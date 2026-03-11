@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Reflection.Metadata.Ecma335;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.DTOs;
 using TelegramBotServer.Interfaces;
@@ -11,27 +6,16 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public class CommandAppService : ICommandAppService
+    public class CommandAppService(IDataService dataService, ITelegramOutputService outputService,
+        INavigationService fileNavigationService, ISessionManager sessionManager, IKeyboardBuilder keyboardBuilder) : ICommandAppService
     {
-        private readonly IDataService _dataService;
-        private readonly ITelegramOutputService _outputService;
-        private readonly INavigationService _fileNavigationService;
-        private readonly ISessionManager _sessionManager;
-        private readonly IKeyboardBuilder _keyboardBuilder;
-
+        private readonly IDataService _dataService = dataService;
+        private readonly ITelegramOutputService _outputService = outputService;
+        private readonly INavigationService _fileNavigationService = fileNavigationService;
+        private readonly ISessionManager _sessionManager = sessionManager;
+        private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
 
         string rootPath = "I:\\";
-
-
-        public CommandAppService(IDataService dataService, ITelegramOutputService outputService,
-            INavigationService fileNavigationService, ISessionManager sessionManager, IKeyboardBuilder keyboardBuilder)
-        {
-            _dataService = dataService;
-            _outputService = outputService;
-            _fileNavigationService = fileNavigationService;
-            _sessionManager = sessionManager;
-            _keyboardBuilder = keyboardBuilder;
-        }
 
         public async Task HandleUserCommandAsync(MessageDto message)
         {
