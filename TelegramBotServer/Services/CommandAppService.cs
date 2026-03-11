@@ -235,7 +235,7 @@ namespace TelegramBotServer.Services
                         return;
                     }
 
-                    session.CurrentPath = newPath;
+                    session.CurrentPath = newPath!;
 
                     await _outputService.AnswerCallbackAsync(callbackQueryId, session.CurrentPath);
 
@@ -415,7 +415,7 @@ namespace TelegramBotServer.Services
                     }
                     else
                     {
-                        session.CurrentPath = newPath + "\\01_PROJECT";
+                        session.CurrentPath = newPath! + "\\01_PROJECT";
                     }
 
 
@@ -663,14 +663,8 @@ namespace TelegramBotServer.Services
                         await _outputService.EditMessageReplyMarkupAsync(
                         userId,
                         messageId,
-                        keyboard
-                    );
+                        keyboard );
                     }
-
-
-
-
-
 
                 }
             }
@@ -719,6 +713,7 @@ namespace TelegramBotServer.Services
             else if (callbackData.StartsWith("PREV:"))
             {
                 session.Counter -= 20;
+
                 InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
 
                 await _outputService.EditMessageReplyMarkupAsync(
@@ -748,6 +743,7 @@ namespace TelegramBotServer.Services
                     keyboard
                 );
             }
+
             else if (callbackData.StartsWith("DWG:"))
             {
                 if (session.PendingCommand.Contains("DWG"))
@@ -849,14 +845,10 @@ namespace TelegramBotServer.Services
 
                 string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
 
-
-
-
                 await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
 
-
-
                 InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, tkn);
+
                 await _outputService.EditMessageReplyMarkupAsync(
                     userId,
                     messageId,
@@ -869,10 +861,9 @@ namespace TelegramBotServer.Services
             {
                 session.statusLevel = true;
 
-                var token = callbackData.Substring(15);
+                var token = callbackData.Substring(14);
+
                 int.TryParse(token, out int tkn);
-
-
 
                 List<SessionCommands> sessionCommands = await _dataService.GetSessionsCommandsAsync(tkn);
 
@@ -882,10 +873,6 @@ namespace TelegramBotServer.Services
                     messageId,
                     keyboard
                 );
-
-
-
-
             }
             else if (callbackData.StartsWith("Backtostatus:"))
             {
@@ -923,20 +910,18 @@ namespace TelegramBotServer.Services
             }
             else if (callbackData.StartsWith("Deletecommand:"))
             {
-                var token = callbackData.Substring(14);
+                var token = callbackData.Substring(15);
+
                 int.TryParse(token, out int tkn);
 
                 if (await _dataService.DeleteCommandAsync(tkn))
                 {
                     foreach (var row in buttonDtos)
                     {
-
-                        row.RemoveAll(btn => btn.CallbackData.Contains($"{tkn}"));
-
+                        row.RemoveAll(btn => btn.CallbackData!.Contains($"{tkn}"));
                     }
 
                     var newKeyboard = ConvertDtoToKeyboard(buttonDtos);
-
 
                     //check if all files are deleted, if yes then mark session as deleted and return to sessions page.
                     if (!await _dataService.CheckCommandsStatusAsync(session.sessionId))
@@ -953,7 +938,6 @@ namespace TelegramBotServer.Services
                                 keyboard
                             );
                         }
-
                     }
                     else
                     {
@@ -1036,10 +1020,6 @@ namespace TelegramBotServer.Services
         }
 
 
-
-
-
-
         public InlineKeyboardMarkup ConvertDtoToKeyboard(List<List<ButtonDto>> dto)
         {
             if (dto == null)
@@ -1055,7 +1035,6 @@ namespace TelegramBotServer.Services
 
             return new InlineKeyboardMarkup(inlineKeyboard);
         }
-
 
 
 
