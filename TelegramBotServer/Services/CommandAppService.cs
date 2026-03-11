@@ -34,7 +34,6 @@ namespace TelegramBotServer.Services
             DateTime date = message.Date;
             int messageId = message.MessageId;
 
-
             Console.WriteLine($"[Controller] Received command '{text}' from {username} ({userId})");
             var session = _sessionManager.GetOrCreateSession(userId);
 
@@ -56,23 +55,16 @@ namespace TelegramBotServer.Services
                         session.PendingCommandName.Clear();
                         session.CurrentPath = rootPath;
                         session.PagesCache.Clear();
+
                         //await _outputService.DeleteMessageAsync(chatId, messageId);
                         //var (message2, keyboard) = await _fileNavigationService.GetDirectoryViewAsync(userId, session.CurrentPath);
 
                         session.Counter = 0;
                         session.Items.Clear();
 
-
-
-
-
-
-
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
 
                         await _outputService.SendMessageWithKeyboardAsync(userId, $"¬ыберите команду:", keyboard);
-
-
 
                         //execute add command to queue(prioritization feature)--in callbackhandler*
                         //notify user--in callbackhandler*
@@ -139,9 +131,6 @@ namespace TelegramBotServer.Services
                     session.Counter = 0;
                     session.Items.Clear();
 
-
-
-
                     await _outputService.SendMessageAsync(userId,
                         "/export - используетс€ дл€ экспорта в форматы PDF, DWG, NWC, IFC.\n" +
                         "ѕри отправке данной команды будет пользователю будут предоставлены форматы на выбор(можно выбрать несколько сразу)\n" +
@@ -167,8 +156,6 @@ namespace TelegramBotServer.Services
                     break;
             }
 
-
-
             //send interface to select files.
             //execute add command to queue(prioritization feature)
             //notify user
@@ -179,9 +166,6 @@ namespace TelegramBotServer.Services
         }
 
 
-
-
-
         public async Task HandleCallbackAsync(CallbackQueryDto callback)
         {
             if (callback.Username == null || callback.MessageText == null || callback.CallbackData == null || callback.CallbackQueryId == null)
@@ -190,20 +174,16 @@ namespace TelegramBotServer.Services
                 return;
             }
 
-            long userId = callback.UserId;
-            string username = callback.Username;
             long chatId = callback.ChatId;
-            string messageText = callback.MessageText;
+            long userId = callback.UserId;
             int messageId = callback.MessageId;
+            string username = callback.Username;
+            string messageText = callback.MessageText;
             string callbackData = callback.CallbackData;
             string callbackQueryId = callback.CallbackQueryId;
             List<List<ButtonDto>> buttonDtos = callback.Buttons;
 
-
             var session = _sessionManager.GetOrCreateSession(userId);
-
-
-
 
             if (session.SelectionType == 1)
             {
