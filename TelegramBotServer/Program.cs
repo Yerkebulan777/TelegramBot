@@ -23,7 +23,7 @@ public class Program
                 // Register Telegram client as singleton
                 services.AddSingleton<ITelegramBotClient>(sp =>
                 {
-                    var token = "8239647149:AAHm-x49jza1CnREoJJUPbZ_b-5A01U8wqY";
+                    var token = "7590057279:AAGvtBT68sN1t4ikUaYus_LpZ-5zvQ03TV0";
                     return new TelegramBotClient(token);
                 });
 
