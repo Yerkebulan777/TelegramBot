@@ -68,6 +68,7 @@ namespace TelegramBotServer.Services
                 {
                     var token = button.CallbackData.Substring(5);
                     if (_navigationService.TryResolvePath(userId, token, out var path) &&
+                        path is not null &&
                         session.SelectedFiles.Contains(path))
                     {
                         // Add ? mark
@@ -107,11 +108,11 @@ namespace TelegramBotServer.Services
                         });
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Продолжить", "APPLYCOMMANDS:")
+                            InlineKeyboardButton.WithCallbackData("? пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ", "APPLYCOMMANDS:")
                         });
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Отмена", "CANCELCOMMANDSSEL:")
+                            InlineKeyboardButton.WithCallbackData("?? пїЅпїЅпїЅпїЅпїЅпїЅ", "CANCELCOMMANDSSEL:")
                         });
 
 
@@ -216,11 +217,11 @@ namespace TelegramBotServer.Services
             
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Продолжить", "APPLYCOMMANDS:")
+                            InlineKeyboardButton.WithCallbackData("? пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ", "APPLYCOMMANDS:")
                         });
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Отмена", "CANCELCOMMANDSSEL:")
+                            InlineKeyboardButton.WithCallbackData("?? пїЅпїЅпїЅпїЅпїЅпїЅ", "CANCELCOMMANDSSEL:")
                         });
 
 

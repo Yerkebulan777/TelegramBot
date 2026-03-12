@@ -8,7 +8,7 @@ public interface ITelegramOutputService
     /// <summary>
     /// Sends a standard message to a user.
     /// </summary>
-    Task<Message> SendMessageAsync(long userId, string message);
+    Task<Message?> SendMessageAsync(long userId, string message);
 
     /// <summary>
     /// Sends an error message (??) to a user.

@@ -17,9 +17,9 @@ public class TelegramOutputService : ITelegramOutputService
         _adminChatId = adminChatId;
     }
 
-    public async Task<Message> SendMessageAsync(long userId, string message)
+    public async Task<Message?> SendMessageAsync(long userId, string message)
     {
-        if (string.IsNullOrWhiteSpace(message)) return null;
+        if (string.IsNullOrWhiteSpace(message)) return null!;
 
         try
         {
