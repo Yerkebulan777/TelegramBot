@@ -80,26 +80,32 @@ public class TelegramBotHostedService : BackgroundService
         switch (dto)
         {
             case MessageDto message:
-                var session = _sessionManager.GetOrCreateSession(message.UserId);
+                using (await _sessionManager.AcquireUserLockAsync(message.UserId))
+                {
+                    var session = _sessionManager.GetOrCreateSession(message.UserId);
 
-                if (message.Username == null||message.Text==null)
-                    throw new InvalidOperationException("message.Username or message.Text is null.");
+                    if (message.Username == null||message.Text==null)
+                        throw new InvalidOperationException("message.Username or message.Text is null.");
 
-                if (!await Authorization(message.UserId, message.Username, message.Text, session))
-                    return;
-                await _commandAppService.HandleUserCommandAsync(message);
+                    if (!await Authorization(message.UserId, message.Username, message.Text, session))
+                        return;
+                    await _commandAppService.HandleUserCommandAsync(message);
+                }
                 break;
             case CallbackQueryDto callback:
-                var cbSession = _sessionManager.GetOrCreateSession(callback.UserId);
-                if (!await CallbackAuthorization(callback.UserId))
-                    return;
+                using (await _sessionManager.AcquireUserLockAsync(callback.UserId))
+                {
+                    var cbSession = _sessionManager.GetOrCreateSession(callback.UserId);
+                    if (!await CallbackAuthorization(callback.UserId))
+                        return;
 
-                await _commandAppService.HandleCallbackAsync(callback);
+                    await _commandAppService.HandleCallbackAsync(callback);
 
-                if (callback.CallbackQueryId == null)
-                    throw new InvalidOperationException("callback.CallbackQueryId is null.");
+                    if (callback.CallbackQueryId == null)
+                        throw new InvalidOperationException("callback.CallbackQueryId is null.");
 
-                await bot.AnswerCallbackQuery(callback.CallbackQueryId, callback.CallbackData);
+                    await bot.AnswerCallbackQuery(callback.CallbackQueryId, callback.CallbackData);
+                }
                 break;
         }
     }

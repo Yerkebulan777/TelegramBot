@@ -441,23 +441,37 @@ public class SqliteDataService : IDataService
             await using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
 
+            await using var tx = await conn.BeginTransactionAsync();
+            try
+            {
+                const string deleteSessionQuery = @"
+                UPDATE Sessions
+                SET Status = 'Deleted'
+                WHERE SessionId = @sessionId;
+            ";
 
-            const string query = @"
-            BEGIN TRANSACTION;
+                await using var deleteSessionCmd = new SqliteCommand(deleteSessionQuery, conn, (SqliteTransaction)tx);
+                deleteSessionCmd.Parameters.AddWithValue("@sessionId", sessionId);
+                await deleteSessionCmd.ExecuteNonQueryAsync();
 
-            UPDATE Sessions
-            SET Status = 'Deleted'
-            WHERE SessionId = @sessionId;
-            
-            UPDATE Commands
-            SET Status = 'Deleted'
-            WHERE SessionId = @sessionId;
+                const string deleteCommandsQuery = @"
+                UPDATE Commands
+                SET Status = 'Deleted'
+                WHERE SessionId = @sessionId;
+            ";
 
-            COMMIT;
-        ";
-            await using var cmd = new SqliteCommand(query, conn);
-            cmd.Parameters.AddWithValue("@sessionId", sessionId);
-            await cmd.ExecuteNonQueryAsync();
+                await using var deleteCommandsCmd = new SqliteCommand(deleteCommandsQuery, conn, (SqliteTransaction)tx);
+                deleteCommandsCmd.Parameters.AddWithValue("@sessionId", sessionId);
+                await deleteCommandsCmd.ExecuteNonQueryAsync();
+
+                await tx.CommitAsync();
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+
             return true;
         }
         catch (Exception e)
