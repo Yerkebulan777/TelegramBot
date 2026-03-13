@@ -75,17 +75,17 @@ namespace TelegramBotServer.Services
                     {
                         //clear
                         //send interface to select files.
+                        session.PagesCache.Clear();
                         session.SelectedFiles.Clear();
                         session.PendingCommand.Clear();
                         session.PendingCommandName.Clear();
                         session.CurrentPath = rootPath;
-                        session.PagesCache.Clear();
+  
                         //await _outputService.DeleteMessageAsync(chatId, messageId);
                         //var (message2, keyboard) = await _fileNavigationService.GetDirectoryViewAsync(userId, session.CurrentPath);
 
                         session.Counter = 0;
                         session.Items.Clear();
-
 
                         session.statusLevel = true;
                         List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
