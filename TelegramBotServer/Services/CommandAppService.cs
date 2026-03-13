@@ -12,14 +12,13 @@ namespace TelegramBotServer.Services
         private readonly IDataService _dataService = dataService;
         private readonly ITelegramOutputService _outputService = outputService;
         private readonly INavigationService _fileNavigationService = fileNavigationService;
-        private readonly ISessionManager _sessionManager = sessionManager;
         private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+        private readonly ISessionManager _sessionManager = sessionManager;
 
         string rootPath = "B:\\";
 
         public async Task HandleUserCommandAsync(MessageDto message)
         {
-
             if (message.Username == null || message.Text == null)
             {
                 await _outputService.SendMessageAsync(message.UserId, "Username or text is empty.");
@@ -27,14 +26,16 @@ namespace TelegramBotServer.Services
             }
 
             //public long UserId = message.UserId;
-            long userId = message.UserId;
-            string username = message.Username;
-            long chatId = message.ChatId;
+
             string text = message.Text;
             DateTime date = message.Date;
+            long userId = message.UserId;
+            long chatId = message.ChatId;
             int messageId = message.MessageId;
+            string username = message.Username;
 
             Console.WriteLine($"[Controller] Received command '{text}' from {username} ({userId})");
+
             var session = _sessionManager.GetOrCreateSession(userId);
 
             //if status
@@ -106,7 +107,6 @@ namespace TelegramBotServer.Services
 
                         session.Counter = 0;
                         session.Items.Clear();
-
 
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
 
@@ -292,7 +292,6 @@ namespace TelegramBotServer.Services
                 {
                     session.SelectedFiles.Clear();
 
-
                     InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
 
                     await _outputService.EditMessageReplyMarkupAsync(
@@ -357,9 +356,6 @@ namespace TelegramBotServer.Services
                         return;
                     }
 
-
-
-
                     if (newPath == null)
                     {
                         await _outputService.SendErrorAsync(userId, "Path not found.");
@@ -374,9 +370,6 @@ namespace TelegramBotServer.Services
                     {
                         session.CurrentPath = newPath! + "\\01_PROJECT";
                     }
-
-
-
 
                     await _outputService.AnswerCallbackAsync(callbackQueryId, session.CurrentPath);
 
