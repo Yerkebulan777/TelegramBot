@@ -296,8 +296,8 @@ public class SqliteDataService : IDataService
 
 
     public async Task<long> CreateSessionWithCommandsAsync(
-        List<string> commandText,
-        List<string> files,
+        IEnumerable<string> commandText,
+        IEnumerable<string> files,
         long userId,
         string username,
         int priorityId,
@@ -338,7 +338,7 @@ public class SqliteDataService : IDataService
         }
 
 
-        tx.Commit();
+        await tx.CommitAsync();
         return sessionId;
     }
 
@@ -366,36 +366,33 @@ public class SqliteDataService : IDataService
 
     public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId)
     {
-
-        var result = new SessionStatus();
-
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        await using (var cmd = new SqliteCommand("SELECT Status FROM Sessions WHERE SessionId = @sessionId;", conn))
-        {
-            cmd.Parameters.AddWithValue("@sessionId", sessionId);
-            var statusObj = await cmd.ExecuteScalarAsync();
-            if (statusObj == null)
-            {
-                result.Status = "Invalid";
-                throw new Exception("No data in Status field");
-            }
-            result.Status = statusObj.ToString() ?? string.Empty;
-        }
+        const string query = @"
+            SELECT
+                s.Status,
+                COUNT(CASE WHEN c.Status != 'Deleted' THEN 1 END) AS TotalFiles,
+                COUNT(CASE WHEN c.Status = 'Done'    THEN 1 END) AS DoneFiles
+            FROM Sessions s
+            LEFT JOIN Commands c ON c.SessionId = s.SessionId
+            WHERE s.SessionId = @sessionId
+            GROUP BY s.Status;
+        ";
 
-        await using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';", conn))
-        {
-            cmd.Parameters.AddWithValue("@sessionId", sessionId);
-            result.TotalFiles = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-        }
+        await using var cmd = new SqliteCommand(query, conn);
+        cmd.Parameters.AddWithValue("@sessionId", sessionId);
+        await using var reader = await cmd.ExecuteReaderAsync();
 
-        await using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status = 'Done';", conn))
+        if (!await reader.ReadAsync())
+            throw new Exception($"Session {sessionId} not found");
+
+        return new SessionStatus
         {
-            cmd.Parameters.AddWithValue("@sessionId", sessionId);
-            result.DoneFiles = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-        }
-        return result;
+            Status     = reader.IsDBNull(0) ? "Invalid" : reader.GetString(0),
+            TotalFiles = reader.GetInt32(1),
+            DoneFiles  = reader.GetInt32(2),
+        };
     }
 
     public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId)

@@ -21,8 +21,8 @@ public interface IDataService
     Task<bool> RemoveCommandFromQueue(int id);
 
     Task<long> CreateSessionWithCommandsAsync(
-        List<string> commandText,
-        List<string> files,
+        IEnumerable<string> commandText,
+        IEnumerable<string> files,
         long userId,
         string username,
         int priorityId,

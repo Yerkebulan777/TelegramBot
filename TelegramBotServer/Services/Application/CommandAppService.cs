@@ -150,10 +150,8 @@ namespace TelegramBotServer.Services
                     {
                         if (session.PagesCache.Count > 0)
                             session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
-                        session.Counter = session.PagesCache.Last();
+                        session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
                     }
-
-
 
                     var token = callbackData.Substring(5);
                     if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath))
@@ -223,20 +221,14 @@ namespace TelegramBotServer.Services
 
                         //await _outputService.DeleteMessageAsync(chatId, messageId);
 
-                        string reply = "Команда:\n";
+                        var sb = new System.Text.StringBuilder("Команда:\n");
                         foreach (var file in session.PendingCommandName)
-                        {
-                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
-                        }
-
-                        reply = string.Concat(reply, "Добавлены файлы:\n");
-
+                            sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+                        sb.Append("Добавлены файлы:\n");
                         foreach (var file in session.SelectedFiles)
-                        {
-                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
-                        }
-
-                        reply = string.Concat(reply, "\n/status для проверки статуса команды");
+                            sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+                        sb.Append("\n/status для проверки статуса команды");
+                        string reply = sb.ToString();
 
                         await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
 
@@ -301,7 +293,7 @@ namespace TelegramBotServer.Services
                         session.Level = false;
                         if (session.PagesCache.Count > 0)
                             session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
-                        session.Counter = session.PagesCache.Last();
+                        session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
                     }
 
                     var token = callbackData.Substring(5);
@@ -374,31 +366,19 @@ namespace TelegramBotServer.Services
                 {
                     if (session.SelectedFiles.Count > 0)
                     {
-                        session.SelectedFiles = MapSectionsToFiles(session.SelectedFiles);
+                        session.SelectedFiles = new HashSet<string>(await MapSectionsToFilesAsync(session.SelectedFiles.ToList()));
 
                         await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
-
-                        string reply = "Команда:\n";
+                        var sb2 = new System.Text.StringBuilder("Команда:\n");
                         foreach (var file in session.PendingCommandName)
-                        {
-                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
-                        }
-
-
-
-                        reply = string.Concat(reply, "Добавлены файлы:\n");
+                            sb2.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+                        sb2.Append("Добавлены файлы:\n");
                         foreach (var file in session.SelectedFiles)
-                        {
-                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
-                        }
+                            sb2.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+                        sb2.Append("\n/status для проверки статуса команды");
 
-                        reply = string.Concat(reply, "\n/status для проверки статуса команды");
-
-
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
-
+                        await _outputService.EditMessageReplyTextAsync(userId, messageId, sb2.ToString());
 
                         session.SelectedFiles.Clear();
                         session.PagesCache.Clear();
@@ -494,34 +474,21 @@ namespace TelegramBotServer.Services
                     if (session.SelectedFiles.Count > 0)
                     {
 
-                        session.SelectedFiles = MapProjectsToFiles(session.SelectedFiles);
+                        session.SelectedFiles = new HashSet<string>(await MapProjectsToFilesAsync(session.SelectedFiles.ToList()));
 
 
 
                         await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
-
-
-
-                        string reply = "Команда:\n";
+                        var sb3 = new System.Text.StringBuilder("Команда:\n");
                         foreach (var file in session.PendingCommandName)
-                        {
-                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
-                        }
-
-
-
-                        reply = string.Concat(reply, "Добавлены файлы:\n");
+                            sb3.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+                        sb3.Append("Добавлены файлы:\n");
                         foreach (var file in session.SelectedFiles)
-                        {
-                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
-                        }
+                            sb3.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+                        sb3.Append("\n/status для проверки статуса команды");
 
-                        reply = string.Concat(reply, "\n/status для проверки статуса команды");
-
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
-
+                        await _outputService.EditMessageReplyTextAsync(userId, messageId, sb3.ToString());
 
                         session.SelectedFiles.Clear();
                         session.PagesCache.Clear();
@@ -714,7 +681,6 @@ namespace TelegramBotServer.Services
             {
                 session.statusLevel = false;
 
-
                 var token = callbackData.Substring(15);
 
                 int.TryParse(token, out int tkn);
@@ -723,19 +689,15 @@ namespace TelegramBotServer.Services
 
                 SessionStatus sessionStatus = await _dataService.GetSessionsStatusAsync(tkn);
 
-                int percentage = (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles;
+                int percentage = sessionStatus.TotalFiles > 0
+                    ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
+                    : 0;
 
                 string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
 
                 await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
 
                 InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, tkn);
-
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
 
                 await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
             }
@@ -744,7 +706,7 @@ namespace TelegramBotServer.Services
             {
                 session.statusLevel = true;
 
-                var token = callbackData.Substring(14);
+                var token = callbackData.Substring(15);
 
                 int.TryParse(token, out int tkn);
 
@@ -829,7 +791,9 @@ namespace TelegramBotServer.Services
                     {
                         SessionStatus sessionStatus = await _dataService.GetSessionsStatusAsync(session.sessionId);
 
-                        int percentage = (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles;
+                        int percentage = sessionStatus.TotalFiles > 0
+                            ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
+                            : 0;
 
                         string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
 
@@ -922,52 +886,52 @@ namespace TelegramBotServer.Services
             return new InlineKeyboardMarkup(inlineKeyboard);
         }
 
-        public List<string> MapSectionsToFiles(List<string> dirs)
+        public Task<List<string>> MapSectionsToFilesAsync(List<string> dirs)
         {
-            List<string> allFiles = new List<string>();
-            for (int i = 0; i < dirs.Count; i++)
+            return Task.Run(() =>
             {
-                dirs[i] = Path.Combine(dirs[i], "01_RVT");
-                var files = Directory.GetFiles(dirs[i]);
-                foreach (var file in files)
+                var allFiles = new List<string>();
+                foreach (var dir in dirs)
                 {
-                    if (file.Contains(".rvt"))
-                        allFiles.Add(file);
+                    var rvtDir = Path.Combine(dir, "01_RVT");
+                    foreach (var file in Directory.GetFiles(rvtDir))
+                    {
+                        if (file.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                            allFiles.Add(file);
+                    }
                 }
-            }
-            return allFiles;
+                return allFiles;
+            });
         }
 
-        public List<string> MapProjectsToFiles(List<string> dirs)
+        public Task<List<string>> MapProjectsToFilesAsync(List<string> dirs)
         {
-            List<string> allFiles = new List<string>();
-            for (int i = 0; i < dirs.Count; i++)
+            Regex roman3 = MyRegex();
+            return Task.Run(() =>
             {
-                dirs[i] = Path.Combine(dirs[i], "01_PROJECT");
-                var tempSections = Directory.GetDirectories(dirs[i]);
-                Regex roman3 = MyRegex();
-
-                var sections = tempSections.Where(d =>
+                var allFiles = new List<string>();
+                foreach (var dir in dirs)
                 {
-                    string name = Path.GetFileName(d);
-                    return roman3.IsMatch(name);
-                }).ToList();
+                    var projectDir = Path.Combine(dir, "01_PROJECT");
+                    var sections = Directory.GetDirectories(projectDir)
+                        .Where(d => roman3.IsMatch(Path.GetFileName(d)))
+                        .ToList();
 
-                for (int x = 0; x < sections.Count; x++)
-                {
-                    if (Path.Exists(Path.Combine(sections[x], "01_RVT")))
+                    foreach (var section in sections)
                     {
-                        sections[x] = Path.Combine(sections[x], "01_RVT");
-                        var files = Directory.GetFiles(sections[x]);
-                        foreach (var file in files)
+                        var rvtDir = Path.Combine(section, "01_RVT");
+                        if (Path.Exists(rvtDir))
                         {
-                            if (file.Contains(".rvt"))
-                                allFiles.Add(file);
+                            foreach (var file in Directory.GetFiles(rvtDir))
+                            {
+                                if (file.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                                    allFiles.Add(file);
+                            }
                         }
                     }
                 }
-            }
-            return allFiles;
+                return allFiles;
+            });
         }
 
         [GeneratedRegex(@"^III_", RegexOptions.IgnoreCase, "ru-KZ")]

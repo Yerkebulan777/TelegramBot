@@ -74,39 +74,49 @@ public class TelegramBotHostedService : BackgroundService
 
     public async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken token)
     {
-
-        var dto = await _inputService.Map(update);
-
-        switch (dto)
+        try
         {
-            case MessageDto message:
-                using (await _sessionManager.AcquireUserLockAsync(message.UserId))
-                {
-                    var session = _sessionManager.GetOrCreateSession(message.UserId);
+            var dto = await _inputService.Map(update);
 
-                    if (message.Username == null || message.Text == null)
-                        throw new InvalidOperationException("message.Username or message.Text is null.");
+            switch (dto)
+            {
+                case MessageDto message:
+                    using (await _sessionManager.AcquireUserLockAsync(message.UserId))
+                    {
+                        var session = _sessionManager.GetOrCreateSession(message.UserId);
 
-                    if (!await Authorization(message.UserId, message.Username, message.Text, session))
-                        return;
-                    await _commandAppService.HandleUserCommandAsync(message);
-                }
-                break;
-            case CallbackQueryDto callback:
-                using (await _sessionManager.AcquireUserLockAsync(callback.UserId))
-                {
-                    var cbSession = _sessionManager.GetOrCreateSession(callback.UserId);
-                    if (!await CallbackAuthorization(callback.UserId))
-                        return;
+                        if (message.Username == null || message.Text == null)
+                        {
+                            _logger.LogWarning("Received message with null Username or Text from {UserId}", message.UserId);
+                            return;
+                        }
 
-                    await _commandAppService.HandleCallbackAsync(callback);
-
+                        if (!await Authorization(message.UserId, message.Username, message.Text, session))
+                            return;
+                        await _commandAppService.HandleUserCommandAsync(message);
+                    }
+                    break;
+                case CallbackQueryDto callback:
                     if (callback.CallbackQueryId == null)
-                        throw new InvalidOperationException("callback.CallbackQueryId is null.");
+                    {
+                        _logger.LogWarning("Received callback with null CallbackQueryId from {UserId}", callback.UserId);
+                        return;
+                    }
+                    using (await _sessionManager.AcquireUserLockAsync(callback.UserId))
+                    {
+                        _ = _sessionManager.GetOrCreateSession(callback.UserId);
+                        if (!await CallbackAuthorization(callback.UserId))
+                            return;
 
-                    await bot.AnswerCallbackQuery(callback.CallbackQueryId, callback.CallbackData, cancellationToken: token);
-                }
-                break;
+                        await _commandAppService.HandleCallbackAsync(callback);
+                        await bot.AnswerCallbackQuery(callback.CallbackQueryId, callback.CallbackData, cancellationToken: token);
+                    }
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception processing update {UpdateId}", update.Id);
         }
     }
 
