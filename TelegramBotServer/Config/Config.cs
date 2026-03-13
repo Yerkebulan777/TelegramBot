@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 
@@ -8,7 +7,7 @@ namespace TelegramBotServer.Config
     {
         public static async Task ConfigureAsync(ITelegramBotClient bot, ILogger logger)
         {
-            var commands = new[]
+            BotCommand[] commands = new[]
             {
                 new BotCommand { Command = "/export", Description = "Export to different formats" },
                 new BotCommand { Command = "/automation", Description = "Automation features" },
