@@ -6,17 +6,12 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public class NavigationService:INavigationService
+    public partial class NavigationService:INavigationService
     {
         //private readonly Dictionary<string, string> _pathMap = new();
 
         private readonly ISessionManager _sessions;
-        static readonly Regex folderRegex = new Regex(
-
-
-    @"^(\d{2}|\d{3}|I{1,3})_",
-    RegexOptions.IgnoreCase
-);
+        static readonly Regex folderRegex = MyRegex();
 
         public NavigationService(ISessionManager sessions)
         {
@@ -481,5 +476,9 @@ namespace TelegramBotServer.Services
             return Task.FromResult((message, markup));
         }
 
+        [GeneratedRegex(
+
+            @"^(\d{2}|\d{3}|I{1,3})_", RegexOptions.IgnoreCase, "ru-KZ")]
+        private static partial Regex MyRegex();
     }
 }

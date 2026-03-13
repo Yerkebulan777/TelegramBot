@@ -6,16 +6,9 @@ using TelegramBotServer.Interfaces;
 
 namespace TelegramBotServer.Services;
 
-public class TelegramOutputService : ITelegramOutputService
+public class TelegramOutputService(ITelegramBotClient botClient, long? adminChatId = null) : ITelegramOutputService
 {
-    private readonly ITelegramBotClient _botClient;
-    private readonly long? _adminChatId;
-
-    public TelegramOutputService(ITelegramBotClient botClient, long? adminChatId = null)
-    {
-        _botClient = botClient ?? throw new ArgumentNullException(nameof(botClient));
-        _adminChatId = adminChatId;
-    }
+    private readonly ITelegramBotClient _botClient = botClient ?? throw new ArgumentNullException(nameof(botClient));
 
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
@@ -46,13 +39,13 @@ public class TelegramOutputService : ITelegramOutputService
 
     public async Task SendNotificationAsync(string message)
     {
-        if (_adminChatId == null)
+        if (adminChatId == null)
         {
             Console.WriteLine($"[TelegramOutput] Notification: {message}");
             return;
         }
 
-        await SendMessageAsync(_adminChatId.Value, $"?? [Notification]\n{message}");
+        await SendMessageAsync(adminChatId.Value, $"?? [Notification]\n{message}");
     }
 
     public async Task DeleteMessageAsync(long chatId, int messageId)
@@ -68,9 +61,7 @@ public class TelegramOutputService : ITelegramOutputService
         }
     }
 
-
-
-
+    
     public async Task SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
 
@@ -78,12 +69,11 @@ public class TelegramOutputService : ITelegramOutputService
             chatId: userId,
             text: message,
             replyMarkup: keyboard,
-            parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown
+            parseMode: ParseMode.Markdown
         );
     }
-
-
-
+    
+    
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
     {
         await _botClient.AnswerCallbackQuery(callbackQueryId: callbackId, text: messageText);
@@ -127,7 +117,7 @@ public class TelegramOutputService : ITelegramOutputService
         }
 
     }
-    string EscapeMarkdownV2(string text)
+    static string EscapeMarkdownV2(string text)
     {
         return text
             .Replace("\\", "\\\\")

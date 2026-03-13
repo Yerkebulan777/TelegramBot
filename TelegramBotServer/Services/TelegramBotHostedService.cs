@@ -104,7 +104,7 @@ public class TelegramBotHostedService : BackgroundService
                     if (callback.CallbackQueryId == null)
                         throw new InvalidOperationException("callback.CallbackQueryId is null.");
 
-                    await bot.AnswerCallbackQuery(callback.CallbackQueryId, callback.CallbackData);
+                    await bot.AnswerCallbackQuery(callback.CallbackQueryId, callback.CallbackData, cancellationToken: token);
                 }
                 break;
         }

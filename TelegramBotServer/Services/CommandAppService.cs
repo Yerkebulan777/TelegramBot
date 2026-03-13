@@ -6,7 +6,7 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public class CommandAppService(IDataService dataService, ITelegramOutputService outputService,
+    public partial class CommandAppService(IDataService dataService, ITelegramOutputService outputService,
         INavigationService fileNavigationService, ISessionManager sessionManager, IKeyboardBuilder keyboardBuilder) : ICommandAppService
     {
         private readonly IDataService _dataService = dataService;
@@ -15,7 +15,7 @@ namespace TelegramBotServer.Services
         private readonly ISessionManager _sessionManager = sessionManager;
         private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
 
-        string rootPath = "I:\\";
+        string rootPath = "B:\\";
 
         public async Task HandleUserCommandAsync(MessageDto message)
         {
@@ -50,12 +50,12 @@ namespace TelegramBotServer.Services
                 case "/export":
                     {
                         //send interface to select files.
+                        session.PagesCache.Clear();
                         session.SelectedFiles.Clear();
                         session.PendingCommand.Clear();
                         session.PendingCommandName.Clear();
                         session.CurrentPath = rootPath;
-                        session.PagesCache.Clear();
-
+       
                         //await _outputService.DeleteMessageAsync(chatId, messageId);
                         //var (message2, keyboard) = await _fileNavigationService.GetDirectoryViewAsync(userId, session.CurrentPath);
 
@@ -112,8 +112,6 @@ namespace TelegramBotServer.Services
 
                         await _outputService.SendMessageWithKeyboardAsync(userId, $"Выберите команду:", keyboard);
 
-
-
                         //execute add command to queue(prioritization feature)--in callbackhandler*
                         //notify user--in callbackhandler*
                         break;
@@ -133,22 +131,11 @@ namespace TelegramBotServer.Services
 
                     await _outputService.SendMessageAsync(userId,
                         "/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.\n" +
-                        "При отправке данной команды будет пользователю будут предоставлены форматы на выбор(можно выбрать несколько сразу)\n" +
-                        "Затем пользователю предоставляется меню навигации по файлохранилищу для выбора файлов для экспорта(можно выбрать несколько),\n" +
-                        "Кроме того пользователь может изменить режим выбора файлов: отдельные файлы, разделы, целые проекты.\n" +
-                        "При этом все файлы внутри раздела, проекта будут автоматически выбраны.\n" +
-                        "По нажатию на кнопку 'Выполнить' файлы отправятся на сервер для обработки.\n" +
-                        "/automation - используется для автоматизации задач. Прим. BIM Doctor, Clash Report, Auto Resolver\n" +
-                        "При отправке данной команды будет пользователю будут предоставлены команды автоматизации на выбор(можно выбрать несколько сразу)\n" +
-                        "Затем пользователю предоставляется меню навигации по файлохранилищу для выбора файлов(можно выбрать несколько),\n" +
-                        "Кроме того пользователь может изменить режим выбора файлов: отдельные файлы, разделы, целые проекты.\n" +
-                        "При этом все файлы внутри раздела, проекта будут автоматически выбраны.\n" +
-                        "По нажатию на кнопку 'Выполнить' файлы отправятся на сервер для обработки.\n" +
+                        "/automation - используется для автоматизации задач. BIM Doctor, Clash Report, Auto Resolver \n" +
                         "/status - используется для проверки состояния выполнения команды отправленной пользователем.\n" +
                         "При отправке данной команды пользователю будет предоставлени список сессии с временем отправки на обработку.\n" +
                         "Пользователь может нажать на сессию для мониторинга процесса выполнения команды.\n" +
-                        "Кроме того в предоставленном меню пользователь может полностью удалить сессию\n" +
-                        "Также в предоставленном меню пользователь может раскрыть список файлов в данной сессии для мониторинга и удаления отдельных файлов в сессии."
+                        "Кроме того в предоставленном меню пользователь может полностью удалить сессию\n"
                         );
 
                     break;
@@ -266,7 +253,7 @@ namespace TelegramBotServer.Services
                     {
                         //await _dataService.AddCommandAsync(userId, session.SelectedFiles, session.PendingCommand);
 
-                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count());
+                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
 
                         //await _outputService.DeleteMessageAsync(chatId, messageId);
@@ -451,7 +438,7 @@ namespace TelegramBotServer.Services
                     {
                         session.SelectedFiles = MapSectionsToFiles(session.SelectedFiles);
 
-                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count());
+                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
 
                         string reply = "Команда:\n";
@@ -573,7 +560,7 @@ namespace TelegramBotServer.Services
 
 
 
-                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count());
+                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
 
 
@@ -643,7 +630,7 @@ namespace TelegramBotServer.Services
                         await _outputService.EditMessageReplyMarkupAsync(
                         userId,
                         messageId,
-                        keyboard );
+                        keyboard);
                     }
 
                 }
@@ -1045,7 +1032,7 @@ namespace TelegramBotServer.Services
             {
                 dirs[i] = Path.Combine(dirs[i], "01_PROJECT");
                 var tempSections = Directory.GetDirectories(dirs[i]);
-                Regex roman3 = new Regex(@"^III_", RegexOptions.IgnoreCase);
+                Regex roman3 = MyRegex();
 
                 var sections = tempSections.Where(d =>
                 {
@@ -1073,5 +1060,8 @@ namespace TelegramBotServer.Services
             }
             return allFiles;
         }
+
+        [GeneratedRegex(@"^III_", RegexOptions.IgnoreCase, "ru-KZ")]
+        private static partial Regex MyRegex();
     }
 }
