@@ -279,8 +279,8 @@ namespace TelegramBotServer.Services
                         //    await _outputService.SendMessageAsync(userId, $"? Added to queue: {Path.GetFileName(file)}");
                         //}
 
-                        session.SelectedFiles.Clear();
                         session.Items.Clear();
+                        session.SelectedFiles.Clear();
                         session.PagesCache.Clear();
                         session.SelectionType = 1;
 
