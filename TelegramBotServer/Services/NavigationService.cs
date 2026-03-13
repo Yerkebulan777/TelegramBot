@@ -102,7 +102,7 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = session.Items[i].FullPath;
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
                 });
                     }
                     else if (session.Items[i].Type == ItemType.File)
@@ -112,7 +112,7 @@ namespace TelegramBotServer.Services
 
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
                 });
                     }
 
@@ -131,7 +131,7 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = session.Items[i].FullPath;
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
                 });
                     }
                     else if (session.Items[i].Type == ItemType.File)
@@ -141,7 +141,7 @@ namespace TelegramBotServer.Services
 
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
                 });
                     }
 
@@ -153,15 +153,15 @@ namespace TelegramBotServer.Services
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("??", "PREV:"),
-                            InlineKeyboardButton.WithCallbackData("??", "NEXT:")
+                            InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
+                            InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
                         });
 
 
 
             buttons.Add(new List<InlineKeyboardButton>
                        {
-                            InlineKeyboardButton.WithCallbackData("?? Выбор: Файлы", "SELMODE:")
+                            InlineKeyboardButton.WithCallbackData("🔄 Выбор: Файлы", "SELMODE:")
                         });
 
 
@@ -175,22 +175,22 @@ namespace TelegramBotServer.Services
 
                 buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Назад",$"NAV2:{parentToken}")
+                            InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
                         });
             }
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Продолжить", "APPLYFILES:")
+                            InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
                         });
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Отменить выбор", "CANCELSEL:")
+                            InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
                         });
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Отмена", "CANCELFILESEL:")
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
                         });
 
 
@@ -250,7 +250,7 @@ namespace TelegramBotServer.Services
 
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(dirs[i])}", $"NAV1:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
                 });
                     }
                 }
@@ -263,7 +263,7 @@ namespace TelegramBotServer.Services
 
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(dirs[i])}", $"NAV1:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
                 });
                     }
                 }
@@ -290,7 +290,7 @@ namespace TelegramBotServer.Services
 
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
                 });
                     }
                 }
@@ -303,7 +303,7 @@ namespace TelegramBotServer.Services
 
                         buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
                 });
                     }
                 }
@@ -313,8 +313,8 @@ namespace TelegramBotServer.Services
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("??", "PREV:"),
-                            InlineKeyboardButton.WithCallbackData("??", "NEXT:")
+                            InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
+                            InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
                         });
 
 
@@ -325,7 +325,7 @@ namespace TelegramBotServer.Services
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Выбор: Разделы", "SELMODE:")
+                            InlineKeyboardButton.WithCallbackData("🔄 Выбор: Разделы", "SELMODE:")
                         });
 
 
@@ -338,23 +338,23 @@ namespace TelegramBotServer.Services
 
                 buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Назад",$"NAV2:{parentToken}")
+                            InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
                         });
             }
             
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Продолжить", "APPLYFILES:")
+                            InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
                         });
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Отменить выбор", "CANCELSEL:")
+                            InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
                         });
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Отмена", "CANCELFILESEL:")
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
                         });
 
 
@@ -400,7 +400,7 @@ namespace TelegramBotServer.Services
 
                     buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
                 });
                 }
             }
@@ -413,7 +413,7 @@ namespace TelegramBotServer.Services
 
                     buttons.Add(new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData($"??{Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
                 });
                 }
             }
@@ -428,8 +428,8 @@ namespace TelegramBotServer.Services
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("??", "PREV:"),
-                            InlineKeyboardButton.WithCallbackData("??", "NEXT:")
+                            InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
+                            InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
                         });
 
 
@@ -437,7 +437,7 @@ namespace TelegramBotServer.Services
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Выбор: Проекты", "SELMODE:")
+                            InlineKeyboardButton.WithCallbackData("🔄 Выбор: Проекты", "SELMODE:")
                         });
 
             var parent = Directory.GetParent(path);
@@ -449,23 +449,23 @@ namespace TelegramBotServer.Services
 
                 buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Назад",$"NAV2:{parentToken}")
+                            InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
                         });
             }
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Продолжить", "APPLYFILES:")
+                            InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
                         });
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? Отменить выбор", "CANCELSEL:")
+                            InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
                         });
 
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? Отмена", "CANCELFILESEL:")
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
                         });
 
 
