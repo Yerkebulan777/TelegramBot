@@ -27,13 +27,12 @@ namespace TelegramBotServer.Services
                 path = Directory.GetCurrentDirectory();
             //var dirs = Directory.GetDirectories(path);
             var dirs = Directory.GetDirectories(path)
-        .Where(d => folderRegex.IsMatch(Path.GetFileName(d)))
-        .ToArray();
+                .Where(d => folderRegex.IsMatch(Path.GetFileName(d)))
+                .ToArray();
             var files = Directory.GetFiles(path);
             //Dictionary<string, string> combined = new Dictionary<string, string>();
 
             var buttons = new List<List<InlineKeyboardButton>>();
-
 
 
             int navElements = 20;
@@ -41,40 +40,16 @@ namespace TelegramBotServer.Services
             session.Items.Clear();
 
             foreach (var dir in dirs)
-                {
-
-
-                    //buttons.Add(new List<InlineKeyboardButton>
-                    //{
-                    //    InlineKeyboardButton.WithCallbackData($"{Path.GetFileName(dir)}", $"NAV:{token}")
-                    //});
-
-                    session.Items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
-                    //combined.Add(dir, "NAV");
-
-
-                }
+            {
+                session.Items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
+            }
             
-            
-
-
-
             foreach (var file in files)
             {
                 if (!file.Contains(".rvt"))
                     continue;
 
-
-
-                //buttons.Add(new List<InlineKeyboardButton>
-                //{
-                //    InlineKeyboardButton.WithCallbackData(Path.GetFileName(file),$"FILE:{token}")
-                //});
-
                 session.Items.Add(new FileSystemItem { FullPath = file, Type = ItemType.File });
-                
-                //combined.Add(file, "FILE");
-
             }
 
             //session.Items.Sort();
@@ -101,9 +76,9 @@ namespace TelegramBotServer.Services
                         string token = Guid.NewGuid().ToString("N").Substring(0, 8);
                         session.PathMap[token] = session.Items[i].FullPath;
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
+                        });
                     }
                     else if (session.Items[i].Type == ItemType.File)
                     {
@@ -111,9 +86,9 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = session.Items[i].FullPath;
 
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
+                        });
                     }
 
                    //if FILE
@@ -130,9 +105,9 @@ namespace TelegramBotServer.Services
                         string token = Guid.NewGuid().ToString("N").Substring(0, 8);
                         session.PathMap[token] = session.Items[i].FullPath;
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
+                        });
                     }
                     else if (session.Items[i].Type == ItemType.File)
                     {
@@ -140,31 +115,25 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = session.Items[i].FullPath;
 
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
+                        });
                     }
 
 
                 }
             }
 
-
+            buttons.Add(new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
+                InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
+            });
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
-                            InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
-                        });
-
-
-
-            buttons.Add(new List<InlineKeyboardButton>
-                       {
-                            InlineKeyboardButton.WithCallbackData("🔄 Выбор: Файлы", "SELMODE:")
-                        });
-
-
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Выбор: Файлы", "SELMODE:")
+            });
 
             var parent = Directory.GetParent(path);
             if (parent != null)// and current directory != root directory
@@ -172,28 +141,26 @@ namespace TelegramBotServer.Services
                 string parentToken = Guid.NewGuid().ToString("N").Substring(0, 8);
                 session.PathMap[parentToken] = parent.FullName;
 
-
                 buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
-                        });
+                {
+                    InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
+                });
             }
-            buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
-                        });
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
+            });
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
+            });
 
-
+            buttons.Add(new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
+            });
 
             var markup = new InlineKeyboardMarkup(buttons);
             var message = $"*Current directory:* `{path}`";
@@ -249,9 +216,9 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = dirs[i];
 
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
+                        });
                     }
                 }
                 else
@@ -262,9 +229,9 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = dirs[i];
 
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
+                        });
                     }
                 }
             }
@@ -289,9 +256,9 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = dirs[i];
 
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                        });
                     }
                 }
                 else
@@ -302,9 +269,9 @@ namespace TelegramBotServer.Services
                         session.PathMap[token] = dirs[i];
 
                         buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                });
+                        {
+                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                        });
                     }
                 }
             }
@@ -312,10 +279,10 @@ namespace TelegramBotServer.Services
 
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
-                            InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
+                InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
+            });
 
 
 
@@ -324,9 +291,9 @@ namespace TelegramBotServer.Services
 
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("🔄 Выбор: Разделы", "SELMODE:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Выбор: Разделы", "SELMODE:")
+            });
 
 
             var parent = Directory.GetParent(path);
@@ -337,25 +304,25 @@ namespace TelegramBotServer.Services
 
 
                 buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
-                        });
+                {
+                    InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
+                });
             }
             
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
+            });
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
+            });
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
+            });
 
 
 
@@ -399,9 +366,9 @@ namespace TelegramBotServer.Services
                     session.PathMap[token] = dirs[i];
 
                     buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                });
+                    {
+                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                    });
                 }
             }
             else
@@ -412,9 +379,9 @@ namespace TelegramBotServer.Services
                     session.PathMap[token] = dirs[i];
 
                     buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                });
+                    {
+                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                    });
                 }
             }
 
@@ -427,18 +394,18 @@ namespace TelegramBotServer.Services
 
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
-                            InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
+                InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
+            });
 
 
 
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("🔄 Выбор: Проекты", "SELMODE:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Выбор: Проекты", "SELMODE:")
+            });
 
             var parent = Directory.GetParent(path);
             if (parent != null)// and current directory != root directory
@@ -448,25 +415,25 @@ namespace TelegramBotServer.Services
 
 
                 buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
-                        });
+                {
+                    InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
+                });
             }
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
+            });
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
+            });
 
             buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
-                        });
+            {
+                InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
+            });
 
 
 
