@@ -64,7 +64,7 @@ namespace TelegramBotServer.Services
 
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
 
-                        await _outputService.SendMessageWithKeyboardAsync(userId, $"Выберите команду:", keyboard);
+                        await _outputService.SendMessageWithKeyboardAsync(userId, $"Р’С‹Р±РµСЂРёС‚Рµ РєРѕРјР°РЅРґСѓ:", keyboard);
 
                         //execute add command to queue(prioritization feature)--in callbackhandler*
                         //notify user--in callbackhandler*
@@ -89,7 +89,7 @@ namespace TelegramBotServer.Services
                         session.statusLevel = true;
                         List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                        await _outputService.SendMessageWithKeyboardAsync(userId, $"Сессии:", keyboard);
+                        await _outputService.SendMessageWithKeyboardAsync(userId, $"РЎРµСЃСЃРёРё:", keyboard);
 
                         break;
                     }
@@ -110,7 +110,7 @@ namespace TelegramBotServer.Services
 
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
 
-                        await _outputService.SendMessageWithKeyboardAsync(userId, $"Выберите команду:", keyboard);
+                        await _outputService.SendMessageWithKeyboardAsync(userId, $"Р’С‹Р±РµСЂРёС‚Рµ РєРѕРјР°РЅРґСѓ:", keyboard);
 
                         //execute add command to queue(prioritization feature)--in callbackhandler*
                         //notify user--in callbackhandler*
@@ -130,12 +130,12 @@ namespace TelegramBotServer.Services
                     session.Items.Clear();
 
                     await _outputService.SendMessageAsync(userId,
-                        "/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.\n" +
-                        "/automation - используется для автоматизации задач. BIM Doctor, Clash Report, Auto Resolver \n" +
-                        "/status - используется для проверки состояния выполнения команды отправленной пользователем.\n" +
-                        "При отправке данной команды пользователю будет предоставлени список сессии с временем отправки на обработку.\n" +
-                        "Пользователь может нажать на сессию для мониторинга процесса выполнения команды.\n" +
-                        "Кроме того в предоставленном меню пользователь может полностью удалить сессию\n"
+                        "/export - РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґР»СЏ СЌРєСЃРїРѕСЂС‚Р° РІ С„РѕСЂРјР°С‚С‹ PDF, DWG, NWC, IFC.\n" +
+                        "/automation - РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґР»СЏ Р°РІС‚РѕРјР°С‚РёР·Р°С†РёРё Р·Р°РґР°С‡. BIM Doctor, Clash Report, Auto Resolver \n" +
+                        "/status - РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґР»СЏ РїСЂРѕРІРµСЂРєРё СЃРѕСЃС‚РѕСЏРЅРёСЏ РІС‹РїРѕР»РЅРµРЅРёСЏ РєРѕРјР°РЅРґС‹ РѕС‚РїСЂР°РІР»РµРЅРЅРѕР№ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј.\n" +
+                        "РџСЂРё РѕС‚РїСЂР°РІРєРµ РґР°РЅРЅРѕР№ РєРѕРјР°РЅРґС‹ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ Р±СѓРґРµС‚ РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅРё СЃРїРёСЃРѕРє СЃРµСЃСЃРёРё СЃ РІСЂРµРјРµРЅРµРј РѕС‚РїСЂР°РІРєРё РЅР° РѕР±СЂР°Р±РѕС‚РєСѓ.\n" +
+                        "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РјРѕР¶РµС‚ РЅР°Р¶Р°С‚СЊ РЅР° СЃРµСЃСЃРёСЋ РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР° РїСЂРѕС†РµСЃСЃР° РІС‹РїРѕР»РЅРµРЅРёСЏ РєРѕРјР°РЅРґС‹.\n" +
+                        "РљСЂРѕРјРµ С‚РѕРіРѕ РІ РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅРЅРѕРј РјРµРЅСЋ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РјРѕР¶РµС‚ РїРѕР»РЅРѕСЃС‚СЊСЋ СѓРґР°Р»РёС‚СЊ СЃРµСЃСЃРёСЋ\n"
                         );
 
                     break;
@@ -255,44 +255,34 @@ namespace TelegramBotServer.Services
 
                         await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
-
                         //await _outputService.DeleteMessageAsync(chatId, messageId);
 
-                        string reply = "Команда:\n";
+                        string reply = "РљРѕРјР°РЅРґР°:\n";
                         foreach (var file in session.PendingCommandName)
                         {
-                            reply = string.Concat(reply, "? " + Path.GetFileName(file) + "\n");
+                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
                         }
 
+                        reply = string.Concat(reply, "Р”РѕР±Р°РІР»РµРЅС‹ С„Р°Р№Р»С‹:\n");
 
-
-                        reply = string.Concat(reply, "Добавлены файлы:\n");
                         foreach (var file in session.SelectedFiles)
                         {
-                            reply = string.Concat(reply, "? " + Path.GetFileName(file) + "\n");
+                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
                         }
 
-                        reply = string.Concat(reply, "\n/status для проверки статуса команды");
-
+                        reply = string.Concat(reply, "\n/status РґР»СЏ РїСЂРѕРІРµСЂРєРё СЃС‚Р°С‚СѓСЃР° РєРѕРјР°РЅРґС‹");
 
                         await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
-
-
 
                         //foreach (var file in session.SelectedFiles)
                         //{
                         //    await _outputService.SendMessageAsync(userId, $"? Added to queue: {Path.GetFileName(file)}");
                         //}
 
-
-
                         session.SelectedFiles.Clear();
                         session.Items.Clear();
                         session.PagesCache.Clear();
                         session.SelectionType = 1;
-
-
-
 
                         //clear session?
                     }
@@ -441,21 +431,21 @@ namespace TelegramBotServer.Services
                         await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
 
-                        string reply = "Команда:\n";
+                        string reply = "РљРѕРјР°РЅРґР°:\n";
                         foreach (var file in session.PendingCommandName)
                         {
-                            reply = string.Concat(reply, "? " + Path.GetFileName(file) + "\n");
+                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
                         }
 
 
 
-                        reply = string.Concat(reply, "Добавлены файлы:\n");
+                        reply = string.Concat(reply, "Р”РѕР±Р°РІР»РµРЅС‹ С„Р°Р№Р»С‹:\n");
                         foreach (var file in session.SelectedFiles)
                         {
-                            reply = string.Concat(reply, "? " + Path.GetFileName(file) + "\n");
+                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
                         }
 
-                        reply = string.Concat(reply, "\n/status для проверки статуса команды");
+                        reply = string.Concat(reply, "\n/status РґР»СЏ РїСЂРѕРІРµСЂРєРё СЃС‚Р°С‚СѓСЃР° РєРѕРјР°РЅРґС‹");
 
 
 
@@ -565,21 +555,21 @@ namespace TelegramBotServer.Services
 
 
 
-                        string reply = "Команда:\n";
+                        string reply = "РљРѕРјР°РЅРґР°:\n";
                         foreach (var file in session.PendingCommandName)
                         {
-                            reply = string.Concat(reply, "? " + Path.GetFileName(file) + "\n");
+                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
                         }
 
 
 
-                        reply = string.Concat(reply, "Добавлены файлы:\n");
+                        reply = string.Concat(reply, "Р”РѕР±Р°РІР»РµРЅС‹ С„Р°Р№Р»С‹:\n");
                         foreach (var file in session.SelectedFiles)
                         {
-                            reply = string.Concat(reply, "? " + Path.GetFileName(file) + "\n");
+                            reply = string.Concat(reply, "\u2705 " + Path.GetFileName(file) + "\n");
                         }
 
-                        reply = string.Concat(reply, "\n/status для проверки статуса команды");
+                        reply = string.Concat(reply, "\n/status РґР»СЏ РїСЂРѕРІРµСЂРєРё СЃС‚Р°С‚СѓСЃР° РєРѕРјР°РЅРґС‹");
 
 
                         await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
@@ -810,7 +800,7 @@ namespace TelegramBotServer.Services
 
                 int percentage = (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles;
 
-                string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
+                string reply = $"РЎС‚Р°С‚СѓСЃ: {sessionStatus.Status}\nР¤Р°Р№Р»РѕРІ: {sessionStatus.TotalFiles}\nР—Р°РІРµСЂС€РµРЅРѕ: {sessionStatus.DoneFiles}\n{percentage}%";
 
                 await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
 
@@ -846,7 +836,7 @@ namespace TelegramBotServer.Services
                 session.statusLevel = true;
                 List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                 InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                await _outputService.EditMessageReplyTextAsync(userId, messageId, "Сессии:");
+                await _outputService.EditMessageReplyTextAsync(userId, messageId, "РЎРµСЃСЃРёРё:");
                 await _outputService.EditMessageReplyMarkupAsync(
                     userId,
                     messageId,
@@ -866,7 +856,7 @@ namespace TelegramBotServer.Services
                     session.statusLevel = true;
                     List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                     InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                    await _outputService.EditMessageReplyTextAsync(userId, messageId, "Сессии:");
+                    await _outputService.EditMessageReplyTextAsync(userId, messageId, "РЎРµСЃСЃРёРё:");
                     await _outputService.EditMessageReplyMarkupAsync(
                         userId,
                         messageId,
@@ -898,7 +888,7 @@ namespace TelegramBotServer.Services
                             session.statusLevel = true;
                             List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                             InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                            await _outputService.EditMessageReplyTextAsync(userId, messageId, "Сессии:");
+                            await _outputService.EditMessageReplyTextAsync(userId, messageId, "РЎРµСЃСЃРёРё:");
                             await _outputService.EditMessageReplyMarkupAsync(
                                 userId,
                                 messageId,
@@ -912,7 +902,7 @@ namespace TelegramBotServer.Services
 
                         int percentage = (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles;
 
-                        string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
+                        string reply = $"РЎС‚Р°С‚СѓСЃ: {sessionStatus.Status}\nР¤Р°Р№Р»РѕРІ: {sessionStatus.TotalFiles}\nР—Р°РІРµСЂС€РµРЅРѕ: {sessionStatus.DoneFiles}\n{percentage}%";
 
                         await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
 

@@ -1,31 +1,21 @@
-using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public class KeyboardBuilder:IKeyboardBuilder
+    public class KeyboardBuilder(INavigationService fileNavigationService) : IKeyboardBuilder
     {
-        //NAV and FILE buttons
-
         //GetDirectoryKeyboard
 
         //private readonly ISessionManager _sessionManger;
-        private readonly INavigationService _navigationService;
+        private readonly INavigationService _navigationService = fileNavigationService;
 
-        public KeyboardBuilder(INavigationService fileNavigationService)
+        public async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
         {
-            
-            _navigationService = fileNavigationService;
-        }
+            var (message, keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
 
-
-        public async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId,UserSession session)
-        {
-                var (message, keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
-                
-                return keyboard;
+            return keyboard;
         }
 
         public async Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session)
@@ -42,7 +32,7 @@ namespace TelegramBotServer.Services
             return keyboard;
         }
 
-        
+
         public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
         {
 
@@ -54,16 +44,17 @@ namespace TelegramBotServer.Services
 
             }
             if (session.SelectionType == 2)
-            {   
-                 keyboard = await GetSectionSelKeyboardAsync(userId, session);
+            {
+                keyboard = await GetSectionSelKeyboardAsync(userId, session);
             }
             if (session.SelectionType == 3)
             {
-                 keyboard = await GetProjectSelKeyboardAsync(userId, session);
+                keyboard = await GetProjectSelKeyboardAsync(userId, session);
             }
 
 
-            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button => {
+            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
+            {
                 if (button.CallbackData != null && button.CallbackData.StartsWith("FILE:"))
                 {
                     var token = button.CallbackData.Substring(5);
@@ -71,8 +62,7 @@ namespace TelegramBotServer.Services
                         path is not null &&
                         session.SelectedFiles.Contains(path))
                     {
-                        // Add ? mark
-                        return InlineKeyboardButton.WithCallbackData($"? {Path.GetFileName(path)}", button.CallbackData);
+                        return InlineKeyboardButton.WithCallbackData($"✅ {Path.GetFileName(path)}", button.CallbackData);
                     }
                 }
                 return button; // unchanged
@@ -108,24 +98,22 @@ namespace TelegramBotServer.Services
                         });
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? ����������", "APPLYCOMMANDS:")
+                            InlineKeyboardButton.WithCallbackData("✅ Применить", "APPLYCOMMANDS:")
                         });
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? ������", "CANCELCOMMANDSSEL:")
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELCOMMANDSSEL:")
                         });
-
-
 
             var keyboard = new InlineKeyboardMarkup(buttons);
 
-            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button => {
+            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
+            {
                 if (button.CallbackData != null && !button.CallbackData.StartsWith("APPLYCOMMANDS:") && !button.CallbackData.StartsWith("CANCELCOMMANDSSEL:"))
                 {
                     if (session.PendingCommandName.Contains(button.Text))
                     {
-                        // Add ? mark
-                        return InlineKeyboardButton.WithCallbackData($"? {button.Text}", button.CallbackData);
+                        return InlineKeyboardButton.WithCallbackData($"✅ {button.Text}", button.CallbackData);
                     }
                 }
                 return button; // unchanged
@@ -138,7 +126,7 @@ namespace TelegramBotServer.Services
         }
         public async Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
         {
-            
+
             var buttons = new List<List<InlineKeyboardButton>>();
 
             foreach (var session in sessionsList)
@@ -156,8 +144,8 @@ namespace TelegramBotServer.Services
 
             var buttons = new List<List<InlineKeyboardButton>>();
 
-            
-                buttons.Add(new List<InlineKeyboardButton>
+
+            buttons.Add(new List<InlineKeyboardButton>
                         {
                             InlineKeyboardButton.WithCallbackData("More", $"Sessiondetails:{sessionId}"),
                             InlineKeyboardButton.WithCallbackData("Delete All", $"Deletesession:{sessionId}"),
@@ -179,7 +167,7 @@ namespace TelegramBotServer.Services
                             InlineKeyboardButton.WithCallbackData("Back", $"Backtostatus:")
                         });
 
-            foreach ( var sessionCommand in sessionCommands)
+            foreach (var sessionCommand in sessionCommands)
             {
                 buttons.Add(new List<InlineKeyboardButton>
                         {
@@ -188,10 +176,10 @@ namespace TelegramBotServer.Services
                 buttons.Add(new List<InlineKeyboardButton>
                         {
                             InlineKeyboardButton.WithCallbackData($"{sessionCommand.Date}", $"{sessionCommand.CommandId}"),
-                            InlineKeyboardButton.WithCallbackData("?Delete", $"Deletecommand:{sessionCommand.CommandId}")
+                            InlineKeyboardButton.WithCallbackData("🗑 Delete", $"Deletecommand:{sessionCommand.CommandId}")
                         });
             }
-            
+
             return buttons;
 
         }
@@ -214,34 +202,33 @@ namespace TelegramBotServer.Services
                         {
                             InlineKeyboardButton.WithCallbackData("Auto Resolver", "AUTORES:")
                         });
-            
+
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("? ����������", "APPLYCOMMANDS:")
+                            InlineKeyboardButton.WithCallbackData("✅ Подтвердить", "APPLYCOMMANDS:")
                         });
             buttons.Add(new List<InlineKeyboardButton>
                         {
-                            InlineKeyboardButton.WithCallbackData("?? ������", "CANCELCOMMANDSSEL:")
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELCOMMANDSSEL:")
                         });
 
 
 
             var keyboard = new InlineKeyboardMarkup(buttons);
 
-            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button => {
+            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
+            {
                 if (button.CallbackData != null && !button.CallbackData.StartsWith("APPLYCOMMANDS:") && !button.CallbackData.StartsWith("CANCELCOMMANDSSEL:"))
                 {
-                    if (session.PendingCommand.Contains(button.CallbackData.Replace(":","")))
+                    if (session.PendingCommand.Contains(button.CallbackData.Replace(":", "")))
                     {
-                        // Add ? mark
-                        return InlineKeyboardButton.WithCallbackData($"? {button.Text}", button.CallbackData);
+                        return InlineKeyboardButton.WithCallbackData($"✅ {button.Text}", button.CallbackData);
                     }
                 }
                 return button; // unchanged
             })
             .ToList()
             ).ToList();
-
 
             return new InlineKeyboardMarkup(newKeyboard);
         }
