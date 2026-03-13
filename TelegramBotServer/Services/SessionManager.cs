@@ -4,7 +4,7 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public class SessionManager: ISessionManager
+    public class SessionManager : ISessionManager
     {
         private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
         private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();

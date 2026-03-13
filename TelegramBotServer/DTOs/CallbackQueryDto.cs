@@ -4,7 +4,7 @@ namespace TelegramBotServer.DTOs
     {
         public long UserId { get; set; }
         public string? Username { get; set; }
-        public long ChatId{ get; set; }
+        public long ChatId { get; set; }
         public string? MessageText { get; set; }
         public int MessageId { get; set; }
         public string? CallbackData { get; set; }

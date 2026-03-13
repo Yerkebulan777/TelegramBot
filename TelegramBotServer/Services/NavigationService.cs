@@ -1,12 +1,11 @@
 using System.Text.RegularExpressions;
-using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public partial class NavigationService:INavigationService
+    public partial class NavigationService : INavigationService
     {
         //private readonly Dictionary<string, string> _pathMap = new();
 
@@ -23,7 +22,7 @@ namespace TelegramBotServer.Services
         {
             var session = _sessions.GetOrCreateSession(userId);
 
-            if(string.IsNullOrEmpty(path))
+            if (string.IsNullOrEmpty(path))
                 path = Directory.GetCurrentDirectory();
             //var dirs = Directory.GetDirectories(path);
             var dirs = Directory.GetDirectories(path)
@@ -43,7 +42,7 @@ namespace TelegramBotServer.Services
             {
                 session.Items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
             }
-            
+
             foreach (var file in files)
             {
                 if (!file.Contains(".rvt"))
@@ -91,7 +90,7 @@ namespace TelegramBotServer.Services
                         });
                     }
 
-                   //if FILE
+                    //if FILE
 
                 }
             }
@@ -173,7 +172,7 @@ namespace TelegramBotServer.Services
         public bool TryResolvePath(long userId, string token, out string? path)
         {
             var session = _sessions.GetOrCreateSession(userId);
-            
+
             return session.PathMap.TryGetValue(token, out path);
         }
 
@@ -235,8 +234,8 @@ namespace TelegramBotServer.Services
                     }
                 }
             }
-            
-            if(session.Level==true)
+
+            if (session.Level == true)
             {
                 if (session.Counter < 0)
                 {
@@ -308,7 +307,7 @@ namespace TelegramBotServer.Services
                     InlineKeyboardButton.WithCallbackData("⬅️ Назад",$"NAV2:{parentToken}")
                 });
             }
-            
+
             buttons.Add(new List<InlineKeyboardButton>
             {
                 InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
@@ -328,7 +327,7 @@ namespace TelegramBotServer.Services
 
             var markup = new InlineKeyboardMarkup(buttons);
             var message = $"*Current directory:* `{path}`";
-            
+
 
             return Task.FromResult((message, markup));
         }
@@ -348,13 +347,13 @@ namespace TelegramBotServer.Services
 
 
 
-            if (session.Counter<0)
+            if (session.Counter < 0)
             {
                 session.Counter = 0;
             }
             if (session.Counter > dirs.Length)
             {
-                session.Counter-= navElements;
+                session.Counter -= navElements;
             }
 
 
@@ -389,7 +388,7 @@ namespace TelegramBotServer.Services
 
 
 
-              
+
 
 
 

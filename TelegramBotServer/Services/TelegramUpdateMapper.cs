@@ -5,7 +5,7 @@ using TelegramBotServer.Interfaces;
 
 namespace TelegramBotServer.Services
 {
-    public class TelegramUpdateMapper:ITelegramUpdateMapper
+    public class TelegramUpdateMapper : ITelegramUpdateMapper
     {
         public MessageDto MapMessage(Message message)
         {
@@ -66,7 +66,7 @@ namespace TelegramBotServer.Services
         }
 
 
-        
+
 
 
     }

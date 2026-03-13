@@ -61,7 +61,7 @@ public class TelegramOutputService(ITelegramBotClient botClient, long? adminChat
         }
     }
 
-    
+
     public async Task SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
 
@@ -72,8 +72,8 @@ public class TelegramOutputService(ITelegramBotClient botClient, long? adminChat
             parseMode: ParseMode.Markdown
         );
     }
-    
-    
+
+
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
     {
         await _botClient.AnswerCallbackQuery(callbackQueryId: callbackId, text: messageText);

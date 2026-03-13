@@ -15,7 +15,7 @@ namespace TelegramBotServer.Models
 
         public List<string> PendingCommand { get; set; } = new();
         public List<string> PendingCommandName { get; set; } = new();
-        public List<string> SelectedFiles { get; set;} = new();
+        public List<string> SelectedFiles { get; set; } = new();
         public Dictionary<string, string> CommandParams { get; set; } = new();
 
         public int SelectionType { get; set; } = 1;

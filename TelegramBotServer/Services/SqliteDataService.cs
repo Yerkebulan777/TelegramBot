@@ -1,6 +1,6 @@
-using System.Data.SQLite;
 using Dapper;
 using Microsoft.Data.Sqlite;
+using System.Data.SQLite;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
 
@@ -15,15 +15,15 @@ public class SqliteDataService : IDataService
     public SqliteDataService(string dbPath)
     {
         _connectionString = $"Data Source={dbPath}";
-        
+
     }
-    
+
 
     public SqliteDataService(IConfiguration configuration)
     {
         _connectionString = $"Data Source={configuration.GetConnectionString("Sqlite") ?? "botdata.db"}";
 
-        
+
 
     }
 
@@ -125,13 +125,13 @@ public class SqliteDataService : IDataService
                 await cmd.ExecuteNonQueryAsync();
             }
         }
-        
 
-        
+
+
     }
 
     // ?? Get first queued command
-    public async Task<Command?> GetNextCommandAsync() 
+    public async Task<Command?> GetNextCommandAsync()
     {
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
@@ -340,7 +340,7 @@ public class SqliteDataService : IDataService
                     tx);
             }
         }
-        
+
 
         tx.Commit();
         return sessionId;
@@ -361,7 +361,7 @@ public class SqliteDataService : IDataService
         {
             list.Add(new SessionsList
             {
-                SessionId=reader.GetInt32(0),
+                SessionId = reader.GetInt32(0),
                 Date = reader.GetDateTime(1),
             });
         }
@@ -376,13 +376,13 @@ public class SqliteDataService : IDataService
         await using var conn = new SQLiteConnection(_connectionString);
         await conn.OpenAsync();
 
-        await using(var cmd = conn.CreateCommand())
+        await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT Status FROM Sessions WHERE SessionId = @sessionId;";
             cmd.Parameters.AddWithValue("@sessionId", sessionId);
             var statusObj = await cmd.ExecuteScalarAsync();
             if (statusObj == null)
-            {   
+            {
                 result.Status = "Invalid";
                 throw new Exception("No data in Status field");
             }

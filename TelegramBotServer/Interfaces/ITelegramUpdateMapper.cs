@@ -1,6 +1,4 @@
-using Telegram.Bot;
 using Telegram.Bot.Types;
-using TelegramBotServer.DTOs;
 
 namespace TelegramBotServer.Interfaces
 {

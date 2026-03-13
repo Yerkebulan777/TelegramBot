@@ -76,7 +76,7 @@ public class TelegramBotHostedService : BackgroundService
     {
 
         var dto = await _inputService.Map(update);
-        
+
         switch (dto)
         {
             case MessageDto message:
@@ -84,7 +84,7 @@ public class TelegramBotHostedService : BackgroundService
                 {
                     var session = _sessionManager.GetOrCreateSession(message.UserId);
 
-                    if (message.Username == null||message.Text==null)
+                    if (message.Username == null || message.Text == null)
                         throw new InvalidOperationException("message.Username or message.Text is null.");
 
                     if (!await Authorization(message.UserId, message.Username, message.Text, session))
@@ -129,7 +129,7 @@ public class TelegramBotHostedService : BackgroundService
                 return false;
             }
             await _outputService.SendMessageAsync(userId, "Already authorized. Proceeding.");
-            
+
             return true;
         }
         else if (session.State == "WaitingForPassword")
@@ -143,7 +143,7 @@ public class TelegramBotHostedService : BackgroundService
             }
             session.State = "Idle";
             await _outputService.SendMessageAsync(userId, "Successfully authorized.");
-            
+
             return true;
         }
         else
@@ -154,7 +154,7 @@ public class TelegramBotHostedService : BackgroundService
                 await _outputService.SendMessageAsync(userId, "Not authorized. Enter select or enter /auth to authorize.");
                 return false;
             }
-            
+
             return true;
         }
     }
