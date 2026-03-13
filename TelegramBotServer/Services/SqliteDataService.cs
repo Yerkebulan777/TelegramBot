@@ -1,30 +1,26 @@
 using Dapper;
 using Microsoft.Data.Sqlite;
-using System.Data.SQLite;
+using Microsoft.Extensions.Logging;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
-
-//using Dapper;
 
 namespace TelegramBotServer.Services;
 
 public class SqliteDataService : IDataService
 {
     private readonly string _connectionString;
+    private readonly ILogger<SqliteDataService> _logger;
 
-    public SqliteDataService(string dbPath)
+    public SqliteDataService(string dbPath, ILogger<SqliteDataService> logger)
     {
         _connectionString = $"Data Source={dbPath}";
-
+        _logger = logger;
     }
 
-
-    public SqliteDataService(IConfiguration configuration)
+    public SqliteDataService(IConfiguration configuration, ILogger<SqliteDataService> logger)
     {
         _connectionString = $"Data Source={configuration.GetConnectionString("Sqlite") ?? "botdata.db"}";
-
-
-
+        _logger = logger;
     }
 
 
@@ -93,7 +89,7 @@ public class SqliteDataService : IDataService
         {
             var insertPassword = "INSERT INTO Credentials (password) VALUES ('qwerty123');";
             await new SqliteCommand(insertPassword, conn).ExecuteNonQueryAsync();
-            Console.WriteLine("Default password added to Credentials table.");
+            _logger.LogInformation("Default password added to Credentials table.");
         }
     }
 
@@ -293,7 +289,7 @@ public class SqliteDataService : IDataService
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            _logger.LogError(e, "Failed to remove command {CommandId} from queue", id);
             return false;
         }
     }
@@ -373,12 +369,11 @@ public class SqliteDataService : IDataService
 
         var result = new SessionStatus();
 
-        await using var conn = new SQLiteConnection(_connectionString);
+        await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        await using (var cmd = conn.CreateCommand())
+        await using (var cmd = new SqliteCommand("SELECT Status FROM Sessions WHERE SessionId = @sessionId;", conn))
         {
-            cmd.CommandText = "SELECT Status FROM Sessions WHERE SessionId = @sessionId;";
             cmd.Parameters.AddWithValue("@sessionId", sessionId);
             var statusObj = await cmd.ExecuteScalarAsync();
             if (statusObj == null)
@@ -389,19 +384,15 @@ public class SqliteDataService : IDataService
             result.Status = statusObj.ToString() ?? string.Empty;
         }
 
-        using (var cmd = conn.CreateCommand())
+        await using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';", conn))
         {
-            cmd.CommandText = "SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';";
             cmd.Parameters.AddWithValue("@sessionId", sessionId);
-
             result.TotalFiles = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         }
 
-        using (var cmd = conn.CreateCommand())
+        await using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status = 'Done';", conn))
         {
-            cmd.CommandText = "SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status = 'Done';";
             cmd.Parameters.AddWithValue("@sessionId", sessionId);
-
             result.DoneFiles = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         }
         return result;
@@ -476,7 +467,7 @@ public class SqliteDataService : IDataService
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            _logger.LogError(e, "Failed to delete session {SessionId}", sessionId);
             return false;
         }
     }
@@ -503,7 +494,7 @@ public class SqliteDataService : IDataService
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            _logger.LogError(e, "Failed to delete command {CommandId}", commandId);
             return false;
         }
     }
@@ -511,26 +502,15 @@ public class SqliteDataService : IDataService
 
     public async Task<bool> CheckCommandsStatusAsync(int sessionId)
     {
-        //"SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';";
-
-        await using var conn = new SQLiteConnection(_connectionString);
+        await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        int result;
+        await using var cmd = new SqliteCommand(
+            "SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';", conn);
+        cmd.Parameters.AddWithValue("@sessionId", sessionId);
 
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';";
-            cmd.Parameters.AddWithValue("@sessionId", sessionId);
-
-            result = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-        }
-
-        if (result > 0)
-        {
-            return true;
-        }
-        return false;
+        var result = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        return result > 0;
     }
 
 

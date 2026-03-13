@@ -13,6 +13,7 @@ public class Program
             .ConfigureAppConfiguration((context, cfg) =>
             {
                 _ = cfg.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+                _ = cfg.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
                 _ = cfg.AddEnvironmentVariables();
                 if (args != null)
                 {
@@ -27,7 +28,9 @@ public class Program
                 // Register Telegram client as singleton
                 _ = services.AddSingleton<ITelegramBotClient>(sp =>
                 {
-                    var token = "7590057279:AAGvtBT68sN1t4ikUaYus_LpZ-5zvQ03TV0";
+                    var token = configuration["TelegramBot:Token"]
+                        ?? throw new InvalidOperationException(
+                            "TelegramBot:Token is not configured. Set it in appsettings.Local.json or via environment variable TelegramBot__Token.");
                     return new TelegramBotClient(token);
                 });
 

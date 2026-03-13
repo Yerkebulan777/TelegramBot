@@ -6,9 +6,13 @@ using TelegramBotServer.Interfaces;
 
 namespace TelegramBotServer.Services;
 
-public class TelegramOutputService(ITelegramBotClient botClient, long? adminChatId = null) : ITelegramOutputService
+public class TelegramOutputService(
+    ITelegramBotClient botClient,
+    ILogger<TelegramOutputService> logger,
+    long? adminChatId = null) : ITelegramOutputService
 {
     private readonly ITelegramBotClient _botClient = botClient ?? throw new ArgumentNullException(nameof(botClient));
+    private readonly ILogger<TelegramOutputService> _logger = logger;
 
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
@@ -21,12 +25,12 @@ public class TelegramOutputService(ITelegramBotClient botClient, long? adminChat
                 text: EscapeMarkdownV2(message),
                 parseMode: ParseMode.MarkdownV2
             );
-            Console.WriteLine($"[TelegramOutput] > Sent to {userId}: {message}");
+            _logger.LogDebug("Sent to {UserId}: {Message}", userId, message);
             return t;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TelegramOutput] ? Failed to send message to {userId}: {ex.Message}");
+            _logger.LogWarning(ex, "Failed to send message to {UserId}", userId);
             return null;
         }
     }
@@ -41,7 +45,7 @@ public class TelegramOutputService(ITelegramBotClient botClient, long? adminChat
     {
         if (adminChatId == null)
         {
-            Console.WriteLine($"[TelegramOutput] Notification: {message}");
+            _logger.LogInformation("Notification (no admin chat): {Message}", message);
             return;
         }
 
@@ -93,7 +97,7 @@ public class TelegramOutputService(ITelegramBotClient botClient, long? adminChat
         }
         catch (Telegram.Bot.Exceptions.ApiRequestException ex)
         {
-            Console.WriteLine($"Failed to edit message reply text: {ex.Message}");
+            _logger.LogWarning(ex, "Failed to edit message reply text for {UserId} messageId={MessageId}", userId, messageId);
         }
 
     }
@@ -113,7 +117,7 @@ public class TelegramOutputService(ITelegramBotClient botClient, long? adminChat
         }
         catch (Telegram.Bot.Exceptions.ApiRequestException ex)
         {
-            Console.WriteLine($"Failed to edit message reply markup: {ex.Message}");
+            _logger.LogWarning(ex, "Failed to edit message reply markup for {UserId} messageId={MessageId}", userId, messageId);
         }
 
     }

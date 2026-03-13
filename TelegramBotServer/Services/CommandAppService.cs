@@ -6,14 +6,20 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public partial class CommandAppService(IDataService dataService, ITelegramOutputService outputService,
-    IFileSystemBrowser fileNavigationService, ISessionManager sessionManager, IKeyboardBuilder keyboardBuilder) : ICommandAppService
+    public partial class CommandAppService(
+        IDataService dataService,
+        ITelegramOutputService outputService,
+        IFileSystemBrowser fileNavigationService,
+        ISessionManager sessionManager,
+        IKeyboardBuilder keyboardBuilder,
+        ILogger<CommandAppService> logger) : ICommandAppService
     {
         private readonly IDataService _dataService = dataService;
         private readonly ITelegramOutputService _outputService = outputService;
         private readonly IFileSystemBrowser _fileNavigationService = fileNavigationService;
         private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
         private readonly ISessionManager _sessionManager = sessionManager;
+        private readonly ILogger<CommandAppService> _logger = logger;
 
         string rootPath = "B:\\";
 
@@ -32,7 +38,7 @@ namespace TelegramBotServer.Services
             int messageId = message.MessageId;
             string username = message.Username;
 
-            Console.WriteLine($"[Controller] Received command '{text}' from {username} ({userId})");
+            _logger.LogInformation("Received command '{Command}' from {Username} ({UserId})", text, username, userId);
 
             var session = _sessionManager.GetOrCreateSession(userId);
 

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace TelegramBotServer.Models
 {
     public class UserSession
@@ -10,7 +12,8 @@ namespace TelegramBotServer.Models
 
 
         public string CurrentPath { get; set; } = Directory.GetCurrentDirectory();
-        public Dictionary<string, string> PathMap { get; set; } = new();
+        // ConcurrentDictionary: token-to-path mapping used by FileSystemBrowser and handlers
+        public ConcurrentDictionary<string, string> PathMap { get; set; } = new();
 
 
         public List<string> PendingCommand { get; set; } = new();

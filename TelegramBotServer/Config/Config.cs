@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 
@@ -5,7 +6,7 @@ namespace TelegramBotServer.Config
 {
     public class Config
     {
-        public static async Task ConfigureAsync(ITelegramBotClient bot)
+        public static async Task ConfigureAsync(ITelegramBotClient bot, ILogger logger)
         {
             var commands = new[]
             {
@@ -17,7 +18,7 @@ namespace TelegramBotServer.Config
 
             await bot.SetMyCommands(commands);
 
-            Console.WriteLine("? Telegram bot commands configured.");
+            logger.LogInformation("Telegram bot commands configured.");
         }
     }
 }

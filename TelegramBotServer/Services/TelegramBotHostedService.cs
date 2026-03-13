@@ -40,7 +40,7 @@ public class TelegramBotHostedService : BackgroundService
     {
         _logger.LogInformation("Starting Telegram polling");
 
-        await Config.Config.ConfigureAsync(_botClient);
+        await Config.Config.ConfigureAsync(_botClient, _logger);
 
 
         var receiverOptions = new ReceiverOptions
