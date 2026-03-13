@@ -5,14 +5,14 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public partial class NavigationService : INavigationService
+    public partial class FileSystemBrowser : IFileSystemBrowser
     {
         //private readonly Dictionary<string, string> _pathMap = new();
 
         private readonly ISessionManager _sessions;
         static readonly Regex folderRegex = MyRegex();
 
-        public NavigationService(ISessionManager sessions)
+        public FileSystemBrowser(ISessionManager sessions)
         {
             _sessions = sessions;
         }

@@ -34,7 +34,7 @@ public class Program
                 // App services
                 _ = services.AddSingleton<IDataService, SqliteDataService>(); //edited
                 _ = services.AddSingleton<ITelegramOutputService, TelegramOutputService>();
-                _ = services.AddSingleton<INavigationService, NavigationService>();
+                _ = services.AddSingleton<IFileSystemBrowser, FileSystemBrowser>();
                 _ = services.AddSingleton<ICommandAppService, CommandAppService>();
                 _ = services.AddSingleton<IAuthService, AuthService>();
 

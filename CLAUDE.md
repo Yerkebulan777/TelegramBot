@@ -19,7 +19,7 @@ There are no automated tests in this project.
 
 ## Architecture
 
-Single .NET 8 project (`TelegramBotServer`) running as a background service. The bot uses long-polling (not webhooks).
+Single .NET 8 project (`TelegramBotServer`) running as a background service. The bot uses long-polling (not webhooks). All services are registered as **Singletons** in `Program.cs`.
 
 ### Request Flow
 
@@ -30,15 +30,22 @@ Telegram API → TelegramBotHostedService (polling)
              → CommandAppService.HandleUserCommandAsync / HandleCallbackAsync
 ```
 
-**`TelegramBotHostedService`** — The entry point. Registers bot commands on startup via `Config.ConfigureAsync()`, starts polling, routes incoming updates to `CommandAppService`. Handles `/auth` and password-entry flow before forwarding to command handling.
+**`TelegramBotHostedService`** — The entry point. Registers bot commands on startup via `Config.ConfigureAsync()`, starts polling, routes incoming updates to `CommandAppService`. Handles `/auth` and password-entry flow before forwarding to command handling. Uses `SessionManager.AcquireUserLockAsync()` for per-user concurrency control.
 
-**`CommandAppService`** — Central command dispatcher. Handles text commands (`/export`, `/automation`, `/status`, `/help`) and all inline keyboard callback queries. Manages multi-step workflows by reading/writing `UserSession.State`.
+**`CommandAppService`** — Central command dispatcher (~970 lines). Handles text commands (`/export`, `/automation`, `/status`, `/help`) and all inline keyboard callback queries. Manages multi-step workflows by reading/writing `UserSession` state. Hardcoded filesystem root: `"B:\\"`.
 
-**`NavigationService`** — Builds inline keyboards for browsing the filesystem. Filters directories to those matching regex `^(\d{2}|\d{3}|I{1,3})_` and files to `.rvt` only. Paginates at 20 items per page.
+**`FileSystemBrowser`** — Builds inline keyboards for browsing the filesystem. Filters directories matching regex `^(\d{2}|\d{3}|I{1,3})_` and files to `.rvt` only. Paginates at 20 items per page. Delegates section-level browsing to `SectionNavigationService`.
 
-**`KeyboardBuilder`** — Wraps `NavigationService` to produce context-aware keyboards (marks selected files with ✅, marks selected commands). Three selection modes controlled by `UserSession.SelectionType`: `1`=file browser, `2`=section navigator, `3`=project navigator.
+**`SectionNavigationService`** — Handles navigation within section directories (used by `NavigationService.GetSectionsViewAsync()`).
+
+**`KeyboardBuilder`** — Wraps `NavigationService` to produce context-aware keyboards (marks selected items with ✅). Three selection modes controlled by `UserSession.SelectionType`:
+- `1` = flat file browser
+- `2` = section navigator — `UserSession.Level` tracks depth (0 = sections list, 1 = inside section toward `01_RVT` → files)
+- `3` = project navigator — `UserSession.Level` tracks project → section → RVT depth
 
 **`SessionManager`** — In-memory `ConcurrentDictionary<long, UserSession>` with 5-minute idle timeout. Sessions hold all transient user state (current path, selected files, pending commands, path token map).
+
+**`TelegramOutputService`** — Sends and edits Telegram messages. Uses `ParseMode.MarkdownV2` with `EscapeMarkdownV2()` for plain messages; `ParseMode.Markdown` for keyboard messages. Handles Telegram API exceptions (deleted messages, stale edits) gracefully.
 
 **`SqliteDataService`** — All persistence. Two libraries are used inconsistently: `Microsoft.Data.Sqlite` for raw `SqliteCommand` and `System.Data.SQLite` for some methods (e.g., `GetSessionsStatusAsync`, `CheckCommandsStatusAsync`). Dapper is used only in `CreateSessionWithCommandsAsync`.
 

@@ -2,7 +2,7 @@ using Telegram.Bot.Types.ReplyMarkups;
 
 namespace TelegramBotServer.Interfaces
 {
-    public interface INavigationService
+    public interface IFileSystemBrowser
     {
         Task<(string message, InlineKeyboardMarkup keyboard)> GetFilesViewAsync(long userId, string path);
         bool IsFile(string path);

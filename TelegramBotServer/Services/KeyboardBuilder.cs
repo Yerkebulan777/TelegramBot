@@ -4,12 +4,12 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
-    public class KeyboardBuilder(INavigationService fileNavigationService) : IKeyboardBuilder
+    public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
     {
         //GetDirectoryKeyboard
 
         //private readonly ISessionManager _sessionManger;
-        private readonly INavigationService _navigationService = fileNavigationService;
+        private readonly IFileSystemBrowser _navigationService = fileNavigationService;
 
         public async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
         {

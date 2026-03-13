@@ -7,11 +7,11 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services
 {
     public partial class CommandAppService(IDataService dataService, ITelegramOutputService outputService,
-    INavigationService fileNavigationService, ISessionManager sessionManager, IKeyboardBuilder keyboardBuilder) : ICommandAppService
+    IFileSystemBrowser fileNavigationService, ISessionManager sessionManager, IKeyboardBuilder keyboardBuilder) : ICommandAppService
     {
         private readonly IDataService _dataService = dataService;
         private readonly ITelegramOutputService _outputService = outputService;
-        private readonly INavigationService _fileNavigationService = fileNavigationService;
+        private readonly IFileSystemBrowser _fileNavigationService = fileNavigationService;
         private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
         private readonly ISessionManager _sessionManager = sessionManager;
 
