@@ -51,7 +51,6 @@ Inline keyboard buttons use short tokens to stay within Telegram's 64-byte callb
 Callback prefixes used by `CommandAppService`:
 - `NAV1:`, `NAV2:` — navigate into/up directory
 - `FILE:` — select/deselect a file
-- `PREV:`, `NEXT:` — paginate file list
 - `SELMODE:` — toggle selection mode (file/section/project)
 - `APPLYFILES:`, `CANCELSEL:`, `CANCELFILESEL:` — file selection flow
 - `PDF:`, `DWG:`, `NWC:`, `IFC:` — export format selection

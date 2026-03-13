@@ -597,31 +597,6 @@ namespace TelegramBotServer.Services
 
 
 
-            else if (callbackData.StartsWith("NEXT:"))
-            {
-                session.Counter += 20;
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
-            }
-
-            else if (callbackData.StartsWith("PREV:"))
-            {
-                session.Counter -= 20;
-
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
-            }
-
             else if (callbackData.StartsWith("PDF:"))
             {
                 if (session.PendingCommand.Contains("PDF"))

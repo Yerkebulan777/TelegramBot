@@ -34,8 +34,6 @@ namespace TelegramBotServer.Services
             var buttons = new List<List<InlineKeyboardButton>>();
 
 
-            int navElements = 20;
-
             session.Items.Clear();
 
             foreach (var dir in dirs)
@@ -54,80 +52,28 @@ namespace TelegramBotServer.Services
             //session.Items.Sort();
 
 
-            if (session.Counter < 0)
+            for (int i = 0; i < session.Items.Count; i++)
             {
-                session.Counter = 0;
-            }
-            if (session.Counter > dirs.Length)
-            {
-                session.Counter -= navElements;
-            }
-
-
-            if (session.Items.Count - session.Counter < navElements)
-            {
-                for (int i = session.Counter; i < session.Items.Count; i++)
+                if (session.Items[i].Type == ItemType.Directory)
                 {
-
-                    //if NAV
-                    if (session.Items[i].Type == ItemType.Directory)
+                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
+                    session.PathMap[token] = session.Items[i].FullPath;
+                    buttons.Add(new List<InlineKeyboardButton>
                     {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = session.Items[i].FullPath;
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
-                        });
-                    }
-                    else if (session.Items[i].Type == ItemType.File)
+                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
+                    });
+                }
+                else if (session.Items[i].Type == ItemType.File)
+                {
+                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
+                    session.PathMap[token] = session.Items[i].FullPath;
+
+                    buttons.Add(new List<InlineKeyboardButton>
                     {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = session.Items[i].FullPath;
-
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
-                        });
-                    }
-
-                    //if FILE
-
+                        InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
+                    });
                 }
             }
-            else
-            {
-                for (int i = session.Counter; i < session.Counter + navElements; i++)
-                {
-
-                    if (session.Items[i].Type == ItemType.Directory)
-                    {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = session.Items[i].FullPath;
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"NAV1:{token}")
-                        });
-                    }
-                    else if (session.Items[i].Type == ItemType.File)
-                    {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = session.Items[i].FullPath;
-
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
-                        });
-                    }
-
-
-                }
-            }
-
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
-                InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
-            });
 
             buttons.Add(new List<InlineKeyboardButton>
             {
@@ -191,97 +137,33 @@ namespace TelegramBotServer.Services
             //var files = Directory.GetFiles(path);
 
             var buttons = new List<List<InlineKeyboardButton>>();
-            int navElements = 20;
-
-
-
             if (session.Level == false)
             {
-                if (session.Counter < 0)
+                for (int i = 0; i < dirs.Length; i++)
                 {
-                    session.Counter = 0;
-                }
-                if (session.Counter > dirs.Length)
-                {
-                    session.Counter -= navElements;
-                }
+                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
+                    session.PathMap[token] = dirs[i];
 
-
-                if (dirs.Length - session.Counter < navElements)
-                {
-                    for (int i = session.Counter; i < dirs.Length - 1; i++)
+                    buttons.Add(new List<InlineKeyboardButton>
                     {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = dirs[i];
-
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
-                        });
-                    }
-                }
-                else
-                {
-                    for (int i = session.Counter; i < session.Counter + navElements; i++)
-                    {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = dirs[i];
-
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
-                        });
-                    }
+                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"NAV1:{token}")
+                    });
                 }
             }
 
             if (session.Level == true)
             {
-                if (session.Counter < 0)
+                for (int i = 0; i < dirs.Length; i++)
                 {
-                    session.Counter = 0;
-                }
-                if (session.Counter > dirs.Length)
-                {
-                    session.Counter -= navElements;
-                }
+                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
+                    session.PathMap[token] = dirs[i];
 
-
-                if (dirs.Length - session.Counter < navElements)
-                {
-                    for (int i = session.Counter; i < dirs.Length - 1; i++)
+                    buttons.Add(new List<InlineKeyboardButton>
                     {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = dirs[i];
-
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                        });
-                    }
-                }
-                else
-                {
-                    for (int i = session.Counter; i < session.Counter + navElements; i++)
-                    {
-                        string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                        session.PathMap[token] = dirs[i];
-
-                        buttons.Add(new List<InlineKeyboardButton>
-                        {
-                            InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                        });
-                    }
+                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                    });
                 }
             }
-
-
-
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
-                InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
-            });
 
 
 
@@ -343,60 +225,16 @@ namespace TelegramBotServer.Services
             //var dirs = Directory.GetDirectories(path);
 
             var buttons = new List<List<InlineKeyboardButton>>();
-            int navElements = 20;
-
-
-
-            if (session.Counter < 0)
+            for (int i = 0; i < dirs.Length; i++)
             {
-                session.Counter = 0;
-            }
-            if (session.Counter > dirs.Length)
-            {
-                session.Counter -= navElements;
-            }
+                string token = Guid.NewGuid().ToString("N").Substring(0, 8);
+                session.PathMap[token] = dirs[i];
 
-
-            if (dirs.Length - session.Counter < navElements)
-            {
-                for (int i = session.Counter; i < dirs.Length - 1; i++)
+                buttons.Add(new List<InlineKeyboardButton>
                 {
-                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                    session.PathMap[token] = dirs[i];
-
-                    buttons.Add(new List<InlineKeyboardButton>
-                    {
-                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                    });
-                }
+                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
+                });
             }
-            else
-            {
-                for (int i = session.Counter; i < session.Counter + navElements; i++)
-                {
-                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                    session.PathMap[token] = dirs[i];
-
-                    buttons.Add(new List<InlineKeyboardButton>
-                    {
-                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                    });
-                }
-            }
-
-
-
-
-
-
-
-
-
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("◀️", "PREV:"),
-                InlineKeyboardButton.WithCallbackData("▶️", "NEXT:")
-            });
 
 
 
