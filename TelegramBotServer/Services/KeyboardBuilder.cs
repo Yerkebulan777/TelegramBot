@@ -35,22 +35,13 @@ namespace TelegramBotServer.Services
 
         public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
         {
-
-            InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
-
-            if (session.SelectionType == 1)
+            var keyboard = session.SelectionType switch
             {
-                keyboard = await GetFileSelKeyboardAsync(userId, session);
-
-            }
-            if (session.SelectionType == 2)
-            {
-                keyboard = await GetSectionSelKeyboardAsync(userId, session);
-            }
-            if (session.SelectionType == 3)
-            {
-                keyboard = await GetProjectSelKeyboardAsync(userId, session);
-            }
+                1 => await GetFileSelKeyboardAsync(userId, session),
+                2 => await GetSectionSelKeyboardAsync(userId, session),
+                3 => await GetProjectSelKeyboardAsync(userId, session),
+                _ => new InlineKeyboardMarkup(Array.Empty<InlineKeyboardButton[]>())
+            };
 
 
             var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
@@ -136,11 +127,12 @@ namespace TelegramBotServer.Services
                             InlineKeyboardButton.WithCallbackData(session.Date.ToString(), $"Sessiondetails:{session.SessionId}")
                         });
             }
-            return buttons;
+            return await Task.FromResult(new InlineKeyboardMarkup(buttons));
 
         }
         public async Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
         {
+            _ = sessionStatus;
 
             var buttons = new List<List<InlineKeyboardButton>>();
 
@@ -151,7 +143,7 @@ namespace TelegramBotServer.Services
                             InlineKeyboardButton.WithCallbackData("Delete All", $"Deletesession:{sessionId}"),
                             InlineKeyboardButton.WithCallbackData("Back", $"Backtostatus:")
                         });
-            return buttons;
+            return await Task.FromResult(new InlineKeyboardMarkup(buttons));
 
         }
         public async Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId)
@@ -180,7 +172,7 @@ namespace TelegramBotServer.Services
                         });
             }
 
-            return buttons;
+            return await Task.FromResult(new InlineKeyboardMarkup(buttons));
 
         }
 

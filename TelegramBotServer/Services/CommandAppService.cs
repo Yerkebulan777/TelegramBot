@@ -595,8 +595,6 @@ namespace TelegramBotServer.Services
                 );
             }
 
-
-
             else if (callbackData.StartsWith("PDF:"))
             {
                 if (session.PendingCommand.Contains("PDF"))
@@ -638,6 +636,7 @@ namespace TelegramBotServer.Services
                 keyboard
                 );
             }
+
             else if (callbackData.StartsWith("NWC:"))
             {
                 if (session.PendingCommand.Contains("NWC"))
@@ -658,6 +657,7 @@ namespace TelegramBotServer.Services
                 keyboard
                 );
             }
+
             else if (callbackData.StartsWith("IFC:"))
             {
                 if (session.PendingCommand.Contains("IFC"))
@@ -678,6 +678,7 @@ namespace TelegramBotServer.Services
                 keyboard
                 );
             }
+
             else if (callbackData.StartsWith("APPLYCOMMANDS:"))
             {
                 if (session.PendingCommand.Count > 0)
@@ -688,6 +689,7 @@ namespace TelegramBotServer.Services
                 }
 
             }
+
             else if (callbackData.StartsWith("CANCELCOMMANDSSEL:"))
             {
                 session.PendingCommand.Clear();
@@ -731,6 +733,7 @@ namespace TelegramBotServer.Services
 
                 await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
             }
+
             else if (callbackData.StartsWith("Sessiondetails:") && session.statusLevel == false)
             {
                 session.statusLevel = true;
@@ -748,6 +751,7 @@ namespace TelegramBotServer.Services
                 keyboard
                 );
             }
+
             else if (callbackData.StartsWith("Backtostatus:"))
             {
                 session.statusLevel = true;
@@ -760,6 +764,7 @@ namespace TelegramBotServer.Services
                 keyboard
                 );
             }
+
             else if (callbackData.StartsWith("Deletesession:"))
             {
                 var token = callbackData.Substring(14);
@@ -782,6 +787,7 @@ namespace TelegramBotServer.Services
                 }
 
             }
+
             else if (callbackData.StartsWith("Deletecommand:"))
             {
                 var token = callbackData.Substring(15);
