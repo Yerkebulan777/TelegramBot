@@ -72,7 +72,7 @@ namespace TelegramBotServer.Services
                         _sessions.TryRemove(key, out _);
                         if (_sessionLocks.TryRemove(key, out var removedLock))
                             removedLock.Dispose();
-                        return; // lock already disposed, skip Release
+                        continue; // lock already disposed, skip Release
                     }
                 }
                 finally

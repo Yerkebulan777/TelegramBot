@@ -82,13 +82,14 @@ public class SqliteDataService : IDataService
         await cmd3.ExecuteNonQueryAsync();
         await cmd4.ExecuteNonQueryAsync();
 
-        var count = Convert.ToInt64((await new SqliteCommand("SELECT COUNT(*) FROM Credentials;", conn)
-            .ExecuteScalarAsync()));
+        await using var countCmd = new SqliteCommand("SELECT COUNT(*) FROM Credentials;", conn);
+        var count = Convert.ToInt64(await countCmd.ExecuteScalarAsync());
 
         if (count == 0)
         {
             var insertPassword = "INSERT INTO Credentials (password) VALUES ('qwerty123');";
-            await new SqliteCommand(insertPassword, conn).ExecuteNonQueryAsync();
+            await using var insertCmd = new SqliteCommand(insertPassword, conn);
+            await insertCmd.ExecuteNonQueryAsync();
             _logger.LogInformation("Default password added to Credentials table.");
         }
     }
