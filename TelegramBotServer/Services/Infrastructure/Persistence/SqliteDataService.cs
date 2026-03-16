@@ -1,6 +1,5 @@
 using Dapper;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
 
@@ -87,92 +86,82 @@ public class SqliteDataService : IDataService
 
         if (count == 0)
         {
-            var insertPassword = "INSERT INTO Credentials (password) VALUES ('qwerty123');";
+            string hashedPassword = PasswordHasher.Hash("qwerty123");
+            var insertPassword = "INSERT INTO Credentials (password) VALUES (@password);";
             await using var insertCmd = new SqliteCommand(insertPassword, conn);
+            insertCmd.Parameters.AddWithValue("@password", hashedPassword);
             await insertCmd.ExecuteNonQueryAsync();
-            _logger.LogInformation("Default password added to Credentials table.");
+            _logger.LogInformation("Default password (hashed) added to Credentials table.");
+        }
+        else
+        {
+            // Migrate any existing plain-text passwords to hashed format
+            await MigratePlainTextPasswordsAsync(conn);
         }
     }
 
-
-
-
-    // ?? Add new command to queue
-    public async Task AddCommandAsync(long userId, List<string> fileList, List<string> commandList)
+    /// <summary>
+    /// One-time migration: detects plain-text passwords and re-hashes them.
+    /// </summary>
+    private async Task MigratePlainTextPasswordsAsync(SqliteConnection conn)
     {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
+        var selectCmd = new SqliteCommand("SELECT id, password FROM Credentials;", conn);
+        await using var reader = await selectCmd.ExecuteReaderAsync();
 
-        const string query = @"
-            INSERT INTO Commands (UserId, FileName, CommandText, Status, Timestamp)
-            VALUES (@userId, @fileName, @commandText, 'queued', @ts);
-        ";
-
-
-
-        foreach (var commandText in commandList)
+        var updates = new List<(int Id, string HashedPassword)>();
+        while (await reader.ReadAsync())
         {
-            foreach (var file in fileList)
+            int id = reader.GetInt32(0);
+            string storedPassword = reader.GetString(1);
+
+            // If it doesn't look like a base64-encoded PBKDF2 hash (48 bytes → 64 chars base64), migrate it
+            if (!IsLikelyHash(storedPassword))
             {
-                using var cmd = new SqliteCommand(query, conn);
-                cmd.Parameters.AddWithValue("@userId", userId);
-                cmd.Parameters.AddWithValue("@fileName", file);
-                cmd.Parameters.AddWithValue("@commandText", commandText);
-                cmd.Parameters.AddWithValue("@ts", DateTime.UtcNow.ToString("o"));
-                await cmd.ExecuteNonQueryAsync();
+                updates.Add((id, PasswordHasher.Hash(storedPassword)));
+                _logger.LogInformation("Migrating plain-text password (id={CredentialId}) to hashed format.", id);
             }
         }
+        await reader.CloseAsync();
 
-
-
-    }
-
-    // ?? Get first queued command
-    public async Task<Command?> GetNextCommandAsync()
-    {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
-
-        const string query = @"
-            SELECT * FROM Commands
-            WHERE Status = 'queued'
-            ORDER BY Timestamp ASC
-            LIMIT 1;
-        ";
-
-        await using var cmd = new SqliteCommand(query, conn);
-        await using var reader = await cmd.ExecuteReaderAsync();
-
-        if (await reader.ReadAsync())
+        foreach (var (id, hashedPassword) in updates)
         {
-            return new Command
-            {
-                Id = reader.GetInt32(0),
-                UserId = reader.GetInt64(1),
-                FileName = reader.GetString(2),
-                CommandText = reader.GetString(3),
-                Status = reader.GetString(4),
-                Timestamp = DateTime.Parse(reader.GetString(5))
-            };
+            var updateCmd = new SqliteCommand("UPDATE Credentials SET password = @password WHERE id = @id;", conn);
+            updateCmd.Parameters.AddWithValue("@password", hashedPassword);
+            updateCmd.Parameters.AddWithValue("@id", id);
+            await updateCmd.ExecuteNonQueryAsync();
         }
-
-        return null;
     }
 
-    // ?? Update command status (e.g. queued > in_progress > done)
+    private static bool IsLikelyHash(string value)
+    {
+        // A PBKDF2 hash in our format is base64-encoded 48 bytes → always 64 chars
+        if (value.Length < 40) return false;
+        try
+        {
+            byte[] decoded = Convert.FromBase64String(value);
+            return decoded.Length == 48; // 16 salt + 32 hash
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+
+    // ✅ Update command status (e.g. pending → in_progress → done)
     public async Task UpdateCommandStatusAsync(int commandId, string status)
     {
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        const string query = "UPDATE Commands SET Status = @status WHERE Id = @id";
+        const string query = "UPDATE Commands SET Status = @status WHERE CommandId = @id";
         await using var cmd = new SqliteCommand(query, conn);
         cmd.Parameters.AddWithValue("@status", status);
         cmd.Parameters.AddWithValue("@id", commandId);
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // ?? Check if user is in whitelist
+    // ✅ Check if user is in whitelist
     public async Task<bool> IsUserAuthorizedAsync(long userId)
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -186,7 +175,7 @@ public class SqliteDataService : IDataService
         return count > 0;
     }
 
-    // ?? Add authorized user to whitelist
+    // ✅ Add authorized user to whitelist
     public async Task AddAuthorizedUserAsync(long userId, string username)
     {
         DateTime timestamp = DateTime.UtcNow;
@@ -206,23 +195,19 @@ public class SqliteDataService : IDataService
     }
 
 
-
-
-
-
-
-
-
-
-
-    // ?? Get all user commands
+    // ✅ Get all user commands
     public async Task<List<Command>> GetUserCommandsAsync(long userId)
     {
         var list = new List<Command>();
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        const string query = "SELECT * FROM Commands WHERE UserId = @userId and Status !='Deleted';";
+        const string query = @"
+            SELECT c.CommandId, s.UserId, c.FilePath, c.CommandText, c.Status, c.CreatedAt
+            FROM Commands c
+            JOIN Sessions s ON s.SessionId = c.SessionId
+            WHERE s.UserId = @userId AND c.Status != 'Deleted';
+        ";
         await using var cmd = new SqliteCommand(query, conn);
         cmd.Parameters.AddWithValue("@userId", userId);
 
@@ -249,23 +234,14 @@ public class SqliteDataService : IDataService
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-
-        const string query = @"
-            SELECT COUNT(*) 
-            FROM Credentials
-            WHERE password = @password;
-        ";
-
-
-
-
+        const string query = @"SELECT password FROM Credentials LIMIT 1;";
         await using var cmd = new SqliteCommand(query, conn);
-        cmd.Parameters.AddWithValue("@password", password);
 
+        var storedHash = await cmd.ExecuteScalarAsync() as string;
+        if (storedHash == null)
+            return false;
 
-        var count = Convert.ToInt64(await cmd.ExecuteScalarAsync());
-
-        return count > 0;
+        return PasswordHasher.Verify(password, storedHash);
     }
 
 
@@ -277,11 +253,10 @@ public class SqliteDataService : IDataService
             await using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
 
-
             const string query = @"
             UPDATE Commands
             SET Status = 'Deleted'
-            WHERE Id = @id;
+            WHERE CommandId = @id;
         ";
             await using var cmd = new SqliteCommand(query, conn);
             cmd.Parameters.AddWithValue("@id", id);
@@ -386,7 +361,7 @@ public class SqliteDataService : IDataService
         await using var reader = await cmd.ExecuteReaderAsync();
 
         if (!await reader.ReadAsync())
-            throw new Exception($"Session {sessionId} not found");
+            throw new KeyNotFoundException($"Session {sessionId} not found");
 
         return new SessionStatus
         {
@@ -402,7 +377,7 @@ public class SqliteDataService : IDataService
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        const string query = "select ExecutionOrder, CommandText, FilePath, Status, CreatedAt, CommandId from Commands where SessionId = @sessionId AND Status != 'Deleted';";
+        const string query = "SELECT ExecutionOrder, CommandText, FilePath, Status, CreatedAt, CommandId FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';";
         await using var cmd = new SqliteCommand(query, conn);
         cmd.Parameters.AddWithValue("@sessionId", sessionId);
 
@@ -510,6 +485,4 @@ public class SqliteDataService : IDataService
         var result = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         return result > 0;
     }
-
-
 }

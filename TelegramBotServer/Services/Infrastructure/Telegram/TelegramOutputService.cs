@@ -1,4 +1,5 @@
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
@@ -13,12 +14,13 @@ public class TelegramOutputService(
 {
     private readonly ITelegramBotClient _botClient = botClient ?? throw new ArgumentNullException(nameof(botClient));
     private readonly ILogger<TelegramOutputService> _logger = logger;
+    private const int MaxRetries = 2;
 
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
         if (string.IsNullOrWhiteSpace(message)) return null!;
 
-        try
+        return await ExecuteWithRetryAsync(async () =>
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
@@ -27,18 +29,20 @@ public class TelegramOutputService(
             );
             _logger.LogDebug("Sent to {UserId}: {Message}", userId, message);
             return t;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to send message to {UserId}", userId);
-            return null;
-        }
+        }, userId);
     }
 
     public async Task SendErrorAsync(long userId, string errorMessage)
     {
-        string formatted = $"?? *Error:* {errorMessage}";
-        await SendMessageAsync(userId, formatted);
+        // Send as plain text to avoid MarkdownV2 escaping issues with formatting
+        await ExecuteWithRetryAsync(async () =>
+        {
+            var t = await _botClient.SendMessage(
+                chatId: new ChatId(userId),
+                text: $"⚠ Error: {errorMessage}"
+            );
+            return t;
+        }, userId);
     }
 
     public async Task SendNotificationAsync(string message)
@@ -49,7 +53,7 @@ public class TelegramOutputService(
             return;
         }
 
-        await SendMessageAsync(adminChatId.Value, $"?? [Notification]\n{message}");
+        await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
     }
 
     public async Task DeleteMessageAsync(long chatId, int messageId)
@@ -58,7 +62,7 @@ public class TelegramOutputService(
         {
             await _botClient.DeleteMessage(chatId, messageId);
         }
-        catch (Telegram.Bot.Exceptions.ApiRequestException ex)
+        catch (ApiRequestException ex)
         {
             if (!ex.Message.Contains("message can't be deleted") && !ex.Message.Contains("message to delete not found"))
                 throw;
@@ -68,20 +72,36 @@ public class TelegramOutputService(
 
     public async Task SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
-
-        await _botClient.SendMessage(
-            chatId: userId,
-            text: message,
-            replyMarkup: keyboard,
-            parseMode: ParseMode.Markdown
-        );
+        try
+        {
+            await ExecuteWithRetryAsync(async () =>
+            {
+                var t = await _botClient.SendMessage(
+                    chatId: userId,
+                    text: message,
+                    replyMarkup: keyboard,
+                    parseMode: ParseMode.Markdown
+                );
+                return t;
+            }, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send message with keyboard to {UserId}", userId);
+        }
     }
 
 
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
     {
-        await _botClient.AnswerCallbackQuery(callbackQueryId: callbackId, text: messageText);
-
+        try
+        {
+            await _botClient.AnswerCallbackQuery(callbackQueryId: callbackId, text: messageText);
+        }
+        catch (ApiRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to answer callback {CallbackId}", callbackId);
+        }
     }
 
 
@@ -95,16 +115,14 @@ public class TelegramOutputService(
                 text: message
             );
         }
-        catch (Telegram.Bot.Exceptions.ApiRequestException ex)
+        catch (ApiRequestException ex)
         {
             _logger.LogWarning(ex, "Failed to edit message reply text for {UserId} messageId={MessageId}", userId, messageId);
         }
-
     }
 
     public async Task EditMessageReplyMarkupAsync(long userId, int messageId, InlineKeyboardMarkup keyboard)
     {
-
         try
         {
             await _botClient.EditMessageReplyMarkup(
@@ -112,15 +130,68 @@ public class TelegramOutputService(
                 messageId: messageId,
                 replyMarkup: keyboard
             );
-
-
         }
-        catch (Telegram.Bot.Exceptions.ApiRequestException ex)
+        catch (ApiRequestException ex)
         {
             _logger.LogWarning(ex, "Failed to edit message reply markup for {UserId} messageId={MessageId}", userId, messageId);
         }
-
     }
+
+    public async Task EditMessageTextWithKeyboardAsync(long userId, int messageId, string message, InlineKeyboardMarkup keyboard)
+    {
+        try
+        {
+            await _botClient.EditMessageText(
+                chatId: userId,
+                messageId: messageId,
+                text: message,
+                replyMarkup: keyboard
+            );
+        }
+        catch (ApiRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to edit message text with keyboard for {UserId} messageId={MessageId}", userId, messageId);
+        }
+    }
+
+    /// <summary>
+    /// Executes a Telegram API call with retry logic for 429 (Too Many Requests) errors.
+    /// </summary>
+    private async Task<Message?> ExecuteWithRetryAsync(Func<Task<Message>> action, long userId)
+    {
+        for (int attempt = 0; attempt <= MaxRetries; attempt++)
+        {
+            try
+            {
+                return await action();
+            }
+            catch (ApiRequestException ex) when (ex.ErrorCode == 429)
+            {
+                var retryAfter = ex.Parameters?.RetryAfter ?? 5;
+                _logger.LogWarning(
+                    "Rate limited for {UserId}. Retrying after {RetryAfterSeconds}s (attempt {Attempt}/{MaxRetries})",
+                    userId, retryAfter, attempt + 1, MaxRetries);
+
+                if (attempt < MaxRetries)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(retryAfter));
+                }
+                else
+                {
+                    _logger.LogError(ex, "Rate limit retries exhausted for {UserId}", userId);
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send message to {UserId}", userId);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
     static string EscapeMarkdownV2(string text)
     {
         return text
@@ -144,5 +215,4 @@ public class TelegramOutputService(
             .Replace(".", "\\.")
             .Replace("!", "\\!");
     }
-
 }

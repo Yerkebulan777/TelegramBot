@@ -109,7 +109,7 @@ public class TelegramBotHostedService : BackgroundService
                             return;
 
                         await _commandAppService.HandleCallbackAsync(callback);
-                        await bot.AnswerCallbackQuery(callback.CallbackQueryId, callback.CallbackData, cancellationToken: token);
+                        await bot.AnswerCallbackQuery(callback.CallbackQueryId, cancellationToken: token);
                     }
                     break;
             }

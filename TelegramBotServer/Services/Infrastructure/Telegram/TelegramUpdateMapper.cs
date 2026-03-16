@@ -25,7 +25,6 @@ namespace TelegramBotServer.Services
 
         public CallbackQueryDto MapCallback(CallbackQuery callback)
         {
-
             var msg = callback.Message
              ?? throw new InvalidOperationException("CallbackQuery.Message is null.");
 
@@ -52,22 +51,18 @@ namespace TelegramBotServer.Services
         }
 
 
-        public async Task<object?> Map(Update update)
+        public Task<object?> Map(Update update)
         {
             if (update.Message?.Text != null && update.Message.From != null)
             {
-                return MapMessage(update.Message);
+                return Task.FromResult<object?>(MapMessage(update.Message));
             }
             else if (update.CallbackQuery != null)
             {
-                return MapCallback(update.CallbackQuery);
+                return Task.FromResult<object?>(MapCallback(update.CallbackQuery));
             }
+
             return Task.FromResult<object?>(null);
         }
-
-
-
-
-
     }
 }

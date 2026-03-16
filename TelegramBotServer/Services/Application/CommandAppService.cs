@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.DTOs;
@@ -32,10 +33,7 @@ namespace TelegramBotServer.Services
             }
 
             string text = message.Text;
-            DateTime date = message.Date;
             long userId = message.UserId;
-            long chatId = message.ChatId;
-            int messageId = message.MessageId;
             string username = message.Username;
 
             _logger.LogInformation("Received command '{Command}' from {Username} ({UserId})", text, username, userId);
@@ -46,63 +44,32 @@ namespace TelegramBotServer.Services
             {
                 case "/export":
                     {
-                        session.PagesCache.Clear();
-                        session.SelectedFiles.Clear();
-                        session.PendingCommand.Clear();
-                        session.PendingCommandName.Clear();
-                        session.CurrentPath = _rootPath;
-
-                        session.Counter = 0;
-                        session.Items.Clear();
+                        session.Reset(_rootPath);
 
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-
                         await _outputService.SendMessageWithKeyboardAsync(userId, $"Выберите команду:", keyboard);
                         break;
                     }
                 case "/status":
                     {
-                        session.PagesCache.Clear();
-                        session.SelectedFiles.Clear();
-                        session.PendingCommand.Clear();
-                        session.PendingCommandName.Clear();
-                        session.CurrentPath = _rootPath;
+                        session.Reset(_rootPath);
+                        session.StatusLevel = true;
 
-                        session.Counter = 0;
-                        session.Items.Clear();
-
-                        session.statusLevel = true;
                         List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
                         await _outputService.SendMessageWithKeyboardAsync(userId, $"Сессии:", keyboard);
-
                         break;
                     }
                 case "/automation":
                     {
-                        session.SelectedFiles.Clear();
-                        session.PendingCommand.Clear();
-                        session.PendingCommandName.Clear();
-                        session.CurrentPath = _rootPath;
-                        session.PagesCache.Clear();
-
-                        session.Counter = 0;
-                        session.Items.Clear();
+                        session.Reset(_rootPath);
 
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-
                         await _outputService.SendMessageWithKeyboardAsync(userId, $"Выберите команду:", keyboard);
                         break;
                     }
                 case "/help":
-                    session.SelectedFiles.Clear();
-                    session.PendingCommand.Clear();
-                    session.PendingCommandName.Clear();
-                    session.CurrentPath = _rootPath;
-                    session.PagesCache.Clear();
-
-                    session.Counter = 0;
-                    session.Items.Clear();
+                    session.Reset(_rootPath);
 
                     await _outputService.SendMessageAsync(userId,
                     "/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.\n" +
@@ -112,7 +79,6 @@ namespace TelegramBotServer.Services
                     "Пользователь может нажать на сессию для мониторинга процесса выполнения команды.\n" +
                     "Кроме того в предоставленном меню пользователь может полностью удалить сессию\n"
                     );
-
                     break;
                 default:
                     break;
@@ -138,407 +104,45 @@ namespace TelegramBotServer.Services
 
             var session = _sessionManager.GetOrCreateSession(userId);
 
-            if (session.SelectionType == 1)
+            // --- Selection-mode-specific navigation & file operations ---
+            if (session.SelectionType is SelectionMode.Files or SelectionMode.Sections or SelectionMode.Projects)
             {
-if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParent))
+                if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParent))
                 {
-                    session.PagesCache.Add(session.Counter);
-                    session.Counter = 0;
-
-
-                    if (parsedCallback.Is(CallbackPrefixes.GoToParent))
-                    {
-                        if (session.PagesCache.Count > 0)
-                            session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
-                        session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
-                    }
-
-                    var token = parsedCallback.Argument;
-                    if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath))
-                    {
-                        await _outputService.SendErrorAsync(userId, "Path not found.");
-                        return;
-                    }
-
-                    if (newPath == null)
-                    {
-                        await _outputService.SendErrorAsync(userId, "Path not found.");
-                        return;
-                    }
-
-                    session.CurrentPath = newPath!;
-
-                    await _outputService.AnswerCallbackAsync(callbackQueryId, session.CurrentPath);
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
+                    await HandleFolderNavigationAsync(userId, messageId, callbackQueryId, session, parsedCallback);
+                    return;
                 }
                 else if (parsedCallback.Is(CallbackPrefixes.File))
                 {
-
-
-
-                    var token = parsedCallback.Argument;
-                    if (!_fileNavigationService.TryResolvePath(userId, token, out var filePath))
-                    {
-                        await _outputService.SendErrorAsync(userId, "File not found.");
-                        return;
-                    }
-
-
-
-                    if (filePath != null && session.SelectedFiles.Contains(filePath))
-                    {
-                        session.SelectedFiles.Remove(filePath);
-                    }
-                    else if (filePath != null)
-                    {
-                        session.SelectedFiles.Add(filePath);
-                    }
-
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
+                    await HandleFileToggleAsync(userId, messageId, session, parsedCallback);
+                    return;
                 }
-
                 else if (parsedCallback.Is(CallbackPrefixes.ApplyFiles))
                 {
-                    if (session.SelectedFiles.Count > 0)
-                    {
-                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, BuildQueueReply(session));
-
-                        session.Items.Clear();
-                        session.SelectedFiles.Clear();
-                        session.PagesCache.Clear();
-                        session.SelectionType = 1;
-                    }
+                    await HandleApplyFilesAsync(userId, messageId, username, session);
+                    return;
                 }
-
                 else if (parsedCallback.Is(CallbackPrefixes.CancelSelection))
                 {
-                    session.SelectedFiles.Clear();
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
+                    await HandleCancelSelectionAsync(userId, messageId, session);
+                    return;
                 }
                 else if (parsedCallback.Is(CallbackPrefixes.CancelFileSelection))
                 {
-                    session.SelectedFiles.Clear();
-                    session.CurrentPath = _rootPath;
-                    session.Counter = 0;
-                    session.Items.Clear();
-                    session.PagesCache.Clear();
-                    session.SelectionType = 1;
-
-                    if (HasExportCommands(session))
-                    {
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                        await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
-                    }
-
-                    if (HasAutomationCommands(session))
-                    {
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-                        await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
-                    }
-                }
-            }
-            else if (session.SelectionType == 2)
-            {
-if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParent))
-                {
-                    session.PagesCache.Add(session.Counter);
-                    session.Counter = 0;
-
-                    session.Level = true;
-                    if (parsedCallback.Is(CallbackPrefixes.GoToParent))
-                    {
-                        session.Level = false;
-                        if (session.PagesCache.Count > 0)
-                            session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
-                        session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
-                    }
-
-                    var token = parsedCallback.Argument;
-                    if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath))
-                    {
-                        await _outputService.SendErrorAsync(userId, "Path not found.");
-                        return;
-                    }
-
-                    if (newPath == null)
-                    {
-                        await _outputService.SendErrorAsync(userId, "Path not found.");
-                        return;
-                    }
-
-if (parsedCallback.Is(CallbackPrefixes.GoToParent))
-                    {
-                        session.CurrentPath = _rootPath;
-                    }
-                    else
-                    {
-                        session.CurrentPath = newPath! + "\\01_PROJECT";
-                    }
-
-                    await _outputService.AnswerCallbackAsync(callbackQueryId, session.CurrentPath);
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
-                }
-                else if (parsedCallback.Is(CallbackPrefixes.File))
-                {
-
-
-
-                    var token = parsedCallback.Argument;
-                    if (!_fileNavigationService.TryResolvePath(userId, token, out var filePath))
-                    {
-                        await _outputService.SendErrorAsync(userId, "File not found.");
-                        return;
-                    }
-
-
-
-                    if (filePath != null && session.SelectedFiles.Contains(filePath))
-                    {
-                        session.SelectedFiles.Remove(filePath);
-                    }
-                    else if (filePath != null)
-                    {
-
-                        session.SelectedFiles.Add(filePath);
-                    }
-
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
-                }
-
-                else if (parsedCallback.Is(CallbackPrefixes.ApplyFiles))
-                {
-                    if (session.SelectedFiles.Count > 0)
-                    {
-                        session.SelectedFiles = new HashSet<string>(await MapSectionsToFilesAsync(session.SelectedFiles.ToList()));
-
-                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, BuildQueueReply(session));
-
-                        session.SelectedFiles.Clear();
-                        session.PagesCache.Clear();
-                        session.Level = false;
-                        session.SelectionType = 1;
-                    }
-                }
-
-                else if (parsedCallback.Is(CallbackPrefixes.CancelSelection))
-                {
-                    session.SelectedFiles.Clear();
-
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
-                }
-                else if (parsedCallback.Is(CallbackPrefixes.CancelFileSelection))
-                {
-                    session.SelectedFiles.Clear();
-                    session.CurrentPath = _rootPath;
-                    session.Level = false;
-                    session.PagesCache.Clear();
-                    session.SelectionType = 1;
-
-                    if (HasExportCommands(session))
-                    {
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                        await _outputService.EditMessageReplyMarkupAsync(
-                        userId,
-                        messageId,
-                        keyboard
-                        );
-                    }
-
-                    if (HasAutomationCommands(session))
-                    {
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-                        await _outputService.EditMessageReplyMarkupAsync(
-                        userId,
-                        messageId,
-                        keyboard
-                        );
-
-                    }
-                }
-            }
-            else if (session.SelectionType == 3)
-            {
-if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParent))
-                {
-                    session.PagesCache.Add(session.Counter);
-                    session.Counter = 0;
-
-                    if (parsedCallback.Is(CallbackPrefixes.GoToParent))
-                    {
-                        if (session.PagesCache.Count > 0)
-                            session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
-                        session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
-                    }
-
-                    var token = parsedCallback.Argument;
-                    if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath))
-                    {
-                        await _outputService.SendErrorAsync(userId, "Path not found.");
-                        return;
-                    }
-
-                    if (newPath == null)
-                    {
-                        await _outputService.SendErrorAsync(userId, "Path not found.");
-                        return;
-                    }
-
-                    session.CurrentPath = newPath;
-
-                    await _outputService.AnswerCallbackAsync(callbackQueryId, session.CurrentPath);
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-                    await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
-                }
-                else if (parsedCallback.Is(CallbackPrefixes.File))
-                {
-
-
-
-                    var token = parsedCallback.Argument;
-                    if (!_fileNavigationService.TryResolvePath(userId, token, out var filePath))
-                    {
-                        await _outputService.SendErrorAsync(userId, "File not found.");
-                        return;
-                    }
-
-
-
-                    if (filePath != null && session.SelectedFiles.Contains(filePath))
-                    {
-                        session.SelectedFiles.Remove(filePath);
-                    }
-                    else if (filePath != null)
-                    {
-                        session.SelectedFiles.Add(filePath);
-                    }
-
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
-                }
-
-                else if (parsedCallback.Is(CallbackPrefixes.ApplyFiles))
-                {
-                    if (session.SelectedFiles.Count > 0)
-                    {
-
-                        session.SelectedFiles = new HashSet<string>(await MapProjectsToFilesAsync(session.SelectedFiles.ToList()));
-
-
-
-                        await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, BuildQueueReply(session));
-
-                        session.SelectedFiles.Clear();
-                        session.PagesCache.Clear();
-                        session.SelectionType = 1;
-                    }
-                }
-
-                else if (parsedCallback.Is(CallbackPrefixes.CancelSelection))
-                {
-                    session.SelectedFiles.Clear();
-
-
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
-                }
-                else if (parsedCallback.Is(CallbackPrefixes.CancelFileSelection))
-                {
-                    session.SelectedFiles.Clear();
-                    session.CurrentPath = _rootPath;
-                    session.PagesCache.Clear();
-                    session.SelectionType = 1;
-
-                    if (HasExportCommands(session))
-                    {
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                        await _outputService.EditMessageReplyMarkupAsync(
-                        userId,
-                        messageId,
-                        keyboard
-                        );
-                    }
-
-                    if (HasAutomationCommands(session))
-                    {
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-                        await _outputService.EditMessageReplyMarkupAsync(
-                        userId,
-                        messageId,
-                        keyboard);
-                    }
-
+                    await HandleCancelFileSelectionAsync(userId, messageId, session);
+                    return;
                 }
             }
 
-
+            // --- Global callbacks (not dependent on selection type) ---
             if (parsedCallback.Is(CallbackPrefixes.SelectionMode))
             {
-                int nextMode = session.SelectionType switch
+                var nextMode = session.SelectionType switch
                 {
-                    1 => 2,
-                    2 => 3,
-                    3 => 1,
-                    _ => 1
+                    SelectionMode.Files => SelectionMode.Sections,
+                    SelectionMode.Sections => SelectionMode.Projects,
+                    SelectionMode.Projects => SelectionMode.Files,
+                    _ => SelectionMode.Files
                 };
                 session.SelectionType = nextMode;
                 session.CurrentPath = _rootPath;
@@ -547,36 +151,25 @@ if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParen
                 session.Counter = 0;
                 session.PagesCache.Clear();
 
-
                 InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.Pdf))
             {
                 await TogglePendingCommandAsync(userId, messageId, session, "PDF", "Export to PDF", isAutomation: false);
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.Dwg))
             {
                 await TogglePendingCommandAsync(userId, messageId, session, "DWG", "Export to DWG", isAutomation: false);
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.Nwc))
             {
                 await TogglePendingCommandAsync(userId, messageId, session, "NWC", "Export to NWC", isAutomation: false);
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.Ifc))
             {
                 await TogglePendingCommandAsync(userId, messageId, session, "IFC", "Export to IFC", isAutomation: false);
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.ApplyCommands))
             {
                 if (session.PendingCommand.Count > 0)
@@ -585,145 +178,31 @@ if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParen
                     InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
                     await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
                 }
-
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.CancelCommandSelection))
             {
                 session.PendingCommand.Clear();
                 session.PendingCommandName.Clear();
                 await _outputService.DeleteMessageAsync(chatId, messageId);
             }
-
-            else if (parsedCallback.Is(CallbackPrefixes.SessionDetails) && session.statusLevel == true)
+            else if (parsedCallback.Is(CallbackPrefixes.SessionDetails))
             {
-                session.statusLevel = false;
-
-                var token = parsedCallback.Argument;
-
-                int.TryParse(token, out int tkn);
-
-                session.sessionId = tkn;
-
-                SessionStatus sessionStatus = await _dataService.GetSessionsStatusAsync(tkn);
-
-                int percentage = sessionStatus.TotalFiles > 0
-                    ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
-                    : 0;
-
-                string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
-
-                await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
-
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, tkn);
-
-                await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+                await HandleSessionDetailsAsync(userId, messageId, session, parsedCallback);
             }
-
-            else if (parsedCallback.Is(CallbackPrefixes.SessionDetails) && session.statusLevel == false)
-            {
-                session.statusLevel = true;
-
-                var token = parsedCallback.Argument;
-
-                int.TryParse(token, out int tkn);
-
-                List<SessionCommands> sessionCommands = await _dataService.GetSessionsCommandsAsync(tkn);
-
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, tkn);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
-            }
-
             else if (parsedCallback.Is(CallbackPrefixes.BackToStatus))
             {
-                session.statusLevel = true;
+                session.StatusLevel = true;
                 List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                 InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                await _outputService.EditMessageReplyTextAsync(userId, messageId, "Сессии:");
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await _outputService.EditMessageTextWithKeyboardAsync(userId, messageId, "Сессии:", keyboard);
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.DeleteSession))
             {
-                var token = parsedCallback.Argument;
-                int.TryParse(token, out int tkn);
-
-                //call sqldataservice to delete session
-                //deleted sessions won't be shown
-
-                if (await _dataService.DeleteSessionAsync(tkn))
-                {
-                    session.statusLevel = true;
-                    List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
-                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                    await _outputService.EditMessageReplyTextAsync(userId, messageId, "Сессии:");
-                    await _outputService.EditMessageReplyMarkupAsync(
-                    userId,
-                    messageId,
-                    keyboard
-                    );
-                }
-
+                await HandleDeleteSessionAsync(userId, messageId, session, parsedCallback);
             }
-
             else if (parsedCallback.Is(CallbackPrefixes.DeleteCommand))
             {
-                var token = parsedCallback.Argument;
-
-                int.TryParse(token, out int tkn);
-
-                if (await _dataService.DeleteCommandAsync(tkn))
-                {
-                    foreach (var row in buttonDtos)
-                    {
-                        row.RemoveAll(btn => btn.CallbackData!.Contains($"{tkn}"));
-                    }
-
-                    var newKeyboard = ConvertDtoToKeyboard(buttonDtos);
-
-                    //check if all files are deleted, if yes then mark session as deleted and return to sessions page.
-                    if (!await _dataService.CheckCommandsStatusAsync(session.sessionId))
-                    {
-                        if (await _dataService.DeleteSessionAsync(session.sessionId))
-                        {
-                            session.statusLevel = true;
-                            List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
-                            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                            await _outputService.EditMessageReplyTextAsync(userId, messageId, "Сессии:");
-                            await _outputService.EditMessageReplyMarkupAsync(
-                            userId,
-                            messageId,
-                            keyboard
-                            );
-                        }
-                    }
-                    else
-                    {
-                        SessionStatus sessionStatus = await _dataService.GetSessionsStatusAsync(session.sessionId);
-
-                        int percentage = sessionStatus.TotalFiles > 0
-                            ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
-                            : 0;
-
-                        string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
-
-                        await _outputService.EditMessageReplyMarkupAsync(
-                        userId,
-                        messageId,
-                        newKeyboard
-                        );
-                    }
-                }
+                await HandleDeleteCommandAsync(userId, messageId, session, parsedCallback, buttonDtos);
             }
             else if (parsedCallback.Is(CallbackPrefixes.BimDoc))
             {
@@ -743,9 +222,256 @@ if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParen
             }
         }
 
+        // ========== Extracted handler methods to eliminate duplication ==========
+
+        private async Task HandleFolderNavigationAsync(
+            long userId, int messageId, string callbackQueryId,
+            UserSession session, ParsedCallback parsedCallback)
+        {
+            session.PagesCache.Add(session.Counter);
+            session.Counter = 0;
+
+            bool isGoToParent = parsedCallback.Is(CallbackPrefixes.GoToParent);
+
+            if (session.SelectionType == SelectionMode.Sections)
+            {
+                session.Level = !isGoToParent;
+            }
+
+            if (isGoToParent)
+            {
+                if (session.PagesCache.Count > 0)
+                    session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
+                session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
+            }
+
+            var token = parsedCallback.Argument;
+            if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath) || newPath == null)
+            {
+                await _outputService.SendErrorAsync(userId, "Path not found.");
+                return;
+            }
+
+            // Selection-type-specific path logic
+            if (session.SelectionType == SelectionMode.Sections)
+            {
+                if (isGoToParent)
+                {
+                    session.CurrentPath = _rootPath;
+                }
+                else
+                {
+                    session.CurrentPath = newPath + "\\01_PROJECT";
+                }
+            }
+            else
+            {
+                session.CurrentPath = newPath;
+            }
+
+            await _outputService.AnswerCallbackAsync(callbackQueryId, session.CurrentPath);
+
+            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+        }
+
+        private async Task HandleFileToggleAsync(
+            long userId, int messageId,
+            UserSession session, ParsedCallback parsedCallback)
+        {
+            var token = parsedCallback.Argument;
+            if (!_fileNavigationService.TryResolvePath(userId, token, out var filePath))
+            {
+                await _outputService.SendErrorAsync(userId, "File not found.");
+                return;
+            }
+
+            if (filePath != null && session.SelectedFiles.Contains(filePath))
+            {
+                session.SelectedFiles.Remove(filePath);
+            }
+            else if (filePath != null)
+            {
+                session.SelectedFiles.Add(filePath);
+            }
+
+            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+        }
+
+        private async Task HandleApplyFilesAsync(
+            long userId, int messageId, string username, UserSession session)
+        {
+            if (session.SelectedFiles.Count == 0)
+                return;
+
+            // Map selection to actual files based on selection type
+            if (session.SelectionType == SelectionMode.Sections)
+            {
+                session.SelectedFiles = new HashSet<string>(
+                    await MapSectionsToFilesAsync(session.SelectedFiles.ToList()));
+            }
+            else if (session.SelectionType == SelectionMode.Projects)
+            {
+                session.SelectedFiles = new HashSet<string>(
+                    await MapProjectsToFilesAsync(session.SelectedFiles.ToList()));
+            }
+
+            await _dataService.CreateSessionWithCommandsAsync(
+                session.PendingCommand, session.SelectedFiles,
+                userId, username,
+                (int)session.SelectionType, session.SelectedFiles.Count);
+
+            await _outputService.EditMessageReplyTextAsync(userId, messageId, BuildQueueReply(session));
+
+            session.Items.Clear();
+            session.SelectedFiles.Clear();
+            session.PagesCache.Clear();
+            session.Level = false;
+            session.SelectionType = SelectionMode.Files;
+        }
+
+        private async Task HandleCancelSelectionAsync(
+            long userId, int messageId, UserSession session)
+        {
+            session.SelectedFiles.Clear();
+
+            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+        }
+
+        private async Task HandleCancelFileSelectionAsync(
+            long userId, int messageId, UserSession session)
+        {
+            session.SelectedFiles.Clear();
+            session.CurrentPath = _rootPath;
+            session.Counter = 0;
+            session.Items.Clear();
+            session.PagesCache.Clear();
+            session.Level = false;
+            session.SelectionType = SelectionMode.Files;
+
+            if (HasExportCommands(session))
+            {
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
+                await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+            }
+
+            if (HasAutomationCommands(session))
+            {
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
+                await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+            }
+        }
+
+        private async Task HandleSessionDetailsAsync(
+            long userId, int messageId, UserSession session, ParsedCallback parsedCallback)
+        {
+            var token = parsedCallback.Argument;
+            if (!int.TryParse(token, out int tkn))
+            {
+                _logger.LogWarning("Invalid session ID '{Token}' from user {UserId}", token, userId);
+                return;
+            }
+
+            if (session.StatusLevel)
+            {
+                // Show session summary
+                session.StatusLevel = false;
+                session.SessionId = tkn;
+
+                SessionStatus sessionStatus = await _dataService.GetSessionsStatusAsync(tkn);
+
+                int percentage = sessionStatus.TotalFiles > 0
+                    ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
+                    : 0;
+
+                string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
+
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, tkn);
+                await _outputService.EditMessageTextWithKeyboardAsync(userId, messageId, reply, keyboard);
+            }
+            else
+            {
+                // Show session commands detail
+                session.StatusLevel = true;
+
+                List<SessionCommands> sessionCommands = await _dataService.GetSessionsCommandsAsync(tkn);
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, tkn);
+                await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+            }
+        }
+
+        private async Task HandleDeleteSessionAsync(
+            long userId, int messageId, UserSession session, ParsedCallback parsedCallback)
+        {
+            var token = parsedCallback.Argument;
+            if (!int.TryParse(token, out int tkn))
+            {
+                _logger.LogWarning("Invalid session ID '{Token}' for deletion from user {UserId}", token, userId);
+                return;
+            }
+
+            if (await _dataService.DeleteSessionAsync(tkn))
+            {
+                session.StatusLevel = true;
+                List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+                await _outputService.EditMessageTextWithKeyboardAsync(userId, messageId, "Сессии:", keyboard);
+            }
+        }
+
+        private async Task HandleDeleteCommandAsync(
+            long userId, int messageId, UserSession session,
+            ParsedCallback parsedCallback, List<List<ButtonDto>> buttonDtos)
+        {
+            var token = parsedCallback.Argument;
+            if (!int.TryParse(token, out int tkn))
+            {
+                _logger.LogWarning("Invalid command ID '{Token}' for deletion from user {UserId}", token, userId);
+                return;
+            }
+
+            if (!await _dataService.DeleteCommandAsync(tkn))
+                return;
+
+            foreach (var row in buttonDtos)
+            {
+                row.RemoveAll(btn => btn.CallbackData!.Contains($"{tkn}"));
+            }
+
+            var newKeyboard = ConvertDtoToKeyboard(buttonDtos);
+
+            // Check if all files are deleted; if yes, mark session as deleted and return to sessions page
+            if (!await _dataService.CheckCommandsStatusAsync(session.SessionId))
+            {
+                if (await _dataService.DeleteSessionAsync(session.SessionId))
+                {
+                    session.StatusLevel = true;
+                    List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
+                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+                    await _outputService.EditMessageTextWithKeyboardAsync(userId, messageId, "Сессии:", keyboard);
+                }
+            }
+            else
+            {
+                SessionStatus sessionStatus = await _dataService.GetSessionsStatusAsync(session.SessionId);
+
+                int percentage = sessionStatus.TotalFiles > 0
+                    ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
+                    : 0;
+
+                string reply = $"Статус: {sessionStatus.Status}\nФайлов: {sessionStatus.TotalFiles}\nЗавершено: {sessionStatus.DoneFiles}\n{percentage}%";
+
+                await _outputService.EditMessageTextWithKeyboardAsync(userId, messageId, reply, newKeyboard);
+            }
+        }
+
+        // ========== Helper methods ==========
+
         private static string BuildQueueReply(UserSession session)
         {
-            var sb = new System.Text.StringBuilder("Команда:\n");
+            var sb = new StringBuilder("Команда:\n");
             foreach (var file in session.PendingCommandName)
                 sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
             sb.Append("Добавлены файлы:\n");
@@ -821,6 +547,12 @@ if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParen
                 foreach (var dir in dirs)
                 {
                     var rvtDir = Path.Combine(dir, "01_RVT");
+                    if (!Directory.Exists(rvtDir))
+                    {
+                        _logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
+                        continue;
+                    }
+
                     foreach (var file in Directory.GetFiles(rvtDir))
                     {
                         if (file.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
@@ -840,6 +572,12 @@ if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParen
                 foreach (var dir in dirs)
                 {
                     var projectDir = Path.Combine(dir, "01_PROJECT");
+                    if (!Directory.Exists(projectDir))
+                    {
+                        _logger.LogWarning("Project directory not found: {ProjectDir}", projectDir);
+                        continue;
+                    }
+
                     var sections = Directory.GetDirectories(projectDir)
                         .Where(d => roman3.IsMatch(Path.GetFileName(d)))
                         .ToList();
@@ -847,7 +585,7 @@ if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParen
                     foreach (var section in sections)
                     {
                         var rvtDir = Path.Combine(section, "01_RVT");
-                        if (Path.Exists(rvtDir))
+                        if (Directory.Exists(rvtDir))
                         {
                             foreach (var file in Directory.GetFiles(rvtDir))
                             {
