@@ -4,7 +4,8 @@
       "Bash(find \"C:\\\\Users\\\\y.zhumabayev\\\\Yandex.Disk\\\\Repository\\\\TelegramBot/TelegramBotServer\" -maxdepth 3 -name \"*.cs\" -type f ! -path \"*/obj/*\" | while read file; do wc -l \"$file\"; done | sort -rn)",
       "Bash(find TelegramBotServer -maxdepth 3 -name \"*.cs\" -type f ! -path \"*/obj/*\" -exec wc -l {} + | sort -rn)",
       "Bash(cd \"C:/Users/y.zhumabayev/Yandex.Disk/Repository/TelegramBot\" && dotnet build TelegramBotServer/TelegramBotServer.csproj 2>&1 | tail -20)",
-      "Bash(cd \"C:/Users/y.zhumabayev/Yandex.Disk/Repository/TelegramBot\" && dotnet build TelegramBotServer/TelegramBotServer.csproj 2>&1)"
+      "Bash(cd \"C:/Users/y.zhumabayev/Yandex.Disk/Repository/TelegramBot\" && dotnet build TelegramBotServer/TelegramBotServer.csproj 2>&1)",
+      "Bash(winget upgrade:*)"
     ]
   },
   "hooks": {

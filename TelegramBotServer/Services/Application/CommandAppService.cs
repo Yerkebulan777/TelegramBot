@@ -12,6 +12,7 @@ namespace TelegramBotServer.Services
         IFileSystemBrowser fileNavigationService,
         ISessionManager sessionManager,
         IKeyboardBuilder keyboardBuilder,
+        IConfiguration configuration,
         ILogger<CommandAppService> logger) : ICommandAppService
     {
         private readonly IDataService _dataService = dataService;
@@ -20,8 +21,7 @@ namespace TelegramBotServer.Services
         private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
         private readonly ISessionManager _sessionManager = sessionManager;
         private readonly ILogger<CommandAppService> _logger = logger;
-
-        string rootPath = "B:\\";
+        private readonly string _rootPath = configuration["TelegramBot:RootPath"] ?? "B:\\";
 
         public async Task HandleUserCommandAsync(MessageDto message)
         {
@@ -50,7 +50,7 @@ namespace TelegramBotServer.Services
                         session.SelectedFiles.Clear();
                         session.PendingCommand.Clear();
                         session.PendingCommandName.Clear();
-                        session.CurrentPath = rootPath;
+                        session.CurrentPath = _rootPath;
 
                         session.Counter = 0;
                         session.Items.Clear();
@@ -66,7 +66,7 @@ namespace TelegramBotServer.Services
                         session.SelectedFiles.Clear();
                         session.PendingCommand.Clear();
                         session.PendingCommandName.Clear();
-                        session.CurrentPath = rootPath;
+                        session.CurrentPath = _rootPath;
 
                         session.Counter = 0;
                         session.Items.Clear();
@@ -83,7 +83,7 @@ namespace TelegramBotServer.Services
                         session.SelectedFiles.Clear();
                         session.PendingCommand.Clear();
                         session.PendingCommandName.Clear();
-                        session.CurrentPath = rootPath;
+                        session.CurrentPath = _rootPath;
                         session.PagesCache.Clear();
 
                         session.Counter = 0;
@@ -98,7 +98,7 @@ namespace TelegramBotServer.Services
                     session.SelectedFiles.Clear();
                     session.PendingCommand.Clear();
                     session.PendingCommandName.Clear();
-                    session.CurrentPath = rootPath;
+                    session.CurrentPath = _rootPath;
                     session.PagesCache.Clear();
 
                     session.Counter = 0;
@@ -261,7 +261,7 @@ namespace TelegramBotServer.Services
                 else if (callbackData.StartsWith("CANCELFILESEL:"))
                 {
                     session.SelectedFiles.Clear();
-                    session.CurrentPath = rootPath;
+                    session.CurrentPath = _rootPath;
                     session.Counter = 0;
                     session.Items.Clear();
                     session.PagesCache.Clear();
@@ -311,7 +311,7 @@ namespace TelegramBotServer.Services
 
                     if (callbackData.StartsWith("NAV2"))
                     {
-                        session.CurrentPath = rootPath;
+                        session.CurrentPath = _rootPath;
                     }
                     else
                     {
@@ -403,7 +403,7 @@ namespace TelegramBotServer.Services
                 else if (callbackData.StartsWith("CANCELFILESEL:"))
                 {
                     session.SelectedFiles.Clear();
-                    session.CurrentPath = rootPath;
+                    session.CurrentPath = _rootPath;
                     session.Level = false;
                     session.PagesCache.Clear();
                     session.SelectionType = 1;
@@ -512,7 +512,7 @@ namespace TelegramBotServer.Services
                 else if (callbackData.StartsWith("CANCELFILESEL:"))
                 {
                     session.SelectedFiles.Clear();
-                    session.CurrentPath = rootPath;
+                    session.CurrentPath = _rootPath;
                     session.PagesCache.Clear();
                     session.SelectionType = 1;
                     //await _outputService.DeleteMessageAsync(chatId, messageId);
@@ -552,7 +552,7 @@ namespace TelegramBotServer.Services
                     _ => 1
                 };
                 session.SelectionType = nextMode;
-                session.CurrentPath = rootPath;
+                session.CurrentPath = _rootPath;
                 session.Level = false;
                 session.SelectedFiles.Clear();
                 session.Counter = 0;
@@ -656,7 +656,7 @@ namespace TelegramBotServer.Services
             {
                 if (session.PendingCommand.Count > 0)
                 {
-                    session.CurrentPath = rootPath;
+                    session.CurrentPath = _rootPath;
                     InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
                     await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
                 }
