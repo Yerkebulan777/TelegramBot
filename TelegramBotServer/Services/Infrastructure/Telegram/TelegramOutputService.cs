@@ -69,6 +69,48 @@ public class TelegramOutputService(
         }
     }
 
+    public async Task SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
+    {
+        try
+        {
+            await ExecuteWithRetryAsync(async () =>
+            {
+                var t = await _botClient.SendMessage(
+                    chatId: userId,
+                    text: message,
+                    replyMarkup: keyboard,
+                    parseMode: ParseMode.Markdown
+                );
+                return t;
+            }, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send message with reply keyboard to {UserId}", userId);
+        }
+    }
+
+    public async Task RemoveReplyKeyboardAsync(long userId, string message)
+    {
+        try
+        {
+            await ExecuteWithRetryAsync(async () =>
+            {
+                var t = await _botClient.SendMessage(
+                    chatId: userId,
+                    text: message,
+                    replyMarkup: new ReplyKeyboardRemove(),
+                    parseMode: ParseMode.Markdown
+                );
+                return t;
+            }, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove reply keyboard for {UserId}", userId);
+        }
+    }
+
 
     public async Task SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {

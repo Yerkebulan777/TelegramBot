@@ -4,6 +4,8 @@ using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services
 {
+    public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
+
     public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
     {
         private readonly IFileSystemBrowser _navigationService = fileNavigationService;
@@ -59,33 +61,27 @@ namespace TelegramBotServer.Services
 
         public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(long userId, UserSession session)
         {
-            var buttons = new List<List<InlineKeyboardButton>>
+            _ = userId;
+
+            var commandOptions = new List<CommandOption>
             {
-                new() { InlineKeyboardButton.WithCallbackData("Export to PDF", "PDF:") },
-                new() { InlineKeyboardButton.WithCallbackData("Export to DWG", "DWG:") },
-                new() { InlineKeyboardButton.WithCallbackData("Export to NWC", "NWC:") },
-                new() { InlineKeyboardButton.WithCallbackData("Export to IFC", "IFC:") },
-                new() { InlineKeyboardButton.WithCallbackData("✅ Применить", "APPLYCOMMANDS:") },
-                new() { InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELCOMMANDSSEL:") }
+                new("Export to PDF", "PDF:", "PDF"),
+                new("Export to DWG", "DWG:", "DWG"),
+                new("Export to NWC", "NWC:", "NWC"),
+                new("Export to IFC", "IFC:", "IFC")
             };
 
-            var keyboard = new InlineKeyboardMarkup(buttons);
+            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, "✅ Применить"));
+        }
 
-            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
-            {
-                if (button.CallbackData != null && !button.CallbackData.StartsWith("APPLYCOMMANDS:") && !button.CallbackData.StartsWith("CANCELCOMMANDSSEL:"))
-                {
-                    if (session.PendingCommandName.Contains(button.Text))
-                    {
-                        return InlineKeyboardButton.WithCallbackData($"✅ {button.Text}", button.CallbackData);
-                    }
-                }
-                return button; // unchanged
-            })
-            .ToList()
-            ).ToList();
+        public Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync()
+        {
+            return Task.FromResult(BuildActionsReplyKeyboard("✅ Применить"));
+        }
 
-            return Task.FromResult(new InlineKeyboardMarkup(newKeyboard));
+        public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
+        {
+            return Task.FromResult(BuildActionsReplyKeyboard("✅ Подтвердить"));
         }
 
         public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
@@ -148,32 +144,58 @@ namespace TelegramBotServer.Services
 
         public Task<InlineKeyboardMarkup> GetAutomationKeyboardAsync(long userId, UserSession session)
         {
-            var buttons = new List<List<InlineKeyboardButton>>
+            _ = userId;
+
+            var commandOptions = new List<CommandOption>
             {
-                new() { InlineKeyboardButton.WithCallbackData("BIM Doctor", "BIMDOC:") },
-                new() { InlineKeyboardButton.WithCallbackData("Clash Report", "CLASHREP:") },
-                new() { InlineKeyboardButton.WithCallbackData("Auto Resolver", "AUTORES:") },
-                new() { InlineKeyboardButton.WithCallbackData("✅ Подтвердить", "APPLYCOMMANDS:") },
-                new() { InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELCOMMANDSSEL:") }
+                new("BIM Doctor", "BIMDOC:", "BIMDOC"),
+                new("Clash Report", "CLASHREP:", "CLASHREP"),
+                new("Auto Resolver", "AUTORES:", "AUTORES")
             };
 
-            var keyboard = new InlineKeyboardMarkup(buttons);
+            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, "✅ Подтвердить"));
+        }
 
-            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
-            {
-                if (button.CallbackData != null && !button.CallbackData.StartsWith("APPLYCOMMANDS:") && !button.CallbackData.StartsWith("CANCELCOMMANDSSEL:"))
+        private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(
+            UserSession session,
+            List<CommandOption> commandOptions,
+            string applyButtonText)
+        {
+            var buttons = commandOptions
+                .Select(option =>
                 {
-                    if (session.PendingCommand.Contains(button.CallbackData.Replace(":", "")))
+                    bool isSelected = session.PendingCommand.Contains(option.CommandKey);
+                    string text = isSelected ? $"✅ {option.Text}" : option.Text;
+                    return new List<InlineKeyboardButton>
                     {
-                        return InlineKeyboardButton.WithCallbackData($"✅ {button.Text}", button.CallbackData);
-                    }
-                }
-                return button; // unchanged
-            })
-            .ToList()
-            ).ToList();
+                        InlineKeyboardButton.WithCallbackData(text, option.CallbackData)
+                    };
+                })
+                .ToList();
 
-            return Task.FromResult(new InlineKeyboardMarkup(newKeyboard));
+            buttons.Add(new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData(applyButtonText, CallbackPrefixes.ApplyCommands),
+                InlineKeyboardButton.WithCallbackData("❌ Отмена", CallbackPrefixes.CancelCommandSelection)
+            });
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        private static ReplyKeyboardMarkup BuildActionsReplyKeyboard(string applyButtonText)
+        {
+            return new ReplyKeyboardMarkup(new[]
+            {
+                new KeyboardButton[]
+                {
+                    new(applyButtonText),
+                    new("❌ Отмена")
+                }
+            })
+            {
+                ResizeKeyboard = true,
+                OneTimeKeyboard = false
+            };
         }
     }
 }

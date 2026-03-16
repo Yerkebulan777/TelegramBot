@@ -27,6 +27,16 @@ public interface ITelegramOutputService
     Task SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard);
 
     /// <summary>
+    /// Sends a message with a reply keyboard to a user.
+    /// </summary>
+    Task SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard);
+
+    /// <summary>
+    /// Removes reply keyboard for the user.
+    /// </summary>
+    Task RemoveReplyKeyboardAsync(long userId, string message);
+
+    /// <summary>
     /// Deletes a message from a chat.
     /// </summary>
     Task DeleteMessageAsync(long chatId, int messageId);

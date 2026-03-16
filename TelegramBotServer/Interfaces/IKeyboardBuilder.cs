@@ -10,6 +10,8 @@ namespace TelegramBotServer.Interfaces
         Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session);
         Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session);
         Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(long userId, UserSession session);
+        Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync();
+        Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync();
         Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsStatus);
         Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId);
         Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId);

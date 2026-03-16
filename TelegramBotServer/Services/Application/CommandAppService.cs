@@ -23,6 +23,9 @@ namespace TelegramBotServer.Services
         private readonly ISessionManager _sessionManager = sessionManager;
         private readonly ILogger<CommandAppService> _logger = logger;
         private readonly string _rootPath = configuration["TelegramBot:RootPath"] ?? "B:\\";
+        private const string ExportApplyText = "✅ Применить";
+        private const string AutomationApplyText = "✅ Подтвердить";
+        private const string CancelText = "❌ Отмена";
 
         public async Task HandleUserCommandAsync(MessageDto message)
         {
@@ -40,14 +43,16 @@ namespace TelegramBotServer.Services
 
             var session = _sessionManager.GetOrCreateSession(userId);
 
+            if (await HandleReplyKeyboardActionAsync(userId, text, session))
+            {
+                return;
+            }
+
             switch (text.ToLower())
             {
                 case "/export":
                     {
-                        session.Reset(_rootPath);
-
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                        await _outputService.SendMessageWithKeyboardAsync(userId, $"Выберите команду:", keyboard);
+                        await StartCommandSelectionAsync(userId, session, isAutomation: false);
                         break;
                     }
                 case "/status":
@@ -62,10 +67,7 @@ namespace TelegramBotServer.Services
                     }
                 case "/automation":
                     {
-                        session.Reset(_rootPath);
-
-                        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-                        await _outputService.SendMessageWithKeyboardAsync(userId, $"Выберите команду:", keyboard);
+                        await StartCommandSelectionAsync(userId, session, isAutomation: true);
                         break;
                     }
                 case "/help":
@@ -83,6 +85,45 @@ namespace TelegramBotServer.Services
                 default:
                     break;
             }
+        }
+
+        private async Task StartCommandSelectionAsync(long userId, UserSession session, bool isAutomation)
+        {
+            session.Reset(_rootPath);
+
+            InlineKeyboardMarkup commandKeyboard = isAutomation
+                ? await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session)
+                : await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
+
+            await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard);
+        }
+
+        private async Task<bool> HandleReplyKeyboardActionAsync(long userId, string messageText, UserSession session)
+        {
+            if (messageText == ExportApplyText || messageText == AutomationApplyText)
+            {
+                if (session.PendingCommand.Count == 0)
+                {
+                    await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду.");
+                    return true;
+                }
+
+                session.CurrentPath = _rootPath;
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+                await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
+                await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор подтвержден.");
+                return true;
+            }
+
+            if (messageText == CancelText)
+            {
+                session.PendingCommand.Clear();
+                session.PendingCommandName.Clear();
+                await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
+                return true;
+            }
+
+            return false;
         }
 
         public async Task HandleCallbackAsync(CallbackQueryDto callback)
@@ -177,12 +218,14 @@ namespace TelegramBotServer.Services
                     session.CurrentPath = _rootPath;
                     InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
                     await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+                    await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор подтвержден.");
                 }
             }
             else if (parsedCallback.Is(CallbackPrefixes.CancelCommandSelection))
             {
                 session.PendingCommand.Clear();
                 session.PendingCommandName.Clear();
+                await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
                 await _outputService.DeleteMessageAsync(chatId, messageId);
             }
             else if (parsedCallback.Is(CallbackPrefixes.SessionDetails))
@@ -206,15 +249,15 @@ namespace TelegramBotServer.Services
             }
             else if (parsedCallback.Is(CallbackPrefixes.BimDoc))
             {
-                await TogglePendingCommandAsync(userId, messageId, session, "BIMDOC", "BIMDOC", isAutomation: true);
+                await TogglePendingCommandAsync(userId, messageId, session, "BIMDOC", "BIM Doctor", isAutomation: true);
             }
             else if (parsedCallback.Is(CallbackPrefixes.ClashRep))
             {
-                await TogglePendingCommandAsync(userId, messageId, session, "CLASHREP", "CLASHREP", isAutomation: true);
+                await TogglePendingCommandAsync(userId, messageId, session, "CLASHREP", "Clash Report", isAutomation: true);
             }
             else if (parsedCallback.Is(CallbackPrefixes.AutoRes))
             {
-                await TogglePendingCommandAsync(userId, messageId, session, "AUTORES", "AUTORES", isAutomation: true);
+                await TogglePendingCommandAsync(userId, messageId, session, "AUTORES", "Auto Resolver", isAutomation: true);
             }
             else
             {
@@ -331,8 +374,7 @@ namespace TelegramBotServer.Services
             session.SelectionType = SelectionMode.Files;
         }
 
-        private async Task HandleCancelSelectionAsync(
-            long userId, int messageId, UserSession session)
+        private async Task HandleCancelSelectionAsync(long userId, int messageId, UserSession session)
         {
             session.SelectedFiles.Clear();
 
@@ -340,8 +382,7 @@ namespace TelegramBotServer.Services
             await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
         }
 
-        private async Task HandleCancelFileSelectionAsync(
-            long userId, int messageId, UserSession session)
+        private async Task HandleCancelFileSelectionAsync(long userId, int messageId, UserSession session)
         {
             session.SelectedFiles.Clear();
             session.CurrentPath = _rootPath;
@@ -364,8 +405,7 @@ namespace TelegramBotServer.Services
             }
         }
 
-        private async Task HandleSessionDetailsAsync(
-            long userId, int messageId, UserSession session, ParsedCallback parsedCallback)
+        private async Task HandleSessionDetailsAsync(long userId, int messageId, UserSession session, ParsedCallback parsedCallback)
         {
             var token = parsedCallback.Argument;
             if (!int.TryParse(token, out int tkn))
@@ -402,8 +442,7 @@ namespace TelegramBotServer.Services
             }
         }
 
-        private async Task HandleDeleteSessionAsync(
-            long userId, int messageId, UserSession session, ParsedCallback parsedCallback)
+        private async Task HandleDeleteSessionAsync(long userId, int messageId, UserSession session, ParsedCallback parsedCallback)
         {
             var token = parsedCallback.Argument;
             if (!int.TryParse(token, out int tkn))
@@ -421,9 +460,7 @@ namespace TelegramBotServer.Services
             }
         }
 
-        private async Task HandleDeleteCommandAsync(
-            long userId, int messageId, UserSession session,
-            ParsedCallback parsedCallback, List<List<ButtonDto>> buttonDtos)
+        private async Task HandleDeleteCommandAsync(long userId, int messageId, UserSession session, ParsedCallback parsedCallback, List<List<ButtonDto>> buttonDtos)
         {
             var token = parsedCallback.Argument;
             if (!int.TryParse(token, out int tkn))
@@ -601,5 +638,6 @@ namespace TelegramBotServer.Services
 
         [GeneratedRegex(@"^III_", RegexOptions.IgnoreCase, "ru-KZ")]
         private static partial Regex MyRegex();
+
     }
 }
