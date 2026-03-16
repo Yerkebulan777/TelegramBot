@@ -2,8 +2,8 @@ namespace TelegramBotServer.Services;
 
 public static class CallbackPrefixes
 {
-    public const string Nav1 = "NAV1:";
-    public const string Nav2 = "NAV2:";
+    public const string OpenFolder = "OPENFOLDER:";
+    public const string GoToParent = "GOTOPARENT:";
     public const string File = "FILE:";
     public const string SelectionMode = "SELMODE:";
     public const string ApplyFiles = "APPLYFILES:";

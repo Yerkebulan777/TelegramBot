@@ -68,7 +68,7 @@ The filesystem root is hardcoded as `"B:\\"` in `CommandAppService`.
 Inline keyboard buttons use short tokens (≤64 bytes Telegram limit).
 Full paths stored in `UserSession.PathMap[token]`.
 
-Prefixes: `NAV1:`, `NAV2:`, `FILE:`, `SELMODE:`, `APPLYFILES:`, `CANCELSEL:`,
+Prefixes: `OPENFOLDER:`, `GOTOPARENT:`, `FILE:`, `SELMODE:`, `APPLYFILES:`, `CANCELSEL:`,
 `CANCELFILESEL:`, `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`,
 `AUTORES:`, `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`, `Sessiondetails:`,
 `Deletesession:`, `Deletecommand:`, `Backtostatus:`

@@ -140,13 +140,13 @@ namespace TelegramBotServer.Services
 
             if (session.SelectionType == 1)
             {
-                if (parsedCallback.IsAny(CallbackPrefixes.Nav1, CallbackPrefixes.Nav2))
+if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParent))
                 {
                     session.PagesCache.Add(session.Counter);
                     session.Counter = 0;
 
 
-                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
+                    if (parsedCallback.Is(CallbackPrefixes.GoToParent))
                     {
                         if (session.PagesCache.Count > 0)
                             session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
@@ -262,13 +262,13 @@ namespace TelegramBotServer.Services
             }
             else if (session.SelectionType == 2)
             {
-                if (parsedCallback.IsAny(CallbackPrefixes.Nav1, CallbackPrefixes.Nav2))
+if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParent))
                 {
                     session.PagesCache.Add(session.Counter);
                     session.Counter = 0;
 
                     session.Level = true;
-                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
+                    if (parsedCallback.Is(CallbackPrefixes.GoToParent))
                     {
                         session.Level = false;
                         if (session.PagesCache.Count > 0)
@@ -289,7 +289,7 @@ namespace TelegramBotServer.Services
                         return;
                     }
 
-                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
+if (parsedCallback.Is(CallbackPrefixes.GoToParent))
                     {
                         session.CurrentPath = _rootPath;
                     }
@@ -404,12 +404,12 @@ namespace TelegramBotServer.Services
             }
             else if (session.SelectionType == 3)
             {
-                if (parsedCallback.IsAny(CallbackPrefixes.Nav1, CallbackPrefixes.Nav2))
+if (parsedCallback.IsAny(CallbackPrefixes.OpenFolder, CallbackPrefixes.GoToParent))
                 {
                     session.PagesCache.Add(session.Counter);
                     session.Counter = 0;
 
-                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
+                    if (parsedCallback.Is(CallbackPrefixes.GoToParent))
                     {
                         if (session.PagesCache.Count > 0)
                             session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
