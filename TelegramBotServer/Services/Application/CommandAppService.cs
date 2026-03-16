@@ -23,9 +23,6 @@ namespace TelegramBotServer.Services
         private readonly ISessionManager _sessionManager = sessionManager;
         private readonly ILogger<CommandAppService> _logger = logger;
         private readonly string _rootPath = configuration["TelegramBot:RootPath"] ?? "B:\\";
-        private const string ExportApplyText = "✅ Применить";
-        private const string AutomationApplyText = "✅ Подтвердить";
-        private const string CancelText = "❌ Отмена";
 
         public async Task HandleUserCommandAsync(MessageDto message)
         {
@@ -92,15 +89,21 @@ namespace TelegramBotServer.Services
             session.Reset(_rootPath);
 
             InlineKeyboardMarkup commandKeyboard = isAutomation
-                ? await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session)
-                : await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
+                ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
+                : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
 
             await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard);
+
+            ReplyKeyboardMarkup replyKeyboard = isAutomation
+                ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
+                : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
+
+            await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
         }
 
         private async Task<bool> HandleReplyKeyboardActionAsync(long userId, string messageText, UserSession session)
         {
-            if (messageText == ExportApplyText || messageText == AutomationApplyText)
+            if (messageText == ButtonTexts.ExportApply || messageText == ButtonTexts.AutomationApply)
             {
                 if (session.PendingCommand.Count == 0)
                 {
@@ -115,7 +118,7 @@ namespace TelegramBotServer.Services
                 return true;
             }
 
-            if (messageText == CancelText)
+            if (messageText == ButtonTexts.Cancel)
             {
                 session.PendingCommand.Clear();
                 session.PendingCommandName.Clear();
@@ -394,13 +397,13 @@ namespace TelegramBotServer.Services
 
             if (HasExportCommands(session))
             {
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(session);
                 await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
             }
 
             if (HasAutomationCommands(session))
             {
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(session);
                 await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
             }
         }
@@ -538,8 +541,8 @@ namespace TelegramBotServer.Services
             }
 
             InlineKeyboardMarkup keyboard = isAutomation
-                ? await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session)
-                : await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
+                ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
+                : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
 
             await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
         }

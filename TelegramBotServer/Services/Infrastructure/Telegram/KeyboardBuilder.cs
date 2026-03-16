@@ -6,6 +6,13 @@ namespace TelegramBotServer.Services
 {
     public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
 
+    public static class ButtonTexts
+    {
+        public const string ExportApply = "✅ Применить";
+        public const string AutomationApply = "✅ Подтвердить";
+        public const string Cancel = "❌ Отмена";
+    }
+
     public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
     {
         private readonly IFileSystemBrowser _navigationService = fileNavigationService;
@@ -59,10 +66,8 @@ namespace TelegramBotServer.Services
         }
 
 
-        public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(long userId, UserSession session)
+        public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session)
         {
-            _ = userId;
-
             var commandOptions = new List<CommandOption>
             {
                 new("Export to PDF", "PDF:", "PDF"),
@@ -71,17 +76,17 @@ namespace TelegramBotServer.Services
                 new("Export to IFC", "IFC:", "IFC")
             };
 
-            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, "✅ Применить"));
+            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, ButtonTexts.ExportApply));
         }
 
         public Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync()
         {
-            return Task.FromResult(BuildActionsReplyKeyboard("✅ Применить"));
+            return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.ExportApply));
         }
 
         public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
         {
-            return Task.FromResult(BuildActionsReplyKeyboard("✅ Подтвердить"));
+            return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.AutomationApply));
         }
 
         public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
@@ -142,10 +147,8 @@ namespace TelegramBotServer.Services
             return Task.FromResult(new InlineKeyboardMarkup(buttons));
         }
 
-        public Task<InlineKeyboardMarkup> GetAutomationKeyboardAsync(long userId, UserSession session)
+        public Task<InlineKeyboardMarkup> GetAutomationKeyboardAsync(UserSession session)
         {
-            _ = userId;
-
             var commandOptions = new List<CommandOption>
             {
                 new("BIM Doctor", "BIMDOC:", "BIMDOC"),
@@ -153,7 +156,7 @@ namespace TelegramBotServer.Services
                 new("Auto Resolver", "AUTORES:", "AUTORES")
             };
 
-            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, "✅ Подтвердить"));
+            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, ButtonTexts.AutomationApply));
         }
 
         private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(
@@ -176,7 +179,7 @@ namespace TelegramBotServer.Services
             buttons.Add(new List<InlineKeyboardButton>
             {
                 InlineKeyboardButton.WithCallbackData(applyButtonText, CallbackPrefixes.ApplyCommands),
-                InlineKeyboardButton.WithCallbackData("❌ Отмена", CallbackPrefixes.CancelCommandSelection)
+                InlineKeyboardButton.WithCallbackData(ButtonTexts.Cancel, CallbackPrefixes.CancelCommandSelection)
             });
 
             return new InlineKeyboardMarkup(buttons);
@@ -189,7 +192,7 @@ namespace TelegramBotServer.Services
                 new KeyboardButton[]
                 {
                     new(applyButtonText),
-                    new("❌ Отмена")
+                    new(ButtonTexts.Cancel)
                 }
             })
             {
