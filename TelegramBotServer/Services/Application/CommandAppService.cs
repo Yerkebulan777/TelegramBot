@@ -131,29 +131,29 @@ namespace TelegramBotServer.Services
             long userId = callback.UserId;
             int messageId = callback.MessageId;
             string username = callback.Username;
-            string messageText = callback.MessageText;
             string callbackData = callback.CallbackData;
             string callbackQueryId = callback.CallbackQueryId;
             List<List<ButtonDto>> buttonDtos = callback.Buttons;
+            var parsedCallback = CallbackDataParser.Parse(callbackData);
 
             var session = _sessionManager.GetOrCreateSession(userId);
 
             if (session.SelectionType == 1)
             {
-                if (callbackData.StartsWith("NAV"))
+                if (parsedCallback.IsAny(CallbackPrefixes.Nav1, CallbackPrefixes.Nav2))
                 {
                     session.PagesCache.Add(session.Counter);
                     session.Counter = 0;
 
 
-                    if (callbackData.StartsWith("NAV2"))
+                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
                     {
                         if (session.PagesCache.Count > 0)
                             session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
                         session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
                     }
 
-                    var token = callbackData.Substring(5);
+                    var token = parsedCallback.Argument;
                     if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath))
                     {
                         await _outputService.SendErrorAsync(userId, "Path not found.");
@@ -178,12 +178,12 @@ namespace TelegramBotServer.Services
                     keyboard
                     );
                 }
-                else if (callbackData.StartsWith("FILE:"))
+                else if (parsedCallback.Is(CallbackPrefixes.File))
                 {
 
 
 
-                    var token = callbackData.Substring(5);
+                    var token = parsedCallback.Argument;
                     if (!_fileNavigationService.TryResolvePath(userId, token, out var filePath))
                     {
                         await _outputService.SendErrorAsync(userId, "File not found.");
@@ -211,42 +211,22 @@ namespace TelegramBotServer.Services
                     );
                 }
 
-                else if (callbackData.StartsWith("APPLYFILES:"))
+                else if (parsedCallback.Is(CallbackPrefixes.ApplyFiles))
                 {
                     if (session.SelectedFiles.Count > 0)
                     {
-                        //await _dataService.AddCommandAsync(userId, session.SelectedFiles, session.PendingCommand);
-
                         await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
-                        //await _outputService.DeleteMessageAsync(chatId, messageId);
-
-                        var sb = new System.Text.StringBuilder("Команда:\n");
-                        foreach (var file in session.PendingCommandName)
-                            sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
-                        sb.Append("Добавлены файлы:\n");
-                        foreach (var file in session.SelectedFiles)
-                            sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
-                        sb.Append("\n/status для проверки статуса команды");
-                        string reply = sb.ToString();
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, reply);
-
-                        //foreach (var file in session.SelectedFiles)
-                        //{
-                        //    await _outputService.SendMessageAsync(userId, $"? Added to queue: {Path.GetFileName(file)}");
-                        //}
+                        await _outputService.EditMessageReplyTextAsync(userId, messageId, BuildQueueReply(session));
 
                         session.Items.Clear();
                         session.SelectedFiles.Clear();
                         session.PagesCache.Clear();
                         session.SelectionType = 1;
-
-                        //clear session?
                     }
                 }
 
-                else if (callbackData.StartsWith("CANCELSEL:"))
+                else if (parsedCallback.Is(CallbackPrefixes.CancelSelection))
                 {
                     session.SelectedFiles.Clear();
 
@@ -258,7 +238,7 @@ namespace TelegramBotServer.Services
                     keyboard
                     );
                 }
-                else if (callbackData.StartsWith("CANCELFILESEL:"))
+                else if (parsedCallback.Is(CallbackPrefixes.CancelFileSelection))
                 {
                     session.SelectedFiles.Clear();
                     session.CurrentPath = _rootPath;
@@ -267,13 +247,13 @@ namespace TelegramBotServer.Services
                     session.PagesCache.Clear();
                     session.SelectionType = 1;
 
-                    if (session.PendingCommand.Contains("PDF") || session.PendingCommand.Contains("DWG") || session.PendingCommand.Contains("NWC") || session.PendingCommand.Contains("IFC"))
+                    if (HasExportCommands(session))
                     {
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
                         await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
                     }
 
-                    if (session.PendingCommand.Contains("BIMDOC") || session.PendingCommand.Contains("CLASHREP") || session.PendingCommand.Contains("AUTORES"))
+                    if (HasAutomationCommands(session))
                     {
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
                         await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
@@ -282,13 +262,13 @@ namespace TelegramBotServer.Services
             }
             else if (session.SelectionType == 2)
             {
-                if (callbackData.StartsWith("NAV"))
+                if (parsedCallback.IsAny(CallbackPrefixes.Nav1, CallbackPrefixes.Nav2))
                 {
                     session.PagesCache.Add(session.Counter);
                     session.Counter = 0;
 
                     session.Level = true;
-                    if (callbackData.StartsWith("NAV2"))
+                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
                     {
                         session.Level = false;
                         if (session.PagesCache.Count > 0)
@@ -296,7 +276,7 @@ namespace TelegramBotServer.Services
                         session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
                     }
 
-                    var token = callbackData.Substring(5);
+                    var token = parsedCallback.Argument;
                     if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath))
                     {
                         await _outputService.SendErrorAsync(userId, "Path not found.");
@@ -309,7 +289,7 @@ namespace TelegramBotServer.Services
                         return;
                     }
 
-                    if (callbackData.StartsWith("NAV2"))
+                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
                     {
                         session.CurrentPath = _rootPath;
                     }
@@ -328,12 +308,12 @@ namespace TelegramBotServer.Services
                     keyboard
                     );
                 }
-                else if (callbackData.StartsWith("FILE:"))
+                else if (parsedCallback.Is(CallbackPrefixes.File))
                 {
 
 
 
-                    var token = callbackData.Substring(5);
+                    var token = parsedCallback.Argument;
                     if (!_fileNavigationService.TryResolvePath(userId, token, out var filePath))
                     {
                         await _outputService.SendErrorAsync(userId, "File not found.");
@@ -362,7 +342,7 @@ namespace TelegramBotServer.Services
                     );
                 }
 
-                else if (callbackData.StartsWith("APPLYFILES:"))
+                else if (parsedCallback.Is(CallbackPrefixes.ApplyFiles))
                 {
                     if (session.SelectedFiles.Count > 0)
                     {
@@ -370,15 +350,7 @@ namespace TelegramBotServer.Services
 
                         await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
-                        var sb2 = new System.Text.StringBuilder("Команда:\n");
-                        foreach (var file in session.PendingCommandName)
-                            sb2.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
-                        sb2.Append("Добавлены файлы:\n");
-                        foreach (var file in session.SelectedFiles)
-                            sb2.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
-                        sb2.Append("\n/status для проверки статуса команды");
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, sb2.ToString());
+                        await _outputService.EditMessageReplyTextAsync(userId, messageId, BuildQueueReply(session));
 
                         session.SelectedFiles.Clear();
                         session.PagesCache.Clear();
@@ -387,7 +359,7 @@ namespace TelegramBotServer.Services
                     }
                 }
 
-                else if (callbackData.StartsWith("CANCELSEL:"))
+                else if (parsedCallback.Is(CallbackPrefixes.CancelSelection))
                 {
                     session.SelectedFiles.Clear();
 
@@ -400,18 +372,15 @@ namespace TelegramBotServer.Services
                     keyboard
                     );
                 }
-                else if (callbackData.StartsWith("CANCELFILESEL:"))
+                else if (parsedCallback.Is(CallbackPrefixes.CancelFileSelection))
                 {
                     session.SelectedFiles.Clear();
                     session.CurrentPath = _rootPath;
                     session.Level = false;
                     session.PagesCache.Clear();
                     session.SelectionType = 1;
-                    //await _outputService.DeleteMessageAsync(chatId, messageId);
-                    //get editedcommandskeyboard
 
-
-                    if (session.PendingCommand.Contains("PDF") || session.PendingCommand.Contains("DWG") || session.PendingCommand.Contains("NWC") || session.PendingCommand.Contains("IFC"))
+                    if (HasExportCommands(session))
                     {
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
                         await _outputService.EditMessageReplyMarkupAsync(
@@ -421,7 +390,7 @@ namespace TelegramBotServer.Services
                         );
                     }
 
-                    if (session.PendingCommand.Contains("BIMDOC") || session.PendingCommand.Contains("CLASHREP") || session.PendingCommand.Contains("AUTORES"))
+                    if (HasAutomationCommands(session))
                     {
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
                         await _outputService.EditMessageReplyMarkupAsync(
@@ -435,13 +404,44 @@ namespace TelegramBotServer.Services
             }
             else if (session.SelectionType == 3)
             {
+                if (parsedCallback.IsAny(CallbackPrefixes.Nav1, CallbackPrefixes.Nav2))
+                {
+                    session.PagesCache.Add(session.Counter);
+                    session.Counter = 0;
 
-                if (callbackData.StartsWith("FILE:"))
+                    if (parsedCallback.Is(CallbackPrefixes.Nav2))
+                    {
+                        if (session.PagesCache.Count > 0)
+                            session.PagesCache.RemoveAt(session.PagesCache.Count - 1);
+                        session.Counter = session.PagesCache.Count > 0 ? session.PagesCache.Last() : 0;
+                    }
+
+                    var token = parsedCallback.Argument;
+                    if (!_fileNavigationService.TryResolvePath(userId, token, out var newPath))
+                    {
+                        await _outputService.SendErrorAsync(userId, "Path not found.");
+                        return;
+                    }
+
+                    if (newPath == null)
+                    {
+                        await _outputService.SendErrorAsync(userId, "Path not found.");
+                        return;
+                    }
+
+                    session.CurrentPath = newPath;
+
+                    await _outputService.AnswerCallbackAsync(callbackQueryId, session.CurrentPath);
+
+                    InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+                    await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+                }
+                else if (parsedCallback.Is(CallbackPrefixes.File))
                 {
 
 
 
-                    var token = callbackData.Substring(5);
+                    var token = parsedCallback.Argument;
                     if (!_fileNavigationService.TryResolvePath(userId, token, out var filePath))
                     {
                         await _outputService.SendErrorAsync(userId, "File not found.");
@@ -469,7 +469,7 @@ namespace TelegramBotServer.Services
                     );
                 }
 
-                else if (callbackData.StartsWith("APPLYFILES:"))
+                else if (parsedCallback.Is(CallbackPrefixes.ApplyFiles))
                 {
                     if (session.SelectedFiles.Count > 0)
                     {
@@ -480,15 +480,7 @@ namespace TelegramBotServer.Services
 
                         await _dataService.CreateSessionWithCommandsAsync(session.PendingCommand, session.SelectedFiles, userId, username, session.SelectionType, session.SelectedFiles.Count);
 
-                        var sb3 = new System.Text.StringBuilder("Команда:\n");
-                        foreach (var file in session.PendingCommandName)
-                            sb3.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
-                        sb3.Append("Добавлены файлы:\n");
-                        foreach (var file in session.SelectedFiles)
-                            sb3.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
-                        sb3.Append("\n/status для проверки статуса команды");
-
-                        await _outputService.EditMessageReplyTextAsync(userId, messageId, sb3.ToString());
+                        await _outputService.EditMessageReplyTextAsync(userId, messageId, BuildQueueReply(session));
 
                         session.SelectedFiles.Clear();
                         session.PagesCache.Clear();
@@ -496,7 +488,7 @@ namespace TelegramBotServer.Services
                     }
                 }
 
-                else if (callbackData.StartsWith("CANCELSEL:"))
+                else if (parsedCallback.Is(CallbackPrefixes.CancelSelection))
                 {
                     session.SelectedFiles.Clear();
 
@@ -509,17 +501,14 @@ namespace TelegramBotServer.Services
                     keyboard
                     );
                 }
-                else if (callbackData.StartsWith("CANCELFILESEL:"))
+                else if (parsedCallback.Is(CallbackPrefixes.CancelFileSelection))
                 {
                     session.SelectedFiles.Clear();
                     session.CurrentPath = _rootPath;
                     session.PagesCache.Clear();
                     session.SelectionType = 1;
-                    //await _outputService.DeleteMessageAsync(chatId, messageId);
-                    //get editedcommandskeyboard
 
-
-                    if (session.PendingCommand.Contains("PDF") || session.PendingCommand.Contains("DWG") || session.PendingCommand.Contains("NWC") || session.PendingCommand.Contains("IFC"))
+                    if (HasExportCommands(session))
                     {
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
                         await _outputService.EditMessageReplyMarkupAsync(
@@ -529,7 +518,7 @@ namespace TelegramBotServer.Services
                         );
                     }
 
-                    if (session.PendingCommand.Contains("BIMDOC") || session.PendingCommand.Contains("CLASHREP") || session.PendingCommand.Contains("AUTORES"))
+                    if (HasAutomationCommands(session))
                     {
                         InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
                         await _outputService.EditMessageReplyMarkupAsync(
@@ -542,7 +531,7 @@ namespace TelegramBotServer.Services
             }
 
 
-            if (callbackData.StartsWith("SELMODE:"))
+            if (parsedCallback.Is(CallbackPrefixes.SelectionMode))
             {
                 int nextMode = session.SelectionType switch
                 {
@@ -568,91 +557,27 @@ namespace TelegramBotServer.Services
                 );
             }
 
-            else if (callbackData.StartsWith("PDF:"))
+            else if (parsedCallback.Is(CallbackPrefixes.Pdf))
             {
-                if (session.PendingCommand.Contains("PDF"))
-                {
-                    session.PendingCommand.Remove("PDF");
-                    session.PendingCommandName.Remove("Export to PDF");
-                }
-                else
-                {
-                    session.PendingCommand.Add("PDF");
-                    session.PendingCommandName.Add("Export to PDF");
-                }
-                //get editedcommandskeyboard
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await TogglePendingCommandAsync(userId, messageId, session, "PDF", "Export to PDF", isAutomation: false);
             }
 
-            else if (callbackData.StartsWith("DWG:"))
+            else if (parsedCallback.Is(CallbackPrefixes.Dwg))
             {
-                if (session.PendingCommand.Contains("DWG"))
-                {
-                    session.PendingCommand.Remove("DWG");
-                    session.PendingCommandName.Remove("Export to DWG");
-                }
-                else
-                {
-                    session.PendingCommand.Add("DWG");
-                    session.PendingCommandName.Add("Export to DWG");
-                }
-                //get editedcommandskeyboard
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await TogglePendingCommandAsync(userId, messageId, session, "DWG", "Export to DWG", isAutomation: false);
             }
 
-            else if (callbackData.StartsWith("NWC:"))
+            else if (parsedCallback.Is(CallbackPrefixes.Nwc))
             {
-                if (session.PendingCommand.Contains("NWC"))
-                {
-                    session.PendingCommand.Remove("NWC");
-                    session.PendingCommandName.Remove("Export to NWC");
-                }
-                else
-                {
-                    session.PendingCommand.Add("NWC");
-                    session.PendingCommandName.Add("Export to NWC");
-                }
-                //get editedcommandskeyboard
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await TogglePendingCommandAsync(userId, messageId, session, "NWC", "Export to NWC", isAutomation: false);
             }
 
-            else if (callbackData.StartsWith("IFC:"))
+            else if (parsedCallback.Is(CallbackPrefixes.Ifc))
             {
-                if (session.PendingCommand.Contains("IFC"))
-                {
-                    session.PendingCommand.Remove("IFC");
-                    session.PendingCommandName.Remove("Export to IFC");
-                }
-                else
-                {
-                    session.PendingCommand.Add("IFC");
-                    session.PendingCommandName.Add("Export to IFC");
-                }
-                //get editedcommandskeyboard
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await TogglePendingCommandAsync(userId, messageId, session, "IFC", "Export to IFC", isAutomation: false);
             }
 
-            else if (callbackData.StartsWith("APPLYCOMMANDS:"))
+            else if (parsedCallback.Is(CallbackPrefixes.ApplyCommands))
             {
                 if (session.PendingCommand.Count > 0)
                 {
@@ -663,25 +588,18 @@ namespace TelegramBotServer.Services
 
             }
 
-            else if (callbackData.StartsWith("CANCELCOMMANDSSEL:"))
+            else if (parsedCallback.Is(CallbackPrefixes.CancelCommandSelection))
             {
                 session.PendingCommand.Clear();
                 session.PendingCommandName.Clear();
                 await _outputService.DeleteMessageAsync(chatId, messageId);
             }
 
-            else if (callbackData.StartsWith("CANCELCOMMANDSSEL:"))
-            {
-                session.PendingCommand.Clear();
-                session.PendingCommandName.Clear();
-                await _outputService.DeleteMessageAsync(chatId, messageId);
-            }
-
-            else if (callbackData.StartsWith("Sessiondetails:") && session.statusLevel == true)
+            else if (parsedCallback.Is(CallbackPrefixes.SessionDetails) && session.statusLevel == true)
             {
                 session.statusLevel = false;
 
-                var token = callbackData.Substring(15);
+                var token = parsedCallback.Argument;
 
                 int.TryParse(token, out int tkn);
 
@@ -702,11 +620,11 @@ namespace TelegramBotServer.Services
                 await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
             }
 
-            else if (callbackData.StartsWith("Sessiondetails:") && session.statusLevel == false)
+            else if (parsedCallback.Is(CallbackPrefixes.SessionDetails) && session.statusLevel == false)
             {
                 session.statusLevel = true;
 
-                var token = callbackData.Substring(15);
+                var token = parsedCallback.Argument;
 
                 int.TryParse(token, out int tkn);
 
@@ -720,7 +638,7 @@ namespace TelegramBotServer.Services
                 );
             }
 
-            else if (callbackData.StartsWith("Backtostatus:"))
+            else if (parsedCallback.Is(CallbackPrefixes.BackToStatus))
             {
                 session.statusLevel = true;
                 List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
@@ -733,9 +651,9 @@ namespace TelegramBotServer.Services
                 );
             }
 
-            else if (callbackData.StartsWith("Deletesession:"))
+            else if (parsedCallback.Is(CallbackPrefixes.DeleteSession))
             {
-                var token = callbackData.Substring(14);
+                var token = parsedCallback.Argument;
                 int.TryParse(token, out int tkn);
 
                 //call sqldataservice to delete session
@@ -756,9 +674,9 @@ namespace TelegramBotServer.Services
 
             }
 
-            else if (callbackData.StartsWith("Deletecommand:"))
+            else if (parsedCallback.Is(CallbackPrefixes.DeleteCommand))
             {
-                var token = callbackData.Substring(15);
+                var token = parsedCallback.Argument;
 
                 int.TryParse(token, out int tkn);
 
@@ -807,66 +725,75 @@ namespace TelegramBotServer.Services
                     }
                 }
             }
-            else if (callbackData.StartsWith("BIMDOC:"))
+            else if (parsedCallback.Is(CallbackPrefixes.BimDoc))
             {
-                if (session.PendingCommand.Contains("BIMDOC"))
-                {
-                    session.PendingCommand.Remove("BIMDOC");
-                    session.PendingCommandName.Remove("BIMDOC");
-                }
-                else
-                {
-                    session.PendingCommand.Add("BIMDOC");
-                    session.PendingCommandName.Add("BIMDOC");
-                }
-                //get editedcommandskeyboard
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await TogglePendingCommandAsync(userId, messageId, session, "BIMDOC", "BIMDOC", isAutomation: true);
             }
-            else if (callbackData.StartsWith("CLASHREP:"))
+            else if (parsedCallback.Is(CallbackPrefixes.ClashRep))
             {
-                if (session.PendingCommand.Contains("CLASHREP"))
-                {
-                    session.PendingCommand.Remove("CLASHREP");
-                    session.PendingCommandName.Remove("CLASHREP");
-                }
-                else
-                {
-                    session.PendingCommand.Add("CLASHREP");
-                    session.PendingCommandName.Add("CLASHREP");
-                }
-                //get editedcommandskeyboard
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await TogglePendingCommandAsync(userId, messageId, session, "CLASHREP", "CLASHREP", isAutomation: true);
             }
-            else if (callbackData.StartsWith("AUTORES:"))
+            else if (parsedCallback.Is(CallbackPrefixes.AutoRes))
             {
-                if (session.PendingCommand.Contains("AUTORES"))
-                {
-                    session.PendingCommand.Remove("AUTORES");
-                    session.PendingCommandName.Remove("AUTORES");
-                }
-                else
-                {
-                    session.PendingCommand.Add("AUTORES");
-                    session.PendingCommandName.Add("AUTORES");
-                }
-                //get editedcommandskeyboard
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session);
-                await _outputService.EditMessageReplyMarkupAsync(
-                userId,
-                messageId,
-                keyboard
-                );
+                await TogglePendingCommandAsync(userId, messageId, session, "AUTORES", "AUTORES", isAutomation: true);
             }
+            else
+            {
+                _logger.LogDebug("Unhandled callback data '{CallbackData}' for user {UserId}", callbackData, userId);
+            }
+        }
+
+        private static string BuildQueueReply(UserSession session)
+        {
+            var sb = new System.Text.StringBuilder("Команда:\n");
+            foreach (var file in session.PendingCommandName)
+                sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+            sb.Append("Добавлены файлы:\n");
+            foreach (var file in session.SelectedFiles)
+                sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+            sb.Append("\n/status для проверки статуса команды");
+            return sb.ToString();
+        }
+
+        private async Task TogglePendingCommandAsync(
+            long userId,
+            int messageId,
+            UserSession session,
+            string commandCode,
+            string commandDisplayName,
+            bool isAutomation)
+        {
+            if (session.PendingCommand.Contains(commandCode))
+            {
+                session.PendingCommand.Remove(commandCode);
+                session.PendingCommandName.Remove(commandDisplayName);
+            }
+            else
+            {
+                session.PendingCommand.Add(commandCode);
+                session.PendingCommandName.Add(commandDisplayName);
+            }
+
+            InlineKeyboardMarkup keyboard = isAutomation
+                ? await _keyboardBuilder.GetAutomationKeyboardAsync(userId, session)
+                : await _keyboardBuilder.GetCommandsKeyboardAsync(userId, session);
+
+            await _outputService.EditMessageReplyMarkupAsync(userId, messageId, keyboard);
+        }
+
+        private static bool HasExportCommands(UserSession session)
+        {
+            return session.PendingCommand.Contains("PDF")
+                || session.PendingCommand.Contains("DWG")
+                || session.PendingCommand.Contains("NWC")
+                || session.PendingCommand.Contains("IFC");
+        }
+
+        private static bool HasAutomationCommands(UserSession session)
+        {
+            return session.PendingCommand.Contains("BIMDOC")
+                || session.PendingCommand.Contains("CLASHREP")
+                || session.PendingCommand.Contains("AUTORES");
         }
 
 
