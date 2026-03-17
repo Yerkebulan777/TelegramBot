@@ -7,7 +7,7 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Handles session management operations (view details, delete session, delete command).
+/// Обработчик операций управления сессиями (просмотр, удаление).
 /// </summary>
 public sealed class SessionManagementHandler : CallbackHandlerBase
 {
@@ -34,7 +34,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         _outputService = outputService;
     }
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {

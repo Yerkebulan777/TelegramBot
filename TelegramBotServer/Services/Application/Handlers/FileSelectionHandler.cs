@@ -8,7 +8,7 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Handles file selection operations (toggle file, apply selection, cancel).
+/// Обработчик операций выбора файлов (переключение, применение, отмена).
 /// </summary>
 public sealed class FileSelectionHandler : CallbackHandlerBase
 {
@@ -26,7 +26,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         CallbackPrefixes.CancelFileSelection
     ];
 
-    public override int Priority => 20; // High priority for selection operations
+    public override int Priority => 20;
 
     public FileSelectionHandler(
         IFileSystemBrowser fileNavigationService,
@@ -43,7 +43,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         _options = options.Value;
     }
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {

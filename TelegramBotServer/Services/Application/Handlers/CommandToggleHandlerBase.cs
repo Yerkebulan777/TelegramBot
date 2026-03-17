@@ -5,7 +5,7 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Base class for handlers that toggle named commands on/off in the user session.
+/// Базовый класс для обработчиков, переключающих команды в сессии пользователя.
 /// </summary>
 public abstract class CommandToggleHandlerBase : CallbackHandlerBase
 {
@@ -22,16 +22,16 @@ public abstract class CommandToggleHandlerBase : CallbackHandlerBase
     }
 
     /// <summary>
-    /// Maps callback prefix → (code, displayName) for each toggleable command.
+    /// Сопоставление префикса команды с (код, отображаемое имя).
     /// </summary>
     protected abstract IReadOnlyDictionary<string, (string Code, string DisplayName)> Commands { get; }
 
     /// <summary>
-    /// Returns the keyboard to display after toggling.
+    /// Возвращает клавиатуру для отображения после переключения.
     /// </summary>
     protected abstract Task<InlineKeyboardMarkup> GetKeyboardAsync(IKeyboardBuilder keyboardBuilder, UserSession session);
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
         var (code, displayName) = Commands[context.ParsedCallback.Prefix];
 

@@ -244,33 +244,6 @@ public class SqliteDataService : IDataService
         return PasswordHasher.Verify(password, storedHash);
     }
 
-
-
-    public async Task<bool> RemoveCommandFromQueue(int id)
-    {
-        try
-        {
-            await using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-
-            const string query = @"
-            UPDATE Commands
-            SET Status = 'Deleted'
-            WHERE CommandId = @id;
-        ";
-            await using var cmd = new SqliteCommand(query, conn);
-            cmd.Parameters.AddWithValue("@id", id);
-            await cmd.ExecuteNonQueryAsync();
-            return true;
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Failed to remove command {CommandId} from queue", id);
-            return false;
-        }
-    }
-
-
     public async Task<long> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,

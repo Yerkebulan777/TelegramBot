@@ -35,11 +35,6 @@ public interface IDataService
     Task<List<Command>> GetUserCommandsAsync(long userId);
 
     /// <summary>
-    /// Soft-deletes a command by setting its status to 'Deleted'.
-    /// </summary>
-    Task<bool> RemoveCommandFromQueue(int id);
-
-    /// <summary>
     /// Creates a new session with associated commands in a single transaction.
     /// </summary>
     Task<long> CreateSessionWithCommandsAsync(

@@ -2,20 +2,26 @@ using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
 
-namespace TelegramBotServer.Services.Infrastructure.Telegram
+namespace TelegramBotServer.Services.Infrastructure.Telegram;
+
+public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
+
+/// <summary>
+/// Стандартные тексты кнопок.
+/// </summary>
+public static class ButtonTexts
 {
-    public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
+    public const string ExportApply = "✅ Применить";
+    public const string AutomationApply = "✅ Подтвердить";
+    public const string Cancel = "❌ Отмена";
+}
 
-    public static class ButtonTexts
-    {
-        public const string ExportApply = "✅ Применить";
-        public const string AutomationApply = "✅ Подтвердить";
-        public const string Cancel = "❌ Отмена";
-    }
-
-    public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
-    {
-        private readonly IFileSystemBrowser _navigationService = fileNavigationService;
+/// <summary>
+/// Построитель клавиатур для Telegram-бота.
+/// </summary>
+public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
+{
+    private readonly IFileSystemBrowser _navigationService = fileNavigationService;
 
         public async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
         {
@@ -199,4 +205,3 @@ namespace TelegramBotServer.Services.Infrastructure.Telegram
             };
         }
     }
-}

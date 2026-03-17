@@ -5,7 +5,7 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Handles automation command toggles (BIMDOC, CLASHREP, AUTORES).
+/// Обработчик переключения команд автоматизации (BIMDOC, CLASHREP, AUTORES).
 /// </summary>
 public sealed class AutomationCommandHandler : CommandToggleHandlerBase
 {
@@ -14,7 +14,7 @@ public sealed class AutomationCommandHandler : CommandToggleHandlerBase
         {
             [CallbackPrefixes.BimDoc] = ("BIMDOC", "BIM Doctor"),
             [CallbackPrefixes.ClashRep] = ("CLASHREP", "Clash Report"),
-            [CallbackPrefixes.AutoRes] = ("AUTORES", "Auto Resolver")
+            [CallbackPrefixes.AutoRes] = ("AUTORES", "Auto Resolver"),
         };
 
     protected override HashSet<string> SupportedPrefixes { get; } =

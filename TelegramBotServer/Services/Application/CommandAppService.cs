@@ -44,15 +44,10 @@ public sealed class CommandAppService : ICommandAppService
 
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
-        if (message.Username == null || message.Text == null)
-        {
-            await _outputService.SendMessageAsync(message.UserId, "Username or text is empty.");
-            return;
-        }
-
-        string text = message.Text;
+        // Username и Text уже проверены в TelegramBotHostedService
+        string text = message.Text!;
         long userId = message.UserId;
-        string username = message.Username;
+        string username = message.Username!;
 
         _logger.LogInformation("Received command '{Command}' from {Username} ({UserId})", text, username, userId);
 

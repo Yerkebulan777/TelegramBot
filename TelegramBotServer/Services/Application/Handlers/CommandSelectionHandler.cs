@@ -6,7 +6,7 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Handles command selection operations (apply, cancel) and selection mode changes.
+/// Обработчик операций выбора команд (применить, отмена) и смены режима выбора.
 /// </summary>
 public sealed class CommandSelectionHandler : CallbackHandlerBase
 {
@@ -32,7 +32,7 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
         _options = options.Value;
     }
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {

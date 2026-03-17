@@ -3,7 +3,8 @@ using TelegramBotServer.Interfaces;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Base class for callback handlers providing common functionality.
+/// Базовый класс для обработчиков callback-запросов.
+/// Предоставляет базовую обработку ошибок и логирование.
 /// </summary>
 public abstract class CallbackHandlerBase : ICallbackHandler
 {
@@ -15,7 +16,7 @@ public abstract class CallbackHandlerBase : ICallbackHandler
     }
 
     /// <summary>
-    /// Override to specify which prefixes this handler can process.
+    /// Префиксы, которые может обрабатывать этот обработчик.
     /// </summary>
     protected virtual HashSet<string> SupportedPrefixes { get; } = [];
 
@@ -27,13 +28,37 @@ public abstract class CallbackHandlerBase : ICallbackHandler
         => SupportedPrefixes.Count > 0 && SupportedPrefixes.Contains(prefix);
 
     /// <inheritdoc/>
-    public abstract Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
+    public async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await HandleAsyncInternal(context, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogInformation("Callback handling was cancelled for prefix '{Prefix}'", GetPrefix(context));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling callback with prefix '{Prefix}' for user {UserId}",
+                GetPrefix(context), context.UserId);
+            throw;
+        }
+    }
 
     /// <summary>
-    /// Logs a warning for invalid input.
+    /// Реализация обработки callback в подклассах.
+    /// </summary>
+    protected abstract Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Логирует предупреждение для некорректных входных данных.
     /// </summary>
     protected void LogInvalidInput(string fieldName, object? value, long userId)
     {
         Logger.LogWarning("Invalid {FieldName} '{Value}' from user {UserId}", fieldName, value, userId);
     }
+
+    private static string GetPrefix(CallbackContext context) => context.ParsedCallback.Prefix;
 }

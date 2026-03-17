@@ -6,7 +6,7 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Handles file system navigation (open folder, go to parent).
+/// Обработчик навигации по файловой системе (открыть папку, перейти к родителю).
 /// </summary>
 public sealed class FileNavigationHandler : CallbackHandlerBase
 {
@@ -21,7 +21,7 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
         CallbackPrefixes.GoToParent
     ];
 
-    public override int Priority => 10; // Higher priority - handle navigation first
+    public override int Priority => 10;
 
     public FileNavigationHandler(
         IFileSystemBrowser fileNavigationService,
@@ -36,19 +36,16 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
         _options = options.Value;
     }
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
         var session = context.Session;
         var isGoToParent = context.ParsedCallback.Is(CallbackPrefixes.GoToParent);
 
-        // Update navigation state
         session.AddToPagesCache(session.Counter);
         session.Counter = 0;
 
         if (session.SelectionType == SelectionMode.Sections)
-        {
             session.Level = !isGoToParent;
-        }
 
         if (isGoToParent)
         {
@@ -56,7 +53,6 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
             session.Counter = session.GetLastPageFromCache();
         }
 
-        // Resolve path from token
         var token = context.ParsedCallback.Argument;
         if (!_fileNavigationService.TryResolvePath(context.UserId, token, out var newPath) || newPath == null)
         {
@@ -64,7 +60,6 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
             return true;
         }
 
-        // Update current path based on selection type
         session.CurrentPath = session.SelectionType switch
         {
             SelectionMode.Sections when !isGoToParent => _options.GetProjectPath(newPath),
@@ -72,7 +67,6 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
             _ => newPath
         };
 
-        // Send response
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);

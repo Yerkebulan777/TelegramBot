@@ -5,7 +5,7 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Services.Application.Handlers;
 
 /// <summary>
-/// Handles export command toggles (PDF, DWG, NWC, IFC).
+/// Обработчик переключения команд экспорта (PDF, DWG, NWC, IFC).
 /// </summary>
 public sealed class ExportCommandHandler : CommandToggleHandlerBase
 {
@@ -15,7 +15,7 @@ public sealed class ExportCommandHandler : CommandToggleHandlerBase
             [CallbackPrefixes.Pdf] = ("PDF", "Export to PDF"),
             [CallbackPrefixes.Dwg] = ("DWG", "Export to DWG"),
             [CallbackPrefixes.Nwc] = ("NWC", "Export to NWC"),
-            [CallbackPrefixes.Ifc] = ("IFC", "Export to IFC")
+            [CallbackPrefixes.Ifc] = ("IFC", "Export to IFC"),
         };
 
     protected override HashSet<string> SupportedPrefixes { get; } =
