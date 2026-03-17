@@ -26,8 +26,15 @@ public static class DependencyInjectionExtensions
         // Register FileSystemOptions as IOptions for dependency injection
         _ = services.AddOptions<FileSystemOptions>()
             .Bind(configuration.GetSection(FileSystemOptions.SectionName))
-            .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
-            .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
+            .PostConfigure(options =>
+            {
+                // If the RootPath doesn't exist, default to "C:\\"
+                if (string.IsNullOrWhiteSpace(options.RootPath) || !Directory.Exists(options.RootPath))
+                {
+                    options.RootPath = "C:\\";
+                }
+            })
+            .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required");
 
         return services;
     }
