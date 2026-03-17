@@ -36,6 +36,7 @@
     },
 
     // --- Misc ---
+    "workbench.colorTheme": "Default Dark Modern",
     "editor.bracketPairColorization.enabled": true,
     "editor.guides.bracketPairs": "active"
 }
