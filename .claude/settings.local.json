@@ -44,5 +44,9 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "skill-creator@claude-plugins-official": true,
+    "notion@claude-plugins-official": true
   }
 }
