@@ -1,6 +1,4 @@
-using System.Text;
 using Microsoft.Extensions.Options;
-using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Config;
 using TelegramBotServer.DTOs;
 using TelegramBotServer.Interfaces;
@@ -12,38 +10,25 @@ namespace TelegramBotServer.Services;
 
 /// <summary>
 /// Main application service for handling user commands and callbacks.
-/// Delegates callback processing to specialized handlers via CallbackDispatcher.
 /// </summary>
-public sealed class CommandAppService : ICommandAppService
+public sealed class CommandAppService(
+    IEnumerable<IUserCommandHandler> handlers,
+    IDataService dataService,
+    ITelegramOutputService outputService,
+    ISessionManager sessionManager,
+    IKeyboardBuilder keyboardBuilder,
+    CallbackDispatcher callbackDispatcher,
+    IOptions<FileSystemOptions> fileSystemOptions,
+    ILogger<CommandAppService> logger) : ICommandAppService
 {
-    private readonly IEnumerable<IUserCommandHandler> _handlers;
-    private readonly IDataService _dataService;
-    private readonly ITelegramOutputService _outputService;
-    private readonly ISessionManager _sessionManager;
-    private readonly IKeyboardBuilder _keyboardBuilder;
-    private readonly CallbackDispatcher _callbackDispatcher;
-    private readonly ILogger<CommandAppService> _logger;
-    private readonly FileSystemOptions _options;
-
-    public CommandAppService(
-        IEnumerable<IUserCommandHandler> handlers,
-        IDataService dataService,
-        ITelegramOutputService outputService,
-        ISessionManager sessionManager,
-        IKeyboardBuilder keyboardBuilder,
-        CallbackDispatcher callbackDispatcher,
-        IOptions<FileSystemOptions> fileSystemOptions,
-        ILogger<CommandAppService> logger)
-    {
-        _handlers = handlers;
-        _dataService = dataService;
-        _outputService = outputService;
-        _sessionManager = sessionManager;
-        _keyboardBuilder = keyboardBuilder;
-        _callbackDispatcher = callbackDispatcher;
-        _logger = logger;
-        _options = fileSystemOptions.Value;
-    }
+    private readonly IEnumerable<IUserCommandHandler> _handlers = handlers;
+    private readonly IDataService _dataService = dataService;
+    private readonly ITelegramOutputService _outputService = outputService;
+    private readonly ISessionManager _sessionManager = sessionManager;
+    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+    private readonly CallbackDispatcher _callbackDispatcher = callbackDispatcher;
+    private readonly ILogger<CommandAppService> _logger = logger;
+    private readonly FileSystemOptions _options = fileSystemOptions.Value;
 
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
@@ -102,11 +87,7 @@ public sealed class CommandAppService : ICommandAppService
 
     // ========== Private helper methods ==========
 
-    private async Task<bool> HandleReplyKeyboardActionAsync(
-        long userId,
-        string messageText,
-        UserSession session,
-        CancellationToken cancellationToken)
+    private async Task<bool> HandleReplyKeyboardActionAsync(long userId, string messageText, UserSession session, CancellationToken cancellationToken)
     {
         if (messageText == ButtonTexts.ExportApply || messageText == ButtonTexts.AutomationApply)
         {

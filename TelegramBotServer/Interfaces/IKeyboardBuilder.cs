@@ -5,9 +5,6 @@ namespace TelegramBotServer.Interfaces
 {
     public interface IKeyboardBuilder
     {
-        Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session);
-        Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session);
-        Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session);
         Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session);
         Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session);
         Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync();

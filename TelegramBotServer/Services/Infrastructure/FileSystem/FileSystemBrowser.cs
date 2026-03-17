@@ -80,9 +80,6 @@ namespace TelegramBotServer.Services
             var message = $"*Current directory:* `{path}`";
             return (message, markup);
         }
-        public bool IsFile(string path) => File.Exists(path);
-
-
         public bool TryResolvePath(long userId, string token, out string? path)
         {
             var session = _sessions.GetOrCreateSession(userId);

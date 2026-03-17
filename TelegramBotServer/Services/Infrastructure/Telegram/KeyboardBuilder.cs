@@ -23,19 +23,19 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 {
     private readonly IFileSystemBrowser _navigationService = fileNavigationService;
 
-        public async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
+        private async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
         {
             (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
             return keyboard;
         }
 
-        public async Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session)
+        private async Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session)
         {
             (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
             return keyboard;
         }
 
-        public async Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session)
+        private async Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session)
         {
             (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetProjectsViewAsync(userId, session.CurrentPath);
             return keyboard;

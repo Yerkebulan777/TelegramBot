@@ -1,10 +1,8 @@
 using Telegram.Bot;
 using TelegramBotServer.Config;
-using TelegramBotServer.Interfaces;
 using TelegramBotServer.Services;
+using TelegramBotServer.Interfaces;
 using TelegramBotServer.Services.Application;
-using TelegramBotServer.Services.Application.Handlers;
-using TelegramBotServer.Services.Application.Handlers.Commands;
 using TelegramBotServer.Services.Infrastructure.Telegram;
 
 namespace TelegramBotServer.Extensions;
@@ -37,12 +35,12 @@ public static class DependencyInjectionExtensions
     private static IServiceCollection AddCallbackHandlers(this IServiceCollection services)
     {
         // Register all callback handlers (order doesn't matter - dispatcher sorts by priority)
-        _ = services.AddSingleton<ICallbackHandler, FileNavigationHandler>();
-        _ = services.AddSingleton<ICallbackHandler, FileSelectionHandler>();
-        _ = services.AddSingleton<ICallbackHandler, ExportCommandHandler>();
-        _ = services.AddSingleton<ICallbackHandler, AutomationCommandHandler>();
-        _ = services.AddSingleton<ICallbackHandler, SessionManagementHandler>();
-        _ = services.AddSingleton<ICallbackHandler, CommandSelectionHandler>();
+        _ = services.AddSingleton<ICallbackHandler, Services.Application.Handlers.FileNavigationHandler>();
+        _ = services.AddSingleton<ICallbackHandler, Services.Application.Handlers.FileSelectionHandler>();
+        _ = services.AddSingleton<ICallbackHandler, Services.Application.Handlers.ExportCommandHandler>();
+        _ = services.AddSingleton<ICallbackHandler, Services.Application.Handlers.AutomationCommandHandler>();
+        _ = services.AddSingleton<ICallbackHandler, Services.Application.Handlers.SessionManagementHandler>();
+        _ = services.AddSingleton<ICallbackHandler, Services.Application.Handlers.CommandSelectionHandler>();
 
         // Register the dispatcher
         _ = services.AddSingleton<CallbackDispatcher>();
@@ -56,12 +54,11 @@ public static class DependencyInjectionExtensions
         _ = services.AddSingleton<ICommandAppService, CommandAppService>();
 
         // Register Command Handlers
-        _ = services.AddSingleton<IUserCommandHandler, StartCommandHandler>();
-        _ = services.AddSingleton<IUserCommandHandler, ExportCommandHandler>();
-        _ = services.AddSingleton<IUserCommandHandler, StatusCommandHandler>();
-        _ = services.AddSingleton<IUserCommandHandler, AutomationCommandHandler>();
-        _ = services.AddSingleton<IUserCommandHandler, HelpCommandHandler>();
-
+        _ = services.AddSingleton<IUserCommandHandler, Services.Application.Handlers.Commands.StartCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, Services.Application.Handlers.Commands.ExportCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, Services.Application.Handlers.Commands.StatusCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, Services.Application.Handlers.Commands.AutomationCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, Services.Application.Handlers.Commands.HelpCommandHandler>();
         _ = services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
         return services;
@@ -79,7 +76,7 @@ public static class DependencyInjectionExtensions
     {
         _ = services.AddSingleton<ITelegramBotClient>(_ =>
         {
-            var token = configuration["TelegramBot:Token"]
+            string token = configuration["TelegramBot:Token"]
                 ?? throw new InvalidOperationException(
                     "TelegramBot:Token is not configured. " +
                     "Set it in appsettings.Local.json or via environment variable TelegramBot__Token.");

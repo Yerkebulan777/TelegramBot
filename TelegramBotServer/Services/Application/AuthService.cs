@@ -1,6 +1,6 @@
 using TelegramBotServer.Interfaces;
 
-namespace TelegramBotServer.Services;
+namespace TelegramBotServer.Services.Application;
 
 /// <summary>
 /// Сервис аутентификации пользователей.
@@ -10,16 +10,21 @@ public class AuthService(IDataService dataService) : IAuthService
     private readonly IDataService _dataService = dataService;
 
     /// <inheritdoc/>
-    public async Task<bool> CheckAuthAsync(long userId) =>
-        await _dataService.IsUserAuthorizedAsync(userId);
+    public Task<bool> CheckAuthAsync(long userId)
+    {
+        return _dataService.IsUserAuthorizedAsync(userId);
+    }
 
     /// <inheritdoc/>
     public async Task<bool> AuthorizeUserAsync(long userId, string username, string password)
     {
         if (!await _dataService.ValidatePasswordAsync(password))
+        {
             return false;
+        }
 
         await _dataService.AddAuthorizedUserAsync(userId, username);
+
         return true;
     }
 }
