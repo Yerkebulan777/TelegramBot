@@ -72,7 +72,8 @@ public static class DependencyInjectionExtensions
         {
             var token = configuration["TelegramBot:Token"]
                 ?? throw new InvalidOperationException(
-                    "TelegramBot:Token is not configured. Set it in appsettings.Local.json or via environment variable TelegramBot__Token.");
+                    "TelegramBot:Token is not configured. " +
+                    "Set it in appsettings.Local.json or via environment variable TelegramBot__Token.");
             return new TelegramBotClient(token);
         });
 
