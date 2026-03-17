@@ -59,27 +59,15 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
 
         if (session.StatusLevel)
         {
-            // Show session summary
             session.StatusLevel = false;
             session.SessionId = sessionId;
 
             var sessionStatus = await _dataService.GetSessionsStatusAsync(sessionId);
-
-            var percentage = sessionStatus.TotalFiles > 0
-                ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
-                : 0;
-
-            var reply = $"Статус: {sessionStatus.Status}\n" +
-                        $"Файлов: {sessionStatus.TotalFiles}\n" +
-                        $"Завершено: {sessionStatus.DoneFiles}\n" +
-                        $"{percentage}%";
-
             var keyboard = await _keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
-            await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, reply, keyboard);
+            await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
         }
         else
         {
-            // Show session commands detail
             session.StatusLevel = true;
 
             var sessionCommands = await _dataService.GetSessionsCommandsAsync(sessionId);
@@ -103,10 +91,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
             return true;
 
         context.Session.StatusLevel = true;
-
-        var sessionsStatus = await _dataService.GetSessionsListAsync(context.UserId);
-        var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-        await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
+        await ShowSessionsListAsync(context);
 
         return true;
     }
@@ -123,44 +108,26 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         if (!await _dataService.DeleteCommandAsync(commandId))
             return true;
 
-        // Remove button from keyboard
         if (context.Buttons != null)
         {
             foreach (var row in context.Buttons)
-            {
                 row.RemoveAll(btn => btn.CallbackData!.Contains($"{commandId}"));
-            }
         }
 
         var newKeyboard = ConvertDtoToKeyboard(context.Buttons);
 
-        // Check if session has remaining commands
         if (!await _dataService.CheckCommandsStatusAsync(context.Session.SessionId))
         {
-            // All commands deleted - delete session and return to list
             if (await _dataService.DeleteSessionAsync(context.Session.SessionId))
             {
                 context.Session.StatusLevel = true;
-                var sessionsStatus = await _dataService.GetSessionsListAsync(context.UserId);
-                var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
+                await ShowSessionsListAsync(context);
             }
         }
         else
         {
-            // Update status display
             var sessionStatus = await _dataService.GetSessionsStatusAsync(context.Session.SessionId);
-
-            var percentage = sessionStatus.TotalFiles > 0
-                ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
-                : 0;
-
-            var reply = $"Статус: {sessionStatus.Status}\n" +
-                        $"Файлов: {sessionStatus.TotalFiles}\n" +
-                        $"Завершено: {sessionStatus.DoneFiles}\n" +
-                        $"{percentage}%";
-
-            await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, reply, newKeyboard);
+            await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), newKeyboard);
         }
 
         return true;
@@ -169,12 +136,27 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
     private async Task<bool> HandleBackToStatusAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         context.Session.StatusLevel = true;
+        await ShowSessionsListAsync(context);
+        return true;
+    }
 
+    private async Task ShowSessionsListAsync(CallbackContext context)
+    {
         var sessionsStatus = await _dataService.GetSessionsListAsync(context.UserId);
         var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
         await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
+    }
 
-        return true;
+    private static string BuildStatusReply(SessionStatus sessionStatus)
+    {
+        var percentage = sessionStatus.TotalFiles > 0
+            ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
+            : 0;
+
+        return $"Статус: {sessionStatus.Status}\n" +
+               $"Файлов: {sessionStatus.TotalFiles}\n" +
+               $"Завершено: {sessionStatus.DoneFiles}\n" +
+               $"{percentage}%";
     }
 
     private static InlineKeyboardMarkup ConvertDtoToKeyboard(List<List<ButtonDto>>? dto)

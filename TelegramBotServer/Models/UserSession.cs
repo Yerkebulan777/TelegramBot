@@ -182,6 +182,20 @@ public class UserSession
         Counter = 0;
         ClearItems();
     }
+
+    /// <summary>
+    /// Resets navigation state (path, level, counter, selected files, pages cache, items).
+    /// Does not affect pending commands or SelectionType.
+    /// </summary>
+    public void ResetNavigation(string rootPath)
+    {
+        CurrentPath = rootPath;
+        Level = false;
+        Counter = 0;
+        ClearSelectedFiles();
+        ClearPagesCache();
+        ClearItems();
+    }
 }
 
 /// <summary>

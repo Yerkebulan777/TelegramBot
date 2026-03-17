@@ -116,86 +116,42 @@ namespace TelegramBotServer.Services
 
 
 
-        public async Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path)
+        public Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path)
+            => GetDirectoriesViewAsync(userId, path, "OPENFOLDER:");
+
+        public Task<(string message, InlineKeyboardMarkup keyboard)> GetProjectsViewAsync(long userId, string path)
+            => GetDirectoriesViewAsync(userId, path, "FILE:");
+
+        private async Task<(string message, InlineKeyboardMarkup keyboard)> GetDirectoriesViewAsync(
+            long userId, string path, string itemCallbackPrefix)
         {
             var session = _sessions.GetOrCreateSession(userId);
 
-            // Offload blocking network/filesystem I/O off the ThreadPool handler thread
             var dirs = await Task.Run(() =>
                 Directory.GetDirectories(path)
                     .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)))
                     .ToArray());
 
-            // Clear stale token→path mappings to prevent PathMap growing unbounded
             session.PathMap.Clear();
 
             var buttons = new List<List<InlineKeyboardButton>>();
-
-            var items = new List<FileSystemItem>();
-            foreach (var dir in dirs)
-                items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
+            var items = dirs.Select(d => new FileSystemItem { FullPath = d, Type = ItemType.Directory }).ToList();
 
             session.SetItems(items);
 
             var selectedFiles = session.SelectedFiles;
 
-            for (int i = 0; i < items.Count; i++)
+            foreach (var item in items)
             {
-                var item = items[i];
-                var isSelected = selectedFiles.Contains(item.FullPath);
-                var prefix = isSelected ? "✅ " : "📁 ";
-
+                var prefix = selectedFiles.Contains(item.FullPath) ? "✅ " : "📁 ";
                 string token = Guid.NewGuid().ToString("N")[..8];
                 session.PathMap[token] = item.FullPath;
-                buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"OPENFOLDER:{token}")]);
+                buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"{itemCallbackPrefix}{token}")]);
             }
 
             AddNavigationButtons(buttons, session, path);
 
-            var markup = new InlineKeyboardMarkup(buttons);
-            var message = $"*Current directory:* `{path}`";
-            return (message, markup);
-        }
-
-        public async Task<(string message, InlineKeyboardMarkup keyboard)> GetProjectsViewAsync(long userId, string path)
-        {
-            var session = _sessions.GetOrCreateSession(userId);
-
-            // Offload blocking network/filesystem I/O off the ThreadPool handler thread
-            var dirs = await Task.Run(() =>
-                Directory.GetDirectories(path)
-                    .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)))
-                    .ToArray());
-
-            // Clear stale token→path mappings to prevent PathMap growing unbounded
-            session.PathMap.Clear();
-
-            var buttons = new List<List<InlineKeyboardButton>>();
-
-            var items = new List<FileSystemItem>();
-            foreach (var dir in dirs)
-                items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
-
-            session.SetItems(items);
-
-            var selectedFiles = session.SelectedFiles;
-
-            for (int i = 0; i < items.Count; i++)
-            {
-                var item = items[i];
-                var isSelected = selectedFiles.Contains(item.FullPath);
-                var prefix = isSelected ? "✅ " : "📁 ";
-
-                string token = Guid.NewGuid().ToString("N")[..8];
-                session.PathMap[token] = item.FullPath;
-                buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"FILE:{token}")]);
-            }
-
-            AddNavigationButtons(buttons, session, path);
-
-            var markup = new InlineKeyboardMarkup(buttons);
-            var message = $"*Current directory:* `{path}`";
-            return (message, markup);
+            return ($"*Current directory:* `{path}`", new InlineKeyboardMarkup(buttons));
         }
 
         /// <summary>

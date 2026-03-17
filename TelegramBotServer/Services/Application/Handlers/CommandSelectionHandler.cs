@@ -56,12 +56,7 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
             _ => SelectionMode.Files
         };
 
-        // Reset navigation state
-        session.CurrentPath = _options.RootPath;
-        session.Level = false;
-        session.ClearSelectedFiles();
-        session.Counter = 0;
-        session.ClearPagesCache();
+        session.ResetNavigation(_options.RootPath);
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);

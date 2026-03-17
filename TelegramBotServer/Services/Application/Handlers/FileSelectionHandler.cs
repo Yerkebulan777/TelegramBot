@@ -33,7 +33,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         IKeyboardBuilder keyboardBuilder,
         ITelegramOutputService outputService,
         IDataService dataService,
-        Microsoft.Extensions.Options.IOptions<FileSystemOptions> options,
+        IOptions<FileSystemOptions> options,
         ILogger<FileSelectionHandler> logger) : base(logger)
     {
         _fileNavigationService = fileNavigationService;
@@ -80,7 +80,6 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         if (selectedFiles.Count == 0)
             return true;
 
-        // Map selection to actual files based on selection type
         var filesToProcess = await MapFilesAsync(selectedFiles, session.SelectionType, cancellationToken);
 
         await _dataService.CreateSessionWithCommandsAsync(
@@ -94,11 +93,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         var reply = BuildQueueReply(session);
         await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, reply);
 
-        // Reset session state
-        session.ClearItems();
-        session.ClearSelectedFiles();
-        session.ClearPagesCache();
-        session.Level = false;
+        session.ResetNavigation(_options.RootPath);
         session.SelectionType = SelectionMode.Files;
 
         return true;
@@ -118,15 +113,9 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
     {
         var session = context.Session;
 
-        session.ClearSelectedFiles();
-        session.CurrentPath = _options.RootPath;
-        session.Counter = 0;
-        session.ClearItems();
-        session.ClearPagesCache();
-        session.Level = false;
+        session.ResetNavigation(_options.RootPath);
         session.SelectionType = SelectionMode.Files;
 
-        // Return to appropriate command keyboard
         if (HasExportCommands(session))
         {
             var keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(session);
@@ -172,12 +161,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
                 continue;
             }
 
-            foreach (var file in Directory.EnumerateFiles(rvtDir))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (_options.IsRevitFile(file))
-                    allFiles.Add(file);
-            }
+            AddRevitFilesFromDirectory(rvtDir, allFiles, cancellationToken);
         }
 
         return allFiles;
@@ -212,16 +196,21 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
                 if (!Directory.Exists(rvtDir))
                     continue;
 
-                foreach (var file in Directory.EnumerateFiles(rvtDir))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (_options.IsRevitFile(file))
-                        allFiles.Add(file);
-                }
+                AddRevitFilesFromDirectory(rvtDir, allFiles, cancellationToken);
             }
         }
 
         return allFiles;
+    }
+
+    private void AddRevitFilesFromDirectory(string directory, List<string> files, CancellationToken cancellationToken)
+    {
+        foreach (var file in Directory.EnumerateFiles(directory))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_options.IsRevitFile(file))
+                files.Add(file);
+        }
     }
 
     private static string BuildQueueReply(UserSession session)
