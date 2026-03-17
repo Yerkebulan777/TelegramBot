@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBotServer.Config;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
 
@@ -7,14 +9,17 @@ namespace TelegramBotServer.Services
 {
     public partial class FileSystemBrowser : IFileSystemBrowser
     {
-        //private readonly Dictionary<string, string> _pathMap = new();
-
         private readonly ISessionManager _sessions;
-        static readonly Regex folderRegex = MyRegex();
+        private readonly FileSystemOptions _options;
+        private readonly Regex _folderRegex;
+        private readonly Regex _romanThreeRegex;
 
-        public FileSystemBrowser(ISessionManager sessions)
+        public FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOptions> options)
         {
             _sessions = sessions;
+            _options = options.Value;
+            _folderRegex = new Regex(_options.SectionFolderPattern, RegexOptions.IgnoreCase);
+            _romanThreeRegex = new Regex(_options.RomanThreePattern, RegexOptions.IgnoreCase);
         }
 
 
@@ -29,7 +34,7 @@ namespace TelegramBotServer.Services
             var (dirs, files) = await Task.Run(() =>
             {
                 var d = Directory.GetDirectories(path)
-                    .Where(x => folderRegex.IsMatch(Path.GetFileName(x)))
+                    .Where(x => _folderRegex.IsMatch(Path.GetFileName(x)))
                     .ToArray();
                 var f = Directory.GetFiles(path);
                 return (d, f);
@@ -39,68 +44,37 @@ namespace TelegramBotServer.Services
 
             // Clear stale token→path mappings to prevent PathMap growing unbounded
             session.PathMap.Clear();
-            session.Items.Clear();
 
+            var items = new List<FileSystemItem>();
             foreach (var dir in dirs)
-                session.Items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
+                items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
 
             foreach (var file in files)
             {
-                if (!file.Contains(".rvt"))
+                if (!_options.IsRevitFile(file))
                     continue;
-                session.Items.Add(new FileSystemItem { FullPath = file, Type = ItemType.File });
+                items.Add(new FileSystemItem { FullPath = file, Type = ItemType.File });
             }
 
-            for (int i = 0; i < session.Items.Count; i++)
+            session.SetItems(items);
+
+            var selectedFiles = session.SelectedFiles;
+
+            for (int i = 0; i < items.Count; i++)
             {
-                if (session.Items[i].Type == ItemType.Directory)
-                {
-                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                    session.PathMap[token] = session.Items[i].FullPath;
-                    buttons.Add(new List<InlineKeyboardButton>
-                    {
-                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(session.Items[i].FullPath)}", $"OPENFOLDER:{token}")
-                    });
-                }
-                else if (session.Items[i].Type == ItemType.File)
-                {
-                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                    session.PathMap[token] = session.Items[i].FullPath;
-                    buttons.Add(new List<InlineKeyboardButton>
-                    {
-                        InlineKeyboardButton.WithCallbackData($"📄 {Path.GetFileName(session.Items[i].FullPath)}", $"FILE:{token}")
-                    });
-                }
+                var item = items[i];
+                var isSelected = item.Type == ItemType.File && selectedFiles.Contains(item.FullPath);
+                var prefix = isSelected ? "✅ " : (item.Type == ItemType.Directory ? "📁 " : "📄 ");
+                var callbackPrefix = item.Type == ItemType.Directory ? "OPENFOLDER:" : "FILE:";
+
+                string token = Guid.NewGuid().ToString("N")[..8];
+                session.PathMap[token] = item.FullPath;
+                buttons.Add([
+                    InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"{callbackPrefix}{token}")
+                ]);
             }
 
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("🔄 Выбор: Файлы", "SELMODE:")
-            });
-
-            var parent = Directory.GetParent(path);
-            if (parent != null)
-            {
-                string parentToken = Guid.NewGuid().ToString("N").Substring(0, 8);
-                session.PathMap[parentToken] = parent.FullName;
-                buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"GOTOPARENT:{parentToken}")
-                });
-            }
-
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
-            });
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
-            });
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
-            });
+            AddNavigationButtons(buttons, session, path);
 
             var markup = new InlineKeyboardMarkup(buttons);
             var message = $"*Current directory:* `{path}`";
@@ -116,6 +90,30 @@ namespace TelegramBotServer.Services
             return session.PathMap.TryGetValue(token, out path);
         }
 
+        private void AddNavigationButtons(List<List<InlineKeyboardButton>> buttons, UserSession session, string path)
+        {
+            var selectionLabel = session.SelectionType switch
+            {
+                SelectionMode.Sections => "🔄 Выбор: Разделы",
+                SelectionMode.Projects => "🔄 Выбор: Проекты",
+                _ => "🔄 Выбор: Файлы"
+            };
+
+            buttons.Add([InlineKeyboardButton.WithCallbackData(selectionLabel, "SELMODE:")]);
+
+            var parent = Directory.GetParent(path);
+            if (parent != null)
+            {
+                string parentToken = Guid.NewGuid().ToString("N")[..8];
+                session.PathMap[parentToken] = parent.FullName;
+                buttons.Add([InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"GOTOPARENT:{parentToken}")]);
+            }
+
+            buttons.Add([InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")]);
+        }
+
 
 
         public async Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path)
@@ -125,72 +123,40 @@ namespace TelegramBotServer.Services
             // Offload blocking network/filesystem I/O off the ThreadPool handler thread
             var dirs = await Task.Run(() =>
                 Directory.GetDirectories(path)
-                    .Where(d => folderRegex.IsMatch(Path.GetFileName(d)))
+                    .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)))
                     .ToArray());
 
             // Clear stale token→path mappings to prevent PathMap growing unbounded
             session.PathMap.Clear();
 
             var buttons = new List<List<InlineKeyboardButton>>();
-            if (session.Level == false)
+
+            var items = new List<FileSystemItem>();
+            foreach (var dir in dirs)
+                items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
+
+            session.SetItems(items);
+
+            var selectedFiles = session.SelectedFiles;
+
+            for (int i = 0; i < items.Count; i++)
             {
-                for (int i = 0; i < dirs.Length; i++)
-                {
-                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                    session.PathMap[token] = dirs[i];
-                    buttons.Add(new List<InlineKeyboardButton>
-                    {
-                        InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"OPENFOLDER:{token}")
-                    });
-                }
+                var item = items[i];
+                var isSelected = selectedFiles.Contains(item.FullPath);
+                var prefix = isSelected ? "✅ " : "📁 ";
+
+                string token = Guid.NewGuid().ToString("N")[..8];
+                session.PathMap[token] = item.FullPath;
+                buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"OPENFOLDER:{token}")]);
             }
 
-            if (session.Level == true)
-            {
-                for (int i = 0; i < dirs.Length; i++)
-                {
-                    string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                    session.PathMap[token] = dirs[i];
-                    buttons.Add(new List<InlineKeyboardButton>
-                    {
-InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"OPENFOLDER:{token}")
-                    });
-                }
-            }
-
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("🔄 Выбор: Разделы", "SELMODE:")
-            });
-
-            var parent = Directory.GetParent(path);
-            if (parent != null)
-            {
-                string parentToken = Guid.NewGuid().ToString("N").Substring(0, 8);
-                session.PathMap[parentToken] = parent.FullName;
-                buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"GOTOPARENT:{parentToken}")
-                });
-            }
-
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
-            });
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
-            });
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
-            });
+            AddNavigationButtons(buttons, session, path);
 
             var markup = new InlineKeyboardMarkup(buttons);
             var message = $"*Current directory:* `{path}`";
             return (message, markup);
         }
+
         public async Task<(string message, InlineKeyboardMarkup keyboard)> GetProjectsViewAsync(long userId, string path)
         {
             var session = _sessions.GetOrCreateSession(userId);
@@ -198,60 +164,44 @@ InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"OPE
             // Offload blocking network/filesystem I/O off the ThreadPool handler thread
             var dirs = await Task.Run(() =>
                 Directory.GetDirectories(path)
-                    .Where(d => folderRegex.IsMatch(Path.GetFileName(d)))
+                    .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)))
                     .ToArray());
 
             // Clear stale token→path mappings to prevent PathMap growing unbounded
             session.PathMap.Clear();
 
             var buttons = new List<List<InlineKeyboardButton>>();
-            for (int i = 0; i < dirs.Length; i++)
+
+            var items = new List<FileSystemItem>();
+            foreach (var dir in dirs)
+                items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
+
+            session.SetItems(items);
+
+            var selectedFiles = session.SelectedFiles;
+
+            for (int i = 0; i < items.Count; i++)
             {
-                string token = Guid.NewGuid().ToString("N").Substring(0, 8);
-                session.PathMap[token] = dirs[i];
-                buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData($"📁 {Path.GetFileName(dirs[i])}", $"FILE:{token}")
-                });
+                var item = items[i];
+                var isSelected = selectedFiles.Contains(item.FullPath);
+                var prefix = isSelected ? "✅ " : "📁 ";
+
+                string token = Guid.NewGuid().ToString("N")[..8];
+                session.PathMap[token] = item.FullPath;
+                buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"FILE:{token}")]);
             }
 
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("🔄 Выбор: Проекты", "SELMODE:")
-            });
-
-            var parent = Directory.GetParent(path);
-            if (parent != null)
-            {
-                string parentToken = Guid.NewGuid().ToString("N").Substring(0, 8);
-                session.PathMap[parentToken] = parent.FullName;
-                buttons.Add(new List<InlineKeyboardButton>
-                {
-                    InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"GOTOPARENT:{parentToken}")
-                });
-            }
-
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")
-            });
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")
-            });
-            buttons.Add(new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")
-            });
+            AddNavigationButtons(buttons, session, path);
 
             var markup = new InlineKeyboardMarkup(buttons);
             var message = $"*Current directory:* `{path}`";
             return (message, markup);
         }
 
-        [GeneratedRegex(
-
-            @"^(\d{2}|\d{3}|I{1,3})_", RegexOptions.IgnoreCase, "ru-KZ")]
-        private static partial Regex MyRegex();
+        /// <summary>
+        /// Gets the regex for matching Roman numeral III sections.
+        /// Used by CommandAppService for MapProjectsToFilesAsync.
+        /// </summary>
+        public Regex GetRomanThreeRegex() => _romanThreeRegex;
     }
 }

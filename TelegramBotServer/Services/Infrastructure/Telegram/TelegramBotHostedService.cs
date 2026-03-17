@@ -93,7 +93,7 @@ public class TelegramBotHostedService : BackgroundService
 
                         if (!await Authorization(message.UserId, message.Username, message.Text, session))
                             return;
-                        await _commandAppService.HandleUserCommandAsync(message);
+                        await _commandAppService.HandleUserCommandAsync(message, token);
                     }
                     break;
                 case CallbackQueryDto callback:
@@ -108,11 +108,16 @@ public class TelegramBotHostedService : BackgroundService
                         if (!await CallbackAuthorization(callback.UserId))
                             return;
 
-                        await _commandAppService.HandleCallbackAsync(callback);
+                        await _commandAppService.HandleCallbackAsync(callback, token);
                         await bot.AnswerCallbackQuery(callback.CallbackQueryId, cancellationToken: token);
                     }
                     break;
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown
+            _logger.LogDebug("Update handling was cancelled");
         }
         catch (Exception ex)
         {
@@ -134,7 +139,7 @@ public class TelegramBotHostedService : BackgroundService
             var checkAuth = await _authService.CheckAuthAsync(userId);
             if (!checkAuth)
             {
-                session.State = "WaitingForPassword";
+                session.State = SessionState.WaitingForPassword;
                 await _outputService.SendMessageAsync(userId, "Enter password.");
                 return false;
             }
@@ -142,16 +147,16 @@ public class TelegramBotHostedService : BackgroundService
 
             return true;
         }
-        else if (session.State == "WaitingForPassword")
+        else if (session.State == SessionState.WaitingForPassword)
         {
             bool auth = await _authService.AuthorizeUserAsync(userId, username, text);
             if (!auth)
             {
-                session.State = "WaitingForPassword";
+                session.State = SessionState.WaitingForPassword;
                 await _outputService.SendMessageAsync(userId, "Incorrect password. Try again.");
                 return false;
             }
-            session.State = "Idle";
+            session.State = SessionState.Idle;
             await _outputService.SendMessageAsync(userId, "Successfully authorized.");
 
             return true;

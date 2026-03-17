@@ -1,6 +1,9 @@
 using Telegram.Bot;
+using TelegramBotServer.Config;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Services;
+using TelegramBotServer.Services.Application;
+using TelegramBotServer.Services.Application.Handlers;
 using TelegramBotServer.Services.Infrastructure.Telegram;
 
 namespace TelegramBotServer.Extensions;
@@ -10,9 +13,38 @@ public static class DependencyInjectionExtensions
     public static IServiceCollection AddTelegramBotServer(this IServiceCollection services, IConfiguration configuration)
     {
         _ = services
+            .AddConfiguration(configuration)
+            .AddCallbackHandlers()
             .AddApplicationServices()
             .AddInfrastructureServices()
             .AddTelegramServices(configuration);
+
+        return services;
+    }
+
+    private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
+    {
+        // Register FileSystemOptions as IOptions for dependency injection
+        _ = services.AddOptions<FileSystemOptions>()
+            .Bind(configuration.GetSection(FileSystemOptions.SectionName))
+            .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
+            .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
+
+        return services;
+    }
+
+    private static IServiceCollection AddCallbackHandlers(this IServiceCollection services)
+    {
+        // Register all callback handlers (order doesn't matter - dispatcher sorts by priority)
+        _ = services.AddSingleton<ICallbackHandler, FileNavigationHandler>();
+        _ = services.AddSingleton<ICallbackHandler, FileSelectionHandler>();
+        _ = services.AddSingleton<ICallbackHandler, ExportCommandHandler>();
+        _ = services.AddSingleton<ICallbackHandler, AutomationCommandHandler>();
+        _ = services.AddSingleton<ICallbackHandler, SessionManagementHandler>();
+        _ = services.AddSingleton<ICallbackHandler, CommandSelectionHandler>();
+
+        // Register the dispatcher
+        _ = services.AddSingleton<CallbackDispatcher>();
 
         return services;
     }
@@ -52,3 +84,4 @@ public static class DependencyInjectionExtensions
         return services;
     }
 }
+
