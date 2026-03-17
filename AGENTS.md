@@ -20,6 +20,9 @@ dotnet run --project TelegramBotServer/TelegramBotServer.csproj
 
 # Release publish
 dotnet publish TelegramBotServer/TelegramBotServer.csproj -c Release
+
+# Format code according to .editorconfig
+dotnet format
 ```
 
 **There are no automated tests.** There is no test project and no test runner command.
@@ -170,6 +173,12 @@ DB file: `botdata.db` in the project directory.
 - Use `required` keyword on model properties that must always be set: `public required string FullPath { get; set; }`
 - Prefer `??` and `?? throw new InvalidOperationException(...)` over unchecked null dereferences
 - Regex patterns: use `[GeneratedRegex]` attribute with `partial` method for compiled regexes
+
+### Formatting and Linting
+
+- The project uses an EditorConfig file (`.editorconfig`) to enforce coding styles.
+- You can run `dotnet format` to format the code according to the editorconfig settings.
+- There are no additional linting tools configured beyond the Roslyn analyzers that come with the SDK.
 
 ---
 
