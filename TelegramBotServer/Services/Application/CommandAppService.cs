@@ -4,6 +4,7 @@ using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.DTOs;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
+using TelegramBotServer.Services.Infrastructure.Telegram;
 
 namespace TelegramBotServer.Services
 {

@@ -2,7 +2,7 @@ using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
 
-namespace TelegramBotServer.Services
+namespace TelegramBotServer.Services.Infrastructure.Telegram
 {
     public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
 
@@ -19,26 +19,26 @@ namespace TelegramBotServer.Services
 
         public async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
         {
-            var (message, keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
+            (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
             return keyboard;
         }
 
         public async Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session)
         {
-            var (message, keyboard) = await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
+            (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
             return keyboard;
         }
 
         public async Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session)
         {
-            var (message, keyboard) = await _navigationService.GetProjectsViewAsync(userId, session.CurrentPath);
+            (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetProjectsViewAsync(userId, session.CurrentPath);
             return keyboard;
         }
 
 
         public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
         {
-            var keyboard = session.SelectionType switch
+            InlineKeyboardMarkup keyboard = session.SelectionType switch
             {
                 SelectionMode.Files => await GetFileSelKeyboardAsync(userId, session),
                 SelectionMode.Sections => await GetSectionSelKeyboardAsync(userId, session),
@@ -50,18 +50,17 @@ namespace TelegramBotServer.Services
             {
                 if (button.CallbackData != null && button.CallbackData.StartsWith("FILE:"))
                 {
-                    var token = button.CallbackData.Substring(5);
-                    if (_navigationService.TryResolvePath(userId, token, out var path) &&
-                        path is not null &&
-                        session.SelectedFiles.Contains(path))
+                    var token = button.CallbackData[5..];
+
+                    if (_navigationService.TryResolvePath(userId, token, out var path) && path is not null && session.SelectedFiles.Contains(path))
                     {
                         return InlineKeyboardButton.WithCallbackData($"✅ {Path.GetFileName(path)}", button.CallbackData);
                     }
                 }
                 return button; // unchanged
             })
-            .ToList()
-                ).ToList();
+            .ToList()).ToList();
+
             return new InlineKeyboardMarkup(newKeyboard);
         }
 
@@ -93,12 +92,12 @@ namespace TelegramBotServer.Services
         {
             var buttons = new List<List<InlineKeyboardButton>>();
 
-            foreach (var session in sessionsList)
+            foreach (SessionsList session in sessionsList)
             {
-                buttons.Add(new List<InlineKeyboardButton>
-                {
+                buttons.Add(
+                [
                     InlineKeyboardButton.WithCallbackData(session.Date.ToString(), $"Sessiondetails:{session.SessionId}")
-                });
+                ]);
             }
             return Task.FromResult(new InlineKeyboardMarkup(buttons));
         }
@@ -131,17 +130,17 @@ namespace TelegramBotServer.Services
                 }
             };
 
-            foreach (var sessionCommand in sessionCommands)
+            foreach (SessionCommands sessionCommand in sessionCommands)
             {
-                buttons.Add(new List<InlineKeyboardButton>
-                {
+                buttons.Add(
+                [
                     InlineKeyboardButton.WithCallbackData($"{sessionCommand.ExecOrder} | {sessionCommand.Command} | {Path.GetFileName(sessionCommand.FileName)} | {sessionCommand.Status}", $"{sessionCommand.CommandId}"),
-                });
-                buttons.Add(new List<InlineKeyboardButton>
-                {
+                ]);
+                buttons.Add(
+                [
                     InlineKeyboardButton.WithCallbackData($"{sessionCommand.Date}", $"{sessionCommand.CommandId}"),
                     InlineKeyboardButton.WithCallbackData("🗑 Delete", $"Deletecommand:{sessionCommand.CommandId}")
-                });
+                ]);
             }
 
             return Task.FromResult(new InlineKeyboardMarkup(buttons));
@@ -176,25 +175,24 @@ namespace TelegramBotServer.Services
                 })
                 .ToList();
 
-            buttons.Add(new List<InlineKeyboardButton>
-            {
+            buttons.Add(
+            [
                 InlineKeyboardButton.WithCallbackData(applyButtonText, CallbackPrefixes.ApplyCommands),
                 InlineKeyboardButton.WithCallbackData(ButtonTexts.Cancel, CallbackPrefixes.CancelCommandSelection)
-            });
+            ]);
 
             return new InlineKeyboardMarkup(buttons);
         }
 
         private static ReplyKeyboardMarkup BuildActionsReplyKeyboard(string applyButtonText)
         {
-            return new ReplyKeyboardMarkup(new[]
-            {
-                new KeyboardButton[]
-                {
+            return new ReplyKeyboardMarkup(
+            [
+                [
                     new(applyButtonText),
                     new(ButtonTexts.Cancel)
-                }
-            })
+                ]
+            ])
             {
                 ResizeKeyboard = true,
                 OneTimeKeyboard = false

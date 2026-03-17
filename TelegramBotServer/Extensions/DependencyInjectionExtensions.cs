@@ -1,6 +1,7 @@
 using Telegram.Bot;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Services;
+using TelegramBotServer.Services.Infrastructure.Telegram;
 
 namespace TelegramBotServer.Extensions;
 
