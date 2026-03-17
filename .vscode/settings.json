@@ -1,0 +1,41 @@
+{
+    // --- Editor ---
+    "editor.formatOnSave": true,
+    "editor.trimAutoWhitespace": true,
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4,
+    "editor.renderWhitespace": "boundary",
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+
+    // --- C# ---
+    "[csharp]": {
+        "editor.defaultFormatter": "ms-dotnettools.csharp",
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
+    "dotnet.defaultSolution": "TelegramBotServer.slnx",
+    "omnisharp.enableRoslynAnalyzers": true,
+    "omnisharp.enableEditorConfigSupport": true,
+
+    // --- File Explorer: hide build output ---
+    "files.exclude": {
+        "**/bin": true,
+        "**/obj": true,
+        "**/.vs": true
+    },
+    "search.exclude": {
+        "**/bin": true,
+        "**/obj": true
+    },
+
+    // --- JSON ---
+    "[json]": {
+        "editor.defaultFormatter": "vscode.json-language-features",
+        "editor.tabSize": 4
+    },
+
+    // --- Misc ---
+    "editor.bracketPairColorization.enabled": true,
+    "editor.guides.bracketPairs": "active"
+}
