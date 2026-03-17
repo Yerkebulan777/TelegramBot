@@ -1,7 +1,7 @@
 using Telegram.Bot;
 using TelegramBotServer.Config;
-using TelegramBotServer.Services;
 using TelegramBotServer.Interfaces;
+using TelegramBotServer.Services;
 using TelegramBotServer.Services.Application;
 using TelegramBotServer.Services.Infrastructure.Telegram;
 

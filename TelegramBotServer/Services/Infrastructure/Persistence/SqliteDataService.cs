@@ -338,9 +338,9 @@ public class SqliteDataService : IDataService
 
         return new SessionStatus
         {
-            Status     = reader.IsDBNull(0) ? "Invalid" : reader.GetString(0),
+            Status = reader.IsDBNull(0) ? "Invalid" : reader.GetString(0),
             TotalFiles = reader.GetInt32(1),
-            DoneFiles  = reader.GetInt32(2),
+            DoneFiles = reader.GetInt32(2),
         };
     }
 

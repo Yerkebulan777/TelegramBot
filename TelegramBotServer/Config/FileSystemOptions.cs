@@ -62,6 +62,5 @@ public sealed class FileSystemOptions
     /// <summary>
     /// Checks if a file is a Revit file based on extension.
     /// </summary>
-    public bool IsRevitFile(string filePath)
-        => filePath.EndsWith(RevitFileExtension, StringComparison.OrdinalIgnoreCase);
+    public bool IsRevitFile(string filePath) => filePath.EndsWith(RevitFileExtension, StringComparison.OrdinalIgnoreCase);
 }

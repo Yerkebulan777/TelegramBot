@@ -1,9 +1,10 @@
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
+using System.Text.RegularExpressions;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Config;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
+using TelegramBotServer.Services.Infrastructure.Telegram;
 
 namespace TelegramBotServer.Services
 {
@@ -106,10 +107,23 @@ namespace TelegramBotServer.Services
                 buttons.Add([InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"GOTOPARENT:{parentToken}")]);
             }
 
-            buttons.Add([InlineKeyboardButton.WithCallbackData("✅ Продолжить", "APPLYFILES:")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData(GetApplyButtonText(session), "APPLYFILES:")]);
             buttons.Add([InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")]);
-            buttons.Add([InlineKeyboardButton.WithCallbackData("❌ Отмена", "CANCELFILESEL:")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData(ButtonTexts.Cancel, "CANCELFILESEL:")]);
         }
+
+        private static string GetApplyButtonText(UserSession session)
+        {
+            if (HasAutomationCommands(session))
+                return ButtonTexts.AutomationApply;
+
+            return ButtonTexts.ExportApply;
+        }
+
+        private static bool HasAutomationCommands(UserSession session)
+            => session.ContainsPendingCommand("BIMDOC")
+            || session.ContainsPendingCommand("CLASHREP")
+            || session.ContainsPendingCommand("AUTORES");
 
 
 

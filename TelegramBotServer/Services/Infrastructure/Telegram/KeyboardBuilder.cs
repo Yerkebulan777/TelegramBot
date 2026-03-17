@@ -23,57 +23,57 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 {
     private readonly IFileSystemBrowser _navigationService = fileNavigationService;
 
-        private async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
-        {
-            (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
-            return keyboard;
-        }
+    private async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
+    {
+        (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
+        return keyboard;
+    }
 
-        private async Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session)
-        {
-            (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
-            return keyboard;
-        }
+    private async Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session)
+    {
+        (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
+        return keyboard;
+    }
 
-        private async Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session)
-        {
-            (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetProjectsViewAsync(userId, session.CurrentPath);
-            return keyboard;
-        }
+    private async Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session)
+    {
+        (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetProjectsViewAsync(userId, session.CurrentPath);
+        return keyboard;
+    }
 
 
-        public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
+    public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
+    {
+        InlineKeyboardMarkup keyboard = session.SelectionType switch
         {
-            InlineKeyboardMarkup keyboard = session.SelectionType switch
+            SelectionMode.Files => await GetFileSelKeyboardAsync(userId, session),
+            SelectionMode.Sections => await GetSectionSelKeyboardAsync(userId, session),
+            SelectionMode.Projects => await GetProjectSelKeyboardAsync(userId, session),
+            _ => new InlineKeyboardMarkup(Array.Empty<InlineKeyboardButton[]>())
+        };
+
+        var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
+        {
+            if (button.CallbackData != null && button.CallbackData.StartsWith("FILE:"))
             {
-                SelectionMode.Files => await GetFileSelKeyboardAsync(userId, session),
-                SelectionMode.Sections => await GetSectionSelKeyboardAsync(userId, session),
-                SelectionMode.Projects => await GetProjectSelKeyboardAsync(userId, session),
-                _ => new InlineKeyboardMarkup(Array.Empty<InlineKeyboardButton[]>())
-            };
+                var token = button.CallbackData[5..];
 
-            var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
-            {
-                if (button.CallbackData != null && button.CallbackData.StartsWith("FILE:"))
+                if (_navigationService.TryResolvePath(userId, token, out var path) && path is not null && session.SelectedFiles.Contains(path))
                 {
-                    var token = button.CallbackData[5..];
-
-                    if (_navigationService.TryResolvePath(userId, token, out var path) && path is not null && session.SelectedFiles.Contains(path))
-                    {
-                        return InlineKeyboardButton.WithCallbackData($"✅ {Path.GetFileName(path)}", button.CallbackData);
-                    }
+                    return InlineKeyboardButton.WithCallbackData($"✅ {Path.GetFileName(path)}", button.CallbackData);
                 }
-                return button; // unchanged
-            })
-            .ToList()).ToList();
+            }
+            return button; // unchanged
+        })
+        .ToList()).ToList();
 
-            return new InlineKeyboardMarkup(newKeyboard);
-        }
+        return new InlineKeyboardMarkup(newKeyboard);
+    }
 
 
-        public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session)
-        {
-            var commandOptions = new List<CommandOption>
+    public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session)
+    {
+        var commandOptions = new List<CommandOption>
             {
                 new("Export to PDF", "PDF:", "PDF"),
                 new("Export to DWG", "DWG:", "DWG"),
@@ -81,38 +81,38 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
                 new("Export to IFC", "IFC:", "IFC")
             };
 
-            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
-        }
+        return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
+    }
 
-        public Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync()
+    public Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync()
+    {
+        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.ExportApply));
+    }
+
+    public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
+    {
+        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.AutomationApply));
+    }
+
+    public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
+    {
+        var buttons = new List<List<InlineKeyboardButton>>();
+
+        foreach (SessionsList session in sessionsList)
         {
-            return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.ExportApply));
+            buttons.Add(
+            [
+                InlineKeyboardButton.WithCallbackData(session.Date.ToString(), $"Sessiondetails:{session.SessionId}")
+            ]);
         }
+        return Task.FromResult(new InlineKeyboardMarkup(buttons));
+    }
 
-        public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
-        {
-            return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.AutomationApply));
-        }
+    public Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
+    {
+        _ = sessionStatus;
 
-        public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
-        {
-            var buttons = new List<List<InlineKeyboardButton>>();
-
-            foreach (SessionsList session in sessionsList)
-            {
-                buttons.Add(
-                [
-                    InlineKeyboardButton.WithCallbackData(session.Date.ToString(), $"Sessiondetails:{session.SessionId}")
-                ]);
-            }
-            return Task.FromResult(new InlineKeyboardMarkup(buttons));
-        }
-
-        public Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
-        {
-            _ = sessionStatus;
-
-            var buttons = new List<List<InlineKeyboardButton>>
+        var buttons = new List<List<InlineKeyboardButton>>
             {
                 new()
                 {
@@ -121,12 +121,12 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
                     InlineKeyboardButton.WithCallbackData("Back", $"Backtostatus:")
                 }
             };
-            return Task.FromResult(new InlineKeyboardMarkup(buttons));
-        }
+        return Task.FromResult(new InlineKeyboardMarkup(buttons));
+    }
 
-        public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId)
-        {
-            var buttons = new List<List<InlineKeyboardButton>>
+    public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId)
+    {
+        var buttons = new List<List<InlineKeyboardButton>>
             {
                 new()
                 {
@@ -136,65 +136,65 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
                 }
             };
 
-            foreach (SessionCommands sessionCommand in sessionCommands)
-            {
-                buttons.Add(
-                [
-                    InlineKeyboardButton.WithCallbackData($"{sessionCommand.ExecOrder} | {sessionCommand.Command} | {Path.GetFileName(sessionCommand.FileName)} | {sessionCommand.Status}", $"{sessionCommand.CommandId}"),
+        foreach (SessionCommands sessionCommand in sessionCommands)
+        {
+            buttons.Add(
+            [
+                InlineKeyboardButton.WithCallbackData($"{sessionCommand.ExecOrder} | {sessionCommand.Command} | {Path.GetFileName(sessionCommand.FileName)} | {sessionCommand.Status}", $"{sessionCommand.CommandId}"),
                 ]);
-                buttons.Add(
-                [
-                    InlineKeyboardButton.WithCallbackData($"{sessionCommand.Date}", $"{sessionCommand.CommandId}"),
+            buttons.Add(
+            [
+                InlineKeyboardButton.WithCallbackData($"{sessionCommand.Date}", $"{sessionCommand.CommandId}"),
                     InlineKeyboardButton.WithCallbackData("🗑 Delete", $"Deletecommand:{sessionCommand.CommandId}")
-                ]);
-            }
-
-            return Task.FromResult(new InlineKeyboardMarkup(buttons));
+            ]);
         }
 
-        public Task<InlineKeyboardMarkup> GetAutomationKeyboardAsync(UserSession session)
-        {
-            var commandOptions = new List<CommandOption>
+        return Task.FromResult(new InlineKeyboardMarkup(buttons));
+    }
+
+    public Task<InlineKeyboardMarkup> GetAutomationKeyboardAsync(UserSession session)
+    {
+        var commandOptions = new List<CommandOption>
             {
                 new("BIM Doctor", "BIMDOC:", "BIMDOC"),
                 new("Clash Report", "CLASHREP:", "CLASHREP"),
                 new("Auto Resolver", "AUTORES:", "AUTORES")
             };
 
-            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
-        }
+        return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
+    }
 
-        private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(
-            UserSession session,
-            List<CommandOption> commandOptions)
-        {
-            var buttons = commandOptions
-                .Select(option =>
+    private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(
+        UserSession session,
+        List<CommandOption> commandOptions)
+    {
+        var buttons = commandOptions
+            .Select(option =>
+            {
+                bool isSelected = session.PendingCommand.Contains(option.CommandKey);
+                string text = isSelected ? $"✅ {option.Text}" : option.Text;
+                return new List<InlineKeyboardButton>
                 {
-                    bool isSelected = session.PendingCommand.Contains(option.CommandKey);
-                    string text = isSelected ? $"✅ {option.Text}" : option.Text;
-                    return new List<InlineKeyboardButton>
-                    {
                         InlineKeyboardButton.WithCallbackData(text, option.CallbackData)
-                    };
-                })
-                .ToList();
+                };
+            })
+            .ToList();
 
-            return new InlineKeyboardMarkup(buttons);
-        }
+        return new InlineKeyboardMarkup(buttons);
+    }
 
-        private static ReplyKeyboardMarkup BuildActionsReplyKeyboard(string applyButtonText)
-        {
-            return new ReplyKeyboardMarkup(
+    private static ReplyKeyboardMarkup BuildActionsReplyKeyboard(string applyButtonText)
+    {
+        return new ReplyKeyboardMarkup(
+        [
             [
-                [
                     new(applyButtonText),
                     new(ButtonTexts.Cancel)
                 ]
-            ])
-            {
-                ResizeKeyboard = true,
-                OneTimeKeyboard = false
-            };
-        }
+        ])
+        {
+            ResizeKeyboard = true,
+            OneTimeKeyboard = false
+        };
     }
+}

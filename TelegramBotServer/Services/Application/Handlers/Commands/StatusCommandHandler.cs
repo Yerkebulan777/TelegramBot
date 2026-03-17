@@ -32,7 +32,7 @@ public class StatusCommandHandler : IUserCommandHandler
 
         var sessionsStatus = await _dataService.GetSessionsListAsync(message.UserId);
         var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-        
+
         await _outputService.SendMessageWithKeyboardAsync(message.UserId, "Сессии:", keyboard);
     }
 }

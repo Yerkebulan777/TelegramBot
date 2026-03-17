@@ -1,5 +1,5 @@
-using TelegramBotServer.Extensions;
 using Serilog;
+using TelegramBotServer.Extensions;
 
 namespace TelegramBotServer;
 
