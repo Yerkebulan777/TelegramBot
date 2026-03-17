@@ -12,6 +12,8 @@ public class UserSession
     public string? TempData { get; set; }
     public DateTime LastActivity { get; set; } = DateTime.UtcNow;
 
+    public bool IsAuthorized { get; set; }
+
     public string CurrentPath { get; set; } = Directory.GetCurrentDirectory();
 
     // ConcurrentDictionary: token-to-path mapping used by FileSystemBrowser and handlers

@@ -134,11 +134,11 @@ public class TelegramOutputService(
     }
 
 
-    public async Task AnswerCallbackAsync(string callbackId, string messageText)
+    public async Task AnswerCallbackAsync(string callbackId, string messageText, bool showAlert = false)
     {
         try
         {
-            await _botClient.AnswerCallbackQuery(callbackQueryId: callbackId, text: messageText);
+            await _botClient.AnswerCallbackQuery(callbackQueryId: callbackId, text: messageText, showAlert: showAlert);
         }
         catch (ApiRequestException ex)
         {

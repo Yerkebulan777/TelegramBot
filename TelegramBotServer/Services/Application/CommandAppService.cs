@@ -16,6 +16,7 @@ namespace TelegramBotServer.Services;
 /// </summary>
 public sealed class CommandAppService : ICommandAppService
 {
+    private readonly IEnumerable<IUserCommandHandler> _handlers;
     private readonly IDataService _dataService;
     private readonly ITelegramOutputService _outputService;
     private readonly ISessionManager _sessionManager;
@@ -25,6 +26,7 @@ public sealed class CommandAppService : ICommandAppService
     private readonly FileSystemOptions _options;
 
     public CommandAppService(
+        IEnumerable<IUserCommandHandler> handlers,
         IDataService dataService,
         ITelegramOutputService outputService,
         ISessionManager sessionManager,
@@ -33,6 +35,7 @@ public sealed class CommandAppService : ICommandAppService
         IOptions<FileSystemOptions> fileSystemOptions,
         ILogger<CommandAppService> logger)
     {
+        _handlers = handlers;
         _dataService = dataService;
         _outputService = outputService;
         _sessionManager = sessionManager;
@@ -58,29 +61,16 @@ public sealed class CommandAppService : ICommandAppService
             return;
         }
 
-        switch (text.ToLower())
+        var commandText = text.ToLower();
+        var handler = _handlers.FirstOrDefault(h => h.Command == commandText);
+
+        if (handler != null)
         {
-            case "/export":
-                await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
-                break;
-
-            case "/status":
-                session.Reset(_options.RootPath);
-                session.StatusLevel = true;
-
-                var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
-                var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                await _outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard);
-                break;
-
-            case "/automation":
-                await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
-                break;
-
-            case "/help":
-                session.Reset(_options.RootPath);
-                await SendHelpMessageAsync(userId);
-                break;
+            await handler.HandleAsync(message, session, cancellationToken);
+        }
+        else
+        {
+            _logger.LogDebug("No handler found for command '{Command}'", commandText);
         }
     }
 
@@ -112,27 +102,6 @@ public sealed class CommandAppService : ICommandAppService
 
     // ========== Private helper methods ==========
 
-    private async Task StartCommandSelectionAsync(
-        long userId,
-        UserSession session,
-        bool isAutomation,
-        CancellationToken cancellationToken)
-    {
-        session.Reset(_options.RootPath);
-
-        var commandKeyboard = isAutomation
-            ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
-            : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
-
-        await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard);
-
-        var replyKeyboard = isAutomation
-            ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
-            : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
-
-        await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
-    }
-
     private async Task<bool> HandleReplyKeyboardActionAsync(
         long userId,
         string messageText,
@@ -162,19 +131,5 @@ public sealed class CommandAppService : ICommandAppService
         }
 
         return false;
-    }
-
-    private async Task SendHelpMessageAsync(long userId)
-    {
-        var helpText = new StringBuilder()
-            .AppendLine("/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.")
-            .AppendLine("/automation - используется для автоматизации задач. BIM Doctor, Clash Report, Auto Resolver")
-            .AppendLine("/status - используется для проверки состояния выполнения команды отправленной пользователем.")
-            .AppendLine("При отправке данной команды пользователю будет предоставлен список сессий с временем отправки на обработку.")
-            .AppendLine("Пользователь может нажать на сессию для мониторинга процесса выполнения команды.")
-            .AppendLine("Кроме того в предоставленном меню пользователь может полностью удалить сессию.")
-            .ToString();
-
-        await _outputService.SendMessageAsync(userId, helpText);
     }
 }

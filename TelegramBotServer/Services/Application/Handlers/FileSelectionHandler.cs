@@ -60,7 +60,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         var token = context.ParsedCallback.Argument;
         if (!_fileNavigationService.TryResolvePath(context.UserId, token, out var filePath) || filePath == null)
         {
-            await _outputService.SendErrorAsync(context.UserId, "File not found.");
+            await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "Действие устарело. Пожалуйста, начните заново (/start)", showAlert: true);
             return true;
         }
 

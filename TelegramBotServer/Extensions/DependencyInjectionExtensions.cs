@@ -4,6 +4,7 @@ using TelegramBotServer.Interfaces;
 using TelegramBotServer.Services;
 using TelegramBotServer.Services.Application;
 using TelegramBotServer.Services.Application.Handlers;
+using TelegramBotServer.Services.Application.Handlers.Commands;
 using TelegramBotServer.Services.Infrastructure.Telegram;
 
 namespace TelegramBotServer.Extensions;
@@ -53,6 +54,13 @@ public static class DependencyInjectionExtensions
     {
         _ = services.AddSingleton<IAuthService, AuthService>();
         _ = services.AddSingleton<ICommandAppService, CommandAppService>();
+
+        // Register Command Handlers
+        _ = services.AddSingleton<IUserCommandHandler, StartCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, ExportCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, StatusCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, AutomationCommandHandler>();
+        _ = services.AddSingleton<IUserCommandHandler, HelpCommandHandler>();
 
         _ = services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
