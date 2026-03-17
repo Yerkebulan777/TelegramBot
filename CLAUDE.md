@@ -50,11 +50,13 @@ Telegram API → TelegramBotHostedService (polling)
 
 **`TelegramBotHostedService`** — Entry point. Registers bot commands on startup via `Config.ConfigureAsync()`, starts polling, routes incoming updates to `CommandAppService`. Handles `/auth` and password-entry flow before forwarding to command handling. Uses `SessionManager.AcquireUserLockAsync()` for per-user concurrency control.
 
-**`CommandAppService`** — Central command dispatcher (~970 lines). Handles text commands (`/export`, `/automation`, `/status`, `/help`) and all inline keyboard callbacks. Manages multi-step workflows by reading/writing `UserSession` state. Root path read from `TelegramBot:RootPath` config key (defaults to `B:\\`).
+**`CommandAppService`** — Handles text commands (`/export`, `/automation`, `/status`, `/help`). Delegates all inline keyboard callbacks to `CallbackDispatcher`. Manages multi-step workflows by reading/writing `UserSession` state. Root path read from `TelegramBot:RootPath` config key (defaults to `B:\\`).
 
-**`FileSystemBrowser`** — Builds inline keyboards for browsing the filesystem. Filters directories matching regex `^(\d{2}|\d{3}|I{1,3})_` and files to `.rvt` only. Paginates at 20 items per page. Delegates section-level browsing to `SectionNavigationService`.
+**`CallbackDispatcher`** — Chain of Responsibility dispatcher. Routes callback queries to the first `ICallbackHandler` that `CanHandle()` the prefix. Handlers are sorted by `Priority` (lower = first). Registered handlers: `FileNavigationHandler`, `FileSelectionHandler`, `ExportCommandHandler`, `AutomationCommandHandler`, `SessionManagementHandler`, `CommandSelectionHandler`. Base class `CallbackHandlerBase` declares `SupportedPrefixes` set and `Priority`.
 
-**`KeyboardBuilder`** — Wraps `NavigationService` to produce context-aware keyboards (marks selected items with ✅). Three selection modes controlled by `UserSession.SelectionType` (`SelectionMode` enum):
+**`FileSystemBrowser`** — Builds inline keyboards for browsing the filesystem. Filters directories matching regex `^(\d{2}|\d{3}|I{1,3})_` and files to `.rvt` only. Paginates at 20 items per page.
+
+**`KeyboardBuilder`** — Wraps `FileSystemBrowser` to produce context-aware keyboards (marks selected items with ✅). Three selection modes controlled by `UserSession.SelectionType` (`SelectionMode` enum):
 - `SelectionMode.Files` (1) = flat file browser
 - `SelectionMode.Sections` (2) = section navigator — `UserSession.Level` (bool) tracks depth (false = sections list, true = inside section toward `01_RVT` → files)
 - `SelectionMode.Projects` (3) = project navigator — `UserSession.Level` tracks project → section → RVT depth
@@ -65,7 +67,7 @@ Telegram API → TelegramBotHostedService (polling)
 
 **`SqliteDataService`** — All persistence. Two libraries used inconsistently: `Microsoft.Data.Sqlite` for raw `SqliteCommand` and `System.Data.SQLite` for some methods (e.g., `GetSessionsStatusAsync`, `CheckCommandsStatusAsync`). Dapper is used only in `CreateSessionWithCommandsAsync`.
 
-**`AuthService`** — Checks `Whitelist` table for user; validates against `Credentials` table (plain-text password). Default password is `qwerty123` (inserted on first run).
+**`AuthService`** — Checks `Whitelist` table for user; validates password via `PasswordHasher.Verify()` against `Credentials` table. `PasswordHasher` uses PBKDF2-SHA256 (100k iterations) with legacy plain-text fallback for old rows. Default password is `qwerty123` (inserted on first run).
 
 ### Callback Data Protocol
 
