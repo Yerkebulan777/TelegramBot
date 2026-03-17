@@ -81,7 +81,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
                 new("Export to IFC", "IFC:", "IFC")
             };
 
-            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, ButtonTexts.ExportApply));
+            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
         }
 
         public Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync()
@@ -161,13 +161,12 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
                 new("Auto Resolver", "AUTORES:", "AUTORES")
             };
 
-            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions, ButtonTexts.AutomationApply));
+            return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
         }
 
         private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(
             UserSession session,
-            List<CommandOption> commandOptions,
-            string applyButtonText)
+            List<CommandOption> commandOptions)
         {
             var buttons = commandOptions
                 .Select(option =>
@@ -180,12 +179,6 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
                     };
                 })
                 .ToList();
-
-            buttons.Add(
-            [
-                InlineKeyboardButton.WithCallbackData(applyButtonText, CallbackPrefixes.ApplyCommands),
-                InlineKeyboardButton.WithCallbackData(ButtonTexts.Cancel, CallbackPrefixes.CancelCommandSelection)
-            ]);
 
             return new InlineKeyboardMarkup(buttons);
         }

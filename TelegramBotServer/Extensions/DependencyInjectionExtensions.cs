@@ -51,8 +51,9 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
-        _ = services.AddSingleton<ICommandAppService, CommandAppService>();
         _ = services.AddSingleton<IAuthService, AuthService>();
+        _ = services.AddSingleton<ICommandAppService, CommandAppService>();
+
         _ = services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
         return services;
