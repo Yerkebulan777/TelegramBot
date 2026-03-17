@@ -12,8 +12,6 @@ public interface ICallbackHandler
     /// <summary>
     /// Determines whether this handler can process the given callback.
     /// </summary>
-    /// <param name="prefix">The callback prefix (e.g., "PDF:", "OPENFOLDER:").</param>
-    /// <returns>True if this handler can process the callback.</returns>
     bool CanHandle(string prefix);
 
     /// <summary>
@@ -25,9 +23,6 @@ public interface ICallbackHandler
     /// <summary>
     /// Handles the callback asynchronously.
     /// </summary>
-    /// <param name="context">The callback context containing all necessary data.</param>
-    /// <param name="cancellationToken">Token for cancellation.</param>
-    /// <returns>True if the callback was handled and processing should stop.</returns>
     Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
 }
 
