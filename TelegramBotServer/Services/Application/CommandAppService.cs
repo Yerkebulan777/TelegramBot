@@ -45,48 +45,21 @@ public sealed class CommandAppService : ICommandAppService
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
         // Username и Text уже проверены в TelegramBotHostedService
-        string text = message.Text!;
+        string rawText = message.Text!;
+        string text = NormalizeCommandText(rawText);
         long userId = message.UserId;
-        string username = message.Username!;
+        string username = message.Username ?? string.Empty;
 
-        _logger.LogInformation("Received command '{Command}' from {Username} ({UserId})", text, username, userId);
+        _logger.LogInformation("Received command '{Command}' from {Username} ({UserId})", rawText, username, userId);
 
         var session = _sessionManager.GetOrCreateSession(userId);
 
-        if (await HandleReplyKeyboardActionAsync(userId, username, text, session, cancellationToken))
+        if (await HandleReplyKeyboardActionAsync(userId, username, rawText, session, cancellationToken))
         {
             return;
         }
 
-        switch (text.ToLower())
-        {
-            case "/start":
-                session.Reset(_options.RootPath);
-                await SendStartMessageAsync(userId, username);
-                break;
-
-            case "/export":
-                await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
-                break;
-
-            case "/status":
-                session.Reset(_options.RootPath);
-                session.IsInStatusView = true;
-
-                var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
-                var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                await _outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard);
-                break;
-
-            case "/automation":
-                await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
-                break;
-
-            case "/help":
-                session.Reset(_options.RootPath);
-                await SendHelpMessageAsync(userId);
-                break;
-        }
+        await HandleSlashCommandAsync(text, message, session, username, cancellationToken);
     }
 
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
@@ -137,6 +110,63 @@ public sealed class CommandAppService : ICommandAppService
             : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
 
         await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
+    }
+
+    private async Task HandleSlashCommandAsync(
+        string command,
+        MessageDto message,
+        UserSession session,
+        string username,
+        CancellationToken cancellationToken)
+    {
+        long userId = message.UserId;
+        bool isSlashCommand = command.StartsWith('/');
+
+        switch (command)
+        {
+            case "/start":
+                session.Reset(_options.RootPath);
+                await SendStartMessageAsync(userId, username);
+                break;
+
+            case "/clearhistory":
+                session.Reset(_options.RootPath);
+                await ClearChatHistoryAsync(message);
+                break;
+
+            case "/export":
+                await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
+                break;
+
+            case "/status":
+                session.Reset(_options.RootPath);
+                session.IsInStatusView = true;
+
+                var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
+                var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+                await _outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard);
+                break;
+
+            case "/automation":
+                await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
+                break;
+
+            case "/help":
+                session.Reset(_options.RootPath);
+                await SendHelpMessageAsync(userId);
+                break;
+
+            default:
+                if (isSlashCommand)
+                {
+                    _logger.LogWarning("Unknown slash command '{Command}' from {Username} ({UserId})", command, username, userId);
+                }
+                else
+                {
+                    _logger.LogDebug("Ignoring non-command text from {Username} ({UserId})", username, userId);
+                }
+                break;
+        }
     }
 
     private async Task<bool> HandleReplyKeyboardActionAsync(
@@ -221,6 +251,7 @@ public sealed class CommandAppService : ICommandAppService
     private async Task SendHelpMessageAsync(long userId)
     {
         var helpText = new StringBuilder()
+            .AppendLine("/clearhistory - удаление до 500 последних сообщений в текущем чате (в пределах ограничений Telegram).")
             .AppendLine("/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.")
             .AppendLine("/automation - используется для автоматизации задач. BIM Doctor, Clash Report, Auto Resolver")
             .AppendLine("/status - используется для проверки состояния выполнения команды отправленной пользователем.")
@@ -238,6 +269,7 @@ public sealed class CommandAppService : ICommandAppService
             .AppendLine($"Привет, {username}! 👋")
             .AppendLine("Я бот для работы с BIM-документами, автоматизации задач и экспорта файлов.\n")
             .AppendLine("Вот что я умею (нажмите на команду):")
+            .AppendLine("🔹 /clearhistory - очистка до 500 последних сообщений в чате")
             .AppendLine("🔹 /export - экспорт в форматы PDF, DWG, NWC")
             .AppendLine("🔹 /automation - задачи BIM автоматизации ")
             .AppendLine("🔹 /status - состояния выполнения задач")
@@ -245,6 +277,18 @@ public sealed class CommandAppService : ICommandAppService
             .ToString();
 
         await _outputService.SendMessageAsync(userId, startText);
+    }
+
+    private async Task ClearChatHistoryAsync(MessageDto message)
+    {
+        const int maxMessagesToDelete = 500;
+        int lastMessageId = message.MessageId;
+        int firstMessageId = Math.Max(1, lastMessageId - maxMessagesToDelete + 1);
+
+        for (int messageId = lastMessageId; messageId >= firstMessageId; messageId--)
+        {
+            await _outputService.DeleteMessageAsync(message.ChatId, messageId);
+        }
     }
 
     private async Task DispatchFileSelectionCallbackAsync(
@@ -275,5 +319,21 @@ public sealed class CommandAppService : ICommandAppService
         };
 
         await _callbackDispatcher.DispatchAsync(context, cancellationToken);
+    }
+
+    private static string NormalizeCommandText(string text)
+    {
+        if (!text.StartsWith('/'))
+        {
+            return text;
+        }
+
+        int mentionIndex = text.IndexOf('@');
+        if (mentionIndex > 0)
+        {
+            text = text[..mentionIndex];
+        }
+
+        return text.ToLowerInvariant();
     }
 }

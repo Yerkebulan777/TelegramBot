@@ -83,17 +83,29 @@ public class TelegramBotHostedService : BackgroundService
                 case MessageDto message:
                     using (await _sessionManager.AcquireUserLockAsync(message.UserId))
                     {
+                        bool shouldDeleteCommandMessage = IsSlashCommandMessage(message.Text);
                         var session = _sessionManager.GetOrCreateSession(message.UserId);
 
-                        if (message.Username == null || message.Text == null)
+                        if (message.Text == null)
                         {
-                            _logger.LogWarning("Received message with null Username or Text from {UserId}", message.UserId);
+                            _logger.LogWarning("Received message with null Text from {UserId}", message.UserId);
                             return;
                         }
 
                         if (!await Authorization(message.UserId, message.Username, message.Text, session))
+                        {
+                            if (shouldDeleteCommandMessage)
+                            {
+                                await _outputService.DeleteMessageAsync(message.ChatId, message.MessageId);
+                            }
                             return;
+                        }
                         await _commandAppService.HandleUserCommandAsync(message, token);
+
+                        if (shouldDeleteCommandMessage)
+                        {
+                            await _outputService.DeleteMessageAsync(message.ChatId, message.MessageId);
+                        }
                     }
                     break;
                 case CallbackQueryDto callback:
@@ -132,32 +144,34 @@ public class TelegramBotHostedService : BackgroundService
     }
 
 
-    private async Task<bool> Authorization(long userId, string username, string text, UserSession session)
+    private async Task<bool> Authorization(long userId, string? username, string text, UserSession session)
     {
+        string normalizedCommand = NormalizeCommandText(text);
+
         // Lockout check: applies to all paths except /start or /auth (handled separately below)
         if (session.State == SessionState.WaitingForPassword
             && session.FailedAuthAttempts >= UserSession.MaxFailedAttempts
-            && text != "/auth" && text != "/start")
+            && normalizedCommand != "/auth" && normalizedCommand != "/start")
         {
             _logger.LogWarning("User {UserId} is locked out after {Attempts} failed attempts", userId, session.FailedAuthAttempts);
             await _outputService.SendMessageAsync(userId, $"Слишком много неверных попыток ({UserSession.MaxFailedAttempts}). Попробуйте позже или обратитесь к администратору.");
             return false;
         }
 
-        if (text == "/auth" || text == "/start")
+        if (normalizedCommand == "/auth" || normalizedCommand == "/start")
         {
             var checkAuth = await _authService.CheckAuthAsync(userId);
             if (!checkAuth)
             {
                 session.State = SessionState.WaitingForPassword;
-                var welcomeMessage = text == "/start"
+                var welcomeMessage = normalizedCommand == "/start"
                     ? "Привет! Я бот для работы с BIM-документами, автоматизации задач и экспорта файлов.\nДля работы со мной нужна авторизация. Пожалуйста, введите пароль:"
                     : "Введите пароль:";
                 await _outputService.SendMessageAsync(userId, welcomeMessage);
                 return false;
             }
 
-            if (text == "/auth")
+            if (normalizedCommand == "/auth")
             {
                 await _outputService.SendMessageAsync(userId, "Вы уже авторизованы.");
                 return true;
@@ -168,7 +182,7 @@ public class TelegramBotHostedService : BackgroundService
         }
         else if (session.State == SessionState.WaitingForPassword)
         {
-            bool auth = await _authService.AuthorizeUserAsync(userId, username, text);
+            bool auth = await _authService.AuthorizeUserAsync(userId, username ?? string.Empty, text);
             if (!auth)
             {
                 session.FailedAuthAttempts++;
@@ -214,6 +228,27 @@ public class TelegramBotHostedService : BackgroundService
         }
 
         return true;
+    }
+
+    private static bool IsSlashCommandMessage(string? text)
+    {
+        return !string.IsNullOrWhiteSpace(text) && text.StartsWith('/');
+    }
+
+    private static string NormalizeCommandText(string text)
+    {
+        if (!text.StartsWith('/'))
+        {
+            return text;
+        }
+
+        int mentionIndex = text.IndexOf('@');
+        if (mentionIndex > 0)
+        {
+            text = text[..mentionIndex];
+        }
+
+        return text.ToLowerInvariant();
     }
 
 
