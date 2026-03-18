@@ -5,7 +5,9 @@
       "Bash(find TelegramBotServer -maxdepth 3 -name \"*.cs\" -type f ! -path \"*/obj/*\" -exec wc -l {} + | sort -rn)",
       "Bash(cd \"C:/Users/y.zhumabayev/Yandex.Disk/Repository/TelegramBot\" && dotnet build TelegramBotServer/TelegramBotServer.csproj 2>&1 | tail -20)",
       "Bash(cd \"C:/Users/y.zhumabayev/Yandex.Disk/Repository/TelegramBot\" && dotnet build TelegramBotServer/TelegramBotServer.csproj 2>&1)",
-      "Bash(winget upgrade:*)"
+      "Bash(winget upgrade:*)",
+      "Bash(cmd.exe //c \"echo %APPDATA%\")",
+      "Bash(cmd.exe //c \"dir /AL \"\"C:\\\\Users\\\\Yerkebulan\\\\AppData\\\\Roaming\\\\Code\"\"\")"
     ]
   },
   "hooks": {
