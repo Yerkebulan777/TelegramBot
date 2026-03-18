@@ -92,9 +92,9 @@ namespace TelegramBotServer.Services
         {
             var selectionLabel = session.SelectionType switch
             {
-                SelectionMode.Sections => "🏗 Режим: Разделы",
-                SelectionMode.Projects => "🏢 Режим: Проекты",
-                _ => "📄 Режим: Файлы"
+                SelectionMode.Sections => "🌟 Режим: [ РАЗДЕЛЫ ]",
+                SelectionMode.Projects => "🌟 Режим: [ ПРОЕКТЫ ]",
+                _ => "🌟 Режим: [ ФАЙЛЫ ]"
             };
 
             buttons.Add([InlineKeyboardButton.WithCallbackData(selectionLabel, "SELMODE:")]);
