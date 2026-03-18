@@ -106,24 +106,7 @@ namespace TelegramBotServer.Services
                 session.PathMap[parentToken] = parent.FullName;
                 buttons.Add([InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"GOTOPARENT:{parentToken}")]);
             }
-
-            buttons.Add([InlineKeyboardButton.WithCallbackData(GetApplyButtonText(session), "APPLYFILES:")]);
-            buttons.Add([InlineKeyboardButton.WithCallbackData("🔄 Отменить выбор", "CANCELSEL:")]);
-            buttons.Add([InlineKeyboardButton.WithCallbackData(ButtonTexts.Cancel, "CANCELFILESEL:")]);
         }
-
-        private static string GetApplyButtonText(UserSession session)
-        {
-            if (HasAutomationCommands(session))
-                return ButtonTexts.AutomationApply;
-
-            return ButtonTexts.ExportApply;
-        }
-
-        private static bool HasAutomationCommands(UserSession session)
-            => session.ContainsPendingCommand("BIMDOC")
-            || session.ContainsPendingCommand("CLASHREP")
-            || session.ContainsPendingCommand("AUTORES");
 
 
 

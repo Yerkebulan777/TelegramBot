@@ -57,6 +57,8 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
 
     private async Task<bool> HandleFileToggleAsync(CallbackContext context, CancellationToken cancellationToken)
     {
+        context.Session.FileSelectionMessageId = context.MessageId;
+
         var token = context.ParsedCallback.Argument;
         if (!_fileNavigationService.TryResolvePath(context.UserId, token, out var filePath) || filePath == null)
         {
@@ -75,6 +77,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
     private async Task<bool> HandleApplyFilesAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
+        session.FileSelectionMessageId = context.MessageId;
         var selectedFiles = session.SelectedFiles;
 
         if (selectedFiles.Count == 0)
@@ -95,12 +98,14 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
 
         session.ResetNavigation(_options.RootPath);
         session.SelectionType = SelectionMode.Files;
+        session.IsFileSelectionActive = false;
 
         return true;
     }
 
     private async Task<bool> HandleCancelSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
+        context.Session.FileSelectionMessageId = context.MessageId;
         context.Session.ClearSelectedFiles();
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, context.Session);
@@ -112,9 +117,11 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
     private async Task<bool> HandleCancelFileSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
+        session.FileSelectionMessageId = context.MessageId;
 
         session.ResetNavigation(_options.RootPath);
         session.SelectionType = SelectionMode.Files;
+        session.IsFileSelectionActive = false;
 
         if (HasExportCommands(session))
         {

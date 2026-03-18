@@ -112,11 +112,11 @@ public class TelegramOutputService(
     }
 
 
-    public async Task SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
+    public async Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
         try
         {
-            await ExecuteWithRetryAsync(async () =>
+            return await ExecuteWithRetryAsync(async () =>
             {
                 var t = await _botClient.SendMessage(
                     chatId: userId,
@@ -130,6 +130,7 @@ public class TelegramOutputService(
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to send message with keyboard to {UserId}", userId);
+            return null;
         }
     }
 

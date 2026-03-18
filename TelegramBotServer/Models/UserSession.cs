@@ -63,6 +63,8 @@ public class UserSession
     /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
     public bool IsInStatusView { get; set; }
     public int SessionId { get; set; }
+    public bool IsFileSelectionActive { get; set; }
+    public int? FileSelectionMessageId { get; set; }
 
     /// <summary>
     /// Tracks consecutive failed password attempts to prevent brute-force attacks.
@@ -192,6 +194,8 @@ public class UserSession
         CurrentPath = rootPath;
         Counter = 0;
         ClearItems();
+        IsFileSelectionActive = false;
+        FileSelectionMessageId = null;
     }
 
     /// <summary>
@@ -206,6 +210,7 @@ public class UserSession
         ClearSelectedFiles();
         ClearPagesCache();
         ClearItems();
+        FileSelectionMessageId = null;
     }
 }
 

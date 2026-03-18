@@ -39,6 +39,7 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
         var session = context.Session;
+        session.FileSelectionMessageId = context.MessageId;
         var isGoToParent = context.ParsedCallback.Is(CallbackPrefixes.GoToParent);
 
         session.AddToPagesCache(session.Counter);

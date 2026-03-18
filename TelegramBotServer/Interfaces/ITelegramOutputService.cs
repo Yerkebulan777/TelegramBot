@@ -24,7 +24,7 @@ public interface ITelegramOutputService
     /// <summary>
     /// Sends a message with an inline keyboard to a user.
     /// </summary>
-    Task SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard);
+    Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard);
 
     /// <summary>
     /// Sends a message with a reply keyboard to a user.

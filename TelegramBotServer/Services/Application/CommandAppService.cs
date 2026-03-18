@@ -53,7 +53,7 @@ public sealed class CommandAppService : ICommandAppService
 
         var session = _sessionManager.GetOrCreateSession(userId);
 
-        if (await HandleReplyKeyboardActionAsync(userId, text, session, cancellationToken))
+        if (await HandleReplyKeyboardActionAsync(userId, username, text, session, cancellationToken))
         {
             return;
         }
@@ -124,6 +124,7 @@ public sealed class CommandAppService : ICommandAppService
         CancellationToken cancellationToken)
     {
         session.Reset(_options.RootPath);
+        session.IsFileSelectionActive = false;
 
         var commandKeyboard = isAutomation
             ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
@@ -140,10 +141,53 @@ public sealed class CommandAppService : ICommandAppService
 
     private async Task<bool> HandleReplyKeyboardActionAsync(
         long userId,
+        string username,
         string messageText,
         UserSession session,
         CancellationToken cancellationToken)
     {
+        if (session.IsFileSelectionActive)
+        {
+            if (messageText == ButtonTexts.ExportApply || messageText == ButtonTexts.AutomationApply)
+            {
+                if (session.SelectedFiles.Count == 0)
+                {
+                    await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один файл.");
+                    return true;
+                }
+
+                await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
+                session.IsFileSelectionActive = false;
+                await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден.");
+                return true;
+            }
+
+            if (messageText == ButtonTexts.CancelSelection)
+            {
+                await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelSelection, cancellationToken);
+                return true;
+            }
+
+            if (messageText == ButtonTexts.Cancel)
+            {
+                await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
+                session.IsFileSelectionActive = false;
+
+                await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен.");
+
+                var replyKeyboard = session.ContainsPendingCommand("BIMDOC")
+                    || session.ContainsPendingCommand("CLASHREP")
+                    || session.ContainsPendingCommand("AUTORES")
+                    ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
+                    : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
+
+                await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
+                return true;
+            }
+
+            return false;
+        }
+
         if (messageText == ButtonTexts.ExportApply || messageText == ButtonTexts.AutomationApply)
         {
             if (session.PendingCommand.Count == 0)
@@ -154,14 +198,21 @@ public sealed class CommandAppService : ICommandAppService
 
             session.CurrentPath = _options.RootPath;
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-            await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
+            var selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
+            session.FileSelectionMessageId = selectionMessage?.Id;
+            session.IsFileSelectionActive = true;
+
             await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор подтвержден.");
+
+            var fileActionsReplyKeyboard = await _keyboardBuilder.GetFileActionsReplyKeyboardAsync(session);
+            await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard);
             return true;
         }
 
         if (messageText == ButtonTexts.Cancel)
         {
             session.ClearPendingCommands();
+            session.IsFileSelectionActive = false;
             await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
             return true;
         }
@@ -196,5 +247,35 @@ public sealed class CommandAppService : ICommandAppService
             .ToString();
 
         await _outputService.SendMessageAsync(userId, startText);
+    }
+
+    private async Task DispatchFileSelectionCallbackAsync(
+        long userId,
+        string username,
+        UserSession session,
+        string callbackPrefix,
+        CancellationToken cancellationToken)
+    {
+        if (session.FileSelectionMessageId is not int messageId)
+        {
+            var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            var selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
+            session.FileSelectionMessageId = selectionMessage?.Id;
+            return;
+        }
+
+        var context = new CallbackContext
+        {
+            UserId = userId,
+            ChatId = userId,
+            MessageId = messageId,
+            Username = username,
+            CallbackQueryId = string.Empty,
+            ParsedCallback = new ParsedCallback(callbackPrefix, string.Empty),
+            Session = session,
+            Buttons = []
+        };
+
+        await _callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 }

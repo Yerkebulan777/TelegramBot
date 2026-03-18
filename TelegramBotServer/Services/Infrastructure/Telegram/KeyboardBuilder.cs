@@ -13,6 +13,7 @@ public static class ButtonTexts
 {
     public const string ExportApply = "✅ Применить";
     public const string AutomationApply = "✅ Подтвердить";
+    public const string CancelSelection = "🔄 Отменить выбор";
     public const string Cancel = "❌ Отмена";
 }
 
@@ -92,6 +93,23 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
     {
         return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.AutomationApply));
+    }
+
+    public Task<ReplyKeyboardMarkup> GetFileActionsReplyKeyboardAsync(UserSession session)
+    {
+        var applyButtonText = HasAutomationCommands(session)
+            ? ButtonTexts.AutomationApply
+            : ButtonTexts.ExportApply;
+
+        return Task.FromResult(new ReplyKeyboardMarkup(
+        [
+            [new(applyButtonText), new(ButtonTexts.CancelSelection)],
+            [new(ButtonTexts.Cancel)]
+        ])
+        {
+            ResizeKeyboard = true,
+            OneTimeKeyboard = false
+        });
     }
 
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
@@ -197,4 +215,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             OneTimeKeyboard = false
         };
     }
+
+    private static bool HasAutomationCommands(UserSession session)
+        => session.ContainsPendingCommand("BIMDOC")
+        || session.ContainsPendingCommand("CLASHREP")
+        || session.ContainsPendingCommand("AUTORES");
 }
