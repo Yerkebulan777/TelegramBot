@@ -106,13 +106,15 @@ public sealed class CommandAppService : ICommandAppService
             ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
             : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
 
-        await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard);
+        var commandMsg = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard);
+        if (commandMsg != null) session.AddBotMessageId(commandMsg.Id);
 
         var replyKeyboard = isAutomation
             ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
             : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
 
-        await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
+        var replyMsg = await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
+        if (replyMsg != null) session.AddBotMessageId(replyMsg.Id);
     }
 
     private async Task HandleSlashCommandAsync(
@@ -124,6 +126,9 @@ public sealed class CommandAppService : ICommandAppService
     {
         long userId = message.UserId;
         bool isSlashCommand = command.StartsWith('/');
+
+        if (isSlashCommand)
+            await DeletePreviousMessagesAsync(userId, session);
 
         switch (command)
         {
@@ -139,7 +144,8 @@ public sealed class CommandAppService : ICommandAppService
 
                 var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                 var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                await _outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard);
+                var statusMsg = await _outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard);
+                if (statusMsg != null) session.AddBotMessageId(statusMsg.Id);
                 break;
 
             case "/automation":
@@ -167,6 +173,13 @@ public sealed class CommandAppService : ICommandAppService
         }
     }
 
+    private async Task DeletePreviousMessagesAsync(long userId, UserSession session)
+    {
+        var messageIds = session.TakeAllBotMessageIds();
+        foreach (var messageId in messageIds)
+            await _outputService.DeleteMessageAsync(userId, messageId);
+    }
+
     private async Task<bool> HandleReplyKeyboardActionAsync(
         long userId,
         string username,
@@ -189,7 +202,8 @@ public sealed class CommandAppService : ICommandAppService
                     username, userId, session.SelectedFiles.Count);
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
                 session.IsFileSelectionActive = false;
-                await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден.");
+                var applyMsg = await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден.");
+                if (applyMsg != null) session.AddBotMessageId(applyMsg.Id);
                 return true;
             }
 
@@ -199,7 +213,8 @@ public sealed class CommandAppService : ICommandAppService
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
                 session.IsFileSelectionActive = false;
 
-                await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен.");
+                var cancelFileMsg = await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен.");
+                if (cancelFileMsg != null) session.AddBotMessageId(cancelFileMsg.Id);
 
                 var replyKeyboard = session.ContainsPendingCommand("BIMDOC")
                     || session.ContainsPendingCommand("CLASHREP")
@@ -207,7 +222,8 @@ public sealed class CommandAppService : ICommandAppService
                     ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
                     : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
 
-                await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
+                var backToSelMsg = await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
+                if (backToSelMsg != null) session.AddBotMessageId(backToSelMsg.Id);
                 return true;
             }
 
@@ -229,10 +245,12 @@ public sealed class CommandAppService : ICommandAppService
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
             var selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
             session.FileSelectionMessageId = selectionMessage?.Id;
+            if (selectionMessage != null) session.AddBotMessageId(selectionMessage.Id);
             session.IsFileSelectionActive = true;
 
             var fileActionsReplyKeyboard = await _keyboardBuilder.GetFileActionsReplyKeyboardAsync(session);
-            await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard);
+            var fileActionsMsg = await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard);
+            if (fileActionsMsg != null) session.AddBotMessageId(fileActionsMsg.Id);
             return true;
         }
 
@@ -241,7 +259,8 @@ public sealed class CommandAppService : ICommandAppService
             session.ClearPendingCommands();
             session.IsFileSelectionActive = false;
             _logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
-            await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
+            var cancelCmdMsg = await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
+            if (cancelCmdMsg != null) session.AddBotMessageId(cancelCmdMsg.Id);
             return true;
         }
 

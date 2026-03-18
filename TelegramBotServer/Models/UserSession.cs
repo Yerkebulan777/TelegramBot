@@ -29,6 +29,9 @@ public class UserSession
     private readonly List<int> _pagesCache = [];
     private readonly List<FileSystemItem> _items = [];
 
+    private readonly object _messageLock = new();
+    private readonly List<int> _botMessageIds = [];
+
     // Public read-only wrappers with thread-safe access
     public IReadOnlyList<string> PendingCommand
     {
@@ -174,6 +177,22 @@ public class UserSession
         lock (_navigationLock) _items.Clear();
     }
 
+    // Bot message tracking methods
+    public void AddBotMessageId(int messageId)
+    {
+        lock (_messageLock) _botMessageIds.Add(messageId);
+    }
+
+    public IReadOnlyList<int> TakeAllBotMessageIds()
+    {
+        lock (_messageLock)
+        {
+            var ids = new List<int>(_botMessageIds);
+            _botMessageIds.Clear();
+            return ids;
+        }
+    }
+
     /// <summary>
     /// Resets the session state for a new command flow.
     /// </summary>
@@ -187,6 +206,7 @@ public class UserSession
         ClearItems();
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;
+        lock (_messageLock) _botMessageIds.Clear();
     }
 
     /// <summary>

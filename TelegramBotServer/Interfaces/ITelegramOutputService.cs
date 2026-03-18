@@ -29,12 +29,12 @@ public interface ITelegramOutputService
     /// <summary>
     /// Sends a message with a reply keyboard to a user.
     /// </summary>
-    Task SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard);
+    Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard);
 
     /// <summary>
     /// Removes reply keyboard for the user.
     /// </summary>
-    Task RemoveReplyKeyboardAsync(long userId, string message);
+    Task<Message?> RemoveReplyKeyboardAsync(long userId, string message);
 
     /// <summary>
     /// Deletes a message from a chat.

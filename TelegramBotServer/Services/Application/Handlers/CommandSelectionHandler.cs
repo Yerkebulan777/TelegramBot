@@ -90,7 +90,8 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
         Logger.LogInformation("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
         context.Session.ClearPendingCommands();
 
-        await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
+        var cancelMsg = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
+        if (cancelMsg != null) context.Session.AddBotMessageId(cancelMsg.Id);
         await _outputService.DeleteMessageAsync(context.ChatId, context.MessageId);
 
         return true;
