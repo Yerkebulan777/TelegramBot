@@ -127,12 +127,6 @@ public sealed class CommandAppService : ICommandAppService
 
         switch (command)
         {
-            case "/start":
-                _logger.LogDebug("Executing /start for {Username} ({UserId})", username, userId);
-                session.Reset(_options.RootPath);
-                await SendStartMessageAsync(userId, username);
-                break;
-
             case "/export":
                 _logger.LogDebug("Executing /export for {Username} ({UserId})", username, userId);
                 await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
@@ -265,21 +259,6 @@ public sealed class CommandAppService : ICommandAppService
             .ToString();
 
         await _outputService.SendMessageAsync(userId, helpText);
-    }
-
-    private async Task SendStartMessageAsync(long userId, string username)
-    {
-        var startText = new StringBuilder()
-            .AppendLine($"Привет, {username}! 👋")
-            .AppendLine("Я бот для работы с BIM-документами, автоматизации задач и экспорта файлов.\n")
-            .AppendLine("Вот что я умею (нажмите на команду):")
-            .AppendLine("🔹 /export - экспорт в форматы PDF, DWG, NWC")
-            .AppendLine("🔹 /automation - задачи BIM автоматизации ")
-            .AppendLine("🔹 /status - состояния выполнения задач")
-            .AppendLine("🔹 /help - показать подробную справку")
-            .ToString();
-
-        await _outputService.SendMessageAsync(userId, startText);
     }
 
     private async Task DispatchFileSelectionCallbackAsync(

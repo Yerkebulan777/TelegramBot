@@ -9,7 +9,6 @@ namespace TelegramBotServer.Config
         {
             BotCommand[] commands = new[]
             {
-                new BotCommand { Command = "start", Description = "Open main menu" },
                 new BotCommand { Command = "export", Description = "Export to different formats" },
                 new BotCommand { Command = "automation", Description = "Automation features" },
                 new BotCommand { Command = "status", Description = "Check your command queue" },
