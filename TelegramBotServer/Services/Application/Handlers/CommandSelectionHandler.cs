@@ -56,8 +56,8 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
             _ => SelectionMode.Files
         };
 
-        Logger.LogDebug("User {UserId} switched selection mode: {From} → {To}",
-            context.UserId, previousMode, session.SelectionType);
+        Logger.LogInformation("User {Username} ({UserId}) switched selection mode: {From} → {To}",
+            context.Username, context.UserId, previousMode, session.SelectionType);
 
         session.ResetNavigation(_options.RootPath);
 
