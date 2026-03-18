@@ -1,0 +1,106 @@
+@startuml
+title TelegramBotServer - overall bot algorithm
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam participantPadding 20
+skinparam boxPadding 10
+autonumber
+
+actor User
+participant "Program" as Program
+participant "TelegramBotHostedService" as Hosted
+participant "TelegramUpdateMapper" as Mapper
+participant "ISessionManager" as Sessions
+participant "CommandAppService" as App
+participant "CallbackDispatcher" as Dispatcher
+participant "ICallbackHandler\n(chain of responsibility)" as Handler
+participant "CommandToggleHandlerBase" as Toggle
+participant "AutomationCommandHandler" as Automation
+participant "IKeyboardBuilder" as Keyboard
+participant "ITelegramOutputService" as Output
+participant "IDataService" as Data
+
+== Startup ==
+Program -> Program: Build host
+Program -> Program: Configure services and logging
+Program -> Program: Initialize database
+Program -> Hosted: Start Telegram polling
+
+== Update processing loop ==
+loop For each incoming Telegram Update
+    User -> Hosted: Message or callback update
+    Hosted -> Mapper: Map(Update)
+    Mapper --> Hosted: MessageDto / CallbackQueryDto
+
+    alt MessageDto
+        Hosted -> Sessions: AcquireUserLockAsync(userId)
+        Hosted -> Sessions: GetOrCreateSession(userId)
+        Hosted -> App: HandleUserCommandAsync(message)
+        App -> App: Normalize command text
+
+        alt Session.IsFileSelectionActive == true
+            App -> App: Handle reply keyboard action
+            alt Apply / Cancel pressed
+                App -> Output: Send / edit reply keyboard
+            else Ordinary file selection input
+                App -> Output: Process selected files / command text
+            end
+        else Session.IsFileSelectionActive == false
+            alt /export
+                App -> Keyboard: GetCommandsKeyboardAsync(session)
+                App -> Output: Send message with command keyboard
+            else /automation
+                App -> Keyboard: GetAutomationKeyboardAsync(session)
+                App -> Output: Send message with automation keyboard
+            else /status
+                App -> Data: GetSessionsListAsync(userId)
+                App -> Keyboard: GetSessionsListKeyboardAsync(statusList)
+                App -> Output: Send status message with keyboard
+            else /start or /help
+                App -> Output: Send help text
+            else Unknown / non-command text
+                App -> App: Ignore or log warning
+            end
+        end
+
+    else CallbackQueryDto
+        Hosted -> Sessions: AcquireUserLockAsync(userId)
+        Hosted -> Sessions: GetOrCreateSession(userId)
+        Hosted -> App: HandleCallbackAsync(callback)
+        App -> Dispatcher: DispatchAsync(context)
+
+        loop Handlers ordered by Priority
+            Dispatcher -> Handler: CanHandle(prefix)
+            alt Handler supports prefix
+                Handler -> Handler: HandleAsync(context)
+                alt AutomationCommandHandler
+                    Automation -> Toggle: HandleAsyncInternal(context)
+                    Toggle -> Toggle: Toggle pending command in session
+                    Toggle -> Keyboard: GetAutomationKeyboardAsync(session)
+                    Keyboard --> Toggle: InlineKeyboardMarkup
+                    Toggle -> Output: EditMessageReplyMarkupAsync(userId, messageId, keyboard)
+                else Other callback handler
+                    Handler -> Handler: Process callback-specific logic
+                end
+                Dispatcher --> App: handled = true
+                break
+            else Not supported
+                Dispatcher -> Dispatcher: Continue search
+            end
+        end
+
+        Hosted -> Output: AnswerCallbackQuery(callbackQueryId)
+    end
+end
+
+note over Hosted,App
+  Main idea:
+  1) update is mapped to DTO
+  2) session lock prevents concurrent user actions
+  3) messages are processed by CommandAppService
+  4) callbacks are dispatched by CallbackDispatcher
+  5) command toggle handlers update session state and rebuild keyboards
+end note
+
+@enduml

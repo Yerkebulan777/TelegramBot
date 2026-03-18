@@ -6,19 +6,10 @@ namespace TelegramBotServer.Services.Application;
 /// Dispatches callback queries to appropriate handlers.
 /// Implements Chain of Responsibility pattern.
 /// </summary>
-public sealed class CallbackDispatcher
+public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, ILogger<CallbackDispatcher> logger)
 {
-    private readonly IEnumerable<ICallbackHandler> _handlers;
-    private readonly ILogger<CallbackDispatcher> _logger;
-
-    public CallbackDispatcher(
-        IEnumerable<ICallbackHandler> handlers,
-        ILogger<CallbackDispatcher> logger)
-    {
-        // Sort handlers by priority (lower values first)
-        _handlers = handlers.OrderBy(h => h.Priority).ToList();
-        _logger = logger;
-    }
+    private readonly IEnumerable<ICallbackHandler> _handlers = handlers.OrderBy(h => h.Priority).ToList();
+    private readonly ILogger<CallbackDispatcher> _logger = logger;
 
     /// <summary>
     /// Перенаправляет callback на первый подходящий обработчик (Chain of Responsibility).
