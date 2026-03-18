@@ -17,13 +17,7 @@ public class Program
 
             .ConfigureAppConfiguration((context, cfg) =>
             {
-                _ = cfg.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
                 _ = cfg.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
-                _ = cfg.AddEnvironmentVariables();
-                if (args != null)
-                {
-                    _ = cfg.AddCommandLine(args);
-                }
             })
             .ConfigureServices((context, services) => _ = services.AddTelegramBotServer(context.Configuration))
             .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration

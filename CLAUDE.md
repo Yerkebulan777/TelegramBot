@@ -24,7 +24,9 @@ Bot token and root path are **not** hardcoded. Set them in `appsettings.Local.js
 ```json
 {
   "TelegramBot": {
-    "Token": "<your-bot-token>",
+    "Token": "<your-bot-token>"
+  },
+  "FileSystem": {
     "RootPath": "B:\\"
   },
   "ConnectionStrings": {
