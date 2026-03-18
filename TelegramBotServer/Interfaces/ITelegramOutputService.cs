@@ -1,5 +1,6 @@
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Interfaces;
 
@@ -39,6 +40,11 @@ public interface ITelegramOutputService
     /// Удаляет сообщение из чата.
     /// </summary>
     Task DeleteMessageAsync(long chatId, int messageId);
+
+    /// <summary>
+    /// Удаляет все ранее отправленные ботом сообщения из истории сессии.
+    /// </summary>
+    Task ClearChatHistoryAsync(long chatId, UserSession session);
 
     /// <summary>
     /// Отвечает на callback-запрос.

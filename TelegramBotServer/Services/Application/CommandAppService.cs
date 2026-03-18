@@ -133,7 +133,7 @@ public sealed class CommandAppService : ICommandAppService
         bool isSlashCommand = command.StartsWith('/');
 
         if (isSlashCommand)
-            await DeletePreviousMessagesAsync(userId, session);
+            await _outputService.ClearChatHistoryAsync(userId, session);
 
         switch (command)
         {
@@ -175,13 +175,6 @@ public sealed class CommandAppService : ICommandAppService
                 }
                 break;
         }
-    }
-
-    private async Task DeletePreviousMessagesAsync(long userId, UserSession session)
-    {
-        var messageIds = session.TakeAllBotMessageIds();
-        foreach (var messageId in messageIds)
-            await _outputService.DeleteMessageAsync(userId, messageId);
     }
 
     private async Task<bool> HandleReplyKeyboardActionAsync(
@@ -240,6 +233,7 @@ public sealed class CommandAppService : ICommandAppService
 
             _logger.LogInformation("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
                 username, userId, string.Join(", ", session.PendingCommand));
+            await _outputService.ClearChatHistoryAsync(userId, session);
             session.CurrentPath = _options.RootPath;
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
             var selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard), session);
@@ -256,6 +250,7 @@ public sealed class CommandAppService : ICommandAppService
             session.ClearPendingCommands();
             session.IsFileSelectionActive = false;
             _logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
+            await _outputService.ClearChatHistoryAsync(userId, session);
             await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен."), session);
             return true;
         }

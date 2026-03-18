@@ -4,6 +4,7 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Interfaces;
+using TelegramBotServer.Models;
 
 namespace TelegramBotServer.Services.Infrastructure.Telegram;
 
@@ -79,6 +80,16 @@ public class TelegramOutputService(
             if (!ex.Message.Contains("message can't be deleted") && !ex.Message.Contains("message to delete not found"))
                 throw;
         }
+    }
+
+    /// <summary>
+    /// Удаляет все ранее отправленные ботом сообщения из истории сессии.
+    /// </summary>
+    public async Task ClearChatHistoryAsync(long chatId, UserSession session)
+    {
+        var messageIds = session.TakeAllBotMessageIds();
+        foreach (var messageId in messageIds)
+            await DeleteMessageAsync(chatId, messageId);
     }
 
     /// <summary>
