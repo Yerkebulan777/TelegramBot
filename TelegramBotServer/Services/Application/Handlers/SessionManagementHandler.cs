@@ -51,13 +51,13 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         var token = context.ParsedCallback.Argument;
         if (!int.TryParse(token, out int sessionId) || !sessionId.IsValidId())
         {
-            LogInvalidInput("session ID", token, context.UserId);
+            LogInvalidInput("session ID", token, context.Username, context.UserId);
             return true;
         }
 
         var session = context.Session;
 
-        Logger.LogInformation("User {UserId} viewing session details for session {SessionId}", context.UserId, sessionId);
+        Logger.LogInformation("User {Username} ({UserId}) viewing session details for session {SessionId}", context.Username, context.UserId, sessionId);
 
         if (session.IsInStatusView)
         {
@@ -85,11 +85,11 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         var token = context.ParsedCallback.Argument;
         if (!int.TryParse(token, out int sessionId) || !sessionId.IsValidId())
         {
-            LogInvalidInput("session ID", token, context.UserId);
+            LogInvalidInput("session ID", token, context.Username, context.UserId);
             return true;
         }
 
-        Logger.LogInformation("User {UserId} deleting session {SessionId}", context.UserId, sessionId);
+        Logger.LogInformation("User {Username} ({UserId}) deleting session {SessionId}", context.Username, context.UserId, sessionId);
 
         if (!await _dataService.DeleteSessionAsync(sessionId, context.UserId))
             return true;
@@ -105,16 +105,16 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         var token = context.ParsedCallback.Argument;
         if (!int.TryParse(token, out int commandId) || !commandId.IsValidId())
         {
-            LogInvalidInput("command ID", token, context.UserId);
+            LogInvalidInput("command ID", token, context.Username, context.UserId);
             return true;
         }
 
-        Logger.LogInformation("User {UserId} deleting command {CommandId}", context.UserId, commandId);
+        Logger.LogInformation("User {Username} ({UserId}) deleting command {CommandId}", context.Username, context.UserId, commandId);
 
         var sessionId = await _dataService.GetSessionIdByCommandAsync(commandId, context.UserId);
         if (!sessionId.HasValue)
         {
-            Logger.LogWarning("User {UserId} attempted to access foreign or missing command {CommandId}", context.UserId, commandId);
+            Logger.LogWarning("User {Username} ({UserId}) attempted to access foreign or missing command {CommandId}", context.Username, context.UserId, commandId);
             return true;
         }
 
@@ -150,7 +150,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
 
     private async Task<bool> HandleBackToStatusAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("User {UserId} returning to sessions list", context.UserId);
+        Logger.LogInformation("User {Username} ({UserId}) returning to sessions list", context.Username, context.UserId);
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
         return true;

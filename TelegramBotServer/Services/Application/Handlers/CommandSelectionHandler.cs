@@ -74,8 +74,8 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
         if (session.PendingCommand.Count == 0)
             return true;
 
-        Logger.LogInformation("User {UserId} applied command selection: [{Commands}]",
-            context.UserId, string.Join(", ", session.PendingCommand));
+        Logger.LogInformation("User {Username} ({UserId}) applied command selection: [{Commands}]",
+            context.Username, context.UserId, string.Join(", ", session.PendingCommand));
 
         session.CurrentPath = _options.RootPath;
 
@@ -87,7 +87,7 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("User {UserId} cancelled command selection", context.UserId);
+        Logger.LogInformation("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
         context.Session.ClearPendingCommands();
 
         await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");

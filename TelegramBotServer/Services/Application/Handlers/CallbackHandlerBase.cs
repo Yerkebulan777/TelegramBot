@@ -55,9 +55,9 @@ public abstract class CallbackHandlerBase : ICallbackHandler
     /// <summary>
     /// Логирует предупреждение для некорректных входных данных.
     /// </summary>
-    protected void LogInvalidInput(string fieldName, object? value, long userId)
+    protected void LogInvalidInput(string fieldName, object? value, string? username, long userId)
     {
-        Logger.LogWarning("Invalid {FieldName} '{Value}' from user {UserId}", fieldName, value, userId);
+        Logger.LogWarning("Invalid {FieldName} '{Value}' from user {Username} ({UserId})", fieldName, value, username, userId);
     }
 
     private static string GetPrefix(CallbackContext context) => context.ParsedCallback.Prefix;

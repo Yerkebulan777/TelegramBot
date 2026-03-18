@@ -72,7 +72,7 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
 
         if (!IsPathWithinRoot(targetPath))
         {
-            Logger.LogWarning("Rejected navigation outside root. User={UserId}, Path={Path}", context.UserId, targetPath);
+            Logger.LogWarning("Rejected navigation outside root. User={Username} ({UserId}), Path={Path}", context.Username, context.UserId, targetPath);
             await _outputService.SendErrorAsync(context.UserId, "Недопустимый путь.");
             session.CurrentPath = _options.RootPath;
             return true;
@@ -80,8 +80,8 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
 
         session.CurrentPath = targetPath;
 
-        Logger.LogInformation("User {UserId} navigated {Direction} to '{Path}'",
-            context.UserId, isGoToParent ? "up" : "into", targetPath);
+        Logger.LogInformation("User {Username} ({UserId}) navigated {Direction} to '{Path}'",
+            context.Username, context.UserId, isGoToParent ? "up" : "into", targetPath);
 
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 

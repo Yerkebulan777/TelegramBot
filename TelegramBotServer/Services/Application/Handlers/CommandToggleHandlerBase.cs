@@ -38,13 +38,13 @@ public abstract class CommandToggleHandlerBase : CallbackHandlerBase
         if (context.Session.ContainsPendingCommand(code))
         {
             context.Session.RemovePendingCommand(code);
-            Logger.LogInformation("User {UserId} deselected command '{Code}'", context.UserId, code);
+            Logger.LogInformation("User {Username} ({UserId}) deselected command '{Code}'", context.Username, context.UserId, code);
         }
         else
         {
             context.Session.AddPendingCommand(code, displayName);
-            Logger.LogInformation("User {UserId} selected command '{Code}' (pending: [{Commands}])",
-                context.UserId, code, string.Join(", ", context.Session.PendingCommand));
+            Logger.LogInformation("User {Username} ({UserId}) selected command '{Code}' (pending: [{Commands}])",
+                context.Username, context.UserId, code, string.Join(", ", context.Session.PendingCommand));
         }
 
         var keyboard = await GetKeyboardAsync(_keyboardBuilder, context.Session);

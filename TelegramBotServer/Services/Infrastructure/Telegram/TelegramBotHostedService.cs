@@ -81,7 +81,7 @@ public class TelegramBotHostedService : BackgroundService
 
                         if (message.Text == null)
                         {
-                            _logger.LogWarning("Received message with null Text from {UserId}", message.UserId);
+                            _logger.LogWarning("Received message with null Text from {Username} ({UserId})", message.Username, message.UserId);
                             return;
                         }
 
@@ -91,7 +91,7 @@ public class TelegramBotHostedService : BackgroundService
                 case CallbackQueryDto callback:
                     if (callback.CallbackQueryId == null)
                     {
-                        _logger.LogWarning("Received callback with null CallbackQueryId from {UserId}", callback.UserId);
+                        _logger.LogWarning("Received callback with null CallbackQueryId from {Username} ({UserId})", callback.Username, callback.UserId);
                         return;
                     }
                     using (await _sessionManager.AcquireUserLockAsync(callback.UserId))

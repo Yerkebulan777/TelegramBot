@@ -67,7 +67,8 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         bool wasSelected = context.Session.SelectedFiles.Contains(filePath);
         context.Session.ToggleSelectedFile(filePath);
 
-        Logger.LogInformation("User {UserId} {Action} file '{File}' (total selected: {Count})",
+        Logger.LogInformation("User {Username} ({UserId}) {Action} file '{File}' (total selected: {Count})",
+            context.Username,
             context.UserId,
             wasSelected ? "deselected" : "selected",
             Path.GetFileName(filePath),
@@ -89,7 +90,8 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
             return true;
 
         Logger.LogInformation(
-            "User {UserId} submitting job: commands=[{Commands}], selectionMode={Mode}, selectedItems={SelectedCount}",
+            "User {Username} ({UserId}) submitting job: commands=[{Commands}], selectionMode={Mode}, selectedItems={SelectedCount}",
+            context.Username,
             context.UserId,
             string.Join(", ", session.PendingCommand),
             session.SelectionType,
@@ -98,8 +100,8 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         var filesToProcess = await MapFilesAsync(selectedFiles, session.SelectionType, cancellationToken);
 
         Logger.LogInformation(
-            "User {UserId} job resolved to {FileCount} files after mapping (mode={Mode})",
-            context.UserId, filesToProcess.Count, session.SelectionType);
+            "User {Username} ({UserId}) job resolved to {FileCount} files after mapping (mode={Mode})",
+            context.Username, context.UserId, filesToProcess.Count, session.SelectionType);
 
         await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand,
@@ -109,7 +111,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
             (int)session.SelectionType,
             filesToProcess.Count);
 
-        Logger.LogInformation("Job saved to DB for user {UserId}", context.UserId);
+        Logger.LogInformation("Job saved to DB for user {Username} ({UserId})", context.Username, context.UserId);
 
         var reply = BuildQueueReply(session);
         await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, reply);
@@ -126,7 +128,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
 
-        Logger.LogInformation("User {UserId} cancelled file selection", context.UserId);
+        Logger.LogInformation("User {Username} ({UserId}) cancelled file selection", context.Username, context.UserId);
 
         session.ResetNavigation(_options.RootPath);
         session.SelectionType = SelectionMode.Files;

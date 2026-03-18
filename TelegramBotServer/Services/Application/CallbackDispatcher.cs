@@ -68,8 +68,9 @@ public sealed class CallbackDispatcher
         }
 
         _logger.LogDebug(
-            "No handler found for callback '{Prefix}' from user {UserId}",
+            "No handler found for callback '{Prefix}' from user {Username} ({UserId})",
             context.ParsedCallback.Prefix,
+            context.Username,
             context.UserId);
 
         return false;
