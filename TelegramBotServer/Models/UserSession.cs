@@ -66,15 +66,6 @@ public class UserSession
     public bool IsFileSelectionActive { get; set; }
     public int? FileSelectionMessageId { get; set; }
 
-    /// <summary>
-    /// Tracks consecutive failed password attempts to prevent brute-force attacks.
-    /// Reset to 0 on successful authorization.
-    /// </summary>
-    public int FailedAuthAttempts { get; set; }
-
-    /// <summary>Maximum number of failed attempts before lockout.</summary>
-    public const int MaxFailedAttempts = 5;
-
     // Command manipulation methods
     public void AddPendingCommand(string code, string displayName)
     {
@@ -219,6 +210,5 @@ public class UserSession
 /// </summary>
 public enum SessionState
 {
-    Idle,
-    WaitingForPassword
+    Idle
 }

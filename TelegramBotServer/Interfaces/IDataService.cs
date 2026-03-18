@@ -15,21 +15,6 @@ public interface IDataService
     Task UpdateCommandStatusAsync(int commandId, string status);
 
     /// <summary>
-    /// Checks if a user is in the whitelist.
-    /// </summary>
-    Task<bool> IsUserAuthorizedAsync(long userId);
-
-    /// <summary>
-    /// Adds a user to the authorization whitelist.
-    /// </summary>
-    Task AddAuthorizedUserAsync(long userId, string username);
-
-    /// <summary>
-    /// Validates a password against stored credentials.
-    /// </summary>
-    Task<bool> ValidatePasswordAsync(string password);
-
-    /// <summary>
     /// Gets all commands for a user (excluding deleted).
     /// </summary>
     Task<List<Command>> GetUserCommandsAsync(long userId);

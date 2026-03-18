@@ -56,98 +56,11 @@ public class SqliteDataService : IDataService
         );
     ";
 
-        var createWhitelistTable = @"
-        CREATE TABLE IF NOT EXISTS Whitelist (
-            UserId INTEGER PRIMARY KEY,
-            Username TEXT,
-            Timestamp TEXT
-        );
-    ";
-
-        var createCredentialsTable = @"
-        CREATE TABLE IF NOT EXISTS Credentials (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            password TEXT NOT NULL
-        );
-    ";
-
         await using var cmd1 = new SqliteCommand(createSessionsTable, conn);
         await using var cmd2 = new SqliteCommand(createCommandsTable, conn);
-        await using var cmd3 = new SqliteCommand(createWhitelistTable, conn);
-        await using var cmd4 = new SqliteCommand(createCredentialsTable, conn);
 
         await cmd1.ExecuteNonQueryAsync();
         await cmd2.ExecuteNonQueryAsync();
-        await cmd3.ExecuteNonQueryAsync();
-        await cmd4.ExecuteNonQueryAsync();
-
-        await using var countCmd = new SqliteCommand("SELECT COUNT(*) FROM Credentials;", conn);
-        var count = Convert.ToInt64(await countCmd.ExecuteScalarAsync());
-
-        if (count == 0)
-        {
-            // Intentional design: the default password is hardcoded and known.
-            // It is stored as a bcrypt/PBKDF2 hash, not plain-text.
-            // The administrator is expected to change it via the database directly after first run.
-            string hashedPassword = PasswordHasher.Hash("qwerty123");
-            var insertPassword = "INSERT INTO Credentials (password) VALUES (@password);";
-            await using var insertCmd = new SqliteCommand(insertPassword, conn);
-            insertCmd.Parameters.AddWithValue("@password", hashedPassword);
-            await insertCmd.ExecuteNonQueryAsync();
-            _logger.LogInformation("Default password (hashed) added to Credentials table.");
-        }
-        else
-        {
-            // Migrate any existing plain-text passwords to hashed format
-            await MigratePlainTextPasswordsAsync(conn);
-        }
-    }
-
-    /// <summary>
-    /// One-time migration: detects plain-text passwords and re-hashes them.
-    /// </summary>
-    private async Task MigratePlainTextPasswordsAsync(SqliteConnection conn)
-    {
-        var selectCmd = new SqliteCommand("SELECT id, password FROM Credentials;", conn);
-        await using var reader = await selectCmd.ExecuteReaderAsync();
-
-        var updates = new List<(int Id, string HashedPassword)>();
-        while (await reader.ReadAsync())
-        {
-            int id = reader.GetInt32(0);
-            string storedPassword = reader.GetString(1);
-
-            // If it doesn't look like a base64-encoded PBKDF2 hash (48 bytes → 64 chars base64), migrate it
-            if (!IsLikelyHash(storedPassword))
-            {
-                updates.Add((id, PasswordHasher.Hash(storedPassword)));
-                _logger.LogInformation("Migrating plain-text password (id={CredentialId}) to hashed format.", id);
-            }
-        }
-        await reader.CloseAsync();
-
-        foreach (var (id, hashedPassword) in updates)
-        {
-            var updateCmd = new SqliteCommand("UPDATE Credentials SET password = @password WHERE id = @id;", conn);
-            updateCmd.Parameters.AddWithValue("@password", hashedPassword);
-            updateCmd.Parameters.AddWithValue("@id", id);
-            await updateCmd.ExecuteNonQueryAsync();
-        }
-    }
-
-    private static bool IsLikelyHash(string value)
-    {
-        // A PBKDF2 hash in our format is base64-encoded 48 bytes → always 64 chars
-        if (value.Length < 40) return false;
-        try
-        {
-            byte[] decoded = Convert.FromBase64String(value);
-            return decoded.Length == 48; // 16 salt + 32 hash
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
     }
 
 
@@ -163,40 +76,6 @@ public class SqliteDataService : IDataService
         cmd.Parameters.AddWithValue("@id", commandId);
         await cmd.ExecuteNonQueryAsync();
     }
-
-    // ✅ Check if user is in whitelist
-    public async Task<bool> IsUserAuthorizedAsync(long userId)
-    {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
-
-        const string query = "SELECT COUNT(*) FROM Whitelist WHERE UserId = @userId";
-        await using var cmd = new SqliteCommand(query, conn);
-        cmd.Parameters.AddWithValue("@userId", userId);
-
-        var count = Convert.ToInt64(await cmd.ExecuteScalarAsync());
-        return count > 0;
-    }
-
-    // ✅ Add authorized user to whitelist
-    public async Task AddAuthorizedUserAsync(long userId, string username)
-    {
-        DateTime timestamp = DateTime.UtcNow;
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
-
-        const string query = @"
-            INSERT OR REPLACE INTO Whitelist (UserId, Username, Timestamp)
-            VALUES (@userId, @username, @ts);
-        ";
-
-        await using var cmd = new SqliteCommand(query, conn);
-        cmd.Parameters.AddWithValue("@userId", userId);
-        cmd.Parameters.AddWithValue("@username", username);
-        cmd.Parameters.AddWithValue("@ts", timestamp.ToString("o"));
-        await cmd.ExecuteNonQueryAsync();
-    }
-
 
     // ✅ Get all user commands
     public async Task<List<Command>> GetUserCommandsAsync(long userId)
@@ -231,21 +110,6 @@ public class SqliteDataService : IDataService
         return list;
     }
 
-
-    public async Task<bool> ValidatePasswordAsync(string password)
-    {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
-
-        const string query = @"SELECT password FROM Credentials LIMIT 1;";
-        await using var cmd = new SqliteCommand(query, conn);
-
-        var storedHash = await cmd.ExecuteScalarAsync() as string;
-        if (storedHash == null)
-            return false;
-
-        return PasswordHasher.Verify(password, storedHash);
-    }
 
     public async Task<long> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
