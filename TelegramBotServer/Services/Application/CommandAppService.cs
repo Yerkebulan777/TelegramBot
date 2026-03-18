@@ -147,6 +147,7 @@ public sealed class CommandAppService : ICommandAppService
                 await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
                 break;
 
+            case "/start":
             case "/help":
                 _logger.LogDebug("Executing /help for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
@@ -250,12 +251,12 @@ public sealed class CommandAppService : ICommandAppService
     private async Task SendHelpMessageAsync(long userId)
     {
         var helpText = new StringBuilder()
-            .AppendLine("/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.")
-            .AppendLine("/automation - используется для автоматизации задач. BIM Doctor, Clash Report, Auto Resolver")
-            .AppendLine("/status - используется для проверки состояния выполнения команды отправленной пользователем.")
-            .AppendLine("При отправке данной команды пользователю будет предоставлен список сессий с временем отправки на обработку.")
-            .AppendLine("Пользователь может нажать на сессию для мониторинга процесса выполнения команды.")
-            .AppendLine("Кроме того в предоставленном меню пользователь может полностью удалить сессию.")
+            .AppendLine("*Доступные команды:*")
+            .AppendLine()
+            .AppendLine("📤 /export — экспорт файлов в PDF, DWG, NWC, IFC")
+            .AppendLine("⚙️ /automation — автоматизация: BIM Doctor, Clash Report, Auto Resolver")
+            .AppendLine("📊 /status — статус выполнения задач и управление сессиями")
+            .AppendLine("❓ /help — справка по командам")
             .ToString();
 
         await _outputService.SendMessageAsync(userId, helpText);
