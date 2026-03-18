@@ -57,9 +57,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 
         var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
         {
-            if (button.CallbackData != null && button.CallbackData.StartsWith("FILE:"))
-            {
-                var token = button.CallbackData[5..];
+            if (button.CallbackData != null && button.CallbackData.StartsWith(CallbackPrefixes.File))
+                {
+                    var token = button.CallbackData[CallbackPrefixes.File.Length..];
 
                 if (_navigationService.TryResolvePath(userId, token, out var path) && path is not null && session.SelectedFiles.Contains(path))
                 {
@@ -81,10 +81,10 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     {
         var commandOptions = new List<CommandOption>
             {
-                new("Export to PDF", "PDF:", "PDF"),
-                new("Export to DWG", "DWG:", "DWG"),
-                new("Export to NWC", "NWC:", "NWC"),
-                new("Export to IFC", "IFC:", "IFC")
+                new("Export to PDF", CallbackPrefixes.Pdf, CommandCodes.Pdf),
+                    new("Export to DWG", CallbackPrefixes.Dwg, CommandCodes.Dwg),
+                    new("Export to NWC", CallbackPrefixes.Nwc, CommandCodes.Nwc),
+                    new("Export to IFC", CallbackPrefixes.Ifc, CommandCodes.Ifc)
             };
 
         return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
@@ -136,7 +136,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         {
             buttons.Add(
             [
-                InlineKeyboardButton.WithCallbackData(session.Date.ToString(), $"Sessiondetails:{session.SessionId}")
+                InlineKeyboardButton.WithCallbackData(session.Date.ToString(), $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
             ]);
         }
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
@@ -153,9 +153,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             {
                 new()
                 {
-                    InlineKeyboardButton.WithCallbackData("More", $"Sessiondetails:{sessionId}"),
-                    InlineKeyboardButton.WithCallbackData("Delete All", $"Deletesession:{sessionId}"),
-                    InlineKeyboardButton.WithCallbackData("Back", $"Backtostatus:")
+                    InlineKeyboardButton.WithCallbackData("More", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
+                    InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}"),
+                    InlineKeyboardButton.WithCallbackData("Back", CallbackPrefixes.BackToStatus)
                 }
             };
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
@@ -170,9 +170,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             {
                 new()
                 {
-                    InlineKeyboardButton.WithCallbackData("Less", $"Sessiondetails:{sessionId}"),
-                    InlineKeyboardButton.WithCallbackData("Delete All", $"Deletesession:{sessionId}"),
-                    InlineKeyboardButton.WithCallbackData("Back", $"Backtostatus:")
+                    InlineKeyboardButton.WithCallbackData("Less", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
+                    InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}"),
+                    InlineKeyboardButton.WithCallbackData("Back", CallbackPrefixes.BackToStatus)
                 }
             };
 
@@ -185,7 +185,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             buttons.Add(
             [
                 InlineKeyboardButton.WithCallbackData($"{sessionCommand.Date}", $"{sessionCommand.CommandId}"),
-                    InlineKeyboardButton.WithCallbackData("🗑 Delete", $"Deletecommand:{sessionCommand.CommandId}")
+                    InlineKeyboardButton.WithCallbackData("🗑 Delete", $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}")
             ]);
         }
 
@@ -199,9 +199,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     {
         var commandOptions = new List<CommandOption>
             {
-                new("BIM Doctor", "BIMDOC:", "BIMDOC"),
-                new("Clash Report", "CLASHREP:", "CLASHREP"),
-                new("Auto Resolver", "AUTORES:", "AUTORES")
+                new("BIM Doctor", CallbackPrefixes.BimDoc, CommandCodes.BimDoc),
+                new("Clash Report", CallbackPrefixes.ClashRep, CommandCodes.ClashRep),
+                new("Auto Resolver", CallbackPrefixes.AutoRes, CommandCodes.AutoRes)
             };
 
         return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
@@ -242,7 +242,5 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     }
 
     private static bool HasAutomationCommands(UserSession session)
-        => session.ContainsPendingCommand("BIMDOC")
-        || session.ContainsPendingCommand("CLASHREP")
-        || session.ContainsPendingCommand("AUTORES");
+        => CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand);
 }

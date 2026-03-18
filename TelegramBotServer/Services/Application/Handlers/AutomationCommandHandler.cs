@@ -13,26 +13,13 @@ public sealed class AutomationCommandHandler(
     ILogger<AutomationCommandHandler> logger) : CommandToggleHandlerBase(keyboardBuilder, outputService, logger)
 {
     protected override IReadOnlyDictionary<string, (string Code, string DisplayName)> Commands { get; } =
-
         new Dictionary<string, (string Code, string DisplayName)>
         {
-            [CallbackPrefixes.BimDoc] = ("BIMDOC", "BIM Doctor"),
-            [CallbackPrefixes.AutoRes] = ("AUTORES", "Auto Resolver"),
-            [CallbackPrefixes.ClashRep] = ("CLASHREP", "Clash Report"),
+            [CallbackPrefixes.BimDoc] = (CommandCodes.BimDoc, "BIM Doctor"),
+            [CallbackPrefixes.AutoRes] = (CommandCodes.AutoRes, "Auto Resolver"),
+            [CallbackPrefixes.ClashRep] = (CommandCodes.ClashRep, "Clash Report"),
         };
 
-    protected override HashSet<string> SupportedPrefixes { get; } =
-    [
-        CallbackPrefixes.BimDoc,
-        CallbackPrefixes.ClashRep,
-        CallbackPrefixes.AutoRes
-    ];
-
-    /// <summary>
-    ///  Retrieves an inline keyboard markup for the specified user session using the provided keyboard builder.
-    /// </summary>
     protected override Task<InlineKeyboardMarkup> GetKeyboardAsync(IKeyboardBuilder keyboardBuilder, UserSession session)
-    {
-        return keyboardBuilder.GetAutomationKeyboardAsync(session);
-    }
+        => keyboardBuilder.GetAutomationKeyboardAsync(session);
 }

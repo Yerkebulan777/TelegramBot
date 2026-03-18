@@ -2,10 +2,11 @@ using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using TelegramBotServer.Config;
 using TelegramBotServer.DTOs;
 using TelegramBotServer.Interfaces;
 
-namespace TelegramBotServer.Services;
+namespace TelegramBotServer.Services.Infrastructure.Telegram;
 
 public class TelegramBotHostedService : BackgroundService
 {
@@ -37,12 +38,12 @@ public class TelegramBotHostedService : BackgroundService
     {
         _logger.LogInformation("Starting Telegram polling");
 
-        await Config.Config.ConfigureAsync(_botClient, _logger);
+        await BotCommandsSetup.ConfigureAsync(_botClient, _logger);
 
 
         var receiverOptions = new ReceiverOptions
         {
-            AllowedUpdates = new[] { UpdateType.Message, UpdateType.CallbackQuery }
+            AllowedUpdates = [UpdateType.Message, UpdateType.CallbackQuery]
         };
 
         // Create the DefaultUpdateHandler with proper delegates

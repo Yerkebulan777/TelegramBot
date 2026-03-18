@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using TelegramBotServer.Config;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
@@ -7,11 +8,15 @@ namespace TelegramBotServer.Services.Application.Handlers;
 /// <summary>
 /// Обработчик операций выбора команд (применить, отмена) и смены режима выбора.
 /// </summary>
-public sealed class CommandSelectionHandler : CallbackHandlerBase
+public sealed class CommandSelectionHandler(
+    IKeyboardBuilder keyboardBuilder,
+    ITelegramOutputService outputService,
+    IOptions<FileSystemOptions> options,
+    ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IKeyboardBuilder _keyboardBuilder;
-    private readonly ITelegramOutputService _outputService;
-    private readonly FileSystemOptions _options;
+    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+    private readonly ITelegramOutputService _outputService = outputService;
+    private readonly FileSystemOptions _options = options.Value;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
@@ -19,17 +24,6 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
         CallbackPrefixes.ApplyCommands,
         CallbackPrefixes.CancelCommandSelection
     ];
-
-    public CommandSelectionHandler(
-        IKeyboardBuilder keyboardBuilder,
-        ITelegramOutputService outputService,
-        Microsoft.Extensions.Options.IOptions<FileSystemOptions> options,
-        ILogger<CommandSelectionHandler> logger) : base(logger)
-    {
-        _keyboardBuilder = keyboardBuilder;
-        _outputService = outputService;
-        _options = options.Value;
-    }
 
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {

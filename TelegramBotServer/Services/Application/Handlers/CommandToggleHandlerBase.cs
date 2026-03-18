@@ -7,24 +7,21 @@ namespace TelegramBotServer.Services.Application.Handlers;
 /// <summary>
 /// Базовый класс для обработчиков, переключающих команды в сессии пользователя.
 /// </summary>
-public abstract class CommandToggleHandlerBase : CallbackHandlerBase
+public abstract class CommandToggleHandlerBase(
+    IKeyboardBuilder keyboardBuilder,
+    ITelegramOutputService outputService,
+    ILogger logger) : CallbackHandlerBase(logger)
 {
-    private readonly IKeyboardBuilder _keyboardBuilder;
-    private readonly ITelegramOutputService _outputService;
-
-    protected CommandToggleHandlerBase(
-        IKeyboardBuilder keyboardBuilder,
-        ITelegramOutputService outputService,
-        ILogger logger) : base(logger)
-    {
-        _keyboardBuilder = keyboardBuilder;
-        _outputService = outputService;
-    }
+    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+    private readonly ITelegramOutputService _outputService = outputService;
 
     /// <summary>
     /// Сопоставление префикса команды с (код, отображаемое имя).
     /// </summary>
     protected abstract IReadOnlyDictionary<string, (string Code, string DisplayName)> Commands { get; }
+
+    /// <inheritdoc/>
+    public override bool CanHandle(string prefix) => Commands.ContainsKey(prefix);
 
     /// <summary>
     /// Возвращает клавиатуру для отображения после переключения.

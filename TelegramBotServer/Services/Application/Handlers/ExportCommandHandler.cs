@@ -12,19 +12,11 @@ public sealed class ExportCommandHandler : CommandToggleHandlerBase
     protected override IReadOnlyDictionary<string, (string Code, string DisplayName)> Commands { get; } =
         new Dictionary<string, (string Code, string DisplayName)>
         {
-            [CallbackPrefixes.Pdf] = ("PDF", "Export to PDF"),
-            [CallbackPrefixes.Dwg] = ("DWG", "Export to DWG"),
-            [CallbackPrefixes.Nwc] = ("NWC", "Export to NWC"),
-            [CallbackPrefixes.Ifc] = ("IFC", "Export to IFC"),
+            [CallbackPrefixes.Pdf] = (CommandCodes.Pdf, "Export to PDF"),
+            [CallbackPrefixes.Dwg] = (CommandCodes.Dwg, "Export to DWG"),
+            [CallbackPrefixes.Nwc] = (CommandCodes.Nwc, "Export to NWC"),
+            [CallbackPrefixes.Ifc] = (CommandCodes.Ifc, "Export to IFC"),
         };
-
-    protected override HashSet<string> SupportedPrefixes { get; } =
-    [
-        CallbackPrefixes.Pdf,
-        CallbackPrefixes.Dwg,
-        CallbackPrefixes.Nwc,
-        CallbackPrefixes.Ifc
-    ];
 
     public ExportCommandHandler(
         IKeyboardBuilder keyboardBuilder,

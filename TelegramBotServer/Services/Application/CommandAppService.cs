@@ -222,9 +222,9 @@ public sealed class CommandAppService : ICommandAppService
                 var cancelFileMsg = await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен.");
                 if (cancelFileMsg != null) session.AddBotMessageId(cancelFileMsg.Id);
 
-                var replyKeyboard = session.ContainsPendingCommand("BIMDOC")
-                    || session.ContainsPendingCommand("CLASHREP")
-                    || session.ContainsPendingCommand("AUTORES")
+                var replyKeyboard = session.ContainsPendingCommand(CommandCodes.BimDoc)
+                    || session.ContainsPendingCommand(CommandCodes.ClashRep)
+                    || session.ContainsPendingCommand(CommandCodes.AutoRes)
                     ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
                     : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
 

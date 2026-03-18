@@ -5,7 +5,7 @@ using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Interfaces;
 
-namespace TelegramBotServer.Services;
+namespace TelegramBotServer.Services.Infrastructure.Telegram;
 
 public class TelegramOutputService(
     ITelegramBotClient botClient,

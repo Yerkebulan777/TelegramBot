@@ -3,7 +3,7 @@ using Telegram.Bot.Types;
 
 namespace TelegramBotServer.Config
 {
-    public class Config
+    public static class BotCommandsSetup
     {
         /// <summary>Регистрирует команды бота в Telegram (export, automation, status, help).</summary>
         public static async Task ConfigureAsync(ITelegramBotClient bot, ILogger logger)

@@ -245,13 +245,8 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
     }
 
     private static bool HasExportCommands(UserSession session)
-        => session.ContainsPendingCommand("PDF")
-        || session.ContainsPendingCommand("DWG")
-        || session.ContainsPendingCommand("NWC")
-        || session.ContainsPendingCommand("IFC");
+        => CommandCodes.ExportCodes.Any(session.ContainsPendingCommand);
 
     private static bool HasAutomationCommands(UserSession session)
-        => session.ContainsPendingCommand("BIMDOC")
-        || session.ContainsPendingCommand("CLASHREP")
-        || session.ContainsPendingCommand("AUTORES");
+        => CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand);
 }
