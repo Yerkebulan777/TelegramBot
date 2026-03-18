@@ -64,6 +64,8 @@ namespace TelegramBotServer.Services
                 if (!sessionLock.Wait(0))
                     continue;
 
+                // Track whether we disposed the semaphore inside the lock, so we know not to Release() it.
+                bool removed = false;
                 try
                 {
                     // Double-check after acquiring lock
@@ -71,14 +73,17 @@ namespace TelegramBotServer.Services
                     {
                         _sessions.TryRemove(key, out _);
                         if (_sessionLocks.TryRemove(key, out var removedLock))
+                        {
                             removedLock.Dispose();
-                        continue; // lock already disposed, skip Release
+                            removed = true;
+                        }
                     }
                 }
                 finally
                 {
-                    // Only release if the semaphore was not disposed above
-                    if (_sessionLocks.ContainsKey(key))
+                    // Release only if the semaphore was NOT disposed above.
+                    // If removed=true, the semaphore is already disposed — calling Release() would throw ObjectDisposedException.
+                    if (!removed)
                         sessionLock.Release();
                 }
             }

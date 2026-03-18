@@ -44,7 +44,7 @@ public interface ITelegramOutputService
     /// <summary>
     /// Answers a callback query with a toast notification.
     /// </summary>
-    Task AnswerCallbackAsync(string callbackId, string messageText, bool showAlert = false);
+    Task AnswerCallbackAsync(string callbackId, string messageText);
 
     /// <summary>
     /// Edits the reply markup (inline keyboard) of an existing message.

@@ -12,8 +12,6 @@ public class UserSession
     public string? TempData { get; set; }
     public DateTime LastActivity { get; set; } = DateTime.UtcNow;
 
-    public bool IsAuthorized { get; set; }
-
     public string CurrentPath { get; set; } = Directory.GetCurrentDirectory();
 
     // ConcurrentDictionary: token-to-path mapping used by FileSystemBrowser and handlers
@@ -59,10 +57,21 @@ public class UserSession
 
     public SelectionMode SelectionType { get; set; } = SelectionMode.Files;
     public string? RootPath { get; set; }
-    public bool Level { get; set; }
+    /// <summary>True when the user is navigating into a subfolder level.</summary>
+    public bool IsNavigatingDeep { get; set; }
     public int Counter { get; set; }
-    public bool StatusLevel { get; set; }
+    /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
+    public bool IsInStatusView { get; set; }
     public int SessionId { get; set; }
+
+    /// <summary>
+    /// Tracks consecutive failed password attempts to prevent brute-force attacks.
+    /// Reset to 0 on successful authorization.
+    /// </summary>
+    public int FailedAuthAttempts { get; set; }
+
+    /// <summary>Maximum number of failed attempts before lockout.</summary>
+    public const int MaxFailedAttempts = 5;
 
     // Command manipulation methods
     public void AddPendingCommand(string code, string displayName)
@@ -192,7 +201,7 @@ public class UserSession
     public void ResetNavigation(string rootPath)
     {
         CurrentPath = rootPath;
-        Level = false;
+        IsNavigatingDeep = false;
         Counter = 0;
         ClearSelectedFiles();
         ClearPagesCache();

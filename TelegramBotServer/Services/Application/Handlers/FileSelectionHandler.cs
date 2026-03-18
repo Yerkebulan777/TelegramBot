@@ -1,6 +1,6 @@
-using Microsoft.Extensions.Options;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
 using TelegramBotServer.Config;
 using TelegramBotServer.Interfaces;
 using TelegramBotServer.Models;
@@ -60,7 +60,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         var token = context.ParsedCallback.Argument;
         if (!_fileNavigationService.TryResolvePath(context.UserId, token, out var filePath) || filePath == null)
         {
-            await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "Действие устарело. Пожалуйста, начните заново (/start)", showAlert: true);
+            await _outputService.SendErrorAsync(context.UserId, "File not found.");
             return true;
         }
 
@@ -121,8 +121,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
             var keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(session);
             await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
         }
-
-        if (HasAutomationCommands(session))
+        else if (HasAutomationCommands(session))
         {
             var keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(session);
             await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);

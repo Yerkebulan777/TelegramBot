@@ -1,4 +1,6 @@
+using System.Text;
 using Microsoft.Extensions.Options;
+using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Config;
 using TelegramBotServer.DTOs;
 using TelegramBotServer.Interfaces;
@@ -10,25 +12,35 @@ namespace TelegramBotServer.Services;
 
 /// <summary>
 /// Main application service for handling user commands and callbacks.
+/// Delegates callback processing to specialized handlers via CallbackDispatcher.
 /// </summary>
-public sealed class CommandAppService(
-    IEnumerable<IUserCommandHandler> handlers,
-    IDataService dataService,
-    ITelegramOutputService outputService,
-    ISessionManager sessionManager,
-    IKeyboardBuilder keyboardBuilder,
-    CallbackDispatcher callbackDispatcher,
-    IOptions<FileSystemOptions> fileSystemOptions,
-    ILogger<CommandAppService> logger) : ICommandAppService
+public sealed class CommandAppService : ICommandAppService
 {
-    private readonly IEnumerable<IUserCommandHandler> _handlers = handlers;
-    private readonly IDataService _dataService = dataService;
-    private readonly ITelegramOutputService _outputService = outputService;
-    private readonly ISessionManager _sessionManager = sessionManager;
-    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
-    private readonly CallbackDispatcher _callbackDispatcher = callbackDispatcher;
-    private readonly ILogger<CommandAppService> _logger = logger;
-    private readonly FileSystemOptions _options = fileSystemOptions.Value;
+    private readonly IDataService _dataService;
+    private readonly ITelegramOutputService _outputService;
+    private readonly ISessionManager _sessionManager;
+    private readonly IKeyboardBuilder _keyboardBuilder;
+    private readonly CallbackDispatcher _callbackDispatcher;
+    private readonly ILogger<CommandAppService> _logger;
+    private readonly FileSystemOptions _options;
+
+    public CommandAppService(
+        IDataService dataService,
+        ITelegramOutputService outputService,
+        ISessionManager sessionManager,
+        IKeyboardBuilder keyboardBuilder,
+        CallbackDispatcher callbackDispatcher,
+        IOptions<FileSystemOptions> fileSystemOptions,
+        ILogger<CommandAppService> logger)
+    {
+        _dataService = dataService;
+        _outputService = outputService;
+        _sessionManager = sessionManager;
+        _keyboardBuilder = keyboardBuilder;
+        _callbackDispatcher = callbackDispatcher;
+        _logger = logger;
+        _options = fileSystemOptions.Value;
+    }
 
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
@@ -46,16 +58,34 @@ public sealed class CommandAppService(
             return;
         }
 
-        var commandText = text.ToLower();
-        var handler = _handlers.FirstOrDefault(h => h.Command == commandText);
+        switch (text.ToLower())
+        {
+            case "/start":
+                session.Reset(_options.RootPath);
+                await SendStartMessageAsync(userId, username);
+                break;
 
-        if (handler != null)
-        {
-            await handler.HandleAsync(message, session, cancellationToken);
-        }
-        else
-        {
-            _logger.LogDebug("No handler found for command '{Command}'", commandText);
+            case "/export":
+                await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
+                break;
+
+            case "/status":
+                session.Reset(_options.RootPath);
+                session.IsInStatusView = true;
+
+                var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
+                var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+                await _outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard);
+                break;
+
+            case "/automation":
+                await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
+                break;
+
+            case "/help":
+                session.Reset(_options.RootPath);
+                await SendHelpMessageAsync(userId);
+                break;
         }
     }
 
@@ -87,7 +117,32 @@ public sealed class CommandAppService(
 
     // ========== Private helper methods ==========
 
-    private async Task<bool> HandleReplyKeyboardActionAsync(long userId, string messageText, UserSession session, CancellationToken cancellationToken)
+    private async Task StartCommandSelectionAsync(
+        long userId,
+        UserSession session,
+        bool isAutomation,
+        CancellationToken cancellationToken)
+    {
+        session.Reset(_options.RootPath);
+
+        var commandKeyboard = isAutomation
+            ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
+            : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
+
+        await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard);
+
+        var replyKeyboard = isAutomation
+            ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
+            : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
+
+        await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
+    }
+
+    private async Task<bool> HandleReplyKeyboardActionAsync(
+        long userId,
+        string messageText,
+        UserSession session,
+        CancellationToken cancellationToken)
     {
         if (messageText == ButtonTexts.ExportApply || messageText == ButtonTexts.AutomationApply)
         {
@@ -112,5 +167,35 @@ public sealed class CommandAppService(
         }
 
         return false;
+    }
+
+    private async Task SendHelpMessageAsync(long userId)
+    {
+        var helpText = new StringBuilder()
+            .AppendLine("/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.")
+            .AppendLine("/automation - используется для автоматизации задач. BIM Doctor, Clash Report, Auto Resolver")
+            .AppendLine("/status - используется для проверки состояния выполнения команды отправленной пользователем.")
+            .AppendLine("При отправке данной команды пользователю будет предоставлен список сессий с временем отправки на обработку.")
+            .AppendLine("Пользователь может нажать на сессию для мониторинга процесса выполнения команды.")
+            .AppendLine("Кроме того в предоставленном меню пользователь может полностью удалить сессию.")
+            .ToString();
+
+        await _outputService.SendMessageAsync(userId, helpText);
+    }
+
+    private async Task SendStartMessageAsync(long userId, string username)
+    {
+        var startText = new StringBuilder()
+            .AppendLine($"Привет, {username}! 👋")
+            .AppendLine("Я бот для работы с BIM-документами, автоматизации задач и экспорта файлов.")
+            .AppendLine()
+            .AppendLine("Вот что я умею (нажмите на команду):")
+            .AppendLine("🔹 /export - экспорт в форматы PDF, DWG, NWC, IFC")
+            .AppendLine("🔹 /automation - задачи автоматизации (BIM Doctor, Clash Report и др.)")
+            .AppendLine("🔹 /status - проверка состояния выполнения ваших задач")
+            .AppendLine("🔹 /help - показать подробную справку")
+            .ToString();
+
+        await _outputService.SendMessageAsync(userId, startText);
     }
 }

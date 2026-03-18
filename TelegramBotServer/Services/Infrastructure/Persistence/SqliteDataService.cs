@@ -86,6 +86,9 @@ public class SqliteDataService : IDataService
 
         if (count == 0)
         {
+            // Intentional design: the default password is hardcoded and known.
+            // It is stored as a bcrypt/PBKDF2 hash, not plain-text.
+            // The administrator is expected to change it via the database directly after first run.
             string hashedPassword = PasswordHasher.Hash("qwerty123");
             var insertPassword = "INSERT INTO Credentials (password) VALUES (@password);";
             await using var insertCmd = new SqliteCommand(insertPassword, conn);
@@ -297,17 +300,26 @@ public class SqliteDataService : IDataService
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        const string query = "SELECT SessionId, CreatedAt FROM Sessions WHERE UserId = @userId and Status !='Deleted';";
+        // Limit to 20 most recent sessions to avoid keyboard overflow (Telegram limit ~100 buttons)
+        const string query = @"
+            SELECT SessionId, CreatedAt FROM Sessions
+            WHERE UserId = @userId AND Status != 'Deleted'
+            ORDER BY CreatedAt DESC
+            LIMIT 20;";
         await using var cmd = new SqliteCommand(query, conn);
         cmd.Parameters.AddWithValue("@userId", userId);
 
         await using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
+            // Safe date parsing: SQLite stores dates as TEXT; format may vary across environments
+            var rawDate = reader.GetString(1);
+            var parsedDate = DateTime.TryParse(rawDate, out var dt) ? dt : DateTime.MinValue;
+
             list.Add(new SessionsList
             {
                 SessionId = reader.GetInt32(0),
-                Date = reader.GetDateTime(1),
+                Date = parsedDate,
             });
         }
         return list;

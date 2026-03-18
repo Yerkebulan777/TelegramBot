@@ -104,8 +104,8 @@ public class TelegramBotHostedService : BackgroundService
                     }
                     using (await _sessionManager.AcquireUserLockAsync(callback.UserId))
                     {
-                        var session = _sessionManager.GetOrCreateSession(callback.UserId);
-                        if (!await CallbackAuthorization(callback.UserId, session))
+                        _ = _sessionManager.GetOrCreateSession(callback.UserId);
+                        if (!await CallbackAuthorization(callback.UserId))
                             return;
 
                         await _commandAppService.HandleCallbackAsync(callback, token);
@@ -134,29 +134,36 @@ public class TelegramBotHostedService : BackgroundService
 
     private async Task<bool> Authorization(long userId, string username, string text, UserSession session)
     {
+        // Lockout check: applies to all paths except /start or /auth (handled separately below)
+        if (session.State == SessionState.WaitingForPassword
+            && session.FailedAuthAttempts >= UserSession.MaxFailedAttempts
+            && text != "/auth" && text != "/start")
+        {
+            _logger.LogWarning("User {UserId} is locked out after {Attempts} failed attempts", userId, session.FailedAuthAttempts);
+            await _outputService.SendMessageAsync(userId, $"Слишком много неверных попыток ({UserSession.MaxFailedAttempts}). Попробуйте позже или обратитесь к администратору.");
+            return false;
+        }
+
         if (text == "/auth" || text == "/start")
         {
-            var checkAuth = session.IsAuthorized || await _authService.CheckAuthAsync(userId);
+            var checkAuth = await _authService.CheckAuthAsync(userId);
             if (!checkAuth)
             {
                 session.State = SessionState.WaitingForPassword;
                 var welcomeMessage = text == "/start"
                     ? "Привет! Я бот для работы с BIM-документами, автоматизации задач и экспорта файлов.\nДля работы со мной нужна авторизация. Пожалуйста, введите пароль:"
-                    : "Enter password.";
+                    : "Введите пароль:";
                 await _outputService.SendMessageAsync(userId, welcomeMessage);
                 return false;
             }
 
-            session.IsAuthorized = true;
-
             if (text == "/auth")
             {
-                await _outputService.SendMessageAsync(userId, "Already authorized. Proceeding.");
+                await _outputService.SendMessageAsync(userId, "Вы уже авторизованы.");
                 return true;
             }
 
-            // Если это /start и пользователь авторизован, пропускаем команду дальше 
-            // в CommandAppService для показа главного меню.
+            // /start для авторизованного пользователя — пропускаем в CommandAppService.
             return true;
         }
         else if (session.State == SessionState.WaitingForPassword)
@@ -164,48 +171,48 @@ public class TelegramBotHostedService : BackgroundService
             bool auth = await _authService.AuthorizeUserAsync(userId, username, text);
             if (!auth)
             {
-                session.State = SessionState.WaitingForPassword;
-                await _outputService.SendMessageAsync(userId, "Incorrect password. Try again.");
+                session.FailedAuthAttempts++;
+                int remaining = UserSession.MaxFailedAttempts - session.FailedAuthAttempts;
+
+                _logger.LogWarning("User {UserId} failed auth attempt {Attempts}/{Max}", userId, session.FailedAuthAttempts, UserSession.MaxFailedAttempts);
+
+                var failMessage = remaining > 0
+                    ? $"Неверный пароль. Осталось попыток: {remaining}."
+                    : $"Неверный пароль. Вы заблокированы после {UserSession.MaxFailedAttempts} неудачных попыток.";
+
+                await _outputService.SendMessageAsync(userId, failMessage);
                 return false;
             }
-            session.State = SessionState.Idle;
-            session.IsAuthorized = true;
-            await _outputService.SendMessageAsync(userId, "Successfully authorized.");
 
-            // После успешной авторизации мы не пропускаем введенный пароль дальше как команду.
-            // Пользователь должен будет нажать /start (или мы можем вызвать это меню сами, но проще попросить).
-            // Или можно автоматически показать меню. Пока просто возвращаем false (не команда).
-            // Но чтобы было красивее, мы можем сами показать меню или сказать нажать /start.
-            // При возврате false сообщение "Successfully authorized" - последнее. 
-            // Мы попросим пользователя нажать /start.
-            await _outputService.SendMessageAsync(userId, "Нажмите /start для вызова главного меню.");
+            // Successful auth: reset counter and state
+            session.FailedAuthAttempts = 0;
+            session.State = SessionState.Idle;
+            await _outputService.SendMessageAsync(userId, "Авторизация успешна. Нажмите /start для вызова главного меню.");
 
             return false;
         }
         else
         {
-            var checkAuth = session.IsAuthorized || await _authService.CheckAuthAsync(userId);
+            var checkAuth = await _authService.CheckAuthAsync(userId);
             if (!checkAuth)
             {
-                await _outputService.SendMessageAsync(userId, "Not authorized. Enter /start or /auth to authorize.");
+                await _outputService.SendMessageAsync(userId, "Вы не авторизованы. Введите /start или /auth для авторизации.");
                 return false;
             }
 
-            session.IsAuthorized = true;
             return true;
         }
     }
 
-    private async Task<bool> CallbackAuthorization(long userId, UserSession session)
+    private async Task<bool> CallbackAuthorization(long userId)
     {
-        var checkAuth = session.IsAuthorized || await _authService.CheckAuthAsync(userId);
+        var checkAuth = await _authService.CheckAuthAsync(userId);
         if (!checkAuth)
         {
-            await _outputService.SendMessageAsync(userId, "Not authorized. Enter select or enter /auth to authorize.");
+            await _outputService.SendMessageAsync(userId, "Вы не авторизованы. Введите /start или /auth для авторизации.");
             return false;
         }
 
-        session.IsAuthorized = true;
         return true;
     }
 

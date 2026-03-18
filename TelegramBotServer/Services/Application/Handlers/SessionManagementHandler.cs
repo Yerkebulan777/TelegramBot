@@ -57,9 +57,9 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
 
         var session = context.Session;
 
-        if (session.StatusLevel)
+        if (session.IsInStatusView)
         {
-            session.StatusLevel = false;
+            session.IsInStatusView = false;
             session.SessionId = sessionId;
 
             var sessionStatus = await _dataService.GetSessionsStatusAsync(sessionId);
@@ -68,7 +68,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         }
         else
         {
-            session.StatusLevel = true;
+            session.IsInStatusView = true;
 
             var sessionCommands = await _dataService.GetSessionsCommandsAsync(sessionId);
             var keyboard = await _keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
@@ -90,7 +90,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         if (!await _dataService.DeleteSessionAsync(sessionId))
             return true;
 
-        context.Session.StatusLevel = true;
+        context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
 
         return true;
@@ -120,7 +120,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         {
             if (await _dataService.DeleteSessionAsync(context.Session.SessionId))
             {
-                context.Session.StatusLevel = true;
+                context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
         }
@@ -135,7 +135,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
 
     private async Task<bool> HandleBackToStatusAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        context.Session.StatusLevel = true;
+        context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
         return true;
     }
