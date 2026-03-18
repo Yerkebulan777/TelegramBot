@@ -14,11 +14,6 @@ public class Program
         try
         {
             IHost host = Host.CreateDefaultBuilder(args)
-
-            .ConfigureAppConfiguration((context, cfg) =>
-            {
-                _ = cfg.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
-            })
             .ConfigureServices((context, services) => _ = services.AddTelegramBotServer(context.Configuration))
             .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
                 .ReadFrom.Configuration(context.Configuration)
