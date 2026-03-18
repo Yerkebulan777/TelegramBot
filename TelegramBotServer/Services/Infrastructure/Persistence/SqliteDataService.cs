@@ -325,7 +325,7 @@ public class SqliteDataService : IDataService
         return list;
     }
 
-    public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId)
+    public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId)
     {
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
@@ -338,11 +338,13 @@ public class SqliteDataService : IDataService
             FROM Sessions s
             LEFT JOIN Commands c ON c.SessionId = s.SessionId
             WHERE s.SessionId = @sessionId
+              AND s.UserId = @userId
             GROUP BY s.Status;
         ";
 
         await using var cmd = new SqliteCommand(query, conn);
         cmd.Parameters.AddWithValue("@sessionId", sessionId);
+        cmd.Parameters.AddWithValue("@userId", userId);
         await using var reader = await cmd.ExecuteReaderAsync();
 
         if (!await reader.ReadAsync())
@@ -356,15 +358,22 @@ public class SqliteDataService : IDataService
         };
     }
 
-    public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId)
+    public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId)
     {
         var list = new List<SessionCommands>();
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        const string query = "SELECT ExecutionOrder, CommandText, FilePath, Status, CreatedAt, CommandId FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';";
+        const string query = @"
+            SELECT c.ExecutionOrder, c.CommandText, c.FilePath, c.Status, c.CreatedAt, c.CommandId
+            FROM Commands c
+            JOIN Sessions s ON s.SessionId = c.SessionId
+            WHERE c.SessionId = @sessionId
+              AND s.UserId = @userId
+              AND c.Status != 'Deleted';";
         await using var cmd = new SqliteCommand(query, conn);
         cmd.Parameters.AddWithValue("@sessionId", sessionId);
+        cmd.Parameters.AddWithValue("@userId", userId);
 
         await using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -383,7 +392,7 @@ public class SqliteDataService : IDataService
         return list;
     }
 
-    public async Task<bool> DeleteSessionAsync(int sessionId)
+    public async Task<bool> DeleteSessionAsync(int sessionId, long userId)
     {
         try
         {
@@ -396,12 +405,20 @@ public class SqliteDataService : IDataService
                 const string deleteSessionQuery = @"
                 UPDATE Sessions
                 SET Status = 'Deleted'
-                WHERE SessionId = @sessionId;
+                WHERE SessionId = @sessionId
+                  AND UserId = @userId;
             ";
 
                 await using var deleteSessionCmd = new SqliteCommand(deleteSessionQuery, conn, (SqliteTransaction)tx);
                 deleteSessionCmd.Parameters.AddWithValue("@sessionId", sessionId);
-                await deleteSessionCmd.ExecuteNonQueryAsync();
+                deleteSessionCmd.Parameters.AddWithValue("@userId", userId);
+                var affectedSessions = await deleteSessionCmd.ExecuteNonQueryAsync();
+                if (affectedSessions == 0)
+                {
+                    await tx.RollbackAsync();
+                    _logger.LogWarning("Attempt to delete foreign or missing session {SessionId} by user {UserId}", sessionId, userId);
+                    return false;
+                }
 
                 const string deleteCommandsQuery = @"
                 UPDATE Commands
@@ -432,7 +449,7 @@ public class SqliteDataService : IDataService
 
 
 
-    public async Task<bool> DeleteCommandAsync(int commandId)
+    public async Task<bool> DeleteCommandAsync(int commandId, long userId)
     {
         try
         {
@@ -443,11 +460,23 @@ public class SqliteDataService : IDataService
             const string query = @"
             UPDATE Commands
             SET Status = 'Deleted'
-            WHERE CommandId = @commandId;
+            WHERE CommandId = @commandId
+              AND SessionId IN (
+                    SELECT SessionId
+                    FROM Sessions
+                    WHERE UserId = @userId
+                );
         ";
             await using var cmd = new SqliteCommand(query, conn);
             cmd.Parameters.AddWithValue("@commandId", commandId);
-            await cmd.ExecuteNonQueryAsync();
+            cmd.Parameters.AddWithValue("@userId", userId);
+            var affectedRows = await cmd.ExecuteNonQueryAsync();
+            if (affectedRows == 0)
+            {
+                _logger.LogWarning("Attempt to delete foreign or missing command {CommandId} by user {UserId}", commandId, userId);
+                return false;
+            }
+
             return true;
         }
         catch (Exception e)
@@ -458,16 +487,48 @@ public class SqliteDataService : IDataService
     }
 
 
-    public async Task<bool> CheckCommandsStatusAsync(int sessionId)
+    public async Task<bool> CheckCommandsStatusAsync(int sessionId, long userId)
     {
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
         await using var cmd = new SqliteCommand(
-            "SELECT COUNT(*) FROM Commands WHERE SessionId = @sessionId AND Status != 'Deleted';", conn);
+            @"SELECT COUNT(*)
+              FROM Commands c
+              JOIN Sessions s ON s.SessionId = c.SessionId
+              WHERE c.SessionId = @sessionId
+                AND s.UserId = @userId
+                AND c.Status != 'Deleted';", conn);
         cmd.Parameters.AddWithValue("@sessionId", sessionId);
+        cmd.Parameters.AddWithValue("@userId", userId);
 
         var result = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         return result > 0;
+    }
+
+    public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        const string query = @"
+            SELECT c.SessionId
+            FROM Commands c
+            JOIN Sessions s ON s.SessionId = c.SessionId
+            WHERE c.CommandId = @commandId
+              AND s.UserId = @userId
+              AND c.Status != 'Deleted'
+              AND s.Status != 'Deleted'
+            LIMIT 1;";
+
+        await using var cmd = new SqliteCommand(query, conn);
+        cmd.Parameters.AddWithValue("@commandId", commandId);
+        cmd.Parameters.AddWithValue("@userId", userId);
+
+        var value = await cmd.ExecuteScalarAsync();
+        if (value is null || value == DBNull.Value)
+            return null;
+
+        return Convert.ToInt32(value);
     }
 }

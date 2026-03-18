@@ -100,7 +100,7 @@ namespace TelegramBotServer.Services
             buttons.Add([InlineKeyboardButton.WithCallbackData(selectionLabel, "SELMODE:")]);
 
             var parent = Directory.GetParent(path);
-            if (parent != null)
+            if (parent != null && IsPathWithinRoot(parent.FullName))
             {
                 string parentToken = Guid.NewGuid().ToString("N")[..8];
                 session.PathMap[parentToken] = parent.FullName;
@@ -170,5 +170,25 @@ namespace TelegramBotServer.Services
         /// Used by CommandAppService for MapProjectsToFilesAsync.
         /// </summary>
         public Regex GetRomanThreeRegex() => _romanThreeRegex;
+
+        private bool IsPathWithinRoot(string path)
+        {
+            try
+            {
+                var rootFullPath = Path.GetFullPath(_options.RootPath)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var candidateFullPath = Path.GetFullPath(path)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                return candidateFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase)
+                       || candidateFullPath.StartsWith(
+                           rootFullPath + Path.DirectorySeparatorChar,
+                           StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 }

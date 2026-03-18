@@ -45,7 +45,7 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
         session.Counter = 0;
 
         if (session.SelectionType == SelectionMode.Sections)
-            session.Level = !isGoToParent;
+            session.IsNavigatingDeep = !isGoToParent;
 
         if (isGoToParent)
         {
@@ -60,12 +60,22 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
             return true;
         }
 
-        session.CurrentPath = session.SelectionType switch
+        var targetPath = session.SelectionType switch
         {
             SelectionMode.Sections when !isGoToParent => _options.GetProjectPath(newPath),
             SelectionMode.Sections when isGoToParent => _options.RootPath,
             _ => newPath
         };
+
+        if (!IsPathWithinRoot(targetPath))
+        {
+            Logger.LogWarning("Rejected navigation outside root. User={UserId}, Path={Path}", context.UserId, targetPath);
+            await _outputService.SendErrorAsync(context.UserId, "Недопустимый путь.");
+            session.CurrentPath = _options.RootPath;
+            return true;
+        }
+
+        session.CurrentPath = targetPath;
 
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 
@@ -73,5 +83,26 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         return true;
+    }
+
+    private bool IsPathWithinRoot(string path)
+    {
+        try
+        {
+            var rootFullPath = Path.GetFullPath(_options.RootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var candidateFullPath = Path.GetFullPath(path)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return candidateFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase)
+                   || candidateFullPath.StartsWith(
+                       rootFullPath + Path.DirectorySeparatorChar,
+                       StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to validate path against root");
+            return false;
+        }
     }
 }

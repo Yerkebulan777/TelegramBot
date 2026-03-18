@@ -51,27 +51,32 @@ public interface IDataService
     Task<List<SessionsList>> GetSessionsListAsync(long userId);
 
     /// <summary>
-    /// Gets the status summary for a session (total files, done files).
+    /// Gets the status summary for a user-owned session (total files, done files).
     /// </summary>
-    Task<SessionStatus> GetSessionsStatusAsync(int sessionId);
+    Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId);
 
     /// <summary>
-    /// Gets all commands within a session (excluding deleted).
+    /// Gets all commands within a user-owned session (excluding deleted).
     /// </summary>
-    Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId);
+    Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId);
 
     /// <summary>
-    /// Soft-deletes a session and all its commands.
+    /// Soft-deletes a user-owned session and all its commands.
     /// </summary>
-    Task<bool> DeleteSessionAsync(int sessionId);
+    Task<bool> DeleteSessionAsync(int sessionId, long userId);
 
     /// <summary>
-    /// Soft-deletes a single command.
+    /// Soft-deletes a single user-owned command.
     /// </summary>
-    Task<bool> DeleteCommandAsync(int commandId);
+    Task<bool> DeleteCommandAsync(int commandId, long userId);
 
     /// <summary>
-    /// Checks if a session has any non-deleted commands remaining.
+    /// Checks if a user-owned session has any non-deleted commands remaining.
     /// </summary>
-    Task<bool> CheckCommandsStatusAsync(int sessionId);
+    Task<bool> CheckCommandsStatusAsync(int sessionId, long userId);
+
+    /// <summary>
+    /// Resolves the session ID for a user-owned command.
+    /// </summary>
+    Task<int?> GetSessionIdByCommandAsync(int commandId, long userId);
 }

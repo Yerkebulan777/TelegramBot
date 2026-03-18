@@ -62,7 +62,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
             session.IsInStatusView = false;
             session.SessionId = sessionId;
 
-            var sessionStatus = await _dataService.GetSessionsStatusAsync(sessionId);
+            var sessionStatus = await _dataService.GetSessionsStatusAsync(sessionId, context.UserId);
             var keyboard = await _keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
             await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
         }
@@ -70,7 +70,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         {
             session.IsInStatusView = true;
 
-            var sessionCommands = await _dataService.GetSessionsCommandsAsync(sessionId);
+            var sessionCommands = await _dataService.GetSessionsCommandsAsync(sessionId, context.UserId);
             var keyboard = await _keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
             await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
         }
@@ -87,7 +87,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
             return true;
         }
 
-        if (!await _dataService.DeleteSessionAsync(sessionId))
+        if (!await _dataService.DeleteSessionAsync(sessionId, context.UserId))
             return true;
 
         context.Session.IsInStatusView = true;
@@ -105,8 +105,17 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
             return true;
         }
 
-        if (!await _dataService.DeleteCommandAsync(commandId))
+        var sessionId = await _dataService.GetSessionIdByCommandAsync(commandId, context.UserId);
+        if (!sessionId.HasValue)
+        {
+            Logger.LogWarning("User {UserId} attempted to access foreign or missing command {CommandId}", context.UserId, commandId);
             return true;
+        }
+
+        if (!await _dataService.DeleteCommandAsync(commandId, context.UserId))
+            return true;
+
+        context.Session.SessionId = sessionId.Value;
 
         if (context.Buttons != null)
         {
@@ -116,9 +125,9 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
 
         var newKeyboard = ConvertDtoToKeyboard(context.Buttons);
 
-        if (!await _dataService.CheckCommandsStatusAsync(context.Session.SessionId))
+        if (!await _dataService.CheckCommandsStatusAsync(sessionId.Value, context.UserId))
         {
-            if (await _dataService.DeleteSessionAsync(context.Session.SessionId))
+            if (await _dataService.DeleteSessionAsync(sessionId.Value, context.UserId))
             {
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
@@ -126,7 +135,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         }
         else
         {
-            var sessionStatus = await _dataService.GetSessionsStatusAsync(context.Session.SessionId);
+            var sessionStatus = await _dataService.GetSessionsStatusAsync(sessionId.Value, context.UserId);
             await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), newKeyboard);
         }
 
