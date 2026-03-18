@@ -73,6 +73,9 @@ public sealed class CommandAppService : ICommandAppService
 
         var session = _sessionManager.GetOrCreateSession(callback.UserId);
 
+        _logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})",
+            CallbackDataParser.Parse(callback.CallbackData).Prefix, callback.Username, callback.UserId);
+
         var context = new CallbackContext
         {
             UserId = callback.UserId,

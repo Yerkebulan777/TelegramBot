@@ -57,6 +57,8 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
 
         var session = context.Session;
 
+        Logger.LogInformation("User {UserId} viewing session details for session {SessionId}", context.UserId, sessionId);
+
         if (session.IsInStatusView)
         {
             session.IsInStatusView = false;
@@ -87,6 +89,8 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
             return true;
         }
 
+        Logger.LogInformation("User {UserId} deleting session {SessionId}", context.UserId, sessionId);
+
         if (!await _dataService.DeleteSessionAsync(sessionId, context.UserId))
             return true;
 
@@ -104,6 +108,8 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
             LogInvalidInput("command ID", token, context.UserId);
             return true;
         }
+
+        Logger.LogInformation("User {UserId} deleting command {CommandId}", context.UserId, commandId);
 
         var sessionId = await _dataService.GetSessionIdByCommandAsync(commandId, context.UserId);
         if (!sessionId.HasValue)
@@ -144,6 +150,7 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
 
     private async Task<bool> HandleBackToStatusAsync(CallbackContext context, CancellationToken cancellationToken)
     {
+        Logger.LogInformation("User {UserId} returning to sessions list", context.UserId);
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
         return true;

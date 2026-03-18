@@ -64,7 +64,14 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
             return true;
         }
 
+        bool wasSelected = context.Session.SelectedFiles.Contains(filePath);
         context.Session.ToggleSelectedFile(filePath);
+
+        Logger.LogInformation("User {UserId} {Action} file '{File}' (total selected: {Count})",
+            context.UserId,
+            wasSelected ? "deselected" : "selected",
+            Path.GetFileName(filePath),
+            context.Session.SelectedFiles.Count);
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, context.Session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
@@ -118,6 +125,8 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
     {
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
+
+        Logger.LogInformation("User {UserId} cancelled file selection", context.UserId);
 
         session.ResetNavigation(_options.RootPath);
         session.SelectionType = SelectionMode.Files;

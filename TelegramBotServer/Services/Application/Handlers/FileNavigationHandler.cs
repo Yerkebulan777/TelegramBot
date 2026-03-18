@@ -78,6 +78,9 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
 
         session.CurrentPath = targetPath;
 
+        Logger.LogInformation("User {UserId} navigated {Direction} to '{Path}'",
+            context.UserId, isGoToParent ? "up" : "into", targetPath);
+
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);

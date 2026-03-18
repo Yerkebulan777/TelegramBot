@@ -74,6 +74,9 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
         if (session.PendingCommand.Count == 0)
             return true;
 
+        Logger.LogInformation("User {UserId} applied command selection: [{Commands}]",
+            context.UserId, string.Join(", ", session.PendingCommand));
+
         session.CurrentPath = _options.RootPath;
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
@@ -84,6 +87,7 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
+        Logger.LogInformation("User {UserId} cancelled command selection", context.UserId);
         context.Session.ClearPendingCommands();
 
         await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
