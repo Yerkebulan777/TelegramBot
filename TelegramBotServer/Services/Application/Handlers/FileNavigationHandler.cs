@@ -63,7 +63,9 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
 
         var targetPath = session.SelectionType switch
         {
-            SelectionMode.Sections when !isGoToParent => _options.GetProjectPath(newPath),
+            SelectionMode.Sections when !isGoToParent => PathContainsSegment(newPath, _options.ProjectDirectoryName)
+                ? newPath
+                : _options.GetProjectPath(newPath),
             SelectionMode.Sections when isGoToParent => _options.RootPath,
             _ => newPath
         };
@@ -88,6 +90,10 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
 
         return true;
     }
+
+    private static bool PathContainsSegment(string path, string segment) =>
+        path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(s => s.Equals(segment, StringComparison.OrdinalIgnoreCase));
 
     private bool IsPathWithinRoot(string path)
     {
