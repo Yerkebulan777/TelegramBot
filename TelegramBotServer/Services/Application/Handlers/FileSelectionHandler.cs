@@ -83,7 +83,18 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         if (selectedFiles.Count == 0)
             return true;
 
+        Logger.LogInformation(
+            "User {UserId} submitting job: commands=[{Commands}], selectionMode={Mode}, selectedItems={SelectedCount}",
+            context.UserId,
+            string.Join(", ", session.PendingCommand),
+            session.SelectionType,
+            selectedFiles.Count);
+
         var filesToProcess = await MapFilesAsync(selectedFiles, session.SelectionType, cancellationToken);
+
+        Logger.LogInformation(
+            "User {UserId} job resolved to {FileCount} files after mapping (mode={Mode})",
+            context.UserId, filesToProcess.Count, session.SelectionType);
 
         await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand,
@@ -92,6 +103,8 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
             context.Username,
             (int)session.SelectionType,
             filesToProcess.Count);
+
+        Logger.LogInformation("Job saved to DB for user {UserId}", context.UserId);
 
         var reply = BuildQueueReply(session);
         await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, reply);

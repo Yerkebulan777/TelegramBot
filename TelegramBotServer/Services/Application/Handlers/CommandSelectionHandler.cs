@@ -45,6 +45,7 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
     private async Task<bool> HandleSelectionModeAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
+        var previousMode = session.SelectionType;
 
         // Cycle through selection modes
         session.SelectionType = session.SelectionType switch
@@ -54,6 +55,9 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
             SelectionMode.Projects => SelectionMode.Files,
             _ => SelectionMode.Files
         };
+
+        Logger.LogDebug("User {UserId} switched selection mode: {From} → {To}",
+            context.UserId, previousMode, session.SelectionType);
 
         session.ResetNavigation(_options.RootPath);
 

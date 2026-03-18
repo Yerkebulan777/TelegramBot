@@ -14,7 +14,6 @@ public class TelegramBotHostedService : BackgroundService
     private readonly ILogger<TelegramBotHostedService> _logger;
     private readonly ITelegramUpdateMapper _inputService;
     private readonly ISessionManager _sessionManager;
-    private readonly ITelegramOutputService _outputService;
 
     public TelegramBotHostedService(
         ITelegramBotClient botClient,
@@ -29,7 +28,6 @@ public class TelegramBotHostedService : BackgroundService
         _logger = logger;
         _inputService = inputService;
         _sessionManager = sessionManager;
-        _outputService = outputService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -79,7 +77,6 @@ public class TelegramBotHostedService : BackgroundService
                 case MessageDto message:
                     using (await _sessionManager.AcquireUserLockAsync(message.UserId))
                     {
-                        bool shouldDeleteCommandMessage = IsSlashCommandMessage(message.Text);
                         _ = _sessionManager.GetOrCreateSession(message.UserId);
 
                         if (message.Text == null)
@@ -89,11 +86,6 @@ public class TelegramBotHostedService : BackgroundService
                         }
 
                         await _commandAppService.HandleUserCommandAsync(message, token);
-
-                        if (shouldDeleteCommandMessage)
-                        {
-                            await _outputService.DeleteMessageAsync(message.ChatId, message.MessageId);
-                        }
                     }
                     break;
                 case CallbackQueryDto callback:
@@ -126,10 +118,5 @@ public class TelegramBotHostedService : BackgroundService
     {
         _logger.LogError(exception, "Polling error");
         return Task.CompletedTask;
-    }
-
-    private static bool IsSlashCommandMessage(string? text)
-    {
-        return !string.IsNullOrWhiteSpace(text) && text.StartsWith('/');
     }
 }

@@ -36,9 +36,16 @@ public abstract class CommandToggleHandlerBase : CallbackHandlerBase
         var (code, displayName) = Commands[context.ParsedCallback.Prefix];
 
         if (context.Session.ContainsPendingCommand(code))
+        {
             context.Session.RemovePendingCommand(code);
+            Logger.LogInformation("User {UserId} deselected command '{Code}'", context.UserId, code);
+        }
         else
+        {
             context.Session.AddPendingCommand(code, displayName);
+            Logger.LogInformation("User {UserId} selected command '{Code}' (pending: [{Commands}])",
+                context.UserId, code, string.Join(", ", context.Session.PendingCommand));
+        }
 
         var keyboard = await GetKeyboardAsync(_keyboardBuilder, context.Session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
