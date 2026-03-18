@@ -88,6 +88,9 @@ public class TelegramOutputService(
     public async Task ClearChatHistoryAsync(long chatId, UserSession session)
     {
         var messageIds = session.TakeAllBotMessageIds();
+        if (messageIds.Count == 0) return;
+
+        _logger.LogInformation("ClearChatHistoryAsync: удаление {Count} сообщений для чата {ChatId}", messageIds.Count, chatId);
         foreach (var messageId in messageIds)
             await DeleteMessageAsync(chatId, messageId);
     }

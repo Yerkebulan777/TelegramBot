@@ -197,6 +197,7 @@ public sealed class CommandAppService : ICommandAppService
 
                 _logger.LogInformation("User {Username} ({UserId}) applying file selection: {FileCount} files selected",
                     username, userId, session.SelectedFiles.Count);
+                await _outputService.ClearChatHistoryAsync(userId, session);
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
                 session.IsFileSelectionActive = false;
                 await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден."), session);
@@ -206,6 +207,7 @@ public sealed class CommandAppService : ICommandAppService
             if (messageText == ButtonTexts.Cancel)
             {
                 _logger.LogDebug("User {Username} ({UserId}) cancelling file selection", username, userId);
+                await _outputService.ClearChatHistoryAsync(userId, session);
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
                 session.IsFileSelectionActive = false;
 
