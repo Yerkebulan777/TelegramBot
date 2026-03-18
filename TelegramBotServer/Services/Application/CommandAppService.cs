@@ -238,9 +238,9 @@ public sealed class CommandAppService : ICommandAppService
 
         if (messageText == ButtonTexts.Cancel)
         {
-            _logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
             session.ClearPendingCommands();
             session.IsFileSelectionActive = false;
+            _logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
             await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
             return true;
         }
@@ -251,12 +251,11 @@ public sealed class CommandAppService : ICommandAppService
     private async Task SendHelpMessageAsync(long userId)
     {
         var helpText = new StringBuilder()
-            .AppendLine("*Доступные команды:*")
-            .AppendLine()
-            .AppendLine("📤 /export — экспорт файлов в PDF, DWG, NWC, IFC")
-            .AppendLine("⚙️ /automation — автоматизация: BIM Doctor, Clash Report, Auto Resolver")
-            .AppendLine("📊 /status — статус выполнения задач и управление сессиями")
-            .AppendLine("❓ /help — справка по командам")
+            .AppendLine("*Доступные команды:*\n")
+            .AppendLine("▪️ /export — экспорт файлов в PDF, DWG, NWC, IFC")
+            .AppendLine("▪️ /automation — автоматизация задач связанными с BIM")
+            .AppendLine("▪️ /status — статус выполнения задач и управление сессиями")
+            .AppendLine("▪️ /help — справка по командам")
             .ToString();
 
         await _outputService.SendMessageAsync(userId, helpText);
