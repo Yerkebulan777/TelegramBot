@@ -202,8 +202,6 @@ public sealed class CommandAppService : ICommandAppService
             session.FileSelectionMessageId = selectionMessage?.Id;
             session.IsFileSelectionActive = true;
 
-            await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор подтвержден.");
-
             var fileActionsReplyKeyboard = await _keyboardBuilder.GetFileActionsReplyKeyboardAsync(session);
             await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard);
             return true;

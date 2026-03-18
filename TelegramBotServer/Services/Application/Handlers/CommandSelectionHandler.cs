@@ -74,7 +74,6 @@ public sealed class CommandSelectionHandler : CallbackHandlerBase
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор подтвержден.");
 
         return true;
     }
