@@ -130,12 +130,6 @@ public sealed class CommandAppService : ICommandAppService
                 await SendStartMessageAsync(userId, username);
                 break;
 
-            case "/clearhistory":
-                _logger.LogDebug("Executing /clearhistory for {UserId}", userId);
-                session.Reset(_options.RootPath);
-                await ClearChatHistoryAsync(message);
-                break;
-
             case "/export":
                 _logger.LogDebug("Executing /export for {UserId}", userId);
                 await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
@@ -266,7 +260,6 @@ public sealed class CommandAppService : ICommandAppService
     private async Task SendHelpMessageAsync(long userId)
     {
         var helpText = new StringBuilder()
-            .AppendLine("/clearhistory - удаление до 500 последних сообщений в текущем чате (в пределах ограничений Telegram).")
             .AppendLine("/export - используется для экспорта в форматы PDF, DWG, NWC, IFC.")
             .AppendLine("/automation - используется для автоматизации задач. BIM Doctor, Clash Report, Auto Resolver")
             .AppendLine("/status - используется для проверки состояния выполнения команды отправленной пользователем.")
@@ -284,7 +277,6 @@ public sealed class CommandAppService : ICommandAppService
             .AppendLine($"Привет, {username}! 👋")
             .AppendLine("Я бот для работы с BIM-документами, автоматизации задач и экспорта файлов.\n")
             .AppendLine("Вот что я умею (нажмите на команду):")
-            .AppendLine("🔹 /clearhistory - очистка до 500 последних сообщений в чате")
             .AppendLine("🔹 /export - экспорт в форматы PDF, DWG, NWC")
             .AppendLine("🔹 /automation - задачи BIM автоматизации ")
             .AppendLine("🔹 /status - состояния выполнения задач")
@@ -292,18 +284,6 @@ public sealed class CommandAppService : ICommandAppService
             .ToString();
 
         await _outputService.SendMessageAsync(userId, startText);
-    }
-
-    private async Task ClearChatHistoryAsync(MessageDto message)
-    {
-        const int maxMessagesToDelete = 500;
-        int lastMessageId = message.MessageId;
-        int firstMessageId = Math.Max(1, lastMessageId - maxMessagesToDelete + 1);
-
-        for (int messageId = lastMessageId; messageId >= firstMessageId; messageId--)
-        {
-            await _outputService.DeleteMessageAsync(message.ChatId, messageId);
-        }
     }
 
     private async Task DispatchFileSelectionCallbackAsync(
