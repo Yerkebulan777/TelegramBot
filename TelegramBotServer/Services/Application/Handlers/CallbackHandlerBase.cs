@@ -41,8 +41,8 @@ public abstract class CallbackHandlerBase : ICallbackHandler
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error handling callback with prefix '{Prefix}' for user {UserId}",
-                GetPrefix(context), context.UserId);
+            Logger.LogError(ex, "Error handling callback with prefix '{Prefix}' for user {Username} ({UserId})",
+                GetPrefix(context), context.Username, context.UserId);
             throw;
         }
     }

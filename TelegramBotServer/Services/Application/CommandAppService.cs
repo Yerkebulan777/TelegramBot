@@ -128,18 +128,18 @@ public sealed class CommandAppService : ICommandAppService
         switch (command)
         {
             case "/start":
-                _logger.LogDebug("Executing /start for {UserId}", userId);
+                _logger.LogDebug("Executing /start for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 await SendStartMessageAsync(userId, username);
                 break;
 
             case "/export":
-                _logger.LogDebug("Executing /export for {UserId}", userId);
+                _logger.LogDebug("Executing /export for {Username} ({UserId})", username, userId);
                 await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
                 break;
 
             case "/status":
-                _logger.LogDebug("Executing /status for {UserId}", userId);
+                _logger.LogDebug("Executing /status for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 session.IsInStatusView = true;
 
@@ -149,12 +149,12 @@ public sealed class CommandAppService : ICommandAppService
                 break;
 
             case "/automation":
-                _logger.LogDebug("Executing /automation for {UserId}", userId);
+                _logger.LogDebug("Executing /automation for {Username} ({UserId})", username, userId);
                 await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
                 break;
 
             case "/help":
-                _logger.LogDebug("Executing /help for {UserId}", userId);
+                _logger.LogDebug("Executing /help for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 await SendHelpMessageAsync(userId);
                 break;
@@ -185,13 +185,13 @@ public sealed class CommandAppService : ICommandAppService
             {
                 if (session.SelectedFiles.Count == 0)
                 {
-                    _logger.LogDebug("User {UserId} tried to apply with no files selected", userId);
+                    _logger.LogDebug("User {Username} ({UserId}) tried to apply with no files selected", username, userId);
                     await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один файл.");
                     return true;
                 }
 
-                _logger.LogInformation("User {UserId} applying file selection: {FileCount} files selected",
-                    userId, session.SelectedFiles.Count);
+                _logger.LogInformation("User {Username} ({UserId}) applying file selection: {FileCount} files selected",
+                    username, userId, session.SelectedFiles.Count);
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
                 session.IsFileSelectionActive = false;
                 await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден.");
@@ -200,7 +200,7 @@ public sealed class CommandAppService : ICommandAppService
 
             if (messageText == ButtonTexts.Cancel)
             {
-                _logger.LogDebug("User {UserId} cancelling file selection", userId);
+                _logger.LogDebug("User {Username} ({UserId}) cancelling file selection", username, userId);
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
                 session.IsFileSelectionActive = false;
 
@@ -223,13 +223,13 @@ public sealed class CommandAppService : ICommandAppService
         {
             if (session.PendingCommand.Count == 0)
             {
-                _logger.LogDebug("User {UserId} tried to apply with no commands selected", userId);
+                _logger.LogDebug("User {Username} ({UserId}) tried to apply with no commands selected", username, userId);
                 await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду.");
                 return true;
             }
 
-            _logger.LogInformation("User {UserId} confirmed command selection: [{Commands}], opening file browser",
-                userId, string.Join(", ", session.PendingCommand));
+            _logger.LogInformation("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
+                username, userId, string.Join(", ", session.PendingCommand));
             session.CurrentPath = _options.RootPath;
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
             var selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
@@ -243,7 +243,7 @@ public sealed class CommandAppService : ICommandAppService
 
         if (messageText == ButtonTexts.Cancel)
         {
-            _logger.LogDebug("User {UserId} cancelled command selection", userId);
+            _logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
             session.ClearPendingCommands();
             session.IsFileSelectionActive = false;
             await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
