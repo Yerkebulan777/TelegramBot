@@ -23,6 +23,9 @@ public class SqliteDataService : IDataService
     }
 
 
+    /// <summary>
+    /// Инициализирует базу данных (создает таблицы, если не существуют).
+    /// </summary>
     public async Task InitializeDatabaseAsync()
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -64,7 +67,9 @@ public class SqliteDataService : IDataService
     }
 
 
-    // ✅ Update command status (e.g. pending → in_progress → done)
+    /// <summary>
+    /// Обновляет статус команды в базе данных.
+    /// </summary>
     public async Task UpdateCommandStatusAsync(int commandId, string status)
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -77,7 +82,9 @@ public class SqliteDataService : IDataService
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // ✅ Get all user commands
+    /// <summary>
+    /// Возвращает список всех команд пользователя.
+    /// </summary>
     public async Task<List<Command>> GetUserCommandsAsync(long userId)
     {
         var list = new List<Command>();
@@ -111,6 +118,9 @@ public class SqliteDataService : IDataService
     }
 
 
+    /// <summary>
+    /// Создает новую сессию с набором команд и файлов.
+    /// </summary>
     public async Task<long> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
@@ -158,6 +168,9 @@ public class SqliteDataService : IDataService
         return sessionId;
     }
 
+    /// <summary>
+    /// Возвращает список сессий пользователя (до 20 последних).
+    /// </summary>
     public async Task<List<SessionsList>> GetSessionsListAsync(long userId)
     {
         var list = new List<SessionsList>();
@@ -189,6 +202,9 @@ public class SqliteDataService : IDataService
         return list;
     }
 
+    /// <summary>
+    /// Возвращает статус сессии (количество файлов, выполнено, процент).
+    /// </summary>
     public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId)
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -222,6 +238,9 @@ public class SqliteDataService : IDataService
         };
     }
 
+    /// <summary>
+    /// Возвращает список команд внутри указанной сессии.
+    /// </summary>
     public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId)
     {
         var list = new List<SessionCommands>();
@@ -256,6 +275,9 @@ public class SqliteDataService : IDataService
         return list;
     }
 
+    /// <summary>
+    /// Удаляет сессию и все её команды (мягкое удаление).
+    /// </summary>
     public async Task<bool> DeleteSessionAsync(int sessionId, long userId)
     {
         try
@@ -313,6 +335,9 @@ public class SqliteDataService : IDataService
 
 
 
+    /// <summary>
+    /// Удаляет одну команду (мягкое удаление).
+    /// </summary>
     public async Task<bool> DeleteCommandAsync(int commandId, long userId)
     {
         try
@@ -351,6 +376,9 @@ public class SqliteDataService : IDataService
     }
 
 
+    /// <summary>
+    /// Проверяет, есть ли команды в указанной сессии.
+    /// </summary>
     public async Task<bool> CheckCommandsStatusAsync(int sessionId, long userId)
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -370,6 +398,9 @@ public class SqliteDataService : IDataService
         return result > 0;
     }
 
+    /// <summary>
+    /// Возвращает ID сессии по ID команды.
+    /// </summary>
     public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId)
     {
         await using var conn = new SqliteConnection(_connectionString);

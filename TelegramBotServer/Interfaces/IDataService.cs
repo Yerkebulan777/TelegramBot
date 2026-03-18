@@ -4,24 +4,16 @@ namespace TelegramBotServer.Interfaces;
 
 public interface IDataService
 {
-    /// <summary>
-    /// Initializes the database schema and seed data.
-    /// </summary>
+    /// <summary>Инициализирует базу данных (создает таблицы).</summary>
     Task InitializeDatabaseAsync();
 
-    /// <summary>
-    /// Updates the status of a command (e.g. pending → in_progress → done).
-    /// </summary>
+    /// <summary>Обновляет статус команды.</summary>
     Task UpdateCommandStatusAsync(int commandId, string status);
 
-    /// <summary>
-    /// Gets all commands for a user (excluding deleted).
-    /// </summary>
+    /// <summary>Возвращает все команды пользователя.</summary>
     Task<List<Command>> GetUserCommandsAsync(long userId);
 
-    /// <summary>
-    /// Creates a new session with associated commands in a single transaction.
-    /// </summary>
+    /// <summary>Создает новую сессию с командами.</summary>
     Task<long> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
@@ -30,38 +22,24 @@ public interface IDataService
         int priorityId,
         int filesAmount);
 
-    /// <summary>
-    /// Gets the list of sessions for a user (excluding deleted).
-    /// </summary>
+    /// <summary>Возвращает список сессий пользователя.</summary>
     Task<List<SessionsList>> GetSessionsListAsync(long userId);
 
-    /// <summary>
-    /// Gets the status summary for a user-owned session (total files, done files).
-    /// </summary>
+    /// <summary>Возвращает статус сессии.</summary>
     Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId);
 
-    /// <summary>
-    /// Gets all commands within a user-owned session (excluding deleted).
-    /// </summary>
+    /// <summary>Возвращает список команд в сессии.</summary>
     Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId);
 
-    /// <summary>
-    /// Soft-deletes a user-owned session and all its commands.
-    /// </summary>
+    /// <summary>Удаляет сессию (мягкое удаление).</summary>
     Task<bool> DeleteSessionAsync(int sessionId, long userId);
 
-    /// <summary>
-    /// Soft-deletes a single user-owned command.
-    /// </summary>
+    /// <summary>Удаляет команду (мягкое удаление).</summary>
     Task<bool> DeleteCommandAsync(int commandId, long userId);
 
-    /// <summary>
-    /// Checks if a user-owned session has any non-deleted commands remaining.
-    /// </summary>
+    /// <summary>Проверяет наличие команд в сессии.</summary>
     Task<bool> CheckCommandsStatusAsync(int sessionId, long userId);
 
-    /// <summary>
-    /// Resolves the session ID for a user-owned command.
-    /// </summary>
+    /// <summary>Возвращает ID сессии по ID команды.</summary>
     Task<int?> GetSessionIdByCommandAsync(int commandId, long userId);
 }

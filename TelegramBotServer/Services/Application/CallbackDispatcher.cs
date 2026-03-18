@@ -21,11 +21,8 @@ public sealed class CallbackDispatcher
     }
 
     /// <summary>
-    /// Dispatches the callback to the first handler that can process it.
+    /// Перенаправляет callback на первый подходящий обработчик (Chain of Responsibility).
     /// </summary>
-    /// <param name="context">The callback context.</param>
-    /// <param name="cancellationToken">Token for cancellation.</param>
-    /// <returns>True if the callback was handled.</returns>
     public async Task<bool> DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         foreach (var handler in _handlers)

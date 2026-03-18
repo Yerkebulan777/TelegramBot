@@ -1,30 +1,23 @@
 namespace TelegramBotServer.Models;
 
 /// <summary>
-/// Represents a parsed callback data string with prefix and argument.
+/// Распарсенные данные callback-запроса (префикс и аргумент).
 /// </summary>
 public readonly record struct ParsedCallback(string Prefix, string Argument)
 {
-    /// <summary>
-    /// Checks if the callback prefix matches the specified value.
-    /// </summary>
+    /// <summary>Проверяет, совпадает ли префикс с указанным значением.</summary>
     public bool Is(string prefix) => string.Equals(Prefix, prefix, StringComparison.Ordinal);
 
-    /// <summary>
-    /// Checks if the callback prefix matches any of the two specified values.
-    /// </summary>
+    /// <summary>Проверяет, совпадает ли префикс с одним из двух значений.</summary>
     public bool IsAny(string prefix1, string prefix2) => Is(prefix1) || Is(prefix2);
 }
 
 /// <summary>
-/// Parser for callback data strings.
+/// Парсер данных callback-запроса.
 /// </summary>
 public static class CallbackDataParser
 {
-    /// <summary>
-    /// Parses callback data string into prefix and argument.
-    /// Callback format: "PREFIX:argument" (e.g., "OPENFOLDER:abc123")
-    /// </summary>
+    /// <summary>Парсит строку данных callback в префикс и аргумент. Формат: "PREFIX:argument".</summary>
     public static ParsedCallback Parse(string callbackData)
     {
         if (string.IsNullOrEmpty(callbackData))

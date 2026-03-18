@@ -1,5 +1,6 @@
 namespace TelegramBotServer.Models
 {
+    /// <summary>Команда внутри сессии (порядок, команда, файл, статус).</summary>
     public class SessionCommands
     {
         public int ExecOrder { get; set; }

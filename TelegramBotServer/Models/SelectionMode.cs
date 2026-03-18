@@ -1,8 +1,6 @@
 namespace TelegramBotServer.Models;
 
-/// <summary>
-/// Determines how files are selected: individually, by section, or by project.
-/// </summary>
+/// <summary>Режим выбора файлов: файлы, разделы или проекты.</summary>
 public enum SelectionMode
 {
     Files = 1,

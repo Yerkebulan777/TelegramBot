@@ -1,5 +1,6 @@
 namespace TelegramBotServer.DTOs
 {
+    /// <summary>DTO для входящего текстового сообщения.</summary>
     public class MessageDto
     {
         public long UserId { get; set; }

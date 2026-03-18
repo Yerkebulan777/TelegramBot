@@ -1,5 +1,6 @@
 namespace TelegramBotServer.Models;
 
+/// <summary>Команда пользователя (экспорт/автоматизация для файла).</summary>
 public class Command
 {
     public int Id { get; set; }

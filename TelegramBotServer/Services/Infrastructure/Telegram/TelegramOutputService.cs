@@ -16,6 +16,9 @@ public class TelegramOutputService(
     private readonly ILogger<TelegramOutputService> _logger = logger;
     private const int MaxRetries = 2;
 
+    /// <summary>
+    /// Отправляет текстовое сообщение пользователю с MarkdownV2 форматированием.
+    /// </summary>
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
         if (string.IsNullOrWhiteSpace(message)) return null!;
@@ -32,6 +35,9 @@ public class TelegramOutputService(
         }, userId);
     }
 
+    /// <summary>
+    /// Отправляет сообщение об ошибке пользователю (обычный текст).
+    /// </summary>
     public async Task SendErrorAsync(long userId, string errorMessage)
     {
         // Send as plain text to avoid MarkdownV2 escaping issues with formatting
@@ -45,6 +51,9 @@ public class TelegramOutputService(
         }, userId);
     }
 
+    /// <summary>
+    /// Отправляет уведомление администратору бота.
+    /// </summary>
     public async Task SendNotificationAsync(string message)
     {
         if (adminChatId == null)
@@ -56,6 +65,9 @@ public class TelegramOutputService(
         await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
     }
 
+    /// <summary>
+    /// Удаляет сообщение по ID.
+    /// </summary>
     public async Task DeleteMessageAsync(long chatId, int messageId)
     {
         try
@@ -69,6 +81,9 @@ public class TelegramOutputService(
         }
     }
 
+    /// <summary>
+    /// Отправляет сообщение с reply-клавиатурой.
+    /// </summary>
     public async Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
     {
         try
@@ -91,6 +106,9 @@ public class TelegramOutputService(
         }
     }
 
+    /// <summary>
+    /// Отправляет сообщение с удалением reply-клавиатуры.
+    /// </summary>
     public async Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
     {
         try
@@ -114,6 +132,9 @@ public class TelegramOutputService(
     }
 
 
+    /// <summary>
+    /// Отправляет сообщение с inline-клавиатурой.
+    /// </summary>
     public async Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
         try
@@ -137,6 +158,9 @@ public class TelegramOutputService(
     }
 
 
+    /// <summary>
+    /// Отвечает на callback-запрос (закрывает всплывающее уведомление).
+    /// </summary>
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
     {
         try
@@ -150,6 +174,9 @@ public class TelegramOutputService(
     }
 
 
+    /// <summary>
+    /// Редактирует текст сообщения (без клавиатуры).
+    /// </summary>
     public async Task EditMessageReplyTextAsync(long userId, int messageId, string message)
     {
         try
@@ -166,6 +193,9 @@ public class TelegramOutputService(
         }
     }
 
+    /// <summary>
+    /// Редактирует клавиатуру сообщения (без текста).
+    /// </summary>
     public async Task EditMessageReplyMarkupAsync(long userId, int messageId, InlineKeyboardMarkup keyboard)
     {
         try
@@ -182,6 +212,9 @@ public class TelegramOutputService(
         }
     }
 
+    /// <summary>
+    /// Редактирует текст сообщения и клавиатуру вместе.
+    /// </summary>
     public async Task EditMessageTextWithKeyboardAsync(long userId, int messageId, string message, InlineKeyboardMarkup keyboard)
     {
         try

@@ -4,30 +4,22 @@ using TelegramBotServer.Models;
 namespace TelegramBotServer.Interfaces;
 
 /// <summary>
-/// Defines a handler for processing Telegram callback queries.
-/// Implements Chain of Responsibility pattern for flexible callback routing.
+/// Определяет обработчик для callback-запросов Telegram.
 /// </summary>
 public interface ICallbackHandler
 {
-    /// <summary>
-    /// Determines whether this handler can process the given callback.
-    /// </summary>
+    /// <summary>Проверяет, может ли обработчик обработать callback.</summary>
     bool CanHandle(string prefix);
 
-    /// <summary>
-    /// Gets the priority order for this handler. Lower values are evaluated first.
-    /// Default is 100. Use lower values for more specific handlers.
-    /// </summary>
+    /// <summary>Приоритет обработчика (меньше = раньше).</summary>
     int Priority => 100;
 
-    /// <summary>
-    /// Handles the callback asynchronously.
-    /// </summary>
+    /// <summary>Обрабатывает callback асинхронно.</summary>
     Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
-/// Context object containing all data needed for callback processing.
+/// Контекст для обработки callback-запроса.
 /// </summary>
 public sealed class CallbackContext
 {

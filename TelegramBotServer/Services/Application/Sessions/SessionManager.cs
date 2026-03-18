@@ -22,7 +22,10 @@ namespace TelegramBotServer.Services
                 sessionTimeout);
         }
 
-        public UserSession GetOrCreateSession(long userId)
+    /// <summary>
+    /// Возвращает существующую сессию пользователя или создает новую.
+    /// </summary>
+    public UserSession GetOrCreateSession(long userId)
         {
             var session = _sessions.GetOrAdd(userId,
                 _ => new UserSession { UserId = userId });
@@ -31,14 +34,20 @@ namespace TelegramBotServer.Services
             return session;
         }
 
-        public async Task<IDisposable> AcquireUserLockAsync(long userId)
+    /// <summary>
+    /// Получает блокировку для безопасной работы с сессией пользователя.
+    /// </summary>
+    public async Task<IDisposable> AcquireUserLockAsync(long userId)
         {
             var sessionLock = _sessionLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
             await sessionLock.WaitAsync();
             return new SessionLockReleaser(sessionLock);
         }
 
-        public void RemoveSession(long userId)
+    /// <summary>
+    /// Удаляет сессию пользователя из памяти.
+    /// </summary>
+    public void RemoveSession(long userId)
         {
             _sessions.TryRemove(userId, out _);
             if (_sessionLocks.TryRemove(userId, out var sl))

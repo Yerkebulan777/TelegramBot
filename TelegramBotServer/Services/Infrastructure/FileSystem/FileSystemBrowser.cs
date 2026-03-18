@@ -24,7 +24,10 @@ namespace TelegramBotServer.Services
         }
 
 
-        public async Task<(string message, InlineKeyboardMarkup keyboard)> GetFilesViewAsync(long userId, string path)
+    /// <summary>
+    /// Возвращает представление файлов в указанной директории с клавиатурой навигации.
+    /// </summary>
+    public async Task<(string message, InlineKeyboardMarkup keyboard)> GetFilesViewAsync(long userId, string path)
         {
             var session = _sessions.GetOrCreateSession(userId);
 
@@ -81,7 +84,10 @@ namespace TelegramBotServer.Services
             var message = $"*Current directory:* `{path}`";
             return (message, markup);
         }
-        public bool TryResolvePath(long userId, string token, out string? path)
+    /// <summary>
+    /// Возвращает полный путь по токену из PathMap.
+    /// </summary>
+    public bool TryResolvePath(long userId, string token, out string? path)
         {
             var session = _sessions.GetOrCreateSession(userId);
 
@@ -110,10 +116,16 @@ namespace TelegramBotServer.Services
 
 
 
-        public Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path)
+    /// <summary>
+    /// Возвращает представление разделов (sections) в указанной директории.
+    /// </summary>
+    public Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path)
             => GetDirectoriesViewAsync(userId, path, "OPENFOLDER:");
 
-        public Task<(string message, InlineKeyboardMarkup keyboard)> GetProjectsViewAsync(long userId, string path)
+    /// <summary>
+    /// Возвращает представление проектов в указанной директории.
+    /// </summary>
+    public Task<(string message, InlineKeyboardMarkup keyboard)> GetProjectsViewAsync(long userId, string path)
             => GetDirectoriesViewAsync(userId, path, "FILE:");
 
         private async Task<(string message, InlineKeyboardMarkup keyboard)> GetDirectoriesViewAsync(

@@ -42,6 +42,9 @@ public sealed class CommandAppService : ICommandAppService
         _options = fileSystemOptions.Value;
     }
 
+    /// <summary>
+    /// Обрабатывает входящее текстовое сообщение от пользователя.
+    /// </summary>
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
         // Username и Text уже проверены в TelegramBotHostedService
@@ -62,6 +65,9 @@ public sealed class CommandAppService : ICommandAppService
         await HandleSlashCommandAsync(text, message, session, username, cancellationToken);
     }
 
+    /// <summary>
+    /// Обрабатывает callback-запрос от inline-кнопки.
+    /// </summary>
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
     {
         if (callback.Username == null || callback.MessageText == null ||

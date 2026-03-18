@@ -7,7 +7,10 @@ namespace TelegramBotServer.Services
 {
     public class TelegramUpdateMapper : ITelegramUpdateMapper
     {
-        public MessageDto MapMessage(Message message)
+    /// <summary>
+    /// Преобразует Telegram Message в DTO.
+    /// </summary>
+    public MessageDto MapMessage(Message message)
         {
             var msg = message.From
              ?? throw new InvalidOperationException("Message.From is null.");
@@ -23,7 +26,10 @@ namespace TelegramBotServer.Services
         }
 
 
-        public CallbackQueryDto MapCallback(CallbackQuery callback)
+    /// <summary>
+    /// Преобразует Telegram CallbackQuery в DTO.
+    /// </summary>
+    public CallbackQueryDto MapCallback(CallbackQuery callback)
         {
             var msg = callback.Message
              ?? throw new InvalidOperationException("CallbackQuery.Message is null.");
@@ -51,7 +57,10 @@ namespace TelegramBotServer.Services
         }
 
 
-        public Task<object?> Map(Update update)
+    /// <summary>
+    /// Преобразует любое обновление Telegram в DTO (сообщение или callback).
+    /// </summary>
+    public Task<object?> Map(Update update)
         {
             if (update.Message?.Text != null && update.Message.From != null)
             {

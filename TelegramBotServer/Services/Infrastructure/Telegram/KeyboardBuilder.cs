@@ -42,6 +42,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     }
 
 
+    /// <summary>
+    /// Возвращает клавиатуру выбора файлов с учетом текущего режима.
+    /// </summary>
     public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
     {
         InlineKeyboardMarkup keyboard = session.SelectionType switch
@@ -71,6 +74,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     }
 
 
+    /// <summary>
+    /// Возвращает клавиатуру выбора экспортных команд (PDF, DWG, NWC, IFC).
+    /// </summary>
     public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session)
     {
         var commandOptions = new List<CommandOption>
@@ -84,16 +90,25 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
     }
 
+    /// <summary>
+    /// Возвращает reply-клавиатуру с кнопками "Применить" и "Отмена" для экспорта.
+    /// </summary>
     public Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync()
     {
         return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.ExportApply));
     }
 
+    /// <summary>
+    /// Возвращает reply-клавиатуру с кнопками "Подтвердить" и "Отмена" для автоматизации.
+    /// </summary>
     public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
     {
         return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.AutomationApply));
     }
 
+    /// <summary>
+    /// Возвращает reply-клавиатуру для действий с файлами.
+    /// </summary>
     public Task<ReplyKeyboardMarkup> GetFileActionsReplyKeyboardAsync(UserSession session)
     {
         var applyButtonText = HasAutomationCommands(session)
@@ -110,6 +125,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         });
     }
 
+    /// <summary>
+    /// Возвращает клавиатуру списка сессий пользователя.
+    /// </summary>
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
     {
         var buttons = new List<List<InlineKeyboardButton>>();
@@ -124,6 +142,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
+    /// <summary>
+    /// Возвращает клавиатуру статуса сессии (подробности, удалить, назад).
+    /// </summary>
     public Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
     {
         _ = sessionStatus;
@@ -140,6 +161,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
+    /// <summary>
+    /// Возвращает клавиатуру команд внутри сессии (список файлов и команд).
+    /// </summary>
     public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId)
     {
         var buttons = new List<List<InlineKeyboardButton>>
@@ -168,6 +192,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
+    /// <summary>
+    /// Возвращает клавиатуру выбора автоматизации (BIM Doctor, Clash Report, Auto Resolver).
+    /// </summary>
     public Task<InlineKeyboardMarkup> GetAutomationKeyboardAsync(UserSession session)
     {
         var commandOptions = new List<CommandOption>

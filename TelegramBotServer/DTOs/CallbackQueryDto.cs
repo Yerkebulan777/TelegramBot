@@ -1,5 +1,6 @@
 namespace TelegramBotServer.DTOs
 {
+    /// <summary>DTO для входящего callback-запроса.</summary>
     public class CallbackQueryDto
     {
         public long UserId { get; set; }

@@ -1,8 +1,6 @@
 namespace TelegramBotServer.Models;
 
-/// <summary>
-/// Callback prefix constants for inline keyboard buttons.
-/// </summary>
+/// <summary>Константы префиксов для callback-кнопок.</summary>
 public static class CallbackPrefixes
 {
     public const string OpenFolder = "OPENFOLDER:";

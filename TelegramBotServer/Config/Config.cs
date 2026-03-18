@@ -5,6 +5,7 @@ namespace TelegramBotServer.Config
 {
     public class Config
     {
+        /// <summary>Регистрирует команды бота в Telegram (export, automation, status, help).</summary>
         public static async Task ConfigureAsync(ITelegramBotClient bot, ILogger logger)
         {
             BotCommand[] commands = new[]

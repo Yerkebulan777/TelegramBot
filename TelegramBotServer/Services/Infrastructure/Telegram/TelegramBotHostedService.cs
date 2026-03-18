@@ -30,6 +30,9 @@ public class TelegramBotHostedService : BackgroundService
         _sessionManager = sessionManager;
     }
 
+    /// <summary>
+    /// Запускает long-polling цикл для получения обновлений от Telegram.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Starting Telegram polling");
@@ -66,6 +69,9 @@ public class TelegramBotHostedService : BackgroundService
         _logger.LogInformation("Stopping Telegram polling");
     }
 
+    /// <summary>
+    /// Обрабатывает входящее обновление от Telegram (сообщение или callback).
+    /// </summary>
     public async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken token)
     {
         try
