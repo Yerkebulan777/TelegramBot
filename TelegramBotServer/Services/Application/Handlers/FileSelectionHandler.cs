@@ -134,12 +134,12 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         session.SelectionType = SelectionMode.Files;
         session.IsFileSelectionActive = false;
 
-        if (HasExportCommands(session))
+        if (CommandCodes.ExportCodes.Any(session.ContainsPendingCommand))
         {
             var keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(session);
             await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
         }
-        else if (HasAutomationCommands(session))
+        else if (CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand))
         {
             var keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(session);
             await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
@@ -244,9 +244,4 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         return sb.ToString();
     }
 
-    private static bool HasExportCommands(UserSession session)
-        => CommandCodes.ExportCodes.Any(session.ContainsPendingCommand);
-
-    private static bool HasAutomationCommands(UserSession session)
-        => CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand);
 }

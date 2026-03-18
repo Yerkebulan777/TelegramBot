@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Options;
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotServer.Config;
 using TelegramBotServer.DTOs;
@@ -112,15 +113,13 @@ public sealed class CommandAppService : ICommandAppService
             ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
             : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
 
-        var commandMsg = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard);
-        if (commandMsg != null) session.AddBotMessageId(commandMsg.Id);
+        await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
 
         var replyKeyboard = isAutomation
             ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
             : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
 
-        var replyMsg = await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
-        if (replyMsg != null) session.AddBotMessageId(replyMsg.Id);
+        await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
     }
 
     private async Task HandleSlashCommandAsync(
@@ -150,8 +149,7 @@ public sealed class CommandAppService : ICommandAppService
 
                 var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                 var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                var statusMsg = await _outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard);
-                if (statusMsg != null) session.AddBotMessageId(statusMsg.Id);
+                await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
                 break;
 
             case "/automation":
@@ -208,8 +206,7 @@ public sealed class CommandAppService : ICommandAppService
                     username, userId, session.SelectedFiles.Count);
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
                 session.IsFileSelectionActive = false;
-                var applyMsg = await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден.");
-                if (applyMsg != null) session.AddBotMessageId(applyMsg.Id);
+                await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден."), session);
                 return true;
             }
 
@@ -219,17 +216,13 @@ public sealed class CommandAppService : ICommandAppService
                 await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
                 session.IsFileSelectionActive = false;
 
-                var cancelFileMsg = await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен.");
-                if (cancelFileMsg != null) session.AddBotMessageId(cancelFileMsg.Id);
+                await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен."), session);
 
-                var replyKeyboard = session.ContainsPendingCommand(CommandCodes.BimDoc)
-                    || session.ContainsPendingCommand(CommandCodes.ClashRep)
-                    || session.ContainsPendingCommand(CommandCodes.AutoRes)
+                var replyKeyboard = CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand)
                     ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
                     : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
 
-                var backToSelMsg = await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard);
-                if (backToSelMsg != null) session.AddBotMessageId(backToSelMsg.Id);
+                await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
                 return true;
             }
 
@@ -249,14 +242,12 @@ public sealed class CommandAppService : ICommandAppService
                 username, userId, string.Join(", ", session.PendingCommand));
             session.CurrentPath = _options.RootPath;
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-            var selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
+            var selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard), session);
             session.FileSelectionMessageId = selectionMessage?.Id;
-            if (selectionMessage != null) session.AddBotMessageId(selectionMessage.Id);
             session.IsFileSelectionActive = true;
 
             var fileActionsReplyKeyboard = await _keyboardBuilder.GetFileActionsReplyKeyboardAsync(session);
-            var fileActionsMsg = await _outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard);
-            if (fileActionsMsg != null) session.AddBotMessageId(fileActionsMsg.Id);
+            await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard), session);
             return true;
         }
 
@@ -265,8 +256,7 @@ public sealed class CommandAppService : ICommandAppService
             session.ClearPendingCommands();
             session.IsFileSelectionActive = false;
             _logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
-            var cancelCmdMsg = await _outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен.");
-            if (cancelCmdMsg != null) session.AddBotMessageId(cancelCmdMsg.Id);
+            await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен."), session);
             return true;
         }
 
@@ -314,6 +304,13 @@ public sealed class CommandAppService : ICommandAppService
         };
 
         await _callbackDispatcher.DispatchAsync(context, cancellationToken);
+    }
+
+    private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
+    {
+        var msg = await task;
+        if (msg != null) session.AddBotMessageId(msg.Id);
+        return msg;
     }
 
     private static string NormalizeCommandText(string text)

@@ -21,8 +21,7 @@ public class TelegramBotHostedService : BackgroundService
         ICommandAppService commandAppService,
         ILogger<TelegramBotHostedService> logger,
         ITelegramUpdateMapper inputService,
-        ISessionManager sessionManager,
-        ITelegramOutputService outputService)
+        ISessionManager sessionManager)
     {
         _botClient = botClient;
         _commandAppService = commandAppService;

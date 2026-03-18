@@ -7,7 +7,10 @@ namespace TelegramBotServer.Services.Application.Handlers;
 /// <summary>
 /// Обработчик переключения команд экспорта (PDF, DWG, NWC, IFC).
 /// </summary>
-public sealed class ExportCommandHandler : CommandToggleHandlerBase
+public sealed class ExportCommandHandler(
+    IKeyboardBuilder keyboardBuilder,
+    ITelegramOutputService outputService,
+    ILogger<ExportCommandHandler> logger) : CommandToggleHandlerBase(keyboardBuilder, outputService, logger)
 {
     protected override IReadOnlyDictionary<string, (string Code, string DisplayName)> Commands { get; } =
         new Dictionary<string, (string Code, string DisplayName)>
@@ -17,11 +20,6 @@ public sealed class ExportCommandHandler : CommandToggleHandlerBase
             [CallbackPrefixes.Nwc] = (CommandCodes.Nwc, "Export to NWC"),
             [CallbackPrefixes.Ifc] = (CommandCodes.Ifc, "Export to IFC"),
         };
-
-    public ExportCommandHandler(
-        IKeyboardBuilder keyboardBuilder,
-        ITelegramOutputService outputService,
-        ILogger<ExportCommandHandler> logger) : base(keyboardBuilder, outputService, logger) { }
 
     protected override Task<InlineKeyboardMarkup> GetKeyboardAsync(IKeyboardBuilder keyboardBuilder, UserSession session)
         => keyboardBuilder.GetCommandsKeyboardAsync(session);

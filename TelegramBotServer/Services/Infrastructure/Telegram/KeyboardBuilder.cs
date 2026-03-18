@@ -23,37 +23,18 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 {
     private readonly IFileSystemBrowser _navigationService = fileNavigationService;
 
-    private async Task<InlineKeyboardMarkup> GetFileSelKeyboardAsync(long userId, UserSession session)
-    {
-        (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetFilesViewAsync(userId, session.CurrentPath);
-        return keyboard;
-    }
-
-    private async Task<InlineKeyboardMarkup> GetSectionSelKeyboardAsync(long userId, UserSession session)
-    {
-        (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
-        return keyboard;
-    }
-
-    private async Task<InlineKeyboardMarkup> GetProjectSelKeyboardAsync(long userId, UserSession session)
-    {
-        (_, InlineKeyboardMarkup? keyboard) = await _navigationService.GetProjectsViewAsync(userId, session.CurrentPath);
-        return keyboard;
-    }
-
-
     /// <summary>
     /// Возвращает клавиатуру выбора файлов с учетом текущего режима.
     /// </summary>
     public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
     {
-        InlineKeyboardMarkup keyboard = session.SelectionType switch
+        var (_, rawKeyboard) = session.SelectionType switch
         {
-            SelectionMode.Files => await GetFileSelKeyboardAsync(userId, session),
-            SelectionMode.Sections => await GetSectionSelKeyboardAsync(userId, session),
-            SelectionMode.Projects => await GetProjectSelKeyboardAsync(userId, session),
-            _ => new InlineKeyboardMarkup(Array.Empty<InlineKeyboardButton[]>())
+            SelectionMode.Sections => await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath),
+            SelectionMode.Projects => await _navigationService.GetProjectsViewAsync(userId, session.CurrentPath),
+            _ => await _navigationService.GetFilesViewAsync(userId, session.CurrentPath)
         };
+        InlineKeyboardMarkup keyboard = rawKeyboard ?? new InlineKeyboardMarkup(Array.Empty<InlineKeyboardButton[]>());
 
         var newKeyboard = keyboard.InlineKeyboard.Select(row => row.Select(button =>
         {
@@ -111,7 +92,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     /// </summary>
     public Task<ReplyKeyboardMarkup> GetFileActionsReplyKeyboardAsync(UserSession session)
     {
-        var applyButtonText = HasAutomationCommands(session)
+        var applyButtonText = CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand)
             ? ButtonTexts.AutomationApply
             : ButtonTexts.ExportApply;
 
@@ -241,6 +222,4 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         };
     }
 
-    private static bool HasAutomationCommands(UserSession session)
-        => CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand);
 }

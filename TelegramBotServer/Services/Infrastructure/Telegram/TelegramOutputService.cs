@@ -84,78 +84,32 @@ public class TelegramOutputService(
     /// <summary>
     /// Отправляет сообщение с reply-клавиатурой.
     /// </summary>
-    public async Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
-    {
-        try
-        {
-            return await ExecuteWithRetryAsync(async () =>
-            {
-                var t = await _botClient.SendMessage(
-                    chatId: userId,
-                    text: message,
-                    replyMarkup: keyboard,
-                    parseMode: ParseMode.Markdown
-                );
-                return t;
-            }, userId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to send message with reply keyboard to {UserId}", userId);
-            return null;
-        }
-    }
+    public Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
+        => ExecuteWithRetryAsync(() => _botClient.SendMessage(
+            chatId: userId,
+            text: message,
+            replyMarkup: keyboard,
+            parseMode: ParseMode.Markdown), userId);
 
     /// <summary>
     /// Отправляет сообщение с удалением reply-клавиатуры.
     /// </summary>
-    public async Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
-    {
-        try
-        {
-            return await ExecuteWithRetryAsync(async () =>
-            {
-                var t = await _botClient.SendMessage(
-                    chatId: userId,
-                    text: message,
-                    replyMarkup: new ReplyKeyboardRemove(),
-                    parseMode: ParseMode.Markdown
-                );
-                return t;
-            }, userId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to remove reply keyboard for {UserId}", userId);
-            return null;
-        }
-    }
-
+    public Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
+        => ExecuteWithRetryAsync(() => _botClient.SendMessage(
+            chatId: userId,
+            text: message,
+            replyMarkup: new ReplyKeyboardRemove(),
+            parseMode: ParseMode.Markdown), userId);
 
     /// <summary>
     /// Отправляет сообщение с inline-клавиатурой.
     /// </summary>
-    public async Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
-    {
-        try
-        {
-            return await ExecuteWithRetryAsync(async () =>
-            {
-                var t = await _botClient.SendMessage(
-                    chatId: userId,
-                    text: message,
-                    replyMarkup: keyboard,
-                    parseMode: ParseMode.Markdown
-                );
-                return t;
-            }, userId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to send message with keyboard to {UserId}", userId);
-            return null;
-        }
-    }
+    public Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
+        => ExecuteWithRetryAsync(() => _botClient.SendMessage(
+            chatId: userId,
+            text: message,
+            replyMarkup: keyboard,
+            parseMode: ParseMode.Markdown), userId);
 
 
     /// <summary>
