@@ -195,13 +195,6 @@ public sealed class CommandAppService : ICommandAppService
                 return true;
             }
 
-            if (messageText == ButtonTexts.CancelSelection)
-            {
-                _logger.LogDebug("User {UserId} clearing file selection", userId);
-                await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelSelection, cancellationToken);
-                return true;
-            }
-
             if (messageText == ButtonTexts.Cancel)
             {
                 _logger.LogDebug("User {UserId} cancelling file selection", userId);

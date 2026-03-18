@@ -22,7 +22,6 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
     [
         CallbackPrefixes.File,
         CallbackPrefixes.ApplyFiles,
-        CallbackPrefixes.CancelSelection,
         CallbackPrefixes.CancelFileSelection
     ];
 
@@ -49,7 +48,6 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         {
             CallbackPrefixes.File => await HandleFileToggleAsync(context, cancellationToken),
             CallbackPrefixes.ApplyFiles => await HandleApplyFilesAsync(context, cancellationToken),
-            CallbackPrefixes.CancelSelection => await HandleCancelSelectionAsync(context, cancellationToken),
             CallbackPrefixes.CancelFileSelection => await HandleCancelFileSelectionAsync(context, cancellationToken),
             _ => false
         };
@@ -112,17 +110,6 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         session.ResetNavigation(_options.RootPath);
         session.SelectionType = SelectionMode.Files;
         session.IsFileSelectionActive = false;
-
-        return true;
-    }
-
-    private async Task<bool> HandleCancelSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
-    {
-        context.Session.FileSelectionMessageId = context.MessageId;
-        context.Session.ClearSelectedFiles();
-
-        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, context.Session);
-        await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         return true;
     }

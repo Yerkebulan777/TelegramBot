@@ -10,7 +10,6 @@ public static class CallbackPrefixes
     public const string File = "FILE:";
     public const string SelectionMode = "SELMODE:";
     public const string ApplyFiles = "APPLYFILES:";
-    public const string CancelSelection = "CANCELSEL:";
     public const string CancelFileSelection = "CANCELFILESEL:";
     public const string Pdf = "PDF:";
     public const string Dwg = "DWG:";

@@ -13,7 +13,6 @@ public static class ButtonTexts
 {
     public const string ExportApply = "✅ Применить";
     public const string AutomationApply = "✅ Подтвердить";
-    public const string CancelSelection = "🧹 Сброс";
     public const string Cancel = "❌ Отмена";
 }
 
@@ -103,8 +102,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 
         return Task.FromResult(new ReplyKeyboardMarkup(
         [
-            [new(applyButtonText), new(ButtonTexts.CancelSelection)],
-            [new(ButtonTexts.Cancel)]
+            [new(applyButtonText), new(ButtonTexts.Cancel)]
         ])
         {
             ResizeKeyboard = true,
