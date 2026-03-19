@@ -177,7 +177,6 @@ Namespaces must match folder structure:
 
 ## Known Issues (Do Not Worsen)
 
-- Bot token is committed in `appsettings.json` — always use `IConfiguration`, never hardcode tokens
 - No `.editorconfig` exists — `dotnet format` uses SDK defaults
 - No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`
-- Keep secrets out of committed config files. Put tokens in `TelegramBot.Server/appsettings.Local.json`.
+- Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
