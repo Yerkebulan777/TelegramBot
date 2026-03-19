@@ -5,14 +5,14 @@ Guidance for agentic coding agents working in this repository.
 ## Project Overview
 
 Single .NET 8 background service (`TelegramBotServer`) — a Telegram bot using long-polling.
-No webhooks, no MVC controllers, no test projects.
+No webhooks, no MVC controllers, no test projects. All services are **Singletons**.
 
 ---
 
 ## Build & Run Commands
 
 ```bash
-# Build
+# Build (use this to verify changes — there are no automated tests)
 dotnet build TelegramBotServer/TelegramBotServer.csproj
 
 # Run (requires appsettings.Local.json with bot token, or env var TelegramBot__Token)
@@ -21,66 +21,50 @@ dotnet run --project TelegramBotServer/TelegramBotServer.csproj
 # Release publish
 dotnet publish TelegramBotServer/TelegramBotServer.csproj -c Release
 
-# Format code according to .editorconfig
+# Format code (no .editorconfig exists — uses SDK defaults)
 dotnet format
 ```
 
-**There are no automated tests.** There is no test project and no test runner command.
-After making changes, verify correctness by building successfully (`dotnet build`).
+**There are no automated tests.** After making changes, verify correctness by building successfully.
 
 ---
 
 ## Configuration
 
-- `appsettings.json` — committed, contains Serilog config and empty bot token
-- `appsettings.Local.json` — **gitignored**, contains secrets (bot token, local overrides)
-- `appsettings.Development.json` — environment-specific overrides
+- `appsettings.json` — committed, contains Serilog config and `FileSystem` options
+- `appsettings.Local.json` — **gitignored**, put secrets here (bot token, local overrides)
 - Required config keys:
-  - `TelegramBot:Token` — Telegram bot token (set in `appsettings.Local.json` or env var)
-  - `ConnectionStrings:Sqlite` — SQLite path (defaults to `"botdata.db"`)
+  - `TelegramBot:Token` — bot token (also settable via env var `TelegramBot__Token`)
+  - `FileSystem:RootPath` — filesystem browser root (validated on startup via `FileSystemOptions`)
+  - `ConnectionStrings:Sqlite` — SQLite connection string (defaults to `"Data Source=botdata.db"`)
 
 ---
 
 ## Architecture & Request Flow
 
 ```
-Telegram API → TelegramBotHostedService (polling)
-             → TelegramUpdateMapper (Update → MessageDto | CallbackQueryDto)
-             → Authorization check (AuthService + SessionManager)
-             → CommandAppService.HandleUserCommandAsync / HandleCallbackAsync
+Telegram API -> TelegramBotHostedService (polling)
+             -> TelegramUpdateMapper (Update -> MessageDto | CallbackQueryDto)
+             -> Authorization check (AuthService + SessionManager)
+             -> CommandAppService.HandleUserCommandAsync (text commands)
+             -> CallbackDispatcher.DispatchAsync (inline keyboard callbacks)
 ```
 
-All services are **Singletons**. DI is wired in `DependencyInjectionExtensions.cs`.
-The filesystem root is hardcoded as `"B:\\"` in `CommandAppService`.
+DI is wired in `DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section).
 
-### Key Services
+### Callback Handling — Chain of Responsibility
 
-| Class | Responsibility |
-|---|---|
-| `TelegramBotHostedService` | Entry point, polling loop, `/auth` flow |
-| `CommandAppService` | Central command/callback dispatcher (~970 lines, `partial`) |
-| `FileSystemBrowser` | Builds inline keyboards for filesystem navigation (`partial`) |
-| `KeyboardBuilder` | Context-aware keyboards with selection state |
-| `SessionManager` | In-memory sessions (`ConcurrentDictionary`, 5-min timeout) |
-| `TelegramOutputService` | Send/edit Telegram messages |
-| `SqliteDataService` | All DB persistence via `Microsoft.Data.Sqlite` + Dapper |
-| `AuthService` | Whitelist + password auth (plain-text, default `qwerty123`) |
+`CallbackDispatcher` routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (sorted by `Priority`, lower = first). All handlers extend `CallbackHandlerBase`.
 
-### Callback Data Protocol
+Handler hierarchy: `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `ExportCommandHandler`, `AutomationCommandHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
 
-Inline keyboard buttons use short tokens (≤64 bytes Telegram limit).
-Full paths stored in `UserSession.PathMap[token]`.
-
-Prefixes: `OPENFOLDER:`, `GOTOPARENT:`, `FILE:`, `SELMODE:`, `APPLYFILES:`, `CANCELSEL:`,
-`CANCELFILESEL:`, `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`,
-`AUTORES:`, `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`, `Sessiondetails:`,
-`Deletesession:`, `Deletecommand:`, `Backtostatus:`
+Callback prefixes are constants in `CallbackPrefixes` (`Models/CallbackPrefixes.cs`). Use `CallbackDataParser.Parse(data)` to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.OpenFolder)`.
 
 ### Database
 
 Tables: `Sessions`, `Commands`, `Whitelist`, `Credentials`.
-Soft-delete only — rows are never physically removed (status = `"Deleted"`).
-DB file: `botdata.db` in the project directory.
+Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
+DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()`.
 
 ---
 
@@ -90,9 +74,10 @@ DB file: `botdata.db` in the project directory.
 
 - **Target framework**: .NET 8 (`net8.0`)
 - **Nullable reference types**: enabled — always annotate nullability (`string?`, `T?`)
-- **Implicit usings**: enabled — do not add `using System;`, `using System.Collections.Generic;`, etc. unless needed beyond the implicit set
-- **File-scoped namespaces** are preferred: `namespace TelegramBotServer.Services;`
-- **Primary constructors** (C# 12) are used in some services; either style is acceptable but be consistent within a file
+- **Implicit usings**: enabled — do not add `using System;` etc. unless needed beyond the implicit set
+- **File-scoped namespaces** preferred: `namespace TelegramBotServer.Services;`
+  (Some older files use block-scoped — do not perpetuate; use file-scoped for new code)
+- **Primary constructors** (C# 12) are used in newer services; either style is acceptable but be consistent within a file
 
 ### Naming Conventions
 
@@ -107,33 +92,34 @@ DB file: `botdata.db` in the project directory.
 | Local variables | `camelCase` | `chatId`, `sessionId` |
 | Parameters | `camelCase` | `userId`, `cancellationToken` |
 
-> Note: Some existing `UserSession` properties (`statusLevel`, `sessionId`) violate the property convention — do not perpetuate this; use `PascalCase` for new properties.
-
 ### Imports / Using Directives
 
-- Place `using` directives at the top of the file, before the namespace declaration
-- Order: framework namespaces first, then third-party (`Dapper`, `Serilog`, `Telegram.Bot`), then project-internal (`TelegramBotServer.*`)
+- Place `using` directives at the top of the file, before the namespace
+- Order: framework namespaces, then third-party (`Dapper`, `Serilog`, `Telegram.Bot`), then project-internal (`TelegramBotServer.*`)
 - Do not add unnecessary usings
 
 ### Dependency Injection
 
 - Register all new services as **Singletons** in `DependencyInjectionExtensions.cs`
-- Use `_ = services.AddSingleton<IFoo, Foo>()` (discard the fluent return value explicitly)
+- Use `_ = services.AddSingleton<IFoo, Foo>()` (discard the fluent return value)
 - Inject dependencies via constructor; store in `readonly` private `_camelCase` fields
+- New callback handlers: implement `ICallbackHandler`, extend `CallbackHandlerBase`, register in `AddCallbackHandlers()`
 
 ### Async / Await
 
-- All async methods return `Task` or `Task<T>` — never `async void` (except event handlers)
+- All async methods return `Task` or `Task<T>` — never `async void`
 - Always suffix async methods with `Async`
 - Do **not** use `ConfigureAwait(false)` — this is an application, not a library
-- `CancellationToken` is threaded through at the infrastructure boundary (`BackgroundService.ExecuteAsync`); inner service methods generally do not require it unless doing I/O loops
+- `CancellationToken` is threaded from `BackgroundService.ExecuteAsync`; inner methods generally do not require it unless doing I/O loops
 
 ### Error Handling
 
-- Wrap startup in `try/catch` with `Log.Fatal` — already done in `Program.cs`, do not remove
-- Infrastructure output methods (e.g., `TelegramOutputService`) should catch specific, expected exceptions (like `ApiRequestException`) and log as `LogWarning`, allowing the bot to continue
-- Do not swallow unknown exceptions silently — log them at `LogError` or rethrow
+- Startup: wrapped in `try/catch` with `Log.Fatal` in `Program.cs` — do not remove
+- Telegram API calls: catch `ApiRequestException` specifically, log as `LogWarning`, let the bot continue
+- `TelegramOutputService` has retry logic for HTTP 429 (rate limiting) via `ExecuteWithRetryAsync`
+- Do not swallow unknown exceptions — log at `LogError` or rethrow
 - Avoid empty `catch` blocks
+- Handler base class catches `OperationCanceledException` (logs + rethrows) and general `Exception` (logs at Error + rethrows)
 
 ### Logging
 
@@ -145,45 +131,43 @@ DB file: `botdata.db` in the project directory.
   // Wrong
   _logger.LogInformation($"Received command '{command}' from {userId}");
   ```
-- Log levels: `LogDebug` for trace/diagnostic, `LogInformation` for normal flow, `LogWarning` for recoverable issues, `LogError`/`Log.Fatal` for failures
+- Log levels: `LogDebug` for diagnostics, `LogInformation` for normal flow, `LogWarning` for recoverable issues, `LogError` / `Log.Fatal` for failures
 
 ### Collections & Thread Safety
 
-- `UserSession` mutable collections (`SelectedFiles`, `PendingCommand`) are **not thread-safe** — this is a known issue; do not add new unsynchronized shared state
-- For new shared dictionaries, prefer `ConcurrentDictionary<,>` (already used for `PathMap` and sessions)
+- `UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`, `_navigationLock`, `_messageLock`) — follow this pattern for new mutable state
+- `PathMap` uses `ConcurrentDictionary<string, string>`
+- For new shared dictionaries, prefer `ConcurrentDictionary<,>`
 
 ### SQL / Data Access
 
-- Use `Microsoft.Data.Sqlite` with `await using var conn = new SqliteConnection(...)` for direct queries
-- Use `Dapper` for multi-row reads that map to model classes
+- Use `await using var conn = new SqliteConnection(...)` — open a fresh connection per method
+- Use `Dapper` for multi-row reads that map to model classes; raw `SqliteCommand` for simple queries
 - SQL statements go in verbatim string literals (`@"..."`)
 - Use parameterized queries — never string-concatenate user input into SQL
-- Soft-delete only: set `Status = 'Deleted'`, never `DELETE FROM`
+- Soft-delete only: `SET Status = 'Deleted'`, never `DELETE FROM`
+- For transactions, use `conn.BeginTransactionAsync()` — not raw SQL `BEGIN TRANSACTION`
 
-### Markdown in Telegram Messages
+### Telegram Messages
 
-- Plain messages: `ParseMode.MarkdownV2` — escape all special characters with `EscapeMarkdownV2()`
+- Plain messages: `ParseMode.MarkdownV2` — escape special characters with `EscapeMarkdownV2()`
 - Messages with inline keyboards: `ParseMode.Markdown`
 - Do not mix the two parse modes
+- All Telegram API methods must be current — do not use deprecated approaches
 
 ### General
 
-- `partial` classes are used for `CommandAppService` and `FileSystemBrowser` — keep related partials together and clearly named
-- XML doc comments (`/// <summary>`) are only on interface methods in `ITelegramOutputService`; add them to new interface methods
-- Use `required` keyword on model properties that must always be set: `public required string FullPath { get; set; }`
+- `partial` classes are used for `CommandAppService` and `FileSystemBrowser`
+- XML doc comments (`/// <summary>`) on new interface methods
+- Use `required` keyword on model properties that must always be set
 - Prefer `??` and `?? throw new InvalidOperationException(...)` over unchecked null dereferences
-- Regex patterns: use `[GeneratedRegex]` attribute with `partial` method for compiled regexes
-
-### Formatting and Linting
-
-- The project uses an EditorConfig file (`.editorconfig`) to enforce coding styles.
-- You can run `dotnet format` to format the code according to the editorconfig settings.
-- There are no additional linting tools configured beyond the Roslyn analyzers that come with the SDK.
+- Use `[GeneratedRegex]` attribute with `partial` method for compiled regexes
+- Maintain good code readability and unify methods for easier editing
 
 ---
 
 ## Known Issues (Do Not Worsen)
 
-- `UserSession` collections are accessed from concurrent handlers without locks — do not add more non-concurrent collections to `UserSession`
-- Bot token should come from configuration, not be hardcoded — always use `IConfiguration`
-- `DeleteSessionAsync` uses raw SQL `BEGIN TRANSACTION` string instead of `connection.BeginTransaction()` — use the proper API in new transaction code
+- Bot token is committed in `appsettings.json` — always use `IConfiguration`, never hardcode tokens
+- No `.editorconfig` exists despite some tooling expecting it — `dotnet format` uses SDK defaults
+- No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`
