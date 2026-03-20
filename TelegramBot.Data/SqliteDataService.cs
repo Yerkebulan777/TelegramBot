@@ -10,16 +10,10 @@ namespace TelegramBot.Data;
 /// <summary>
 /// SQLite persistence service using Dapper for all data access.
 /// </summary>
-public class SqliteDataService : IDataService
+public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataService> logger) : IDataService
 {
-    private readonly string _connectionString;
-    private readonly ILogger<SqliteDataService> _logger;
-
-    public SqliteDataService(IConfiguration configuration, ILogger<SqliteDataService> logger)
-    {
-        _connectionString = $"Data Source={configuration.GetConnectionString("Sqlite") ?? "botdata.db"}";
-        _logger = logger;
-    }
+    private readonly string _connectionString = $"Data Source={configuration.GetConnectionString("Sqlite") ?? "botdata.db"}";
+    private readonly ILogger<SqliteDataService> _logger = logger;
 
     /// <summary>
     /// Инициализирует базу данных (создает таблицы, если не существуют).
