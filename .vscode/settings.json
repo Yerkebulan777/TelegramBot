@@ -7,7 +7,6 @@
     "editor.renderWhitespace": "boundary",
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,
-
     // --- C# ---
     "[csharp]": {
         "editor.defaultFormatter": "ms-dotnettools.csharp",
@@ -17,7 +16,6 @@
     "dotnet.defaultSolution": "TelegramBotServer.slnx",
     "omnisharp.enableRoslynAnalyzers": true,
     "omnisharp.enableEditorConfigSupport": true,
-
     // --- File Explorer: hide build output ---
     "files.exclude": {
         "**/bin": true,
@@ -28,15 +26,13 @@
         "**/bin": true,
         "**/obj": true
     },
-
     // --- JSON ---
     "[json]": {
         "editor.defaultFormatter": "vscode.json-language-features",
         "editor.tabSize": 4
     },
-
     // --- Misc ---
-    "workbench.colorTheme": "Default Dark Modern",
+    "workbench.colorTheme": "VS Code Dark",
     "editor.bracketPairColorization.enabled": true,
     "editor.guides.bracketPairs": "active"
 }
