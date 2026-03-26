@@ -6,7 +6,7 @@ namespace TelegramBot.Server;
 
 public class Program
 {
-    public static async Task Main(string[]? args)
+    public static void Main(string[]? args)
     {
         Log.Logger = new LoggerConfiguration()
             .WriteTo.Console()
@@ -22,8 +22,8 @@ public class Program
                     .Enrich.FromLogContext())
                 .Build();
 
-            await host.InitializeDatabaseAsync();
-            await host.RunAsync();
+            host.InitializeDatabaseAsync().GetAwaiter().GetResult();
+            host.Run();
         }
         catch (Exception ex)
         {

@@ -26,6 +26,9 @@ public static class DependencyInjectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Добавляет и настраивает параметры файловой системы.
+    /// </summary>
     private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<FileSystemOptions>()
@@ -69,10 +72,15 @@ public static class DependencyInjectionExtensions
     {
         _ = services.AddSingleton<ITelegramBotClient>(_ =>
         {
-            var token = configuration["TelegramBot:Token"]
-                ?? throw new InvalidOperationException(
+            var token = configuration["TelegramBot:Token"];
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
                     "TelegramBot:Token is not configured. " +
-                    "Set it in appsettings.Local.json or via environment variable TelegramBot__Token.");
+                    "Set it in appsettings.json or via environment variable TelegramBotToken.");
+            }
+
             return new TelegramBotClient(token);
         });
 
