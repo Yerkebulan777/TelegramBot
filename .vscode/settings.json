@@ -32,7 +32,7 @@
         "editor.tabSize": 4
     },
     // --- Misc ---
-    "workbench.colorTheme": "VS Code Dark",
+    "workbench.colorTheme": "Dark 2026",
     "editor.bracketPairColorization.enabled": true,
     "editor.guides.bracketPairs": "active"
 }
