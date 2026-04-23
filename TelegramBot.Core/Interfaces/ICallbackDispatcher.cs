@@ -1,3 +1,5 @@
+using TelegramBot.Core.Models;
+
 namespace TelegramBot.Core.Interfaces;
 
 /// <summary>

@@ -1,4 +1,5 @@
 using TelegramBot.Core.Interfaces;
+using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application;
 

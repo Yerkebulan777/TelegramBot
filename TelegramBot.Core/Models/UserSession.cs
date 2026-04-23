@@ -120,16 +120,6 @@ public class UserSession
         }
     }
 
-    public void SetSelectedFiles(IEnumerable<string> files)
-    {
-        lock (_selectionLock)
-        {
-            _selectedFiles.Clear();
-            foreach (var file in files)
-                _selectedFiles.Add(file);
-        }
-    }
-
     public void ClearSelectedFiles()
     {
         lock (_selectionLock) _selectedFiles.Clear();

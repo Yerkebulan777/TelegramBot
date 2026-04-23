@@ -7,7 +7,10 @@
       "Bash(cd \"C:/Users/y.zhumabayev/Yandex.Disk/Repository/TelegramBot\" && dotnet build TelegramBotServer/TelegramBotServer.csproj 2>&1)",
       "Bash(winget upgrade:*)",
       "Bash(cmd.exe //c \"echo %APPDATA%\")",
-      "Bash(cmd.exe //c \"dir /AL \"\"C:\\\\Users\\\\Yerkebulan\\\\AppData\\\\Roaming\\\\Code\"\"\")"
+      "Bash(cmd.exe //c \"dir /AL \"\"C:\\\\Users\\\\Yerkebulan\\\\AppData\\\\Roaming\\\\Code\"\"\")",
+      "Read(//c/Users/y.zhumabayev/.claude//**)",
+      "Read(//c/Users/y.zhumabayev/.claude/plugins//**)",
+      "Bash(powershell.exe -Command ' *)"
     ]
   },
   "hooks": {

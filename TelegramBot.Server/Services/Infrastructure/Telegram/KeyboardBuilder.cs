@@ -1,20 +1,11 @@
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
-
-/// <summary>
-/// Стандартные тексты кнопок.
-/// </summary>
-public static class ButtonTexts
-{
-    public const string ExportApply = "✅ Применить";
-    public const string AutomationApply = "✅ Подтвердить";
-    public const string Cancel = "❌ Отмена";
-}
 
 /// <summary>
 /// Построитель клавиатур для Telegram-бота.

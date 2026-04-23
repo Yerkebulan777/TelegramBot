@@ -6,7 +6,7 @@ using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
-using TelegramBot.Server.Services.Infrastructure.Telegram;
+using TelegramBot.Core.Constants;
 
 namespace TelegramBot.Server.Services.Application;
 
