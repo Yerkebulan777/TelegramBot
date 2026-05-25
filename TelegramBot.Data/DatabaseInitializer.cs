@@ -9,7 +9,9 @@ namespace TelegramBot.Data;
 /// </summary>
 public static class DatabaseInitializer
 {
-    /// <summary>Инициализирует базу данных при запуске приложения.</summary>
+    /// <summary>
+    /// Инициализирует базу данных при запуске приложения.
+    /// </summary>
     public static async Task InitializeDatabaseAsync(this IHost host)
     {
         using IServiceScope scope = host.Services.CreateScope();
