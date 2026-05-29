@@ -4,7 +4,7 @@ Guidance for agentic coding agents working in this repository.
 
 ## Project Overview
 
-Telegram bot using long-polling, split into 3 projects. No webhooks, no MVC controllers, no test projects. All services are **Singletons**.
+Telegram bot using long-polling, split into 4 projects. No webhooks, no MVC controllers. All services are **Singletons**.
 
 ```
 TelegramBot.Core   ←──  TelegramBot.Data
@@ -15,13 +15,14 @@ TelegramBot.Core   ←──  TelegramBot.Data
 - **TelegramBot.Core** — Models, DTOs, interfaces, config. Zero Telegram SDK dependency.
 - **TelegramBot.Data** — SQLite persistence via Dapper. References Core only.
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting. References Core + Data.
+- **TelegramBot.Tests** — unit tests (SqliteUserAccessTests.cs).
 
 ---
 
 ## Build & Run Commands
 
 ```bash
-# Build all projects (use this to verify changes — there are no automated tests)
+# Build all projects (use this to verify changes)
 dotnet build TelegramBot.sln
 
 # Run the server
@@ -34,7 +35,7 @@ dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
 dotnet format TelegramBot.sln
 ```
 
-**There are no automated tests.** After making changes, verify correctness by building successfully.
+**There are no automated CI tests.** After making changes, verify correctness by building successfully.
 
 ---
 
@@ -44,6 +45,7 @@ dotnet format TelegramBot.sln
 - `TelegramBot.Server/appsettings.Local.json` — **gitignored**, put secrets here (bot token, local overrides)
 - Required config keys:
   - `TelegramBot:Token` — bot token (also settable via env var `TelegramBot__Token`)
+  - `TelegramBot:AdminUserIds` — long[] of admin Telegram IDs (also settable via `TelegramBot__AdminUserIds__0`, `__1`, etc.)
   - `FileSystem:RootPath` — filesystem browser root (validated on startup via `FileSystemOptions`)
   - `ConnectionStrings:Sqlite` — SQLite connection string (defaults to `"Data Source=botdata.db"`)
 
@@ -55,7 +57,11 @@ dotnet format TelegramBot.sln
 Telegram API -> TelegramBotHostedService (polling)
              -> TelegramUpdateMapper (Update -> MessageDto | CallbackQueryDto)
              -> CommandAppService.HandleUserCommandAsync (text commands)
+                ├── /start bypasses access check → registration or help
+                └── other commands → BotUsers.Status must be Approved
              -> ICallbackDispatcher -> CallbackDispatcher.DispatchAsync (inline keyboard callbacks)
+                ├── REQACCESS/APPROVEUSER/REJECTUSER bypass access check
+                └── all other callbacks → user must be Approved
 ```
 
 DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section).
@@ -64,13 +70,13 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 
 `CallbackDispatcher` (implements `ICallbackDispatcher`) routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (sorted by `Priority`, lower = first). All handlers extend `CallbackHandlerBase`.
 
-Handler hierarchy: `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `ExportCommandHandler`, `AutomationCommandHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
+Handler hierarchy: `AccessRequestHandler` (0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `ExportCommandHandler`, `AutomationCommandHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
 
 Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Use `CallbackDataParser.Parse(data)` to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.OpenFolder)`.
 
 ### Database
 
-Tables: `Sessions`, `Commands`. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
+Tables: `Sessions`, `Commands`, `BotUsers` (UserId, Username, Role, Status). Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
 DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()`.
 All data access uses **Dapper** (`TelegramBot.Data/SqliteDataService.cs`).
 
