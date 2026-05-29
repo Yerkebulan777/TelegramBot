@@ -321,4 +321,81 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
               LIMIT 1;",
             new { CommandId = commandId, UserId = userId });
     }
+
+    public async Task CreateAccessRequestAsync(long userId, string? username, string? firstName, string? lastName)
+    {
+        var now = DateTime.UtcNow;
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        await conn.ExecuteAsync(@"
+            INSERT INTO BotUsers (UserId, Username, Role, Status, CreatedAt, UpdatedAt)
+            VALUES (@UserId, @Username, @Role, @Status, @CreatedAt, @UpdatedAt)
+            ON CONFLICT(UserId) DO NOTHING;",
+            new
+            {
+                UserId = userId,
+                Username = username,
+                Role = (int)UserRole.User,
+                Status = (int)UserAccessStatus.Pending,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+    }
+
+    public Task<BotUser?> GetBotUserAsync(long userId) => GetUserAsync(userId);
+
+    public async Task<bool> IsUserApprovedAsync(long userId)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        var status = await conn.QuerySingleOrDefaultAsync<int?>(
+            "SELECT Status FROM BotUsers WHERE UserId = @UserId;",
+            new { UserId = userId });
+
+        return status == (int)UserAccessStatus.Approved;
+    }
+
+    public async Task<bool> ApproveUserAsync(long userId, long approvedBy)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        var rows = await conn.ExecuteAsync(@"
+            UPDATE BotUsers SET Status = @Status, UpdatedAt = @UpdatedAt
+            WHERE UserId = @UserId;",
+            new
+            {
+                UserId = userId,
+                Status = (int)UserAccessStatus.Approved,
+                UpdatedAt = DateTime.UtcNow
+            });
+
+        return rows > 0;
+    }
+
+    public async Task EnsureAdminUserAsync(long userId, string? username)
+    {
+        var now = DateTime.UtcNow;
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        await conn.ExecuteAsync(@"
+            INSERT INTO BotUsers (UserId, Username, Role, Status, CreatedAt, UpdatedAt)
+            VALUES (@UserId, @Username, @Role, @Status, @CreatedAt, @UpdatedAt)
+            ON CONFLICT(UserId) DO UPDATE SET
+                Role      = excluded.Role,
+                Status    = excluded.Status,
+                UpdatedAt = excluded.UpdatedAt;",
+            new
+            {
+                UserId = userId,
+                Username = username,
+                Role = (int)UserRole.Admin,
+                Status = (int)UserAccessStatus.Approved,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+    }
 }
