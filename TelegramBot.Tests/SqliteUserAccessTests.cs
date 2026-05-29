@@ -16,11 +16,7 @@ public sealed class SqliteUserAccessTests : IDisposable
         var service = CreateService();
         await service.InitializeDatabaseAsync();
 
-        await service.CreateAccessRequestAsync(
-            userId: 123,
-            username: "alice",
-            firstName: "Alice",
-            lastName: "User");
+        await service.CreateAccessRequestAsync(userId: 123, username: "alice", firstName: "Alice", lastName: "User");
 
         var pending = await service.GetBotUserAsync(123);
         Assert.NotNull(pending);
