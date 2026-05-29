@@ -12,7 +12,7 @@ namespace TelegramBot.Data;
 /// </summary>
 public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataService> logger) : IDataService
 {
-    private readonly string _connectionString = $"Data Source={configuration.GetConnectionString("Sqlite") ?? "botdata.db"}";
+    private readonly string _connectionString = configuration.GetConnectionString("Sqlite") ?? "Data Source=botdata.db";
     private readonly ILogger<SqliteDataService> _logger = logger;
 
     /// <summary>
