@@ -2,13 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "TelegramBotServer (Debug)",
+            "name": "TelegramBot.Server (Debug)",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/TelegramBotServer/bin/Debug/net8.0/TelegramBotServer.dll",
+            "program": "${workspaceFolder}/TelegramBot.Server/bin/Debug/net8.0/TelegramBot.Server.dll",
             "args": [],
-            "cwd": "${workspaceFolder}/TelegramBotServer",
+            "cwd": "${workspaceFolder}/TelegramBot.Server",
             "stopAtEntry": false,
             "env": {
                 "DOTNET_ENVIRONMENT": "Development"

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build all projects
-dotnet build TelegramBot.sln
+dotnet build TelegramBot.Server/TelegramBot.Server.csproj
 
 # Run
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
