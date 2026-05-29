@@ -36,11 +36,15 @@ public static class DependencyInjectionExtensions
             .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
             .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
 
+        services.AddOptions<BotOptions>()
+            .Bind(configuration.GetSection(BotOptions.SectionName));
+
         return services;
     }
 
     private static IServiceCollection AddCallbackHandlers(this IServiceCollection services)
     {
+        _ = services.AddSingleton<ICallbackHandler, AccessRequestHandler>();
         _ = services.AddSingleton<ICallbackHandler, FileNavigationHandler>();
         _ = services.AddSingleton<ICallbackHandler, FileSelectionHandler>();
         _ = services.AddSingleton<ICallbackHandler, ExportCommandHandler>();
@@ -78,7 +82,7 @@ public static class DependencyInjectionExtensions
             {
                 throw new InvalidOperationException(
                     "TelegramBot:Token is not configured. " +
-                    "Set it in appsettings.json or via environment variable TelegramBotToken.");
+                    "Set it in appsettings.Local.json or via environment variable TelegramBot__Token.");
             }
 
             return new TelegramBotClient(token);

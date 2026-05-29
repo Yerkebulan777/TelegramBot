@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using System.Text;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
@@ -53,6 +54,26 @@ public sealed class CommandAppService : ICommandAppService
 
         var session = _sessionManager.GetOrCreateSession(userId);
 
+        // /start available to everyone regardless of access status
+        if (text == "/start")
+        {
+            session.Reset(_options.RootPath);
+            await _outputService.ClearChatHistoryAsync(userId, session);
+            var user = await _dataService.GetUserAsync(userId);
+            if (user?.Status == UserAccessStatus.Approved)
+                await SendHelpMessageAsync(userId);
+            else
+                await SendRegistrationMessageAsync(userId);
+            return;
+        }
+
+        var userRecord = await _dataService.GetUserAsync(userId);
+        if (userRecord?.Status != UserAccessStatus.Approved)
+        {
+            await _outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа.");
+            return;
+        }
+
         if (await HandleReplyKeyboardActionAsync(userId, username, rawText, session, cancellationToken))
             return;
 
@@ -69,9 +90,27 @@ public sealed class CommandAppService : ICommandAppService
         }
 
         var session = _sessionManager.GetOrCreateSession(callback.UserId);
+        var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
         _logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})",
-            CallbackDataParser.Parse(callback.CallbackData).Prefix, callback.Username, callback.UserId);
+            parsed.Prefix, callback.Username, callback.UserId);
+
+        // Registration callbacks bypass access check
+        bool isRegistrationCallback = parsed.Prefix is
+            CallbackPrefixes.RequestAccess or
+            CallbackPrefixes.ApproveUser or
+            CallbackPrefixes.RejectUser;
+
+        if (!isRegistrationCallback)
+        {
+            var userRecord = await _dataService.GetUserAsync(callback.UserId);
+            if (userRecord?.Status != UserAccessStatus.Approved)
+            {
+                await _outputService.SendMessageAsync(callback.UserId,
+                    "У вас нет доступа. Введите /start для запроса доступа.");
+                return;
+            }
+        }
 
         var context = new CallbackContext
         {
@@ -80,7 +119,7 @@ public sealed class CommandAppService : ICommandAppService
             MessageId = callback.MessageId,
             Username = callback.Username,
             CallbackQueryId = callback.CallbackQueryId,
-            ParsedCallback = CallbackDataParser.Parse(callback.CallbackData),
+            ParsedCallback = parsed,
             Session = session,
             Buttons = callback.Buttons
         };
@@ -137,7 +176,6 @@ public sealed class CommandAppService : ICommandAppService
                 await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
                 break;
 
-            case "/start":
             case "/help":
                 _logger.LogDebug("Executing /help for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
@@ -229,6 +267,16 @@ public sealed class CommandAppService : ICommandAppService
         }
 
         return false;
+    }
+
+    private async Task SendRegistrationMessageAsync(long userId)
+    {
+        var keyboard = new InlineKeyboardMarkup([[
+            InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
+        ]]);
+        await _outputService.SendMessageWithKeyboardAsync(userId,
+            "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
+            keyboard);
     }
 
     private async Task SendHelpMessageAsync(long userId)

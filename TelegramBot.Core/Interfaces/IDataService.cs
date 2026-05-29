@@ -3,10 +3,16 @@ using TelegramBot.Core.Models;
 namespace TelegramBot.Core.Interfaces;
 
 /// <summary>
-/// Persistence service for sessions and commands.
+/// Persistence service for sessions, commands, and users.
 /// </summary>
 public interface IDataService
 {
+    /// <summary>Возвращает запись пользователя или null.</summary>
+    Task<BotUser?> GetUserAsync(long userId);
+
+    /// <summary>Создаёт или обновляет запись пользователя (upsert по UserId).</summary>
+    Task UpsertUserAsync(BotUser user);
+
     /// <summary>Инициализирует базу данных (создает таблицы).</summary>
     Task InitializeDatabaseAsync();
 

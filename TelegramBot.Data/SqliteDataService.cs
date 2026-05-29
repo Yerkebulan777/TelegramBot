@@ -23,6 +23,16 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
+        const string createUsersTable = @"
+            CREATE TABLE IF NOT EXISTS BotUsers (
+                UserId INTEGER PRIMARY KEY,
+                Username TEXT,
+                Role INTEGER NOT NULL DEFAULT 0,
+                Status INTEGER NOT NULL DEFAULT 0,
+                CreatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UpdatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );";
+
         const string createSessionsTable = @"
             CREATE TABLE IF NOT EXISTS Sessions (
                 SessionId INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,8 +59,44 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
                 FOREIGN KEY (SessionId) REFERENCES Sessions(SessionId)
             );";
 
+        await conn.ExecuteAsync(createUsersTable);
         await conn.ExecuteAsync(createSessionsTable);
         await conn.ExecuteAsync(createCommandsTable);
+    }
+
+    public async Task<BotUser?> GetUserAsync(long userId)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        return await conn.QuerySingleOrDefaultAsync<BotUser>(
+            "SELECT UserId, Username, Role, Status, CreatedAt, UpdatedAt FROM BotUsers WHERE UserId = @UserId;",
+            new { UserId = userId });
+    }
+
+    public async Task UpsertUserAsync(BotUser user)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+
+        var now = DateTime.UtcNow;
+        await conn.ExecuteAsync(@"
+            INSERT INTO BotUsers (UserId, Username, Role, Status, CreatedAt, UpdatedAt)
+            VALUES (@UserId, @Username, @Role, @Status, @CreatedAt, @UpdatedAt)
+            ON CONFLICT(UserId) DO UPDATE SET
+                Username  = excluded.Username,
+                Role      = excluded.Role,
+                Status    = excluded.Status,
+                UpdatedAt = excluded.UpdatedAt;",
+            new
+            {
+                user.UserId,
+                user.Username,
+                Role = (int)user.Role,
+                Status = (int)user.Status,
+                CreatedAt = user.CreatedAt == default ? now : user.CreatedAt,
+                UpdatedAt = user.UpdatedAt == default ? now : user.UpdatedAt
+            });
     }
 
     /// <summary>

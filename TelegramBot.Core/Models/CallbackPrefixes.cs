@@ -22,6 +22,9 @@ public static class CallbackPrefixes
     public const string DeleteSession = "DELETESESSION:";
     public const string DeleteCommand = "DELETECOMMAND:";
     public const string BackToStatus = "BACKTOSTATUS:";
+    public const string RequestAccess = "REQACCESS:";
+    public const string ApproveUser = "APPROVEUSER:";
+    public const string RejectUser = "REJECTUSER:";
 }
 
 /// <summary>Константы кодов команд, хранящихся в сессии пользователя.</summary>

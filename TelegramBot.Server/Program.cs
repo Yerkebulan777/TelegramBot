@@ -23,6 +23,7 @@ public class Program
                 .Build();
 
             host.InitializeDatabaseAsync().GetAwaiter().GetResult();
+            host.SeedAdminUsersAsync().GetAwaiter().GetResult();
             host.Run();
         }
         catch (Exception ex)
