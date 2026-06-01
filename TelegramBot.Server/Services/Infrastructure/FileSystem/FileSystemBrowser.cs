@@ -33,9 +33,15 @@ public class FileSystemBrowser : IFileSystemBrowser
 
         var (dirs, files) = await Task.Run(() =>
         {
-            var d = Directory.GetDirectories(path)
-                .Where(x => _folderRegex.IsMatch(Path.GetFileName(x)))
-                .ToArray();
+            var allDirs = Directory.GetDirectories(path)
+                .Where(x => _folderRegex.IsMatch(Path.GetFileName(x)));
+
+            if (IsRootPath(path))
+            {
+                allDirs = allDirs.Where(d => Directory.Exists(Path.Combine(d, _options.ProjectDirectoryName)));
+            }
+
+            var d = allDirs.ToArray();
             var f = Directory.GetFiles(path);
             return (d, f);
         });
@@ -118,9 +124,17 @@ public class FileSystemBrowser : IFileSystemBrowser
         var session = _sessions.GetOrCreateSession(userId);
 
         var dirs = await Task.Run(() =>
-            Directory.GetDirectories(path)
-                .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)))
-                .ToArray());
+        {
+            var allDirs = Directory.GetDirectories(path)
+                .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)));
+
+            if (IsRootPath(path))
+            {
+                allDirs = allDirs.Where(d => Directory.Exists(Path.Combine(d, _options.ProjectDirectoryName)));
+            }
+
+            return allDirs.ToArray();
+        });
 
         session.PathMap.Clear();
 
@@ -157,6 +171,25 @@ public class FileSystemBrowser : IFileSystemBrowser
                    || candidateFullPath.StartsWith(
                        rootFullPath + Path.DirectorySeparatorChar,
                        StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsRootPath(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return true;
+        try
+        {
+            var rootFullPath = Path.GetFullPath(_options.RootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var pathFullPath = Path.GetFullPath(path)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return pathFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
