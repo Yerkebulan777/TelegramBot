@@ -10,6 +10,9 @@ public interface IDataService
     /// <summary>Возвращает запись пользователя или null.</summary>
     Task<BotUser?> GetUserAsync(long userId);
 
+    /// <summary>Возвращает запись пользователя по ID (алиас для GetUserAsync).</summary>
+    Task<BotUser?> GetBotUserAsync(long userId);
+
     /// <summary>Создаёт или обновляет запись пользователя (upsert по UserId).</summary>
     Task UpsertUserAsync(BotUser user);
 
@@ -45,4 +48,16 @@ public interface IDataService
 
     /// <summary>Возвращает ID сессии по ID команды.</summary>
     Task<int?> GetSessionIdByCommandAsync(int commandId, long userId);
+
+    /// <summary>Создает запрос на доступ для пользователя (статус Pending).</summary>
+    Task CreateAccessRequestAsync(long userId, string? username, string? firstName, string? lastName);
+
+    /// <summary>Проверяет, одобрен ли пользователь.</summary>
+    Task<bool> IsUserApprovedAsync(long userId);
+
+    /// <summary>Одобряет доступ пользователю.</summary>
+    Task<bool> ApproveUserAsync(long userId, long approvedBy);
+
+    /// <summary>Гарантирует наличие администратора в БД.</summary>
+    Task EnsureAdminUserAsync(long userId, string? username);
 }
