@@ -123,8 +123,7 @@ public sealed class CommandAppService(
             BotUser? userRecord = await _dataService.GetUserAsync(callback.UserId);
             if (userRecord?.Status != UserAccessStatus.Approved)
             {
-                _ = await _outputService.SendMessageAsync(callback.UserId,
-                    "У вас нет доступа. Введите /start для запроса доступа.");
+                _ = await _outputService.SendMessageAsync(callback.UserId, "У вас нет доступа. Введите /start для запроса доступа.");
                 return;
             }
         }
