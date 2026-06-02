@@ -51,7 +51,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
                         "Error in handler {HandlerName} for callback '{Prefix}'",
                         handler.GetType().Name,
                         context.ParsedCallback.Prefix);
-                    throw;
+                    // Continue processing - don't rethrow to prevent stopping update handling
                 }
             }
         }
