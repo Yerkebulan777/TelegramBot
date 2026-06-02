@@ -247,7 +247,7 @@ public sealed class CommandAppService(
         {
             _logger.LogDebug("User {Username} ({UserId}) cancelling file selection", username, userId);
             await _outputService.ClearChatHistoryAsync(userId, session);
-            await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
+            session.ResetNavigation(_options.RootPath);
             session.IsFileSelectionActive = false;
             _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен."), session);
 

@@ -42,7 +42,8 @@ public class FileSystemBrowser : IFileSystemBrowser
             string token = NewToken();
             session.PathMap[token] = dir;
             string label = $"{Prefix(selected.Contains(dir))}{Path.GetFileName(dir)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.OpenFolder}{token}")]);
+            var prefix = session.IsFileSelectionActive ? CallbackPrefixes.File : CallbackPrefixes.OpenFolder;
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{prefix}{token}")]);
         }
 
         var parent = Directory.GetParent(path);

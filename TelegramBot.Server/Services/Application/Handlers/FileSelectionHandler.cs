@@ -71,6 +71,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, context.Session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
 
         return true;
     }
