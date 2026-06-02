@@ -1,1 +1,27 @@
-Nothing should be ignored based on the provided file changes, as they only include source code files (.cs files) without any build artifacts, dependencies, or temporary files.
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / JetBrains
+.idea/
+
+# Local agent configuration
+.agents/
+.codex/
+.claude/
+
+# Local application settings and data
+TelegramBot.Server/appsettings.Local.json
+*.db-shm
+*.db-wal
+
+# OS files
+Thumbs.db
+Desktop.ini
