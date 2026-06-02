@@ -10,6 +10,7 @@ public class SessionManager : ISessionManager, IDisposable
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();
     private readonly TimeSpan _sessionTimeout;
     private readonly Timer _cleanupTimer;
+    private bool _disposed;
 
     public SessionManager(TimeSpan sessionTimeout)
     {
@@ -44,6 +45,9 @@ public class SessionManager : ISessionManager, IDisposable
 
     private void CleanUpExpiredSessions()
     {
+        if (_disposed)
+            return;
+
         var now = DateTime.UtcNow;
 
         foreach (var key in _sessions.Keys.ToList())
@@ -60,22 +64,24 @@ public class SessionManager : ISessionManager, IDisposable
             if (!sessionLock.Wait(0))
                 continue;
 
-            bool removed = false;
             try
             {
+                if (_disposed)
+                {
+                    sessionLock.Release();
+                    return;
+                }
+
                 if (_sessions.TryGetValue(key, out var candidate) && now - candidate.LastActivity > _sessionTimeout)
                 {
                     _sessions.TryRemove(key, out _);
                     if (_sessionLocks.TryRemove(key, out var removedLock))
-                    {
                         removedLock.Dispose();
-                        removed = true;
-                    }
                 }
             }
             finally
             {
-                if (!removed)
+                if (!_disposed)
                     sessionLock.Release();
             }
         }
@@ -83,6 +89,9 @@ public class SessionManager : ISessionManager, IDisposable
         // Clean up orphaned locks (locks for users without sessions)
         foreach (var key in _sessionLocks.Keys.ToList())
         {
+            if (_disposed)
+                return;
+
             if (!_sessions.ContainsKey(key))
             {
                 if (_sessionLocks.TryRemove(key, out var orphanedLock))
@@ -93,6 +102,10 @@ public class SessionManager : ISessionManager, IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+            return;
+
+        _disposed = true;
         _cleanupTimer.Dispose();
         foreach (var sl in _sessionLocks.Values)
             sl.Dispose();
