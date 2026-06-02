@@ -13,7 +13,7 @@ namespace TelegramBot.Server;
 [SupportedOSPlatform("windows")]
 public static class Program
 {
-    public static void Main(string[]? args)
+    public static async Task Main(string[]? args)
     {
         // Проверка платформы во время выполнения (дополнительная защита)
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -41,9 +41,9 @@ public static class Program
                     .Enrich.FromLogContext())
                 .Build();
 
-            host.InitializeDatabaseAsync().GetAwaiter().GetResult();
-            host.SeedAdminUsersAsync().GetAwaiter().GetResult();
-            host.Run();
+            await host.InitializeDatabaseAsync();
+            await host.SeedAdminUsersAsync();
+            await host.RunAsync();
         }
         catch (Exception ex)
         {
