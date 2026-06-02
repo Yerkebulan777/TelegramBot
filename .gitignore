@@ -1,4 +1,3 @@
-```
 # Build artifacts
 bin/
 obj/
@@ -30,6 +29,7 @@ logs/
 Thumbs.db
 
 # Editor files
+.vs/
 .vscode/
 .idea/
 *.swp
@@ -159,21 +159,3 @@ _deps/
 # Temporary folders
 tmp/
 temp/
-```
-/.vs/ProjectEvaluation/telegrambot.metadata.v10.bin
-/.vs/ProjectEvaluation/telegrambot.projects.v10.bin
-/.vs/ProjectEvaluation/telegrambot.strings.v10.bin
-/.vs/ProjectSettings.json
-/.vs/slnx.sqlite
-/.vs/TelegramBot/CopilotIndices/18.6.39603.9996/CodeChunks.db
-/.vs/TelegramBot/CopilotIndices/18.6.39603.9996/SemanticSymbols.db
-/.vs/TelegramBot.slnx/config/applicationhost.config
-/.vs/TelegramBot.slnx/DesignTimeBuild/.dtbcache.v2
-/.vs/TelegramBot.slnx/FileContentIndex/1ec2efbf-ba3c-4002-be20-cc5448b08a75.vsidx
-/.vs/TelegramBot.slnx/FileContentIndex/9111f4d4-ca5e-40f5-822c-c5cbc07d0807.vsidx
-/.vs/TelegramBot.slnx/FileContentIndex/9ffa291d-05e4-4a08-9636-0eea033ae363.vsidx
-/.vs/TelegramBot.slnx/v18/.futdcache.v2
-/.vs/TelegramBot.slnx/v18/.wsuo
-/.vs/TelegramBot.slnx/v18/DocumentLayout.backup.json
-/.vs/TelegramBot.slnx/v18/DocumentLayout.json
-/.vs/VSWorkspaceState.json
