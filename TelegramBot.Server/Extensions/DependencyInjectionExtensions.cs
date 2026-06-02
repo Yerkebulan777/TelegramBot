@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Telegram.Bot;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
@@ -36,7 +37,10 @@ public static class DependencyInjectionExtensions
             .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
             .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
 
-        services.AddOptions<BotOptions>().Bind(configuration.GetSection(BotOptions.SectionName));
+        services.AddOptions<BotOptions>()
+            .Bind(configuration.GetSection(BotOptions.SectionName))
+            .ValidateOnStart()
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required");
 
         return services;
     }
@@ -73,18 +77,18 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddTelegramServices(this IServiceCollection services, IConfiguration configuration)
     {
-        _ = services.AddSingleton<ITelegramBotClient>(_ =>
+        _ = services.AddSingleton<ITelegramBotClient>(serviceProvider =>
         {
-            var token = configuration["TelegramBot:Token"];
+            var botOptions = serviceProvider.GetRequiredService<IOptions<BotOptions>>().Value;
 
-            if (string.IsNullOrWhiteSpace(token))
+            if (string.IsNullOrWhiteSpace(botOptions.Token))
             {
                 throw new InvalidOperationException(
                     "TelegramBot:Token is not configured. " +
                     "Set it in appsettings.Local.json or via environment variable TELEGRAM_BOT_TOKEN.");
             }
 
-            return new TelegramBotClient(token);
+            return new TelegramBotClient(botOptions.Token);
         });
 
         _ = services.AddSingleton<ITelegramOutputService, TelegramOutputService>();
