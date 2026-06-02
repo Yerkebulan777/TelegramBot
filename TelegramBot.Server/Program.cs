@@ -1,5 +1,6 @@
 using Serilog;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using TelegramBot.Data;
 using TelegramBot.Server.Extensions;
 
@@ -10,7 +11,7 @@ namespace TelegramBot.Server;
 /// Предназначено только для операционной системы Windows.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public class Program
+public static class Program
 {
     public static void Main(string[]? args)
     {

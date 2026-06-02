@@ -36,8 +36,7 @@ public static class DependencyInjectionExtensions
             .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
             .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
 
-        services.AddOptions<BotOptions>()
-            .Bind(configuration.GetSection(BotOptions.SectionName));
+        services.AddOptions<BotOptions>().Bind(configuration.GetSection(BotOptions.SectionName));
 
         return services;
     }
