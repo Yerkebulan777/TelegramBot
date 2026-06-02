@@ -61,7 +61,11 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
                 FOREIGN KEY (SessionId) REFERENCES Sessions(SessionId)
             );";
 
-        // Add migration for BotUsers table: add Role column if not exists (for backward compatibility)
+        await conn.ExecuteAsync(createUsersTable);
+        await conn.ExecuteAsync(createSessionsTable);
+        await conn.ExecuteAsync(createCommandsTable);
+
+        // Миграция нужна для старых баз без Role.
         const string addRoleColumn = @"
             SELECT COUNT(*) FROM pragma_table_info('BotUsers') WHERE name='Role';";
         
@@ -71,7 +75,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
             await conn.ExecuteAsync("ALTER TABLE BotUsers ADD COLUMN Role INTEGER NOT NULL DEFAULT 0;");
         }
 
-        // Add migration for BotUsers table: add Status column if not exists
+        // Миграция нужна для старых баз без Status.
         const string addStatusColumn = @"
             SELECT COUNT(*) FROM pragma_table_info('BotUsers') WHERE name='Status';";
         
@@ -80,10 +84,6 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
         {
             await conn.ExecuteAsync("ALTER TABLE BotUsers ADD COLUMN Status INTEGER NOT NULL DEFAULT 0;");
         }
-
-        await conn.ExecuteAsync(createUsersTable);
-        await conn.ExecuteAsync(createSessionsTable);
-        await conn.ExecuteAsync(createCommandsTable);
     }
 
     public async Task<BotUser?> GetUserAsync(long userId)

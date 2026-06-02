@@ -49,10 +49,15 @@ public sealed class SqliteUserAccessTests : IDisposable
 
     private SqliteDataService CreateService()
     {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath
+        }.ToString();
+
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:Sqlite"] = _dbPath
+                ["ConnectionStrings:Sqlite"] = connectionString
             })
             .Build();
 
