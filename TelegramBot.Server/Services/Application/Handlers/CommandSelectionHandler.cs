@@ -7,7 +7,7 @@ using TelegramBot.Server.Interfaces;
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 /// <summary>
-/// Обработчик операций выбора команд (применить, отмена) и смены режима выбора.
+/// Обработчик операций выбора команд (применить, отмена).
 /// </summary>
 public sealed class CommandSelectionHandler(
     IKeyboardBuilder keyboardBuilder,
@@ -21,7 +21,6 @@ public sealed class CommandSelectionHandler(
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
-        CallbackPrefixes.SelectionMode,
         CallbackPrefixes.ApplyCommands,
         CallbackPrefixes.CancelCommandSelection
     ];
@@ -30,35 +29,10 @@ public sealed class CommandSelectionHandler(
     {
         return context.ParsedCallback.Prefix switch
         {
-            CallbackPrefixes.SelectionMode => await HandleSelectionModeAsync(context, cancellationToken),
             CallbackPrefixes.ApplyCommands => await HandleApplyCommandsAsync(context, cancellationToken),
             CallbackPrefixes.CancelCommandSelection => await HandleCancelCommandSelectionAsync(context, cancellationToken),
             _ => false
         };
-    }
-
-    private async Task<bool> HandleSelectionModeAsync(CallbackContext context, CancellationToken cancellationToken)
-    {
-        var session = context.Session;
-        var previousMode = session.SelectionType;
-
-        session.SelectionType = session.SelectionType switch
-        {
-            SelectionMode.Files => SelectionMode.Sections,
-            SelectionMode.Sections => SelectionMode.Projects,
-            SelectionMode.Projects => SelectionMode.Files,
-            _ => SelectionMode.Files
-        };
-
-        Logger.LogInformation("User {Username} ({UserId}) switched selection mode: {From} -> {To}",
-            context.Username, context.UserId, previousMode, session.SelectionType);
-
-        session.ResetNavigation(_options.RootPath);
-
-        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
-        await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-
-        return true;
     }
 
     private async Task<bool> HandleApplyCommandsAsync(CallbackContext context, CancellationToken cancellationToken)

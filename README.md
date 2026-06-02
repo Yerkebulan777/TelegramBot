@@ -56,7 +56,7 @@ CallbackDispatcher → Handlers
 |---------|-----------|----------|
 | `AccessRequestHandler` | 0 | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` |
 | `FileNavigationHandler` | 10 | `OPENFOLDER:`, `GOTOPARENT:` |
-| `FileSelectionHandler` | 20 | `FILE:`, `SELMODE:`, `APPLYFILES:`, `CANCELSEL:` |
+| `FileSelectionHandler` | 20 | `FILE:`, `APPLYFILES:`, `CANCELSEL:` |
 | `ExportCommandHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:` |
 | `AutomationCommandHandler` | 100 | `CLASHREP:`, `AUTORES:` |
 | `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `BACKTOSTATUS:` |

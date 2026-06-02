@@ -23,9 +23,6 @@ public sealed class FileSystemOptions
     /// <summary>Регулярное выражение для папок разделов.</summary>
     public string SectionFolderPattern { get; set; } = @"^(\d{2}|\d{3}|I{1,3})_";
 
-    /// <summary>Регулярное выражение для разделов с римской цифрой III.</summary>
-    public string RomanThreePattern { get; set; } = @"^III_";
-
     /// <summary>Возвращает полный путь к RVT-директории для раздела.</summary>
     public string GetRvtPath(string sectionPath) => Path.Combine(sectionPath, RvtDirectoryName);
 

@@ -6,7 +6,6 @@ public static class CallbackPrefixes
     public const string OpenFolder = "OPENFOLDER:";
     public const string GoToParent = "GOTOPARENT:";
     public const string File = "FILE:";
-    public const string SelectionMode = "SELMODE:";
     public const string ApplyFiles = "APPLYFILES:";
     public const string CancelFileSelection = "CANCELFILESEL:";
     public const string Pdf = "PDF:";

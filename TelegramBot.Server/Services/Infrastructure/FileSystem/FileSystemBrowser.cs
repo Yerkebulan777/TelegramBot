@@ -24,68 +24,6 @@ public class FileSystemBrowser : IFileSystemBrowser
         _folderRegex = new Regex(_options.SectionFolderPattern, RegexOptions.IgnoreCase);
     }
 
-    public async Task<(string message, InlineKeyboardMarkup keyboard)> GetFilesViewAsync(long userId, string path)
-    {
-        var session = _sessions.GetOrCreateSession(userId);
-
-        if (string.IsNullOrEmpty(path))
-            path = Directory.GetCurrentDirectory();
-
-        var (dirs, files) = await Task.Run(() =>
-        {
-            var allDirs = Directory.GetDirectories(path)
-                .Where(x => _folderRegex.IsMatch(Path.GetFileName(x)));
-
-            if (IsRootPath(path))
-            {
-                allDirs = allDirs.Where(d => Directory.Exists(Path.Combine(d, _options.ProjectDirectoryName)));
-            }
-
-            var d = allDirs.ToArray();
-            var f = Directory.GetFiles(path);
-            return (d, f);
-        });
-
-        var buttons = new List<List<InlineKeyboardButton>>();
-
-        session.PathMap.Clear();
-
-        var items = new List<FileSystemItem>();
-        foreach (var dir in dirs)
-            items.Add(new FileSystemItem { FullPath = dir, Type = ItemType.Directory });
-
-        foreach (var file in files)
-        {
-            if (!_options.IsRevitFile(file))
-                continue;
-            items.Add(new FileSystemItem { FullPath = file, Type = ItemType.File });
-        }
-
-        session.SetItems(items);
-
-        var selectedFiles = session.SelectedFiles;
-
-        for (int i = 0; i < items.Count; i++)
-        {
-            var item = items[i];
-            var isSelected = item.Type == ItemType.File && selectedFiles.Contains(item.FullPath);
-            var prefix = isSelected ? "✅ " : (item.Type == ItemType.Directory ? "📁 " : "📄 ");
-            var callbackPrefix = item.Type == ItemType.Directory ? "OPENFOLDER:" : "FILE:";
-
-            string token = Guid.NewGuid().ToString("N")[..8];
-            session.PathMap[token] = item.FullPath;
-            buttons.Add([
-                InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"{callbackPrefix}{token}")
-            ]);
-        }
-
-        AddNavigationButtons(buttons, session, path);
-
-        var markup = new InlineKeyboardMarkup(buttons);
-        var message = $"*Current directory:* `{path}`";
-        return (message, markup);
-    }
-
     public bool TryResolvePath(long userId, string token, out string? path)
     {
         var session = _sessions.GetOrCreateSession(userId);
@@ -93,48 +31,16 @@ public class FileSystemBrowser : IFileSystemBrowser
     }
 
     public Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path)
-        => GetDirectoriesViewAsync(userId, path, "OPENFOLDER:");
-
-    public Task<(string message, InlineKeyboardMarkup keyboard)> GetProjectsViewAsync(long userId, string path)
-        => GetDirectoriesViewAsync(userId, path, "FILE:");
-
-    private void AddNavigationButtons(List<List<InlineKeyboardButton>> buttons, UserSession session, string path)
-    {
-        var selectionLabel = session.SelectionType switch
-        {
-            SelectionMode.Sections => "🌟 Режим: [ РАЗДЕЛЫ ]",
-            SelectionMode.Projects => "🌟 Режим: [ ПРОЕКТЫ ]",
-            _ => "🌟 Режим: [ ФАЙЛЫ ]"
-        };
-
-        buttons.Add([InlineKeyboardButton.WithCallbackData(selectionLabel, "SELMODE:")]);
-
-        var parent = Directory.GetParent(path);
-        if (parent != null && IsPathWithinRoot(parent.FullName))
-        {
-            string parentToken = Guid.NewGuid().ToString("N")[..8];
-            session.PathMap[parentToken] = parent.FullName;
-            buttons.Add([InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"GOTOPARENT:{parentToken}")]);
-        }
-    }
-
-    private async Task<(string message, InlineKeyboardMarkup keyboard)> GetDirectoriesViewAsync(
-        long userId, string path, string itemCallbackPrefix)
     {
         var session = _sessions.GetOrCreateSession(userId);
 
-        var dirs = await Task.Run(() =>
+        var dirs = Directory.GetDirectories(path)
+            .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)));
+
+        if (IsRootPath(path))
         {
-            var allDirs = Directory.GetDirectories(path)
-                .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)));
-
-            if (IsRootPath(path))
-            {
-                allDirs = allDirs.Where(d => Directory.Exists(Path.Combine(d, _options.ProjectDirectoryName)));
-            }
-
-            return allDirs.ToArray();
-        });
+            dirs = dirs.Where(d => Directory.Exists(Path.Combine(d, _options.ProjectDirectoryName)));
+        }
 
         session.PathMap.Clear();
 
@@ -150,12 +56,18 @@ public class FileSystemBrowser : IFileSystemBrowser
             var prefix = selectedFiles.Contains(item.FullPath) ? "✅ " : "📁 ";
             string token = Guid.NewGuid().ToString("N")[..8];
             session.PathMap[token] = item.FullPath;
-            buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"{itemCallbackPrefix}{token}")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"{CallbackPrefixes.OpenFolder}{token}")]);
         }
 
-        AddNavigationButtons(buttons, session, path);
+        var parent = Directory.GetParent(path);
+        if (parent != null && IsPathWithinRoot(parent.FullName))
+        {
+            string parentToken = Guid.NewGuid().ToString("N")[..8];
+            session.PathMap[parentToken] = parent.FullName;
+            buttons.Add([InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"{CallbackPrefixes.GoToParent}{parentToken}")]);
+        }
 
-        return ($"*Current directory:* `{path}`", new InlineKeyboardMarkup(buttons));
+        return Task.FromResult(($"*Current directory:* `{path}`", new InlineKeyboardMarkup(buttons)));
     }
 
     private bool IsPathWithinRoot(string path)

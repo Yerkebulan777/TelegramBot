@@ -129,7 +129,6 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
         IEnumerable<string> files,
         long userId,
         string username,
-        int priorityId,
         int filesAmount)
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -138,10 +137,10 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
         await using var tx = conn.BeginTransaction();
 
         var sessionId = await conn.ExecuteScalarAsync<long>(
-            @"INSERT INTO Sessions (UserId, Username, PriorityId, FilesAmount)
-              VALUES (@UserId, @Username, @PriorityId, @FilesAmount);
+            @"INSERT INTO Sessions (UserId, Username, FilesAmount)
+              VALUES (@UserId, @Username, @FilesAmount);
               SELECT last_insert_rowid();",
-            new { UserId = userId, Username = username, PriorityId = priorityId, FilesAmount = filesAmount },
+            new { UserId = userId, Username = username, FilesAmount = filesAmount },
             tx);
 
         var order = 1;

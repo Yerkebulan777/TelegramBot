@@ -46,9 +46,6 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
         session.AddToPagesCache(session.Counter);
         session.Counter = 0;
 
-        if (session.SelectionType == SelectionMode.Sections)
-            session.IsNavigatingDeep = !isGoToParent;
-
         if (isGoToParent)
         {
             session.RemoveLastFromPagesCache();
@@ -62,14 +59,11 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
             return true;
         }
 
-        var targetPath = session.SelectionType switch
-        {
-            SelectionMode.Sections when !isGoToParent => PathContainsSegment(newPath, _options.ProjectDirectoryName)
+        var targetPath = isGoToParent
+            ? _options.RootPath
+            : PathContainsSegment(newPath, _options.ProjectDirectoryName)
                 ? newPath
-                : _options.GetProjectPath(newPath),
-            SelectionMode.Sections when isGoToParent => _options.RootPath,
-            _ => GetFilesTargetPath(newPath, isGoToParent)
-        };
+                : _options.GetProjectPath(newPath);
 
         if (!IsPathWithinRoot(targetPath))
         {
@@ -115,46 +109,5 @@ public sealed class FileNavigationHandler : CallbackHandlerBase
             Logger.LogWarning(ex, "Failed to validate path against root");
             return false;
         }
-    }
-
-    private bool IsProjectDirectory(string path)
-    {
-        try
-        {
-            var parent = Directory.GetParent(path);
-            if (parent == null)
-                return false;
-
-            var rootFullPath = Path.GetFullPath(_options.RootPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var parentFullPath = Path.GetFullPath(parent.FullName)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            return parentFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private string GetFilesTargetPath(string newPath, bool isGoToParent)
-    {
-        if (IsProjectDirectory(newPath))
-        {
-            if (isGoToParent)
-            {
-                return _options.RootPath;
-            }
-            else
-            {
-                var projectPath = _options.GetProjectPath(newPath);
-                if (Directory.Exists(projectPath))
-                {
-                    return projectPath;
-                }
-            }
-        }
-        return newPath;
     }
 }

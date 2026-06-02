@@ -56,9 +56,6 @@ public class UserSession
         get { lock (_navigationLock) return [.. _items]; }
     }
 
-    public SelectionMode SelectionType { get; set; } = SelectionMode.Files;
-    /// <summary>True when the user is navigating into a subfolder level.</summary>
-    public bool IsNavigatingDeep { get; set; }
     public int Counter { get; set; }
     /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
     public bool IsInStatusView { get; set; }
@@ -197,13 +194,12 @@ public class UserSession
     }
 
     /// <summary>
-    /// Resets navigation state (path, level, counter, selected files, pages cache, items).
-    /// Does not affect pending commands or SelectionType.
+    /// Resets navigation state (path, counter, selected files, pages cache, items).
+    /// Does not affect pending commands.
     /// </summary>
     public void ResetNavigation(string rootPath)
     {
         CurrentPath = rootPath;
-        IsNavigatingDeep = false;
         Counter = 0;
         ClearSelectedFiles();
         ClearPagesCache();

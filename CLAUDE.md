@@ -69,7 +69,7 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 | `ExportCommandHandler` | 100 | PDF:, DWG:, NWC:, IFC: |
 | `AutomationCommandHandler` | 100 | BIMDOC:, CLASHREP:, AUTORES: |
 | `SessionManagementHandler` | 100 | SESSIONDETAILS:, DELETESESSION:, DELETECOMMAND:, BACKTOSTATUS: |
-| `CommandSelectionHandler` | 100 | SELMODE:, APPLYCOMMANDS:, CANCELCOMMANDSSEL: |
+| `CommandSelectionHandler` | 100 | APPLYCOMMANDS:, CANCELCOMMANDSSEL: |
 
 Use `CallbackDataParser.Parse(callbackData)` to get a `ParsedCallback` struct, then match with `parsed.Is(CallbackPrefixes.OpenFolder)`.
 

@@ -25,7 +25,6 @@ public interface IDataService
         IEnumerable<string> files,
         long userId,
         string username,
-        int priorityId,
         int filesAmount);
 
     /// <summary>Возвращает список сессий пользователя.</summary>
