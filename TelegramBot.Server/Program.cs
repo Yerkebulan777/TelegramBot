@@ -1,13 +1,26 @@
 using Serilog;
+using System.Runtime.InteropServices;
 using TelegramBot.Data;
 using TelegramBot.Server.Extensions;
 
 namespace TelegramBot.Server;
 
+/// <summary>
+/// Точка входа приложения.
+/// Предназначено только для операционной системы Windows.
+/// </summary>
+[SupportedOSPlatform("windows")]
 public class Program
 {
     public static void Main(string[]? args)
     {
+        // Проверка платформы во время выполнения (дополнительная защита)
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            throw new PlatformNotSupportedException(
+                "Это приложение разработано исключительно для операционной системы Windows.");
+        }
+
         Log.Logger = new LoggerConfiguration()
             .WriteTo.Console()
             .CreateBootstrapLogger();
@@ -18,6 +31,7 @@ public class Program
                 .ConfigureAppConfiguration((context, config) =>
                 {
                     config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+                    config.AddEnvironmentVariables();
                 })
                 .ConfigureServices((context, services) => _ = services.AddTelegramBotServer(context.Configuration))
                 .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
