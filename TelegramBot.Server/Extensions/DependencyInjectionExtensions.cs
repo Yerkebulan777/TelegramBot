@@ -82,7 +82,7 @@ public static class DependencyInjectionExtensions
             {
                 throw new InvalidOperationException(
                     "TelegramBot:Token is not configured. " +
-                    "Set it in appsettings.Local.json or via environment variable TelegramBot__Token.");
+                    "Set it in appsettings.Local.json or via environment variable TELEGRAM_BOT_TOKEN.");
             }
 
             return new TelegramBotClient(token);
