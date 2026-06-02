@@ -101,8 +101,7 @@ public sealed class CommandAppService(
 
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
     {
-        if (callback.Username == null || callback.MessageText == null ||
-            callback.CallbackData == null || callback.CallbackQueryId == null)
+        if (callback.Username == null || callback.MessageText == null ||  callback.CallbackData == null || callback.CallbackQueryId == null)
         {
             _ = await _outputService.SendMessageAsync(callback.UserId, "Callback is empty.");
             return;
@@ -111,8 +110,7 @@ public sealed class CommandAppService(
         UserSession session = _sessionManager.GetOrCreateSession(callback.UserId);
         ParsedCallback parsed = CallbackDataParser.Parse(callback.CallbackData);
 
-        _logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})",
-            parsed.Prefix, callback.Username, callback.UserId);
+        _logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})", parsed.Prefix, callback.Username, callback.UserId);
 
         // Registration callbacks bypass access check
         bool isRegistrationCallback = parsed.Prefix is
