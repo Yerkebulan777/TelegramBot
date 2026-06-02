@@ -2,12 +2,12 @@ using Microsoft.Extensions.Options;
 using System.Text;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Config;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
-using TelegramBot.Core.Config;
 using TelegramBot.Server.Interfaces;
-using TelegramBot.Core.Constants;
 
 namespace TelegramBot.Server.Services.Application;
 
@@ -15,58 +15,50 @@ namespace TelegramBot.Server.Services.Application;
 /// Main application service for handling user commands and callbacks.
 /// Delegates callback processing to specialized handlers via ICallbackDispatcher.
 /// </summary>
-public sealed class CommandAppService : ICommandAppService
+public sealed class CommandAppService(
+    IDataService dataService,
+    ITelegramOutputService outputService,
+    ISessionManager sessionManager,
+    IKeyboardBuilder keyboardBuilder,
+    ICallbackDispatcher callbackDispatcher,
+    IOptions<FileSystemOptions> fileSystemOptions,
+    ILogger<CommandAppService> logger) : ICommandAppService
 {
-    private readonly IDataService _dataService;
-    private readonly ITelegramOutputService _outputService;
-    private readonly ISessionManager _sessionManager;
-    private readonly IKeyboardBuilder _keyboardBuilder;
-    private readonly ICallbackDispatcher _callbackDispatcher;
-    private readonly ILogger<CommandAppService> _logger;
-    private readonly FileSystemOptions _options;
-
-    public CommandAppService(
-        IDataService dataService,
-        ITelegramOutputService outputService,
-        ISessionManager sessionManager,
-        IKeyboardBuilder keyboardBuilder,
-        ICallbackDispatcher callbackDispatcher,
-        IOptions<FileSystemOptions> fileSystemOptions,
-        ILogger<CommandAppService> logger)
-    {
-        _dataService = dataService;
-        _outputService = outputService;
-        _sessionManager = sessionManager;
-        _keyboardBuilder = keyboardBuilder;
-        _callbackDispatcher = callbackDispatcher;
-        _logger = logger;
-        _options = fileSystemOptions.Value;
-    }
+    private readonly IDataService _dataService = dataService;
+    private readonly ITelegramOutputService _outputService = outputService;
+    private readonly ISessionManager _sessionManager = sessionManager;
+    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+    private readonly ICallbackDispatcher _callbackDispatcher = callbackDispatcher;
+    private readonly ILogger<CommandAppService> _logger = logger;
+    private readonly FileSystemOptions _options = fileSystemOptions.Value;
 
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
-        string rawText = message.Text!;
-        string text = NormalizeCommandText(rawText);
         long userId = message.UserId;
-        string username = message.Username ?? string.Empty;
+        string rawText = message.Text!;
+        string username = message.Username!;
+
+        string text = NormalizeCommandText(rawText);
+
+        ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
 
         _logger.LogInformation("Received command '{Command}' from {Username} ({UserId})", rawText, username, userId);
 
-        var session = _sessionManager.GetOrCreateSession(userId);
+        UserSession session = _sessionManager.GetOrCreateSession(userId);
 
         // /start available to everyone regardless of access status
         if (text == "/start")
         {
             session.Reset(_options.RootPath);
             await _outputService.ClearChatHistoryAsync(userId, session);
-            var user = await _dataService.GetUserAsync(userId);
+            BotUser? user = await _dataService.GetUserAsync(userId);
 
             if (user?.Status != UserAccessStatus.Approved)
             {
-                var adminUser = await _dataService.GetBotUserAsync(userId);
+                BotUser? adminUser = await _dataService.GetBotUserAsync(userId);
                 if (adminUser?.Role == UserRole.Admin && adminUser.Status == UserAccessStatus.Approved)
                 {
-                    var now = DateTime.UtcNow;
+                    DateTime now = DateTime.UtcNow;
                     await _dataService.UpsertUserAsync(new BotUser
                     {
                         UserId = userId,
@@ -81,21 +73,28 @@ public sealed class CommandAppService : ICommandAppService
             }
 
             if (user?.Status == UserAccessStatus.Approved)
+            {
                 await SendHelpMessageAsync(userId);
+            }
             else
+            {
                 await SendRegistrationMessageAsync(userId);
+            }
+
             return;
         }
 
-        var userRecord = await _dataService.GetUserAsync(userId);
+        BotUser? userRecord = await _dataService.GetUserAsync(userId);
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
-            await _outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа.");
+            _ = await _outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа.");
             return;
         }
 
         if (await HandleReplyKeyboardActionAsync(userId, username, rawText, session, cancellationToken))
+        {
             return;
+        }
 
         await HandleSlashCommandAsync(text, message, session, username, cancellationToken);
     }
@@ -105,12 +104,12 @@ public sealed class CommandAppService : ICommandAppService
         if (callback.Username == null || callback.MessageText == null ||
             callback.CallbackData == null || callback.CallbackQueryId == null)
         {
-            await _outputService.SendMessageAsync(callback.UserId, "Callback is empty.");
+            _ = await _outputService.SendMessageAsync(callback.UserId, "Callback is empty.");
             return;
         }
 
-        var session = _sessionManager.GetOrCreateSession(callback.UserId);
-        var parsed = CallbackDataParser.Parse(callback.CallbackData);
+        UserSession session = _sessionManager.GetOrCreateSession(callback.UserId);
+        ParsedCallback parsed = CallbackDataParser.Parse(callback.CallbackData);
 
         _logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})",
             parsed.Prefix, callback.Username, callback.UserId);
@@ -123,10 +122,10 @@ public sealed class CommandAppService : ICommandAppService
 
         if (!isRegistrationCallback)
         {
-            var userRecord = await _dataService.GetUserAsync(callback.UserId);
+            BotUser? userRecord = await _dataService.GetUserAsync(callback.UserId);
             if (userRecord?.Status != UserAccessStatus.Approved)
             {
-                await _outputService.SendMessageAsync(callback.UserId,
+                _ = await _outputService.SendMessageAsync(callback.UserId,
                     "У вас нет доступа. Введите /start для запроса доступа.");
                 return;
             }
@@ -144,22 +143,21 @@ public sealed class CommandAppService : ICommandAppService
             Buttons = callback.Buttons
         };
 
-        await _callbackDispatcher.DispatchAsync(context, cancellationToken);
+        _ = await _callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
-    private async Task StartCommandSelectionAsync(
-        long userId, UserSession session, bool isAutomation, CancellationToken cancellationToken)
+    private async Task StartCommandSelectionAsync(long userId, UserSession session, bool isAutomation, CancellationToken cancellationToken)
     {
         session.Reset(_options.RootPath);
         session.IsFileSelectionActive = false;
 
-        var commandKeyboard = isAutomation
+        InlineKeyboardMarkup commandKeyboard = isAutomation
             ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
             : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
 
         await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
 
-        var replyKeyboard = isAutomation
+        ReplyKeyboardMarkup replyKeyboard = isAutomation
             ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
             : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
 
@@ -173,7 +171,9 @@ public sealed class CommandAppService : ICommandAppService
         bool isSlashCommand = command.StartsWith('/');
 
         if (isSlashCommand)
+        {
             await _outputService.ClearChatHistoryAsync(userId, session);
+        }
 
         switch (command)
         {
@@ -186,9 +186,9 @@ public sealed class CommandAppService : ICommandAppService
                 _logger.LogDebug("Executing /status for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 session.IsInStatusView = true;
-                var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
-                var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
+                List<SessionsList> sessionsStatus = await _dataService.GetSessionsListAsync(userId);
+                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+                _ = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
                 break;
 
             case "/automation":
@@ -204,61 +204,75 @@ public sealed class CommandAppService : ICommandAppService
 
             default:
                 if (isSlashCommand)
+                {
                     _logger.LogWarning("Unknown slash command '{Command}' from {Username} ({UserId})", command, username, userId);
+                }
                 else
+                {
                     _logger.LogDebug("Ignoring non-command text from {Username} ({UserId})", username, userId);
+                }
+
                 break;
         }
     }
 
-    private async Task<bool> HandleReplyKeyboardActionAsync(
-        long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
+    private async Task<bool> HandleReplyKeyboardActionAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
     {
         if (session.IsFileSelectionActive)
         {
-            if (messageText == ButtonTexts.ExportApply || messageText == ButtonTexts.AutomationApply)
-            {
-                if (session.SelectedFiles.Count == 0)
-                {
-                    _logger.LogDebug("User {Username} ({UserId}) tried to apply with no files selected", username, userId);
-                    await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один файл.");
-                    return true;
-                }
-
-                _logger.LogInformation("User {Username} ({UserId}) applying file selection: {FileCount} files selected",
-                    username, userId, session.SelectedFiles.Count);
-                await _outputService.ClearChatHistoryAsync(userId, session);
-                await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
-                session.IsFileSelectionActive = false;
-                await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден."), session);
-                return true;
-            }
-
-            if (messageText == ButtonTexts.Cancel)
-            {
-                _logger.LogDebug("User {Username} ({UserId}) cancelling file selection", username, userId);
-                await _outputService.ClearChatHistoryAsync(userId, session);
-                await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
-                session.IsFileSelectionActive = false;
-                await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен."), session);
-
-                var replyKeyboard = CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand)
-                    ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
-                    : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
-
-                await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
-                return true;
-            }
-
-            return false;
+            return await HandleFileSelectionActionsAsync(userId, username, messageText, session, cancellationToken);
         }
 
-        if (messageText == ButtonTexts.ExportApply || messageText == ButtonTexts.AutomationApply)
+        return await HandleCommandSelectionActionsAsync(userId, username, messageText, session, cancellationToken);
+    }
+
+    private async Task<bool> HandleFileSelectionActionsAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
+    {
+        if (messageText is ButtonTexts.ExportApply or ButtonTexts.AutomationApply)
+        {
+            if (session.SelectedFiles.Count == 0)
+            {
+                _logger.LogDebug("User {Username} ({UserId}) tried to apply with no files selected", username, userId);
+                _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один файл.");
+                return true;
+            }
+
+            _logger.LogInformation("User {Username} ({UserId}) applying file selection: {FileCount} files selected",
+                username, userId, session.SelectedFiles.Count);
+            await _outputService.ClearChatHistoryAsync(userId, session);
+            await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
+            session.IsFileSelectionActive = false;
+            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден."), session);
+            return true;
+        }
+
+        if (messageText == ButtonTexts.Cancel)
+        {
+            _logger.LogDebug("User {Username} ({UserId}) cancelling file selection", username, userId);
+            await _outputService.ClearChatHistoryAsync(userId, session);
+            await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.CancelFileSelection, cancellationToken);
+            session.IsFileSelectionActive = false;
+            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен."), session);
+
+            ReplyKeyboardMarkup replyKeyboard = CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand)
+                ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
+                : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
+
+            _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task<bool> HandleCommandSelectionActionsAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
+    {
+        if (messageText is ButtonTexts.ExportApply or ButtonTexts.AutomationApply)
         {
             if (session.PendingCommand.Count == 0)
             {
                 _logger.LogDebug("User {Username} ({UserId}) tried to apply with no commands selected", username, userId);
-                await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду.");
+                _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду.");
                 return true;
             }
 
@@ -266,13 +280,13 @@ public sealed class CommandAppService : ICommandAppService
                 username, userId, string.Join(", ", session.PendingCommand));
             await _outputService.ClearChatHistoryAsync(userId, session);
             session.CurrentPath = _options.RootPath;
-            var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-            var selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard), session);
+            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            Message? selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard), session);
             session.FileSelectionMessageId = selectionMessage?.Id;
             session.IsFileSelectionActive = true;
 
-            var fileActionsReplyKeyboard = await _keyboardBuilder.GetFileActionsReplyKeyboardAsync(session);
-            await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard), session);
+            ReplyKeyboardMarkup fileActionsReplyKeyboard = await _keyboardBuilder.GetFileActionsReplyKeyboardAsync(session);
+            _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard), session);
             return true;
         }
 
@@ -282,7 +296,7 @@ public sealed class CommandAppService : ICommandAppService
             session.IsFileSelectionActive = false;
             _logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
             await _outputService.ClearChatHistoryAsync(userId, session);
-            await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен."), session);
+            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен."), session);
             return true;
         }
 
@@ -294,7 +308,7 @@ public sealed class CommandAppService : ICommandAppService
         var keyboard = new InlineKeyboardMarkup([[
             InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
         ]]);
-        await _outputService.SendMessageWithKeyboardAsync(userId,
+        _ = await _outputService.SendMessageWithKeyboardAsync(userId,
             "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
             keyboard);
     }
@@ -309,7 +323,7 @@ public sealed class CommandAppService : ICommandAppService
             .AppendLine("/help — справка по командам")
             .ToString();
 
-        await _outputService.SendMessageAsync(userId, helpText);
+        _ = await _outputService.SendMessageAsync(userId, helpText);
     }
 
     private async Task DispatchFileSelectionCallbackAsync(
@@ -317,8 +331,8 @@ public sealed class CommandAppService : ICommandAppService
     {
         if (session.FileSelectionMessageId is not int messageId)
         {
-            var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-            var selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
+            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            Message? selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
             session.FileSelectionMessageId = selectionMessage?.Id;
             return;
         }
@@ -335,24 +349,32 @@ public sealed class CommandAppService : ICommandAppService
             Buttons = []
         };
 
-        await _callbackDispatcher.DispatchAsync(context, cancellationToken);
+        _ = await _callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
     private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
     {
-        var msg = await task;
-        if (msg != null) session.AddBotMessageId(msg.Id);
+        Message? msg = await task;
+        if (msg != null)
+        {
+            session.AddBotMessageId(msg.Id);
+        }
+
         return msg;
     }
 
     private static string NormalizeCommandText(string text)
     {
         if (!text.StartsWith('/'))
+        {
             return text;
+        }
 
         int mentionIndex = text.IndexOf('@');
         if (mentionIndex > 0)
+        {
             text = text[..mentionIndex];
+        }
 
         return text.ToLowerInvariant();
     }
