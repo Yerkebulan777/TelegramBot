@@ -16,8 +16,6 @@ public interface IKeyboardBuilder
     Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync();
     /// <summary>Возвращает reply-клавиатуру для автоматизации.</summary>
     Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync();
-    /// <summary>Возвращает reply-клавиатуру для файлов.</summary>
-    Task<ReplyKeyboardMarkup> GetFileActionsReplyKeyboardAsync(UserSession session);
     /// <summary>Возвращает клавиатуру списка сессий.</summary>
     Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsStatus);
     /// <summary>Возвращает клавиатуру статуса сессии.</summary>

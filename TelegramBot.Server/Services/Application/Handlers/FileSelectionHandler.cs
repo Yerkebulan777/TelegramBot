@@ -112,53 +112,52 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
 
     private async Task<bool> HandleCancelFileSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        var session = context.Session;
-        session.FileSelectionMessageId = context.MessageId;
-
-        Logger.LogInformation("User {Username} ({UserId}) cancelled file selection", context.Username, context.UserId);
-
-        session.ResetNavigation(_options.RootPath);
-        session.IsFileSelectionActive = false;
-
-        if (CommandCodes.ExportCodes.Any(session.ContainsPendingCommand))
-        {
-            var keyboard = await _keyboardBuilder.GetCommandsKeyboardAsync(session);
-            await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        }
-        else if (CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand))
-        {
-            var keyboard = await _keyboardBuilder.GetAutomationKeyboardAsync(session);
-            await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        }
-
+        context.Session.Reset(_options.RootPath);
+        await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "Отменено");
+        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Выбор отменён.");
         return true;
     }
 
-    private async Task<List<string>> MapSectionsToRvtFilesAsync(
-        IReadOnlySet<string> sections, CancellationToken cancellationToken)
+    private Task<List<string>> MapSectionsToRvtFilesAsync(IReadOnlySet<string> selectedPaths, CancellationToken cancellationToken)
     {
         var allFiles = new List<string>();
 
-        foreach (var section in sections)
+        foreach (var path in selectedPaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var rvtDir = _options.GetRvtPath(section);
-            if (!Directory.Exists(rvtDir))
+            var projectDir = Path.Combine(path, _options.ProjectDirectoryName);
+            if (Directory.Exists(projectDir))
             {
-                Logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
-                continue;
+                foreach (var section in Directory.EnumerateDirectories(projectDir))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    CollectRvtFiles(section, allFiles);
+                }
             }
-
-            foreach (var file in Directory.EnumerateFiles(rvtDir))
+            else
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (_options.IsRevitFile(file))
-                    allFiles.Add(file);
+                CollectRvtFiles(path, allFiles);
             }
         }
 
-        return allFiles;
+        return Task.FromResult(allFiles);
+    }
+
+    private void CollectRvtFiles(string sectionPath, List<string> files)
+    {
+        var rvtDir = _options.GetRvtPath(sectionPath);
+        if (!Directory.Exists(rvtDir))
+        {
+            Logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(rvtDir))
+        {
+            if (_options.IsRevitFile(file))
+                files.Add(file);
+        }
     }
 
     private static string BuildQueueReply(UserSession session)

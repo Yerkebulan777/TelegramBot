@@ -36,22 +36,6 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
         => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.AutomationApply));
 
-    public Task<ReplyKeyboardMarkup> GetFileActionsReplyKeyboardAsync(UserSession session)
-    {
-        var applyButtonText = CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand)
-            ? ButtonTexts.AutomationApply
-            : ButtonTexts.ExportApply;
-
-        return Task.FromResult(new ReplyKeyboardMarkup(
-        [
-            [new(applyButtonText), new(ButtonTexts.Cancel)]
-        ])
-        {
-            ResizeKeyboard = true,
-            OneTimeKeyboard = false
-        });
-    }
-
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
     {
         var buttons = new List<List<InlineKeyboardButton>>();

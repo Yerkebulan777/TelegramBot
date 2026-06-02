@@ -91,7 +91,7 @@ public sealed class CommandAppService(
             return;
         }
 
-        if (await HandleReplyKeyboardActionAsync(userId, username, rawText, session, cancellationToken))
+        if (await HandleCommandSelectionActionsAsync(userId, username, rawText, session, cancellationToken))
         {
             return;
         }
@@ -213,55 +213,6 @@ public sealed class CommandAppService(
         }
     }
 
-    private async Task<bool> HandleReplyKeyboardActionAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
-    {
-        if (session.IsFileSelectionActive)
-        {
-            return await HandleFileSelectionActionsAsync(userId, username, messageText, session, cancellationToken);
-        }
-
-        return await HandleCommandSelectionActionsAsync(userId, username, messageText, session, cancellationToken);
-    }
-
-    private async Task<bool> HandleFileSelectionActionsAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
-    {
-        if (messageText is ButtonTexts.ExportApply or ButtonTexts.AutomationApply)
-        {
-            if (session.SelectedFiles.Count == 0)
-            {
-                _logger.LogDebug("User {Username} ({UserId}) tried to apply with no files selected", username, userId);
-                _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один файл.");
-                return true;
-            }
-
-            _logger.LogInformation("User {Username} ({UserId}) applying file selection: {FileCount} files selected",
-                username, userId, session.SelectedFiles.Count);
-            await _outputService.ClearChatHistoryAsync(userId, session);
-            await DispatchFileSelectionCallbackAsync(userId, username, session, CallbackPrefixes.ApplyFiles, cancellationToken);
-            session.IsFileSelectionActive = false;
-            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов подтвержден."), session);
-            return true;
-        }
-
-        if (messageText == ButtonTexts.Cancel)
-        {
-            _logger.LogDebug("User {Username} ({UserId}) cancelling file selection", username, userId);
-            await _outputService.ClearChatHistoryAsync(userId, session);
-            session.ResetNavigation(_options.RootPath);
-            session.IsFileSelectionActive = false;
-            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор файлов отменен."), session);
-
-            ReplyKeyboardMarkup replyKeyboard = CommandCodes.AutomationCodes.Any(session.ContainsPendingCommand)
-                ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
-                : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
-
-            _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
-            return true;
-        }
-
-        return false;
-    }
-
     private async Task<bool> HandleCommandSelectionActionsAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
     {
         if (messageText is ButtonTexts.ExportApply or ButtonTexts.AutomationApply)
@@ -277,13 +228,11 @@ public sealed class CommandAppService(
                 username, userId, string.Join(", ", session.PendingCommand));
             await _outputService.ClearChatHistoryAsync(userId, session);
             session.CurrentPath = _options.RootPath;
-            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-            Message? selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard), session);
-            session.FileSelectionMessageId = selectionMessage?.Id;
             session.IsFileSelectionActive = true;
-
-            ReplyKeyboardMarkup fileActionsReplyKeyboard = await _keyboardBuilder.GetFileActionsReplyKeyboardAsync(session);
-            _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия с файлами:", fileActionsReplyKeyboard), session);
+            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            Message? selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
+            session.FileSelectionMessageId = selectionMessage?.Id;
+            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "​"), session);
             return true;
         }
 
@@ -321,32 +270,6 @@ public sealed class CommandAppService(
             .ToString();
 
         _ = await _outputService.SendMessageAsync(userId, helpText);
-    }
-
-    private async Task DispatchFileSelectionCallbackAsync(
-        long userId, string username, UserSession session, string callbackPrefix, CancellationToken cancellationToken)
-    {
-        if (session.FileSelectionMessageId is not int messageId)
-        {
-            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-            Message? selectionMessage = await _outputService.SendMessageWithKeyboardAsync(userId, "Выберите файлы:", keyboard);
-            session.FileSelectionMessageId = selectionMessage?.Id;
-            return;
-        }
-
-        var context = new CallbackContext
-        {
-            UserId = userId,
-            ChatId = userId,
-            MessageId = messageId,
-            Username = username,
-            CallbackQueryId = string.Empty,
-            ParsedCallback = new ParsedCallback(callbackPrefix, string.Empty),
-            Session = session,
-            Buttons = []
-        };
-
-        _ = await _callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
     private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
