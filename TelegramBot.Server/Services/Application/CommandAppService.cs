@@ -2,7 +2,6 @@ using Microsoft.Extensions.Options;
 using System.Text;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
-using TelegramBot.Core.Config;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
@@ -24,7 +23,6 @@ public sealed class CommandAppService : ICommandAppService
     private readonly ICallbackDispatcher _callbackDispatcher;
     private readonly ILogger<CommandAppService> _logger;
     private readonly FileSystemOptions _options;
-    private readonly long[] _adminIds;
 
     public CommandAppService(
         IDataService dataService,
@@ -33,7 +31,6 @@ public sealed class CommandAppService : ICommandAppService
         IKeyboardBuilder keyboardBuilder,
         ICallbackDispatcher callbackDispatcher,
         IOptions<FileSystemOptions> fileSystemOptions,
-        IOptions<BotOptions> botOptions,
         ILogger<CommandAppService> logger)
     {
         _dataService = dataService;
@@ -43,7 +40,6 @@ public sealed class CommandAppService : ICommandAppService
         _callbackDispatcher = callbackDispatcher;
         _logger = logger;
         _options = fileSystemOptions.Value;
-        _adminIds = botOptions.Value.AdminUserIds;
     }
 
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
@@ -64,19 +60,23 @@ public sealed class CommandAppService : ICommandAppService
             await _outputService.ClearChatHistoryAsync(userId, session);
             var user = await _dataService.GetUserAsync(userId);
 
-            if (user?.Status != UserAccessStatus.Approved && _adminIds.Contains(userId))
+            if (user?.Status != UserAccessStatus.Approved)
             {
-                var now = DateTime.UtcNow;
-                await _dataService.UpsertUserAsync(new BotUser
+                var adminUser = await _dataService.GetBotUserAsync(userId);
+                if (adminUser?.Role == UserRole.Admin && adminUser.Status == UserAccessStatus.Approved)
                 {
-                    UserId = userId,
-                    Username = username,
-                    Role = UserRole.Admin,
-                    Status = UserAccessStatus.Approved,
-                    CreatedAt = user?.CreatedAt ?? now,
-                    UpdatedAt = now
-                });
-                user = await _dataService.GetUserAsync(userId);
+                    var now = DateTime.UtcNow;
+                    await _dataService.UpsertUserAsync(new BotUser
+                    {
+                        UserId = userId,
+                        Username = username,
+                        Role = UserRole.Admin,
+                        Status = UserAccessStatus.Approved,
+                        CreatedAt = user?.CreatedAt ?? now,
+                        UpdatedAt = now
+                    });
+                    user = await _dataService.GetUserAsync(userId);
+                }
             }
 
             if (user?.Status == UserAccessStatus.Approved)

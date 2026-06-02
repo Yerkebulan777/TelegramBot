@@ -79,6 +79,16 @@ public class SessionManager : ISessionManager, IDisposable
                     sessionLock.Release();
             }
         }
+
+        // Clean up orphaned locks (locks for users without sessions)
+        foreach (var key in _sessionLocks.Keys.ToList())
+        {
+            if (!_sessions.ContainsKey(key))
+            {
+                if (_sessionLocks.TryRemove(key, out var orphanedLock))
+                    orphanedLock.Dispose();
+            }
+        }
     }
 
     public void Dispose()
