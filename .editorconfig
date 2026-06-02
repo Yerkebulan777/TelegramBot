@@ -4,31 +4,30 @@ root = true
 [*]
 indent_style = space
 indent_size = 4
-end_of_line = lf
 charset = utf-8
-trim_trailing_whitespace = true
+trim_trailing_whitespace = false
 insert_final_newline = true
 
 [*.cs]
-csharp_new_line_before_open_brace_method = false
-csharp_new_line_before_open_brace_type = false
-csharp_new_line_before_open_brace_namespace = false
-csharp_new_line_before_open_brace_property = false
-csharp_new_line_before_open_brace_event = false
-csharp_new_line_before_open_brace_field = false
-csharp_new_line_before_open_brace_anonymous_methods = false
-csharp_new_line_before_open_brace_anonymous_types = false
-csharp_new_line_before_open_brace_accessors = false
-csharp_new_line_before_open_brace_lambdas = false
-csharp_new_line_before_open_brace_local_functions = false
-csharp_new_line_before_open_brace_control_blocks = false
+csharp_new_line_before_open_brace_method = true
+csharp_new_line_before_open_brace_type = true
+csharp_new_line_before_open_brace_namespace = true
+csharp_new_line_before_open_brace_property = true
+csharp_new_line_before_open_brace_event = true
+csharp_new_line_before_open_brace_field = true
+csharp_new_line_before_open_brace_anonymous_methods = true
+csharp_new_line_before_open_brace_anonymous_types = true
+csharp_new_line_before_open_brace_accessors = true
+csharp_new_line_before_open_brace_lambdas = true
+csharp_new_line_before_open_brace_local_functions = true
+csharp_new_line_before_open_brace_control_blocks = true
 csharp_space_after_cast = false
 csharp_space_after_keywords_in_control_flow_statements = true
 csharp_space_between_method_declaration_parameter_list_parentheses = false
 csharp_space_between_method_call_name_and_opening_parenthesis = false
 csharp_space_between_parentheses = false
 csharp_space_between_square_brackets = false
-csharp_space_around_binary_operators = before_and_after
+csharp_space_around_binary_operators = ignore
 csharp_space_between_colon_and_case_label = true
 csharp_indent_labels = flush_left
 csharp_preserve_adds_in_argument_lists = false
@@ -80,8 +79,15 @@ dotnet_naming_rule.private_fields_should_begin_with_underscore.symbols = private
 dotnet_naming_rule.private_fields_should_begin_with_underscore.style = underscore_prefix
 dotnet_naming_symbols.private_fields.applicable_kinds = field
 dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_fields.required_modifiers = readonly
 dotnet_naming_style.underscore_prefix.required_prefix = _
 dotnet_naming_style.underscore_prefix.capitalization = camel_case
+
+[TelegramBot.Data/SqliteDataService.cs]
+generated_code = true
+
+[TelegramBot.Server/Services/Application/Handlers/AccessRequestHandler.cs]
+generated_code = true
 
 [*.csproj]
 indent_size = 2
