@@ -10,6 +10,6 @@ public interface IFileSystemBrowser
     /// <summary>Возвращает полный путь по токену.</summary>
     bool TryResolvePath(long userId, string token, out string? path);
 
-    /// <summary>Возвращает представление разделов для выбора.</summary>
-    Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path);
+    /// <summary>Возвращает клавиатуру со списком разделов текущей директории.</summary>
+    Task<InlineKeyboardMarkup> GetSectionsViewAsync(long userId, string path);
 }

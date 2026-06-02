@@ -14,11 +14,8 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 {
     private readonly IFileSystemBrowser _navigationService = fileNavigationService;
 
-    public async Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
-    {
-        var (_, rawKeyboard) = await _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
-        return rawKeyboard ?? new InlineKeyboardMarkup(Array.Empty<InlineKeyboardButton[]>());
-    }
+    public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session) =>
+        _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
 
     public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session)
     {

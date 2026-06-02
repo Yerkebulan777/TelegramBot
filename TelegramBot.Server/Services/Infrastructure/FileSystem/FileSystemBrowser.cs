@@ -26,86 +26,50 @@ public class FileSystemBrowser : IFileSystemBrowser
 
     public bool TryResolvePath(long userId, string token, out string? path)
     {
-        var session = _sessions.GetOrCreateSession(userId);
-        return session.PathMap.TryGetValue(token, out path);
+        return _sessions.GetOrCreateSession(userId).PathMap.TryGetValue(token, out path);
     }
 
-    public Task<(string message, InlineKeyboardMarkup keyboard)> GetSectionsViewAsync(long userId, string path)
+    public Task<InlineKeyboardMarkup> GetSectionsViewAsync(long userId, string path)
     {
         var session = _sessions.GetOrCreateSession(userId);
-
-        var dirs = Directory.GetDirectories(path)
-            .Where(d => _folderRegex.IsMatch(Path.GetFileName(d)));
-
-        if (IsRootPath(path))
-        {
-            dirs = dirs.Where(d => Directory.Exists(Path.Combine(d, _options.ProjectDirectoryName)));
-        }
+        var selected = session.SelectedFiles;
+        var buttons = new List<List<InlineKeyboardButton>>();
 
         session.PathMap.Clear();
 
-        var buttons = new List<List<InlineKeyboardButton>>();
-        var items = dirs.Select(d => new FileSystemItem { FullPath = d, Type = ItemType.Directory }).ToList();
-
-        session.SetItems(items);
-
-        var selectedFiles = session.SelectedFiles;
-
-        foreach (var item in items)
+        foreach (var dir in EnumerateSectionDirectories(path))
         {
-            var prefix = selectedFiles.Contains(item.FullPath) ? "✅ " : "📁 ";
-            string token = Guid.NewGuid().ToString("N")[..8];
-            session.PathMap[token] = item.FullPath;
-            buttons.Add([InlineKeyboardButton.WithCallbackData($"{prefix}{Path.GetFileName(item.FullPath)}", $"{CallbackPrefixes.OpenFolder}{token}")]);
+            string token = NewToken();
+            session.PathMap[token] = dir;
+            string label = $"{Prefix(selected.Contains(dir))}{Path.GetFileName(dir)}";
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.OpenFolder}{token}")]);
         }
 
         var parent = Directory.GetParent(path);
-        if (parent != null && IsPathWithinRoot(parent.FullName))
+        if (parent is not null && _options.IsPathWithinRoot(parent.FullName))
         {
-            string parentToken = Guid.NewGuid().ToString("N")[..8];
+            string parentToken = NewToken();
             session.PathMap[parentToken] = parent.FullName;
             buttons.Add([InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"{CallbackPrefixes.GoToParent}{parentToken}")]);
         }
 
-        return Task.FromResult(($"*Current directory:* `{path}`", new InlineKeyboardMarkup(buttons)));
+        return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
-    private bool IsPathWithinRoot(string path)
+    private IEnumerable<string> EnumerateSectionDirectories(string path)
     {
-        try
+        foreach (var dir in Directory.GetDirectories(path))
         {
-            var rootFullPath = Path.GetFullPath(_options.RootPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var candidateFullPath = Path.GetFullPath(path)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            return candidateFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase)
-                   || candidateFullPath.StartsWith(
-                       rootFullPath + Path.DirectorySeparatorChar,
-                       StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
+            var name = Path.GetFileName(dir);
+            if (!_folderRegex.IsMatch(name))
+                continue;
+            if (!Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName)))
+                continue;
+            yield return dir;
         }
     }
 
-    private bool IsRootPath(string path)
-    {
-        if (string.IsNullOrEmpty(path))
-            return true;
-        try
-        {
-            var rootFullPath = Path.GetFullPath(_options.RootPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var pathFullPath = Path.GetFullPath(path)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    private static string Prefix(bool isSelected) => isSelected ? "✅ " : "📁 ";
 
-            return pathFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static string NewToken() => Guid.NewGuid().ToString("N")[..8];
 }

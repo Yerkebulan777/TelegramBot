@@ -15,17 +15,12 @@ public class UserSession
     // ConcurrentDictionary: token-to-path mapping used by FileSystemBrowser and handlers
     public ConcurrentDictionary<string, string> PathMap { get; } = new();
 
-    // Thread-safe collections for concurrent access
     private readonly object _commandLock = new();
     private readonly List<string> _pendingCommand = [];
     private readonly List<string> _pendingCommandName = [];
 
     private readonly object _selectionLock = new();
     private readonly HashSet<string> _selectedFiles = [];
-
-    private readonly object _navigationLock = new();
-    private readonly List<int> _pagesCache = [];
-    private readonly List<FileSystemItem> _items = [];
 
     private readonly object _messageLock = new();
     private readonly List<int> _botMessageIds = [];
@@ -46,17 +41,6 @@ public class UserSession
         get { lock (_selectionLock) return new HashSet<string>(_selectedFiles); }
     }
 
-    public IReadOnlyList<int> PagesCache
-    {
-        get { lock (_navigationLock) return [.. _pagesCache]; }
-    }
-
-    public IReadOnlyList<FileSystemItem> Items
-    {
-        get { lock (_navigationLock) return [.. _items]; }
-    }
-
-    public int Counter { get; set; }
     /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
     public bool IsInStatusView { get; set; }
     public int SessionId { get; set; }
@@ -122,45 +106,6 @@ public class UserSession
         lock (_selectionLock) _selectedFiles.Clear();
     }
 
-    // Navigation methods
-    public void AddToPagesCache(int page)
-    {
-        lock (_navigationLock) _pagesCache.Add(page);
-    }
-
-    public void RemoveLastFromPagesCache()
-    {
-        lock (_navigationLock)
-        {
-            if (_pagesCache.Count > 0)
-                _pagesCache.RemoveAt(_pagesCache.Count - 1);
-        }
-    }
-
-    public int GetLastPageFromCache()
-    {
-        lock (_navigationLock) return _pagesCache.Count > 0 ? _pagesCache[^1] : 0;
-    }
-
-    public void ClearPagesCache()
-    {
-        lock (_navigationLock) _pagesCache.Clear();
-    }
-
-    public void SetItems(IEnumerable<FileSystemItem> newItems)
-    {
-        lock (_navigationLock)
-        {
-            _items.Clear();
-            _items.AddRange(newItems);
-        }
-    }
-
-    public void ClearItems()
-    {
-        lock (_navigationLock) _items.Clear();
-    }
-
     // Bot message tracking methods
     public void AddBotMessageId(int messageId)
     {
@@ -182,28 +127,22 @@ public class UserSession
     /// </summary>
     public void Reset(string rootPath)
     {
-        ClearPagesCache();
         ClearSelectedFiles();
         ClearPendingCommands();
         CurrentPath = rootPath;
-        Counter = 0;
-        ClearItems();
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;
         lock (_messageLock) _botMessageIds.Clear();
     }
 
     /// <summary>
-    /// Resets navigation state (path, counter, selected files, pages cache, items).
+    /// Resets navigation state (path, selected files).
     /// Does not affect pending commands.
     /// </summary>
     public void ResetNavigation(string rootPath)
     {
         CurrentPath = rootPath;
-        Counter = 0;
         ClearSelectedFiles();
-        ClearPagesCache();
-        ClearItems();
         FileSelectionMessageId = null;
     }
 }
