@@ -1,0 +1,31 @@
+# Build artifacts
+bin/
+obj/
+publish/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Documentation
+*.md
+Docs/
+
+# IDE
+.vscode/
+.idea/
+.agents/
+.claude/
+.codex/
+
+# Test results
+TestResults/
+
+# Local settings
+appsettings.Local.json
+*.user
+*.suo

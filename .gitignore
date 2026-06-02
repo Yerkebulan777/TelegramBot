@@ -1,161 +1,71 @@
-# Build artifacts
-bin/
-obj/
-*.dll
-*.exe
-*.pdb
-*.so
-*.dylib
-*.jar
-*.war
-*.class
-
-# Dependencies
-node_modules/
-vendor/
-packages/
-
-# Logs
+```
+# Logs and temp files
 *.log
-logs/
+*.tmp
+*.swp
 
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+dist/
+build/
+target/
+.gradle/
 
 # OS generated files
 .DS_Store
 Thumbs.db
 
-# Editor files
-.vs/
-.vscode/
-.idea/
-*.swp
-*.swo
+# Compiled files
+*.pyc
+*.class
+*.o
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
 
-# Test and coverage
+# Coverage
 coverage/
 htmlcov/
 .coverage
-*.coverage
 
-# Distribution / packaging
-dist/
-build/
-target/
-*.tar.gz
+# Compressed files
 *.zip
-
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-pip-log.txt
-pip-delete-this-directory.txt
-*.so
-*.egg-info/
-.eggs/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-.pytest_cache/
-.mypy_cache/
-.hypothesis/
-
-# Java specific
-*.class
-*.jar
-*.war
-*.ear
-hs_err_pid*
-.recommenders
-
-# Node specific
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# C# specific
-*.user
-*.userosscache
-*.suo
-*.userprefs
-*.pidb
-*.svclog
-[Dd]ebug/
-[Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
-x64/
-x86/
-bld/
-[Bb]in/
-[Oo]bj/
-[Ll]og/
-[Ll]ogs/
-
-# Go specific
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Ruby specific
-*.gem
-*.rbc
-csscachestore/
-.ridkey
-gemfiles/
-.installed
-.bundle/
-vendor/bundle/
-vendor/cache/
-vendor/gems/
-vendor/ruby/
-
-# Rust specific
-target/
-Cargo.lock
-
-# Julia specific
-.julia/
-
-# Zig specific
-zig-cache/
-zig-out/
-
-# Gradle specific
-.gradle/
-build/
-
-# Maven specific
-target/
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-
-# CMake specific
-CMakeFiles/
-CMakeCache.txt
-cmake_install.manifest
-CTestTestfile.cmake
-_deps/
-
-# Temporary folders
-tmp/
-temp/
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
