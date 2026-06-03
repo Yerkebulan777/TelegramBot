@@ -59,4 +59,13 @@ public interface IDataService
 
     /// <summary>Гарантирует наличие администратора в БД.</summary>
     Task EnsureAdminUserAsync(long userId, string? username);
+
+    /// <summary>Сохраняет ID сообщений для отложенной очистки (прерванный диалог).</summary>
+    Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds);
+
+    /// <summary>Возвращает все сохранённые ID сообщений, сгруппированные по userId.</summary>
+    Task<ILookup<long, int>> GetAllTrackedMessagesAsync();
+
+    /// <summary>Удаляет все сохранённые ID сообщений для пользователя.</summary>
+    Task DeleteTrackedMessagesAsync(long userId);
 }

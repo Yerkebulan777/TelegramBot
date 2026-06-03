@@ -96,6 +96,7 @@ public sealed class FileSelectionHandler(
             await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
             await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+            await SendFileActionsReplyKeyboardAsync(context);
             return true;
         }
 
@@ -121,6 +122,11 @@ public sealed class FileSelectionHandler(
 
         session.ResetNavigation(_options.RootPath);
         session.IsFileSelectionActive = false;
+        session.ClearPendingCommands();
+
+        var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Задание добавлено в очередь.");
+        if (clearKeyboardMessage != null)
+            session.TrackMessage(clearKeyboardMessage.Id);
 
         return true;
     }
@@ -130,7 +136,21 @@ public sealed class FileSelectionHandler(
         context.Session.Reset(_options.RootPath);
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "Отменено");
         await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Выбор отменён.");
+        var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор отменен.");
+        if (clearKeyboardMessage != null)
+            context.Session.TrackMessage(clearKeyboardMessage.Id);
         return true;
+    }
+
+    private async Task SendFileActionsReplyKeyboardAsync(CallbackContext context)
+    {
+        var replyKeyboard = IsAtProjectLevel(context.Session)
+            ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+            : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+
+        var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
+        if (message != null)
+            context.Session.TrackMessage(message.Id);
     }
 
     private List<string> CollectRvtFiles(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)

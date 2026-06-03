@@ -52,6 +52,25 @@ internal static class SqlQueries
 
         internal const string AddStatusColumn =
             "ALTER TABLE BotUsers ADD COLUMN Status INTEGER NOT NULL DEFAULT 0;";
+
+        internal const string CreateTrackedMessagesTable = @"
+            CREATE TABLE IF NOT EXISTS TrackedMessages (
+                UserId    INTEGER NOT NULL,
+                MessageId INTEGER NOT NULL,
+                PRIMARY KEY (UserId, MessageId)
+            );";
+    }
+
+    internal static class TrackedMessages
+    {
+        internal const string Insert =
+            "INSERT OR IGNORE INTO TrackedMessages (UserId, MessageId) VALUES (@UserId, @MessageId);";
+
+        internal const string GetAll =
+            "SELECT UserId, MessageId FROM TrackedMessages;";
+
+        internal const string DeleteByUser =
+            "DELETE FROM TrackedMessages WHERE UserId = @UserId;";
     }
 
     internal static class Users

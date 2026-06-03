@@ -16,25 +16,32 @@ public class TelegramBotHostedService : BackgroundService
     private readonly ILogger<TelegramBotHostedService> _logger;
     private readonly ITelegramUpdateMapper _inputService;
     private readonly ISessionManager _sessionManager;
+    private readonly IDataService _dataService;
+    private readonly ITelegramOutputService _outputService;
 
     public TelegramBotHostedService(
         ITelegramBotClient botClient,
         ICommandAppService commandAppService,
         ILogger<TelegramBotHostedService> logger,
         ITelegramUpdateMapper inputService,
-        ISessionManager sessionManager)
+        ISessionManager sessionManager,
+        IDataService dataService,
+        ITelegramOutputService outputService)
     {
         _botClient = botClient;
         _commandAppService = commandAppService;
         _logger = logger;
         _inputService = inputService;
         _sessionManager = sessionManager;
+        _dataService = dataService;
+        _outputService = outputService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Starting Telegram polling");
 
+        await CleanupStaleMessagesAsync(stoppingToken);
         await BotCommandsSetup.ConfigureAsync(_botClient, _logger);
 
         var receiverOptions = new ReceiverOptions
@@ -105,6 +112,23 @@ public class TelegramBotHostedService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception processing update {UpdateId}", update.Id);
+        }
+    }
+
+    private async Task CleanupStaleMessagesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var staleMessages = await _dataService.GetAllTrackedMessagesAsync();
+            foreach (var group in staleMessages)
+            {
+                await _outputService.DeleteMessagesAsync(group.Key, group, cancellationToken);
+                await _dataService.DeleteTrackedMessagesAsync(group.Key);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to cleanup stale messages on startup");
         }
     }
 

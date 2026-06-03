@@ -58,6 +58,8 @@ public sealed class SessionManagementHandler(
             var sessionStatus = await _dataService.GetSessionsStatusAsync(sessionId, context.UserId);
             var keyboard = await _keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
             await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
+            session.StatusMessageId = context.MessageId;
+            await SendStatusActionsReplyKeyboardAsync(context);
         }
         else
         {
@@ -66,6 +68,8 @@ public sealed class SessionManagementHandler(
             var sessionCommands = await _dataService.GetSessionsCommandsAsync(sessionId, context.UserId);
             var keyboard = await _keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
             await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+            session.StatusMessageId = context.MessageId;
+            await SendStatusActionsReplyKeyboardAsync(context);
         }
 
         return true;
@@ -152,6 +156,19 @@ public sealed class SessionManagementHandler(
         var sessionsStatus = await _dataService.GetSessionsListAsync(context.UserId);
         var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
         await _outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
+        context.Session.StatusMessageId = context.MessageId;
+
+        var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Сессии:");
+        if (clearKeyboardMessage != null)
+            context.Session.TrackMessage(clearKeyboardMessage.Id);
+    }
+
+    private async Task SendStatusActionsReplyKeyboardAsync(CallbackContext context)
+    {
+        ReplyKeyboardMarkup replyKeyboard = await _keyboardBuilder.GetStatusActionsReplyKeyboardAsync();
+        var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
+        if (message != null)
+            context.Session.TrackMessage(message.Id);
     }
 
     private static string BuildStatusReply(SessionStatus sessionStatus)

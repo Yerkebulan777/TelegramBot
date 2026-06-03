@@ -27,11 +27,17 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
     }
 
-    public Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync()
-        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.ExportApply));
+    public Task<ReplyKeyboardMarkup> GetCommandActionsReplyKeyboardAsync()
+        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Apply, ButtonTexts.Cancel));
 
-    public Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync()
-        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.AutomationApply));
+    public Task<ReplyKeyboardMarkup> GetProjectActionsReplyKeyboardAsync()
+        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
+
+    public Task<ReplyKeyboardMarkup> GetSectionActionsReplyKeyboardAsync()
+        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Back, ButtonTexts.Cancel));
+
+    public Task<ReplyKeyboardMarkup> GetStatusActionsReplyKeyboardAsync()
+        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Back));
 
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
     {
@@ -56,8 +62,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             new()
             {
                 InlineKeyboardButton.WithCallbackData("More", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
-                InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}"),
-                InlineKeyboardButton.WithCallbackData("Back", CallbackPrefixes.BackToStatus)
+                InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}")
             }
         };
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
@@ -70,8 +75,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             new()
             {
                 InlineKeyboardButton.WithCallbackData("Less", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
-                InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}"),
-                InlineKeyboardButton.WithCallbackData("Back", CallbackPrefixes.BackToStatus)
+                InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}")
             }
         };
 
@@ -121,11 +125,11 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return new InlineKeyboardMarkup(buttons);
     }
 
-    private static ReplyKeyboardMarkup BuildActionsReplyKeyboard(string applyButtonText)
+    private static ReplyKeyboardMarkup BuildActionsReplyKeyboard(params string[] buttonTexts)
     {
         return new ReplyKeyboardMarkup(
         [
-            [new(applyButtonText), new(ButtonTexts.Cancel)]
+            buttonTexts.Select(text => new KeyboardButton(text)).ToArray()
         ])
         {
             ResizeKeyboard = true,

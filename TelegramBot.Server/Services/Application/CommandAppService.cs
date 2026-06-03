@@ -21,6 +21,7 @@ public sealed class CommandAppService(
     public Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
         UserSession session = _sessionManager.GetOrCreateSession(message.UserId);
+        session.TrackMessage(message.MessageId);
         return _slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
     }
 

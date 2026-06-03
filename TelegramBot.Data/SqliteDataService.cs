@@ -21,6 +21,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
         await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
 
         // Migrations for legacy databases that predate these columns.
         if (await conn.ExecuteScalarAsync<int>(SqlQueries.Schema.CheckRoleColumnExists) == 0)
@@ -241,5 +242,30 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
             CreatedAt = now,
             UpdatedAt = now
         });
+    }
+
+    public async Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+        await using var tx = conn.BeginTransaction();
+        foreach (var messageId in messageIds)
+            await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId }, tx);
+        await tx.CommitAsync();
+    }
+
+    public async Task<ILookup<long, int>> GetAllTrackedMessagesAsync()
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+        var rows = await conn.QueryAsync<(long UserId, int MessageId)>(SqlQueries.TrackedMessages.GetAll);
+        return rows.ToLookup(r => r.UserId, r => r.MessageId);
+    }
+
+    public async Task DeleteTrackedMessagesAsync(long userId)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
     }
 }
