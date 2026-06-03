@@ -29,7 +29,9 @@ public sealed class FileNavigationHandler(
 
         if (!_fileNavigationService.TryResolvePath(context.UserId, context.ParsedCallback.Argument, out var newPath) || newPath is null)
         {
-            await _outputService.SendErrorAsync(context.UserId, "Path not found.");
+            var errorMessage = await _outputService.SendErrorAsync(context.UserId, "Path not found.");
+            if (errorMessage != null)
+                session.TrackMessage(errorMessage.Id);
             return true;
         }
 
@@ -37,7 +39,9 @@ public sealed class FileNavigationHandler(
         {
             Logger.LogWarning("Rejected navigation outside root. User={Username} ({UserId}), Path={Path}",
                 context.Username, context.UserId, newPath);
-            await _outputService.SendErrorAsync(context.UserId, "Недопустимый путь.");
+            var errorMessage = await _outputService.SendErrorAsync(context.UserId, "Недопустимый путь.");
+            if (errorMessage != null)
+                session.TrackMessage(errorMessage.Id);
             session.CurrentPath = _options.RootPath;
             return true;
         }

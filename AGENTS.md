@@ -15,7 +15,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 - **TelegramBot.Core** — Models, DTOs, interfaces, config. Zero Telegram SDK dependency.
 - **TelegramBot.Data** — SQLite persistence via Dapper. References Core only.
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting. References Core + Data.
-- **TelegramBot.Tests** — unit tests (SqliteUserAccessTests.cs).
+No test project is included in the solution.
 
 ---
 
@@ -23,7 +23,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 
 ```bash
 # Build all projects (use this to verify changes)
-dotnet build TelegramBot.sln
+dotnet build TelegramBot.slnx
 
 # Run the server
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
@@ -32,10 +32,10 @@ dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
 
 # Format code (no .editorconfig exists — uses SDK defaults)
-dotnet format TelegramBot.sln
+dotnet format TelegramBot.slnx
 ```
 
-**There are no automated CI tests.** After making changes, verify correctness by building successfully.
+**Tests are intentionally disabled for this project.** Do not add test projects, do not add unit/integration tests, and do not run `dotnet test`. After making changes, verify correctness by building successfully with `dotnet build TelegramBot.slnx`.
 
 ---
 

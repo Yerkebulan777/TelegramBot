@@ -5,8 +5,6 @@ public static class CallbackPrefixes
 {
     public const string GoToParent = "GOTOPARENT:";
     public const string File = "FILE:";
-    public const string ApplyFiles = "APPLYFILES:";
-    public const string CancelFileSelection = "CANCELFILESEL:";
     public const string Pdf = "PDF:";
     public const string Dwg = "DWG:";
     public const string Nwc = "NWC:";

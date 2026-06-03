@@ -12,5 +12,5 @@ public interface ISlashCommandService
     /// <summary>
     /// Returns false and sends an "access denied" message if the user is not approved.
     /// </summary>
-    Task<bool> CheckAndNotifyAccessAsync(long userId);
+    Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session);
 }

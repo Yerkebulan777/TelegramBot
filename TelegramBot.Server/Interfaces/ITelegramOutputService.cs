@@ -7,7 +7,7 @@ namespace TelegramBot.Server.Interfaces;
 public interface ITelegramOutputService
 {
     Task<Message?> SendMessageAsync(long userId, string message);
-    Task SendErrorAsync(long userId, string errorMessage);
+    Task<Message?> SendErrorAsync(long userId, string errorMessage);
     Task SendNotificationAsync(string message);
     Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard);
     Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard);

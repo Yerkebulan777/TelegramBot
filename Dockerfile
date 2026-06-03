@@ -9,7 +9,6 @@ COPY ["TelegramBot.slnx", "."]
 COPY ["TelegramBot.Core/TelegramBot.Core.csproj", "TelegramBot.Core/"]
 COPY ["TelegramBot.Data/TelegramBot.Data.csproj", "TelegramBot.Data/"]
 COPY ["TelegramBot.Server/TelegramBot.Server.csproj", "TelegramBot.Server/"]
-COPY ["TelegramBot.Tests/TelegramBot.Tests.csproj", "TelegramBot.Tests/"]
 RUN dotnet restore "TelegramBot.slnx"
 COPY . .
 WORKDIR "/src"
