@@ -54,32 +54,57 @@ internal static partial class SqlQueries
             LIMIT @Limit;";
 
         internal const string UpdateStatus = @"
-            UPDATE Commands SET Status = @Status WHERE CommandId = @CommandId;";
+            UPDATE Commands
+            SET Status = @Status,
+                CompletedAt = CASE 
+                    WHEN @Status IN ('Done', 'Failed') THEN NOW() 
+                    ELSE CompletedAt 
+                END,
+                ProcessId = @ProcessId,
+                ErrorMessage = @ErrorMessage
+            WHERE CommandId = @CommandId;";
 
         internal const string ClaimAndReturn = @"
             WITH selected AS (
                 SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder,
-                       s.UserId, s.Username
+                       s.UserId, s.Username, c.Partition, c.Priority
                 FROM Commands c
                 JOIN Sessions s ON s.SessionId = c.SessionId
                 WHERE c.Status = 'pending'
                   AND s.Status != 'Deleted'
-                ORDER BY c.SessionId, c.ExecutionOrder
+                ORDER BY c.Priority DESC, c.CreatedAt ASC
                 LIMIT @Limit
                 FOR UPDATE SKIP LOCKED
             )
             UPDATE Commands c
-            SET Status = 'processing', Lease = @LeaseExpiry
+            SET Status = 'processing', 
+                Lease = @LeaseExpiry,
+                StartedAt = NOW()
             FROM selected
             WHERE c.CommandId = selected.CommandId
             RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
-                      selected.FilePath, selected.ExecutionOrder, selected.UserId, selected.Username;";
+                      selected.FilePath, selected.ExecutionOrder, selected.UserId, 
+                      selected.Username, selected.Partition, selected.Priority;";
 
         internal const string ReleaseExpiredLeases = @"
             UPDATE Commands
-            SET Status = 'pending', Lease = NULL
+            SET Status = 'pending', 
+                Lease = NULL,
+                StartedAt = NULL,
+                ErrorMessage = 'Lease expired: worker crash or timeout'
             WHERE Status = 'processing'
               AND Lease IS NOT NULL
               AND Lease < @CurrentTimeSec;";
+
+        internal const string ReleaseTimeoutCommands = @"
+            UPDATE Commands
+            SET Status = 'pending',
+                StartedAt = NULL,
+                CompletedAt = NULL,
+                ProcessId = NULL,
+                ErrorMessage = 'Timeout: process exceeded maximum execution time',
+                Lease = NULL
+            WHERE Status = 'processing'
+              AND StartedAt < NOW() - INTERVAL '@TimeoutSeconds seconds';";
     }
 }

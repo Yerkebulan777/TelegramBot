@@ -299,20 +299,39 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
-    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status)
+    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null)
     {
         try
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
             var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateStatus,
-                new { CommandId = commandId, Status = status });
+                new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage });
             return affected > 0;
         }
         catch (Exception e)
         {
             logger.LogError(e, "Failed to update status for command {CommandId}", commandId);
             return false;
+        }
+    }
+
+    public async Task ReleaseTimeoutCommandsAsync(int timeoutSeconds)
+    {
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            var released = await conn.ExecuteAsync(
+                SqlQueries.Commands.ReleaseTimeoutCommands,
+                new { TimeoutSeconds = timeoutSeconds });
+
+            if (released > 0)
+                logger.LogInformation("Released {Count} commands due to timeout", released);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to release timeout commands");
         }
     }
 

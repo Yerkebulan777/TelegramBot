@@ -62,13 +62,20 @@ public interface IDataService
     /// Использует SELECT ... FOR UPDATE SKIP LOCKED для защиты от конкурентного доступа.
     /// После захвата статус меняется на 'processing' и устанавливается Lease (TTL).
     /// </summary>
+    /// <remarks>
+    /// TODO (ОБЯЗАТЕЛЬНО): Добавить поддержку партиций — выборка должна учитывать
+    /// балансировку между партициями, а не только глобальный приоритет.
+    /// </remarks>
     Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50);
 
     /// <summary>Освобождает команды с истёкшим Lease (crash worker recovery).</summary>
     Task ReleaseExpiredLeasesAsync();
 
     /// <summary>Обновляет статус команды (done, failed, pending).</summary>
-    Task<bool> UpdateCommandStatusAsync(int commandId, string status);
+    Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null);
+
+    /// <summary>Освобождает команды с истёкшим таймаутом выполнения.</summary>
+    Task ReleaseTimeoutCommandsAsync(int timeoutSeconds);
 
     /// <summary>Уведомляет Worker-ов о новых командах через Postgres LISTEN/NOTIFY.</summary>
     Task NotifyNewCommandsAsync(int sessionId);

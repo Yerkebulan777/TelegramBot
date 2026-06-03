@@ -10,4 +10,6 @@ public class PendingCommand
     public int ExecutionOrder { get; set; }
     public long UserId { get; set; }
     public string? Username { get; set; }
+    public string? Partition { get; set; }
+    public int Priority { get; set; }
 }

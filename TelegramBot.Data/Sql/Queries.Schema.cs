@@ -35,8 +35,14 @@ internal static partial class SqlQueries
                 ExecutionOrder INTEGER NOT NULL,
                 Status TEXT NOT NULL DEFAULT 'pending',
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                StartedAt TIMESTAMPTZ,
+                CompletedAt TIMESTAMPTZ,
                 GUID TEXT,
-                Lease INTEGER DEFAULT 3600
+                Lease INTEGER,
+                Partition TEXT,
+                Priority INTEGER NOT NULL DEFAULT 50,
+                ProcessId INTEGER,
+                ErrorMessage TEXT
             );";
 
         internal const string CreateTrackedMessagesTable = @"
@@ -51,6 +57,9 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_session ON Commands(SessionId);
             CREATE INDEX IF NOT EXISTS idx_commands_status_lease ON Commands(Status, Lease)
                 WHERE Status = 'processing';
-            CREATE INDEX IF NOT EXISTS idx_sessions_user_created ON Sessions(UserId, CreatedAt DESC);";
+            CREATE INDEX IF NOT EXISTS idx_sessions_user_created ON Sessions(UserId, CreatedAt DESC);
+            CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority DESC, CreatedAt ASC)
+                WHERE Status = 'pending';
+            CREATE INDEX IF NOT EXISTS idx_commands_partition_status ON Commands(Partition, Status);";
     }
 }

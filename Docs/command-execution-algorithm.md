@@ -1,13 +1,15 @@
-# Алгоритм выполнения команд (Command Execution Algorithm)
+Вообще# Алгоритм выполнения команд (Command Execution Algorithm)
 
 ## Обзор
 
 Система выполняет внешние команды (например, для CAD/CAE-приложений или AI-обработки) через асинхронную очередь на базе PostgreSQL с механизмом LISTEN/NOTIFY.
 
 **Ключевые концепции:**
-- **Партиции (логические очереди)** — команды группируются по типу задачи, что позволяет изолировать выполнение разных типов работ
 - **Пул процессов** — ограничение на количество одновременно выполняемых процессов защищает систему от перегрузки
-- **Приоритеты** — команды с более высоким приоритетом выполняются первыми внутри своей очереди
+- **Lease-механизм** — аренда команды воркером с TTL для защиты от сбоев
+- **Таймауты** — принудительное завершение процессов при превышении лимита времени
+- **Приоритеты** — команды с более высоким приоритетом выполняются первыми
+- **Партиции (TODO)** — логические очереди для изоляции типов задач (резерв в БД готов)
 
 ---
 
@@ -32,12 +34,13 @@
          │                        │ (блокировка)             │
          │                        ├─────────────────────────>│
          │                        │                          │
-         │                        │ 4. Выбрать pending-команды│
-         │                        │    ORDER BY Priority     │
+         │                        │ 4. Захват команд         │
+         │                        │    SELECT ... FOR UPDATE │
+         │                        │    SKIP LOCKED           │
          │<───────────────────────┤                          │
          │                        │                          │
          │                        │ 5. Выполнить команду     │
-         │                        │    (запустить процесс)   │
+         │                        │    (пул процессов)       │
          │                        │                          │
          │                        │ 6. Обновить статус       │
          │                        │    (Done / Failed)       │
@@ -45,33 +48,34 @@
          │                        │                          │
 ```
 
-### Концепция партиций и пула процессов
+### Концепция пула процессов
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Служба выполнения команд                     │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Менеджер очередей (партиции)               │   │
-│  │  ┌─────────────┬─────────────┬─────────────┐           │   │
-│  │  │ Партия A    │ Партия B    │ Партия C    │           │   │
-│  │  │ (тип 1)     │ (тип 2)     │ (тип 3)     │           │   │
-│  │  │ [команда 1] │ [команда 3] │ [команда 5] │           │   │
-│  │  │ [команда 2] │ [команда 4] │ [команда 6] │           │   │
-│  │  └─────────────┴─────────────┴─────────────┘           │   │
+│  │              Пул процессов (N слотов)                   │   │
+│  │  ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐     │   │
+│  │  │ Слот 1│ │ Слот 2│ │ Слот 3│ │ Слот 4│ │ Слот 5│     │   │
+│  │  │Процесс│ │Процесс│ │Процесс│ │Процесс│ │Процесс│     │   │
+│  │  └───────┘ └───────┘ └───────┘ └───────┘ └───────┘     │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                           │                                     │
 │                           ▼                                     │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Пул процессов (N слотов)                   │   │
-│  │  ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐     │   │
-│  │  │ Слот 1│ │ Слот 2│ │ Слот 3│ │ Слот 4│ │ Слот N│     │   │
-│  │  │Процесс│ │Процесс│ │Процесс│ │Процесс│ │Процесс│     │   │
-│  │  └───────┘ └───────┘ └───────┘ └───────┘ └───────┘     │   │
+│  │              Очередь команд (приоритеты)                │   │
+│  │  [команда 1] → [команда 2] → [команда 3] → ...         │   │
+│  │     (Priority DESC, CreatedAt ASC)                      │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Преимущества пула процессов:**
+- Защита от перегрузки CPU/RAM — не более N процессов одновременно
+- Контроль нагрузки на внешние системы (CAD/CAE)
+- Graceful shutdown — завершение активных процессов при остановке воркера
 
 ---
 
@@ -80,42 +84,12 @@
 | Статус | Описание |
 |--------|----------|
 | `pending` | Команда создана и ожидает выполнения в очереди |
-| `queued` | Команда выбрана из БД и ожидает свободный слот в пуле |
-| `in_progress` | Команда выполняется (внешний процесс запущен) |
+| `processing` | Команда захвачена воркером и выполняется (Lease установлен) |
 | `Done` | Команда успешно завершена |
 | `Failed` | Команда завершена с ошибкой |
 | `Deleted` | Команда удалена (логическое удаление, soft-delete) |
 
----
-
-## Партиции (логические очереди)
-
-### Концепция
-
-Партиции — это механизм группировки команд по типу задачи. Каждая команда принадлежит ровно одной партиции.
-
-**Примеры партиций:**
-- Партия для задач экспорта из CAD-системы №1
-- Партия для задач экспорта из CAD-системы №2
-- Партия для задач AI-обработки
-
-**Преимущества:**
-- Изоляция типов задач — длительные операции одного типа не блокируют другие
-- Гибкое управление ресурсами — можно настроить лимиты для каждой партии отдельно
-- Приоритизация — разные партии могут иметь разный приоритет выполнения
-
-### Приоритеты
-
-Каждая команда имеет числовой приоритет:
-- Чем выше значение — тем выше приоритет
-- Внутри партии команды сортируются: **приоритет (по убыванию)**, затем **время создания (по возрастанию, FIFO)**
-- Команды с одинаковым приоритетом выполняются в порядке поступления
-
-### Конфигурирование партиций
-
-Для каждой партиции настраиваются параметры:
-- **MaxConcurrent** — максимальное количество одновременных процессов для этой партии
-- **Priority** — приоритет партии (влияет на порядок выбора между партициями)
+**Примечание:** Статус `processing` устанавливается атомарно при захвате команды с использованием `SELECT ... FOR UPDATE SKIP LOCKED`.
 
 ---
 
@@ -124,9 +98,9 @@
 ### 1. Инициализация
 
 - Установление подключения к базе данных
-- Подписка на уведомление через `LISTEN <channel_name>`
-- Инициализация пула процессов с настроенным лимитом (N слотов)
-- Создание структур данных для управления очередями по партициям
+- Подписка на уведомление через `LISTEN new_command`
+- Инициализация пула процессов (SemaphoreSlim с лимитом N=5)
+- Очистка истёкших Lease (crash recovery упавших воркеров)
 
 ### 2. Основной цикл обработки
 
@@ -138,55 +112,45 @@
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Ожидание уведомления (блокировка)                              │
-│  - Просыпается при получении NOTIFY                             │
-│  - Таймаут для защиты от зависаний                              │
+│  - LISTEN new_command                                           │
+│  - WaitAsync с таймаутом 5 мин (fallback)                       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
-                             ▼ (уведомление получено)
+                             ▼ (уведомление или таймаут)
 ┌─────────────────────────────────────────────────────────────────┐
-│  Выборка pending-команд из БД                                   │
-│  - WHERE Status = 'pending'                                     │
+│  Очистка истёкших Lease (каждый цикл)                          │
+│  - ReleaseExpiredLeasesAsync()                                  │
+│  - ReleaseTimeoutCommandsAsync()                                │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Захват pending-команд из БД                                    │
+│  - SELECT ... FOR UPDATE SKIP LOCKED                            │
 │  - ORDER BY Priority DESC, CreatedAt ASC                        │
+│  - Статус → 'processing', Lease = timestamp                     │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Распределение команд по партиям                                │
-│  - Каждая команда помещается в очередь своей партии             │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Параллельная обработка каждой партии                           │
-│  - Для каждой партии запускается отдельная задача               │
-│  - Задачи выполняются независимо                                │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Обработка очереди партии:                                      │
-│  while (есть команды в очереди) {                               │
-│    - Дождаться свободного слота в пуле для этой партии          │
-│    - Захватить слот                                             │
-│    - Запустить выполнение команды в фоне                        │
-│    - Освободить слот после завершения                           │
-│  }                                                              │
+│  Параллельная обработка с ограничением пула                    │
+│  - SemaphoreSlim.WaitAsync() для каждого слота                │
+│  - Максимум 5 одновременных процессов                           │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Выполнение одной команды:                                      │
-│  try {                                                          │
-│    - Обновить статус: 'in_progress'                             │
-│    - Запустить внешний процесс (исполняемый файл)               │
-│    - Дождаться завершения процесса (блокирующее ожидание)       │
-│    - Если exit_code == 0: статус = 'Done'                       │
-│    - Иначе: статус = 'Failed'                                   │
-│  } catch (exception) {                                          │
-│    - Записать ошибку                                            │
-│    - Статус = 'Failed'                                          │
-│    - Освободить слот в пуле                                     │
-│  }                                                              │
+│  1. Создать ProcessStartInfo (Revit/Navisworks/AI)             │
+│  2. process.Start()                                             │
+│  3. Сохранить в _activeProcesses (трекинг)                     │
+│  4. Обновить статус: 'processing', ProcessId = PID             │
+│  5. WaitForExit с таймаутом (1 час)                             │
+│  6. Если таймаут → process.Kill(true) (дерево процессов)       │
+│  7. Если exit_code == 0: статус = 'Done'                       │
+│  8. Иначе: статус = 'Failed' + errorMessage                    │
+│  9. _activeProcesses.Remove()                                   │
+│  10. SemaphoreSlim.Release()                                    │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
@@ -200,29 +164,265 @@
 **Назначение:** Ограничение количества одновременно выполняемых процессов.
 
 **Принцип работы:**
-- Глобальный счётчик активных процессов (максимум N)
-- Per-partition счётчики (максимум M для конкретной партии)
-- Семафор для ожидания свободного слота
-- Корректное освобождение слота после завершения команды (в блоке `finally`)
+- `SemaphoreSlim` с начальным счётчиком `MaxConcurrentProcesses` (5)
+- Перед запуском процесса: `await _processPool.WaitAsync(ct)`
+- После завершения (в `finally`): `_processPool.Release()`
+- Пул общий для всех типов команд
 
 **Алгоритм захвата слота:**
-1. Дождаться разрешения от глобального семафора
-2. Проверить лимит для конкретной партии
-3. Если лимит исчерпан — ждать с периодической проверкой
-4. Увеличить счётчик занятого слота
+1. `WaitAsync` блокирует поток, пока слот не освободится
+2. При отмене (CancellationToken) выбрасывает `OperationCanceledException`
 
 **Алгоритм освобождения слота:**
-1. Уменьшить счётчик партии
-2. Освободить разрешение семафора
+1. В блоке `finally` (гарантированно)
+2. Даже если процесс упал с исключением
 
-### 4. Обработка ошибок подключения
+### 4. Трекинг активных процессов
+
+**Назначение:** Возможность принудительного завершения при graceful shutdown или таймауте.
+
+**Реализация:**
+```csharp
+private readonly ConcurrentDictionary<int, ProcessContext> _activeProcesses;
+
+// Перед запуском
+_activeProcesses[cmd.CommandId] = new ProcessContext(process, ...);
+
+// После завершения
+_activeProcesses.TryRemove(cmd.CommandId, out _);
+```
+
+**ProcessContext содержит:**
+- `Process` — для доступа к PID и Kill()
+- `CommandId` — для логирования
+- `Stopwatch` — для измерения длительности
+
+### 5. Обработка ошибок подключения
 
 При потере соединения с базой данных:
 1. Зафиксировать ошибку в логе
-2. Выждать паузу перед повторной попыткой
+2. Выждать паузу 5 сек
 3. Восстановить подключение
 4. Повторно подписаться на уведомления (`LISTEN`)
 5. Продолжить обработку очередей
+
+---
+
+## Защита от зависаний и сбоев
+
+Система реализует многоуровневую защиту от зависаний процессов и сбоев воркеров.
+
+### 1. Lease-механизм (аренда команды)
+
+**Проблема:** Воркер может упасть (crash, перезапуск, сеть) после захвата команды, но до завершения.
+
+**Решение:** Атомарный захват с Lease (TTL):
+
+```sql
+-- При захвате команды
+UPDATE Commands 
+SET Status = 'processing', 
+    Lease = @LeaseExpiry,  -- Unix timestamp (секунды)
+    StartedAt = NOW()
+WHERE CommandId = ...
+RETURNING ...;
+```
+
+**Очистка истёкших Lease:**
+```sql
+-- Каждые 60 сек + при старте воркера
+UPDATE Commands
+SET Status = 'pending', 
+    Lease = NULL,
+    StartedAt = NULL,
+    ErrorMessage = 'Lease expired: worker crash or timeout'
+WHERE Status = 'processing'
+  AND Lease IS NOT NULL
+  AND Lease < @CurrentTimeSec;
+```
+
+**Параметры:**
+- `LeaseTimeoutMin = 5` — Lease истекает через 5 минут
+- `CleanupIntervalSec = 60` — проверка каждые 60 секунд
+
+### 2. Таймаут выполнения процесса
+
+**Проблема:** Внешний процесс (Revit/Navisworks) может зависнуть бесконечно.
+
+**Решение:** Принудительное завершение по таймауту:
+
+```csharp
+// Ожидание с таймаутом
+var timeout = TimeSpan.FromSeconds(ProcessTimeoutSec); // 3600 сек = 1 час
+var completed = await Task.Run(() => 
+    process.WaitForExit((int)timeout.TotalMilliseconds), ct);
+
+if (!completed)
+{
+    // Таймаут: убиваем процесс и всё дерево потомков
+    process.Kill(true); // true = kill entire process tree
+    await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+        errorMessage: $"Timeout: process exceeded {ProcessTimeoutSec}s limit");
+}
+```
+
+**Дополнительная защита (SQL):**
+```sql
+-- Фоновая задача каждые 60 сек
+UPDATE Commands
+SET Status = 'pending',
+    StartedAt = NULL,
+    ProcessId = NULL,
+    ErrorMessage = 'Timeout: process exceeded maximum execution time'
+WHERE Status = 'processing'
+  AND StartedAt < NOW() - INTERVAL '@TimeoutSeconds seconds';
+```
+
+### 3. Трекинг активных процессов
+
+**Проблема:** При graceful shutdown нужно завершить активные процессы корректно.
+
+**Решение:** ConcurrentDictionary для трекинга:
+
+```csharp
+private readonly ConcurrentDictionary<int, ProcessContext> _activeProcesses;
+
+// При запуске процесса
+_activeProcesses[cmd.CommandId] = new ProcessContext(process, cmd.CommandId, sw);
+
+// При завершении (в finally)
+_activeProcesses.TryRemove(cmd.CommandId, out _);
+
+// Graceful shutdown
+private async Task WaitForActiveProcessesAsync()
+{
+    var timeout = TimeSpan.FromSeconds(30);
+    while (_activeProcesses.Count > 0 && elapsed < timeout)
+    {
+        await Task.Delay(500);
+    }
+    
+    // Принудительное завершение если не успели
+    foreach (var ctx in _activeProcesses.Values)
+    {
+        ctx.Process.Kill(true);
+    }
+}
+```
+
+### 4. FOR UPDATE SKIP LOCKED
+
+**Проблема:** Несколько воркеров могут захватить одну и ту же команду.
+
+**Решение:** Блокировка строк с пропуском занятых:
+
+```sql
+WITH selected AS (
+    SELECT c.CommandId, ...
+    FROM Commands c
+    JOIN Sessions s ON s.SessionId = c.SessionId
+    WHERE c.Status = 'pending'
+      AND s.Status != 'Deleted'
+    ORDER BY Priority DESC, CreatedAt ASC
+    LIMIT @Limit
+    FOR UPDATE SKIP LOCKED  -- ← Пропускает строки, заблокированные другими воркерами
+)
+UPDATE Commands c
+SET Status = 'processing', Lease = @LeaseExpiry
+FROM selected
+WHERE c.CommandId = selected.CommandId
+RETURNING ...;
+```
+
+**Преимущества:**
+- Несколько воркеров могут работать параллельно
+- Нет конфликтов блокировок
+- Каждая команда захватывается ровно одним воркером
+
+### 5. Отмена (CancellationToken)
+
+**Проблема:** Нужно корректно завершить работу при остановке сервиса.
+
+**Решение:** CancellationToken threading:
+
+```csharp
+protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+{
+    _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+    
+    try
+    {
+        await RunListenerLoopAsync(stoppingToken);
+    }
+    finally
+    {
+        await WaitForActiveProcessesAsync(); // Graceful shutdown
+    }
+}
+
+private async Task ExecuteOneAsync(PendingCommand cmd, CancellationToken ct)
+{
+    try
+    {
+        // ...
+        var completed = await Task.Run(() => process.WaitForExit(...), ct);
+    }
+    catch (OperationCanceledException) 
+    {
+        // Отмена: убиваем процесс
+        if (process != null && !process.HasExited)
+        {
+            process.Kill(true);
+        }
+        throw; 
+    }
+}
+```
+
+### 6. Переподключение при потере связи
+
+**Проблема:** Соединение с PostgreSQL может разорваться.
+
+**Решение:** Outer retry loop:
+
+```csharp
+while (!stoppingToken.IsCancellationRequested)
+{
+    try
+    {
+        await RunListenerLoopAsync(stoppingToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Connection lost. Reconnecting in {Delay}ms...", ReconnectDelayMs);
+        await Task.Delay(ReconnectDelayMs, stoppingToken);
+        // Повторная попытка → новый conn, новый LISTEN
+    }
+}
+```
+
+**При переподключении:**
+1. Создаётся новое подключение
+2. Выполняется `LISTEN new_command`
+3. Очищаются истёкшие Lease (включая свои)
+4. Цикл продолжается
+
+### 7. Fallback poll (safety net)
+
+**Проблема:** NOTIFY может быть потерян (баг, сеть, перезапуск БД).
+
+**Решение:** Таймаут с периодической проверкой:
+
+```csharp
+await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
+// FallbackTimeoutSec = 300 (5 минут)
+
+// При TimeoutException:
+// - Не выбрасываем исключение
+// - Просто продолжаем цикл → ProcessBatchAsync()
+```
+
+**Результат:** Даже если NOTIFY потерян, воркер проверит очередь каждые 5 минут.
 
 ---
 
@@ -248,17 +448,32 @@
 
 ## Конфигурация системы
 
-### Параметры конфигурации
+### Параметры конфигурации (CommandExecutionService)
 
-| Параметр | Описание | Типичное значение |
-|----------|----------|-------------------|
-| `MaxConcurrentProcesses` | Общее количество одновременных процессов | 5 |
-| `Partitions.{name}.MaxConcurrent` | Лимит процессов для конкретной партии | 1-3 |
-| `Partitions.{name}.Priority` | Приоритет партии (выше = важнее) | 50-100 |
-| `Partitions.{name}.ExecutablePath` | Путь к исполняемому файлу для партии | - |
-| `Partitions.{name}.Timeout` | Таймаут выполнения команды (секунды) | 300-3600 |
-| `PostgresRetryDelaySeconds` | Задержка перед переподключением к БД | 5 |
-| `NotifyTimeoutSeconds` | Таймаут ожидания NOTIFY | 60 |
+| Параметр | Константа | Значение | Описание |
+|----------|-----------|----------|----------|
+| `MaxConcurrentProcesses` | `MaxConcurrentProcesses` | 5 | Глобальный лимит одновременных процессов |
+| `ProcessTimeoutSec` | `ProcessTimeoutSec` | 3600 (1 час) | Максимальное время выполнения команды |
+| `CleanupIntervalSec` | `CleanupIntervalSec` | 60 | Интервал очистки истёкших Lease |
+| `LeaseTimeoutMin` | `LeaseTimeoutMin` | 5 | TTL Lease в минутах (защита от сбоев) |
+| `FallbackTimeoutSec` | `FallbackTimeoutSec` | 300 (5 мин) | Таймаут ожидания NOTIFY (safety net) |
+| `ReconnectDelayMs` | `ReconnectDelayMs` | 5000 | Задержка перед переподключением к БД |
+
+### Настройка через appsettings.json
+
+```json
+{
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
+  },
+  "Worker": {
+    "MaxConcurrentProcesses": 5,
+    "ProcessTimeoutSeconds": 3600
+  }
+}
+```
+
+**Примечание:** В текущей реализации параметры заданы константами в коде. Для гибкой настройки можно вынести в конфигурацию.
 
 ---
 
@@ -268,22 +483,27 @@
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `Id` | SERIAL | Первичный ключ |
+| `CommandId` | SERIAL | Первичный ключ |
 | `SessionId` | INT | Внешний ключ на сессию |
-| `Code` | VARCHAR | Код типа команды |
-| `Status` | VARCHAR | Текущий статус (pending/queued/in_progress/Done/Failed/Deleted) |
-| `Partition` | VARCHAR | Название партии |
-| `Priority` | INT | Приоритет (чем выше, тем важнее) |
+| `CommandText` | VARCHAR | Код типа команды (PDF, DWG, IFC, NWC, AUTORES) |
+| `FilePath` | TEXT | Путь к файлу |
+| `ExecutionOrder` | INT | Порядок выполнения в сессии |
+| `Status` | VARCHAR | Статус: `pending`, `processing`, `Done`, `Failed`, `Deleted` |
 | `CreatedAt` | TIMESTAMPTZ | Время создания |
-| `StartedAt` | TIMESTAMPTZ | Время начала выполнения |
-| `CompletedAt` | TIMESTAMPTZ | Время завершения |
+| `StartedAt` | TIMESTAMPTZ | Время начала выполнения (NULL пока pending) |
+| `CompletedAt` | TIMESTAMPTZ | Время завершения (NULL пока не Done/Failed) |
+| `Lease` | INTEGER | Unix timestamp (секунды) — TTL для защиты от сбоев воркера |
+| `Partition` | TEXT | Резерв для будущего расширения (партиции) |
+| `Priority` | INT | Приоритет (по умолчанию 50, чем выше — тем важнее) |
+| `ProcessId` | INT | PID процесса Windows (для мониторинга и Kill) |
 | `ErrorMessage` | TEXT | Сообщение об ошибке (если Failed) |
-| `ProcessId` | INT | PID процесса Windows (для мониторинга) |
 
 ### Индексы
 
-- `(Status, Priority DESC, CreatedAt ASC)` — для быстрой выборки pending-команд
-- `(Partition, Status)` — для фильтрации по партиям
+- `(Status, Priority DESC, CreatedAt ASC) WHERE Status = 'pending'` — для быстрой выборки с приоритетами
+- `(Status, Lease) WHERE Status = 'processing'` — для очистки истёкших Lease
+- `(Partition, Status)` — для будущего расширения (партиции)
+- `(SessionId)` — для выборки по сессии
 
 ---
 
@@ -293,18 +513,34 @@
 
 ```sql
 INSERT INTO "Commands" 
-    ("SessionId", "Code", "Status", "Partition", "Priority")
+    ("SessionId", "CommandText", "FilePath", "ExecutionOrder", "Priority")
 VALUES 
-    (@SessionId, @Code, 'pending', @Partition, @Priority)
-RETURNING "Id";
+    (@SessionId, @CommandText, @FilePath, @Order, 50);
 ```
 
-### Выборка для выполнения
+### Захват команд (атомарный, с Lease)
 
 ```sql
-SELECT * FROM "Commands"
-WHERE "Status" = 'pending'
-ORDER BY "Priority" DESC, "CreatedAt" ASC;
+WITH selected AS (
+    SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, 
+           c.ExecutionOrder, s.UserId, s.Username, c.Partition, c.Priority
+    FROM "Commands" c
+    JOIN "Sessions" s ON s."SessionId" = c."SessionId"
+    WHERE c."Status" = 'pending'
+      AND s."Status" != 'Deleted'
+    ORDER BY c."Priority" DESC, c."CreatedAt" ASC
+    LIMIT @Limit
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE "Commands" c
+SET "Status" = 'processing', 
+    "Lease" = @LeaseExpiry,
+    "StartedAt" = NOW()
+FROM selected
+WHERE c."CommandId" = selected."CommandId"
+RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
+          selected.FilePath, selected.ExecutionOrder, selected.UserId, 
+          selected.Username, selected.Partition, selected.Priority;
 ```
 
 ### Обновление статуса
@@ -312,28 +548,47 @@ ORDER BY "Priority" DESC, "CreatedAt" ASC;
 ```sql
 UPDATE "Commands"
 SET "Status" = @Status,
-    "StartedAt" = CASE WHEN @Status = 'in_progress' THEN NOW() ELSE "StartedAt" END,
-    "CompletedAt" = CASE WHEN @Status IN ('Done', 'Failed') THEN NOW() ELSE "CompletedAt" END,
-    "ErrorMessage" = @ErrorMessage,
-    "ProcessId" = @ProcessId
-WHERE "Id" = @CommandId;
+    "CompletedAt" = CASE 
+        WHEN @Status IN ('Done', 'Failed') THEN NOW() 
+        ELSE "CompletedAt" 
+    END,
+    "ProcessId" = @ProcessId,
+    "ErrorMessage" = @ErrorMessage
+WHERE "CommandId" = @CommandId;
 ```
 
 ### Отправка уведомления
 
 ```sql
-NOTIFY <channel_name>;
+NOTIFY new_command, @SessionId;
 ```
 
-### Очистка зависших команд
+### Очистка истёкших Lease (crash recovery)
 
 ```sql
--- Вернуть в pending команды, выполняющиеся дольше таймаута
+-- Каждые 60 секунд + при старте воркера
+UPDATE "Commands"
+SET "Status" = 'pending',
+    "Lease" = NULL,
+    "StartedAt" = NULL,
+    "ErrorMessage" = 'Lease expired: worker crash or timeout'
+WHERE "Status" = 'processing'
+  AND "Lease" IS NOT NULL
+  AND "Lease" < @CurrentTimeSec;
+```
+
+### Очистка команд по таймауту
+
+```sql
+-- Каждые 60 секунд (фоновая задача)
 UPDATE "Commands"
 SET "Status" = 'pending',
     "StartedAt" = NULL,
-    "ErrorMessage" = 'Timeout: process exceeded maximum execution time'
-WHERE "Status" = 'in_progress'
+    "CompletedAt" = NULL,
+    "ProcessId" = NULL,
+    "ErrorMessage" = 'Timeout: process exceeded maximum execution time',
+    "Lease" = NULL
+WHERE "Status" = 'processing'
   AND "StartedAt" < NOW() - INTERVAL '@TimeoutSeconds seconds';
 ```
 
@@ -344,16 +599,18 @@ WHERE "Status" = 'in_progress'
 | Принцип | Реализация |
 |---------|------------|
 | **Логическое удаление** | Команды никогда не удаляются физически, только `Status = 'Deleted'` |
-| **Транзакционность** | Создание сессии и команд — атомарная операция |
-| **Ограничение нагрузки** | Пул процессов не позволяет превысить лимит одновременных выполнений |
-| **Изоляция типов** | Партиции предотвращают блокировку одних задач другими |
-| **Приоритизация** | Высокоприоритетные команды выполняются первыми |
-| **Гарантия завершения** | Блокирующее ожидание процесса перед следующей командой |
-| **Таймауты** | Принудительное завершение процессов при превышении лимита времени |
-| **Отказоустойчивость** | Переподключение при потере соединения с БД |
+| **Транзакционность** | Захват команд — атомарная операция с `FOR UPDATE SKIP LOCKED` |
+| **Ограничение нагрузки** | Пул процессов (SemaphoreSlim) не позволяет превысить лимит одновременных выполнений |
+| **Приоритизация** | Высокоприоритетные команды выполняются первыми (`ORDER BY Priority DESC`) |
+| **Lease-механизм** | Защита от сбоев воркера — команды возвращаются в очередь при истечении TTL |
+| **Таймауты** | Принудительное завершение процессов при превышении лимита времени (`process.Kill(true)`) |
+| **Трекинг PID** | Сохранение ProcessId для мониторинга и принудительного завершения |
+| **Отказоустойчивость** | Переподключение при потере соединения с БД (5 сек задержка) |
 | **Логирование** | Полное контекстное логирование всех операций и ошибок |
 | **Изоляция компонентов** | Server и Worker независимы, общаются только через БД |
-| **Корректная остановка** | Graceful shutdown дожидается завершения активных процессов |
+| **Graceful shutdown** | Корректное завершение активных процессов при остановке сервиса (30 сек таймаут) |
+| **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
+| **Fallback poll** | Если NOTIFY потерян — проверка каждые 5 минут (safety net) |
 
 ---
 
@@ -361,27 +618,55 @@ WHERE "Status" = 'in_progress'
 
 ### Общий алгоритм
 
-1. Получить конфигурацию для партии команды
-2. Подготовить параметры запуска (путь, аргументы, рабочая директория)
-3. Перенаправить стандартные потоки (stdout, stderr) для логирования
-4. Запустить процесс
-5. Начать асинхронное чтение выходных данных
-6. Ожидать завершения с таймаутом
-7. При превышении таймаута — принудительно завершить процесс и всё дерево потомков
-8. Зафиксировать результат (код возврата, вывод, ошибки)
+1. Получить конфигурацию для типа команды (Revit/Navisworks/AI)
+2. Создать `ProcessStartInfo` с параметрами:
+   - `FileName` — путь к исполняемому файлу
+   - `Arguments` — аргументы командной строки
+   - `WorkingDirectory` — рабочая директория
+   - `RedirectStandardOutput/Error = true` — для логирования
+   - `UseShellExecute = false` — для перенаправления потоков
+   - `CreateNoWindow = true` — без UI
+3. `process.Start()` — запуск процесса
+4. Сохранить в `_activeProcesses[CommandId]` для трекинга
+5. Обновить статус: `processing`, `ProcessId = process.Id`
+6. `WaitForExit(timeout)` — ожидание с таймаутом
+7. Если таймаут — `process.Kill(true)` (дерево процессов)
+8. Проверить `ExitCode`:
+   - `0` → статус `Done`
+   - `!= 0` → статус `Failed` + `ErrorMessage`
+9. Удалить из `_activeProcesses`
+10. `_processPool.Release()` — освободить слот
 
 ### Обработка результатов
 
 ```
 try
-    выполнить процесс
-    обновить статус (Done / Failed по коду возврата)
+    создать ProcessStartInfo
+    process.Start()
+    _activeProcesses[CommandId] = context
+    UpdateCommandStatus(Processing, ProcessId=PID)
+    WaitForExit(timeout)
+    если timeout → Kill(true), UpdateCommandStatus(Failed, "Timeout")
+    если exit_code == 0 → UpdateCommandStatus(Done)
+    иначе → UpdateCommandStatus(Failed, "Exit code N")
+catch (OperationCanceledException)
+    если процесс активен → Kill(true)
+    throw
 catch (exception)
     записать ошибку в лог
-    обновить статус = 'Failed'
+    UpdateCommandStatus(Failed, errorMessage)
 finally
-    освободить слот в пуле (обязательно!)
+    _activeProcesses.Remove(CommandId)
+    _processPool.Release()  ← обязательно!
 ```
+
+### Заглушки для типов команд
+
+В текущей реализации методы создания `ProcessStartInfo` содержат TODO:
+
+- `CreateRevitProcessStartInfo()` — Revit.exe с аргументами
+- `CreateNavisworksProcessStartInfo()` — FileConvert.exe или COM API
+- `CreateAiAgentProcessStartInfo()` — Python скрипт или HTTP-клиент
 
 ---
 
@@ -389,19 +674,41 @@ finally
 
 ### Шаг 1: Определить код новой команды
 
-Добавить константу с уникальным идентификатором команды.
+Добавить константу с уникальным идентификатором команды (например, `XLSEXPORT`).
 
-### Шаг 2: Настроить маппинг на партию
+### Шаг 2: Добавить обработку в CommandExecutionService
 
-Определить, к какой партии относится новая команда (по типу задачи).
+Добавить кейс в `ExecuteOneAsync`:
 
-### Шаг 3: Добавить конфигурацию партии
+```csharp
+"XLSEXPORT" => CreateExcelExportProcessStartInfo(cmd),
+```
 
-Если партия новая — добавить её конфигурацию (лимиты, путь к исполняемому файлу, таймаут).
+### Шаг 3: Реализовать метод-фабрику
 
-### Шаг 4: Реализовать логику выполнения
+```csharp
+private ProcessStartInfo CreateExcelExportProcessStartInfo(PendingCommand cmd)
+{
+    return new ProcessStartInfo
+    {
+        FileName = "excel_exporter.exe",
+        Arguments = $"--input \"{cmd.FilePath}\"",
+        WorkingDirectory = Environment.CurrentDirectory,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+}
+```
 
-Добавить обработчик для нового типа команды в службу выполнения.
+### Шаг 4: Настроить приоритет (опционально)
+
+При создании команды указать приоритет:
+
+```sql
+INSERT INTO "Commands" (..., "Priority") VALUES (..., 75); -- Выше среднего
+```
 
 ### Шаг 5: Обновить пользовательский интерфейс (при необходимости)
 
@@ -413,67 +720,91 @@ finally
 
 ### Запросы для анализа состояния
 
-**Очереди по партиям:**
+**Очередь pending-команд (с приоритетами):**
 ```sql
-SELECT "Partition", COUNT(*) as "Count", AVG("Priority") as "AvgPriority"
+SELECT "CommandId", "SessionId", "CommandText", "Priority", "CreatedAt",
+       EXTRACT(EPOCH FROM (NOW() - "CreatedAt")) as "AgeSec"
 FROM "Commands"
 WHERE "Status" = 'pending'
-GROUP BY "Partition";
+ORDER BY "Priority" DESC, "CreatedAt" ASC;
 ```
 
-**Активные выполнения:**
+**Активные выполнения (с PID и длительностью):**
 ```sql
-SELECT "Partition", "Status", COUNT(*) as "Count", MIN("StartedAt") as "OldestStarted"
+SELECT "CommandId", "CommandText", "ProcessId", "StartedAt",
+       EXTRACT(EPOCH FROM (NOW() - "StartedAt")) as "DurationSec",
+       "Lease",
+       CASE WHEN "Lease" < EXTRACT(EPOCH FROM NOW()) THEN 'EXPIRED' ELSE 'OK' END as "LeaseStatus"
 FROM "Commands"
-WHERE "Status" IN ('in_progress', 'queued')
-GROUP BY "Partition", "Status";
+WHERE "Status" = 'processing'
+ORDER BY "StartedAt" ASC;
 ```
 
-**История выполнений:**
+**История выполнений (за 24 часа):**
 ```sql
-SELECT "Id", "Code", "Partition", "Priority", "Status", 
+SELECT "CommandId", "CommandText", "Priority", "Status", 
        "CreatedAt", "StartedAt", "CompletedAt",
-       EXTRACT(EPOCH FROM ("CompletedAt" - "StartedAt")) as "DurationSec"
+       EXTRACT(EPOCH FROM ("CompletedAt" - "StartedAt")) as "DurationSec",
+       "ErrorMessage"
 FROM "Commands"
 WHERE "Status" IN ('Done', 'Failed')
+  AND "CreatedAt" > NOW() - INTERVAL '24 hours'
 ORDER BY "CreatedAt" DESC
 LIMIT 20;
 ```
 
-**Зависшие команды:**
+**Зависшие команды (истёк Lease):**
 ```sql
-SELECT * FROM "Commands"
-WHERE "Status" = 'in_progress'
-  AND "StartedAt" < NOW() - INTERVAL '30 minutes'
+SELECT "CommandId", "CommandText", "ProcessId", "StartedAt", "Lease"
+FROM "Commands"
+WHERE "Status" = 'processing'
+  AND "Lease" IS NOT NULL
+  AND "Lease" < EXTRACT(EPOCH FROM NOW())
+ORDER BY "Lease" ASC;
+```
+
+**Зависшие команды (превышен таймаут):**
+```sql
+SELECT "CommandId", "CommandText", "ProcessId", "StartedAt",
+       EXTRACT(EPOCH FROM (NOW() - "StartedAt")) as "DurationSec"
+FROM "Commands"
+WHERE "Status" = 'processing'
+  AND "StartedAt" < NOW() - INTERVAL '1 hour'
 ORDER BY "StartedAt" ASC;
 ```
 
-**Статистика по партиям (за 24 часа):**
+**Статистика по статусам:**
 ```sql
 SELECT 
-    "Partition",
-    COUNT(*) FILTER (WHERE "Status" = 'Done') as "Success",
-    COUNT(*) FILTER (WHERE "Status" = 'Failed') as "Failed",
-    COUNT(*) FILTER (WHERE "Status" = 'pending') as "Pending",
-    COUNT(*) FILTER (WHERE "Status" = 'in_progress') as "InProgress",
-    AVG(EXTRACT(EPOCH FROM ("CompletedAt" - "StartedAt"))) FILTER (WHERE "Status" = 'Done') as "AvgDurationSec"
+    "Status",
+    COUNT(*) as "Count",
+    AVG(EXTRACT(EPOCH FROM ("CompletedAt" - "StartedAt"))) FILTER (WHERE "Status" IN ('Done', 'Failed')) as "AvgDurationSec"
 FROM "Commands"
 WHERE "CreatedAt" > NOW() - INTERVAL '24 hours'
-GROUP BY "Partition";
+GROUP BY "Status";
 ```
 
 **Проверка подписки на уведомления:**
 ```sql
 SELECT * FROM pg_listening_channels();
--- Должен вернуть имя канала уведомлений
+-- Должен вернуть 'new_command'
 ```
 
-**Мониторинг процессов:**
+**Мониторинг процессов (активные PID):**
 ```sql
-SELECT "Id", "Code", "Partition", "ProcessId", "StartedAt"
+SELECT "CommandId", "CommandText", "ProcessId", "StartedAt"
 FROM "Commands"
-WHERE "Status" = 'in_progress'
+WHERE "Status" = 'processing'
   AND "ProcessId" IS NOT NULL;
+```
+
+**Процессы в ОС (Windows PowerShell):**
+```powershell
+# Проверить, существует ли процесс
+Get-Process -Id <ProcessId> -ErrorAction SilentlyContinue
+
+# Все процессы Revit
+Get-Process Revit* | Select-Object Id, StartTime, CPU
 ```
 
 ---
@@ -482,10 +813,54 @@ WHERE "Status" = 'in_progress'
 
 | № | Критерий | Описание |
 |---|----------|----------|
-| 1 | **Изоляция партиций** | Команды разных типов не блокируют выполнение друг друга |
-| 2 | **Лимит процессов** | Никогда не выполняется более N процессов одновременно |
-| 3 | **Приоритизация** | Высокоприоритетные команды стартуют раньше низкоприоритетных |
-| 4 | **Ожидание процесса** | Система ждёт завершения внешнего процесса перед обработкой следующей команды |
-| 5 | **Таймауты** | Процессы, выполняющиеся дольше лимита, принудительно завершаются |
-| 6 | **Восстановление** | При перезапуске Worker продолжает обработку с момента подключения |
-| 7 | **Наблюдаемость** | Диагностические запросы показывают актуальное состояние системы |
+| 1 | **Лимит процессов** | Никогда не выполняется более `MaxConcurrentProcesses` (5) одновременно |
+| 2 | **Приоритизация** | Высокоприоритетные команды стартуют раньше низкоприоритетных |
+| 3 | **Lease-механизм** | При сбое воркера команда возвращается в очередь после истечения Lease |
+| 4 | **Таймауты** | Процессы, выполняющиеся дольше 1 часа, принудительно завершаются |
+| 5 | **Трекинг PID** | ProcessId сохраняется для мониторинга и принудительного завершения |
+| 6 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
+| 7 | **Graceful shutdown** | При остановке воркер завершает активные процессы (30 сек таймаут) |
+| 8 | **Fallback poll** | Если NOTIFY потерян — проверка каждые 5 минут |
+| 9 | **Восстановление** | При перезапуске Worker очищает истёкшие Lease и продолжает обработку |
+| 10 | **Наблюдаемость** | Диагностические запросы показывают актуальное состояние (PID, Lease, длительность) |
+
+---
+
+## Дорожная карта (Roadmap)
+
+### ✅ Реализовано (v1.0)
+
+- [x] Пул процессов (глобальный SemaphoreSlim)
+- [x] Lease-механизм (TTL 5 минут)
+- [x] Таймаут выполнения процесса (1 час)
+- [x] Трекинг PID (ConcurrentDictionary + БД)
+- [x] FOR UPDATE SKIP LOCKED (конкурентная обработка)
+- [x] Graceful shutdown (30 сек на завершение)
+- [x] Fallback poll (5 минут)
+- [x] Reconnect loop (5 сек задержка)
+- [x] Поля `StartedAt`, `CompletedAt`, `ProcessId`, `ErrorMessage`
+- [x] Приоритеты команд (`Priority DESC`)
+
+### 🔴 TODO: Обязательно (v1.1)
+
+- [ ] **Партиции (логические очереди)** — изоляция типов задач
+  - [ ] Per-partition пул процессов (`ConcurrentDictionary<string, SemaphoreSlim>`)
+  - [ ] Маппинг `CommandCode → PartitionName`
+  - [ ] Конфигурация партиций (appsettings.json)
+  - [ ] Балансировка между партициями (fair queuing)
+  - [ ] SQL: фильтрация по партиции при выборке
+
+### 🟡 TODO: Желательно (v1.2)
+
+- [ ] Статистика выполнения (среднее время, успех/ошибки)
+- [ ] Персистентность очередей (сохранение состояния при рестарте)
+- [ ] Метрики для Prometheus/Grafana
+- [ ] Уведомления в Telegram о завершении/ошибках
+- [ ] Retry logic для_failed команд (автоматический повтор)
+
+### ⚪ TODO: Будущее (v2.0)
+
+- [ ] Несколько Worker-ов (горизонтальное масштабирование)
+- [ ] Приоритеты пользователей (VIP-очередь)
+- [ ] Rate limiting (ограничение на команду/пользователя)
+- [ ] Планировщик (отложенный запуск по расписанию)
