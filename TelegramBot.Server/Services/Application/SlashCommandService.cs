@@ -244,6 +244,13 @@ public sealed class SlashCommandService(
             "User {Username} ({UserId}) submitting job: commands=[{Commands}], sections={Count}",
             username, userId, string.Join(", ", session.PendingCommand), selectedSections.Count);
 
+        IReadOnlyList<string> commandNames = session.PendingCommandName;
+        string projectName = GetCurrentProjectName(session);
+        string[] sectionNames = selectedSections
+            .Select(GetSafePathName)
+            .ToArray();
+        string queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames);
+
         List<string> filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
 
         await _dataService.CreateSessionWithCommandsAsync(
@@ -255,7 +262,7 @@ public sealed class SlashCommandService(
         session.ClearPendingCommands();
         session.IsFileSelectionActive = false;
 
-        _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Задание добавлено в очередь."), session);
+        _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
     }
 
     private async Task BackInFileSelectionAsync(long userId, string username, UserSession session)
@@ -363,6 +370,59 @@ public sealed class SlashCommandService(
             text = text[..mentionIndex];
 
         return text.ToLowerInvariant();
+    }
+
+    private static string BuildJobQueuedMessage(
+        IReadOnlyList<string> commandNames,
+        string projectName,
+        IEnumerable<string> sectionNames)
+    {
+        var builder = new StringBuilder()
+            .AppendLine("✅ *Задание добавлено в очередь.*")
+            .AppendLine()
+            .AppendLine("🧰 *Команды*");
+
+        foreach (string commandName in commandNames)
+            _ = builder.AppendLine($"• {EscapeMarkdown(commandName)}");
+
+        _ = builder
+            .AppendLine()
+            .AppendLine("📌 *Проект*")
+            .AppendLine(EscapeMarkdown(projectName))
+            .AppendLine()
+            .AppendLine("📂 *Разделы*");
+
+        foreach (string sectionName in sectionNames)
+            _ = builder.AppendLine($"• {EscapeMarkdown(sectionName)}");
+
+        return builder.ToString();
+    }
+
+    private static string GetCurrentProjectName(UserSession session)
+    {
+        DirectoryInfo? projectDirectory = Directory.GetParent(session.CurrentPath);
+        return projectDirectory == null
+            ? GetSafePathName(session.CurrentPath)
+            : GetSafePathName(projectDirectory.FullName);
+    }
+
+    private static string GetSafePathName(string path)
+    {
+        string? name = Path.GetFileName(path);
+        return string.IsNullOrWhiteSpace(name) ? path : name;
+    }
+
+    private static string EscapeMarkdown(string text)
+    {
+        return text
+            .Replace("\\", "\\\\")
+            .Replace("_", "\\_")
+            .Replace("*", "\\*")
+            .Replace("[", "\\[")
+            .Replace("]", "\\]")
+            .Replace("(", "\\(")
+            .Replace(")", "\\)")
+            .Replace("`", "\\`");
     }
 
     private bool IsAtProjectLevel(UserSession session) =>
