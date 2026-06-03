@@ -1,23 +1,16 @@
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
+using TelegramBot.Server.Constants;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Базовый класс для обработчиков callback-запросов.
-/// </summary>
-public abstract class CallbackHandlerBase : ICallbackHandler
+public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
 {
-    protected readonly ILogger Logger;
-
-    protected CallbackHandlerBase(ILogger logger)
-    {
-        Logger = logger;
-    }
+    protected readonly ILogger Logger = logger;
 
     protected virtual HashSet<string> SupportedPrefixes { get; } = [];
 
-    public virtual int Priority => 100;
+    public virtual int Priority => HandlerPriorities.Default;
 
     public virtual bool CanHandle(string prefix)
         => SupportedPrefixes.Count > 0 && SupportedPrefixes.Contains(prefix);

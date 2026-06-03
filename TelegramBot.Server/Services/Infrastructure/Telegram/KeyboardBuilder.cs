@@ -7,9 +7,6 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
 
-/// <summary>
-/// Построитель клавиатур для Telegram-бота.
-/// </summary>
 public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
 {
     private readonly IFileSystemBrowser _navigationService = fileNavigationService;

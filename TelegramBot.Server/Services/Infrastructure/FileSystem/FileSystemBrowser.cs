@@ -8,9 +8,6 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.FileSystem;
 
-/// <summary>
-/// Browses the filesystem and builds inline keyboard representations.
-/// </summary>
 public class FileSystemBrowser : IFileSystemBrowser
 {
     private readonly ISessionManager _sessions;

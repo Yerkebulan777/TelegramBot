@@ -3,20 +3,22 @@ using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
+using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Обработчик запросов регистрации и управления доступом пользователей.
-/// </summary>
-public sealed class AccessRequestHandler : CallbackHandlerBase
+public sealed class AccessRequestHandler(
+    IDataService dataService,
+    ITelegramOutputService outputService,
+    IOptions<BotOptions> botOptions,
+    ILogger<AccessRequestHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IDataService _dataService;
-    private readonly ITelegramOutputService _outputService;
-    private readonly long[] _adminIds;
+    private readonly IDataService _dataService = dataService;
+    private readonly ITelegramOutputService _outputService = outputService;
+    private readonly long[] _adminIds = botOptions.Value.AdminUserIds;
 
-    public override int Priority => 0;
+    public override int Priority => HandlerPriorities.AccessRequest;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
@@ -24,17 +26,6 @@ public sealed class AccessRequestHandler : CallbackHandlerBase
         CallbackPrefixes.ApproveUser,
         CallbackPrefixes.RejectUser
     ];
-
-    public AccessRequestHandler(
-        IDataService dataService,
-        ITelegramOutputService outputService,
-        IOptions<BotOptions> botOptions,
-        ILogger<AccessRequestHandler> logger) : base(logger)
-    {
-        _dataService = dataService;
-        _outputService = outputService;
-        _adminIds = botOptions.Value.AdminUserIds;
-    }
 
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
@@ -98,37 +89,23 @@ public sealed class AccessRequestHandler : CallbackHandlerBase
         return true;
     }
 
-    private async Task<bool> HandleApproveAsync(CallbackContext context)
-    {
-        if (!long.TryParse(context.ParsedCallback.Argument, out long targetUserId))
-        {
-            LogInvalidInput("user ID", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return true;
-        }
-
-        var user = await _dataService.GetUserAsync(targetUserId);
-        if (user == null)
-        {
-            await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
-                "Пользователь не найден.");
-            return true;
-        }
-
-        user.Status = UserAccessStatus.Approved;
-        user.UpdatedAt = DateTime.UtcNow;
-        await _dataService.UpsertUserAsync(user);
-
-        var displayName = string.IsNullOrEmpty(user.Username) ? targetUserId.ToString() : $"@{user.Username}";
-        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
-            $"✅ Пользователь {displayName} одобрен.");
-
-        await _outputService.SendMessageAsync(targetUserId,
+    private Task<bool> HandleApproveAsync(CallbackContext context)
+        => HandleAccessDecisionAsync(context,
+            UserAccessStatus.Approved,
+            displayName => $"✅ Пользователь {displayName} одобрен.",
             "Доступ предоставлен! Введите /help для просмотра доступных команд.");
 
-        return true;
-    }
+    private Task<bool> HandleRejectAsync(CallbackContext context)
+        => HandleAccessDecisionAsync(context,
+            UserAccessStatus.Rejected,
+            displayName => $"❌ Пользователь {displayName} отклонён.",
+            "Ваш запрос на доступ отклонён. Обратитесь к администратору.");
 
-    private async Task<bool> HandleRejectAsync(CallbackContext context)
+    private async Task<bool> HandleAccessDecisionAsync(
+        CallbackContext context,
+        UserAccessStatus newStatus,
+        Func<string, string> adminMessage,
+        string userMessage)
     {
         if (!long.TryParse(context.ParsedCallback.Argument, out long targetUserId))
         {
@@ -139,21 +116,17 @@ public sealed class AccessRequestHandler : CallbackHandlerBase
         var user = await _dataService.GetUserAsync(targetUserId);
         if (user == null)
         {
-            await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
-                "Пользователь не найден.");
+            await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Пользователь не найден.");
             return true;
         }
 
-        user.Status = UserAccessStatus.Rejected;
+        user.Status = newStatus;
         user.UpdatedAt = DateTime.UtcNow;
         await _dataService.UpsertUserAsync(user);
 
         var displayName = string.IsNullOrEmpty(user.Username) ? targetUserId.ToString() : $"@{user.Username}";
-        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
-            $"❌ Пользователь {displayName} отклонён.");
-
-        await _outputService.SendMessageAsync(targetUserId,
-            "Ваш запрос на доступ отклонён. Обратитесь к администратору.");
+        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));
+        await _outputService.SendMessageAsync(targetUserId, userMessage);
 
         return true;
     }

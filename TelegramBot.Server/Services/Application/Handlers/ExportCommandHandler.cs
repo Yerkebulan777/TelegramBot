@@ -4,9 +4,6 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Обработчик переключения команд экспорта (PDF, DWG, NWC, IFC).
-/// </summary>
 public sealed class ExportCommandHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,

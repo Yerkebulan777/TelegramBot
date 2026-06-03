@@ -6,9 +6,6 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Обработчик операций выбора команд (применить, отмена).
-/// </summary>
 public sealed class CommandSelectionHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,

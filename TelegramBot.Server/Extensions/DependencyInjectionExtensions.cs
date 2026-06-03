@@ -14,7 +14,6 @@ namespace TelegramBot.Server.Extensions;
 
 public static class DependencyInjectionExtensions
 {
-    /// <summary>Регистрирует все сервисы бота в DI-контейнере.</summary>
     public static IServiceCollection AddTelegramBotServer(this IServiceCollection services, IConfiguration configuration)
     {
         services
@@ -27,9 +26,6 @@ public static class DependencyInjectionExtensions
         return services;
     }
 
-    /// <summary>
-    /// Добавляет и настраивает параметры файловой системы.
-    /// </summary>
     private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<FileSystemOptions>()
@@ -62,6 +58,7 @@ public static class DependencyInjectionExtensions
     private static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
         _ = services.AddSingleton<ICommandAppService, CommandAppService>();
+        _ = services.AddSingleton<ISlashCommandService, SlashCommandService>();
         _ = services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
         return services;

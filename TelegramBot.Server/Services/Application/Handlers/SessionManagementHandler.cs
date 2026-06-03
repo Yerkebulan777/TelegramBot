@@ -7,14 +7,15 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Обработчик операций управления сессиями (просмотр, удаление).
-/// </summary>
-public sealed class SessionManagementHandler : CallbackHandlerBase
+public sealed class SessionManagementHandler(
+    IDataService dataService,
+    IKeyboardBuilder keyboardBuilder,
+    ITelegramOutputService outputService,
+    ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IDataService _dataService;
-    private readonly IKeyboardBuilder _keyboardBuilder;
-    private readonly ITelegramOutputService _outputService;
+    private readonly IDataService _dataService = dataService;
+    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+    private readonly ITelegramOutputService _outputService = outputService;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
@@ -23,17 +24,6 @@ public sealed class SessionManagementHandler : CallbackHandlerBase
         CallbackPrefixes.DeleteCommand,
         CallbackPrefixes.BackToStatus
     ];
-
-    public SessionManagementHandler(
-        IDataService dataService,
-        IKeyboardBuilder keyboardBuilder,
-        ITelegramOutputService outputService,
-        ILogger<SessionManagementHandler> logger) : base(logger)
-    {
-        _dataService = dataService;
-        _keyboardBuilder = keyboardBuilder;
-        _outputService = outputService;
-    }
 
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {

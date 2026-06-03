@@ -5,9 +5,6 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Базовый класс для обработчиков, переключающих команды в сессии пользователя.
-/// </summary>
 public abstract class CommandToggleHandlerBase(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,

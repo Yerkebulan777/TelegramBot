@@ -4,9 +4,6 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Обработчик переключения команд автоматизации (BIMDOC, CLASHREP, AUTORES).
-/// </summary>
 public sealed class AutomationCommandHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,

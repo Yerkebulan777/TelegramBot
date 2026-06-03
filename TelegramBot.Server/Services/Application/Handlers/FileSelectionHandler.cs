@@ -3,19 +3,22 @@ using System.Text;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
+using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Обработчик операций выбора файлов (переключение, применение, отмена).
-/// </summary>
-public sealed class FileSelectionHandler : CallbackHandlerBase
+public sealed class FileSelectionHandler(
+    IKeyboardBuilder keyboardBuilder,
+    ITelegramOutputService outputService,
+    IDataService dataService,
+    IOptions<FileSystemOptions> options,
+    ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IKeyboardBuilder _keyboardBuilder;
-    private readonly ITelegramOutputService _outputService;
-    private readonly IDataService _dataService;
-    private readonly FileSystemOptions _options;
+    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+    private readonly ITelegramOutputService _outputService = outputService;
+    private readonly IDataService _dataService = dataService;
+    private readonly FileSystemOptions _options = options.Value;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
@@ -24,20 +27,7 @@ public sealed class FileSelectionHandler : CallbackHandlerBase
         CallbackPrefixes.CancelFileSelection
     ];
 
-    public override int Priority => 20;
-
-    public FileSelectionHandler(
-        IKeyboardBuilder keyboardBuilder,
-        ITelegramOutputService outputService,
-        IDataService dataService,
-        IOptions<FileSystemOptions> options,
-        ILogger<FileSelectionHandler> logger) : base(logger)
-    {
-        _keyboardBuilder = keyboardBuilder;
-        _outputService = outputService;
-        _dataService = dataService;
-        _options = options.Value;
-    }
+    public override int Priority => HandlerPriorities.FileSelection;
 
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {

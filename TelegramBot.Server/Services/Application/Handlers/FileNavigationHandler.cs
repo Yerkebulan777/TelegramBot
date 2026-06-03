@@ -1,36 +1,26 @@
 using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
+using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-/// <summary>
-/// Обработчик навигации по файловой системе (открыть папку, перейти к родителю).
-/// </summary>
-public sealed class FileNavigationHandler : CallbackHandlerBase
+public sealed class FileNavigationHandler(
+    IFileSystemBrowser fileNavigationService,
+    IKeyboardBuilder keyboardBuilder,
+    ITelegramOutputService outputService,
+    IOptions<FileSystemOptions> options,
+    ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IFileSystemBrowser _fileNavigationService;
-    private readonly IKeyboardBuilder _keyboardBuilder;
-    private readonly ITelegramOutputService _outputService;
-    private readonly FileSystemOptions _options;
+    private readonly IFileSystemBrowser _fileNavigationService = fileNavigationService;
+    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
+    private readonly ITelegramOutputService _outputService = outputService;
+    private readonly FileSystemOptions _options = options.Value;
 
     protected override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.GoToParent];
 
-    public override int Priority => 10;
-
-    public FileNavigationHandler(
-        IFileSystemBrowser fileNavigationService,
-        IKeyboardBuilder keyboardBuilder,
-        ITelegramOutputService outputService,
-        IOptions<FileSystemOptions> options,
-        ILogger<FileNavigationHandler> logger) : base(logger)
-    {
-        _fileNavigationService = fileNavigationService;
-        _keyboardBuilder = keyboardBuilder;
-        _outputService = outputService;
-        _options = options.Value;
-    }
+    public override int Priority => HandlerPriorities.FileNavigation;
 
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {

@@ -10,7 +10,8 @@
       "Bash(cmd.exe //c \"dir /AL \"\"C:\\\\Users\\\\Yerkebulan\\\\AppData\\\\Roaming\\\\Code\"\"\")",
       "Read(//c/Users/y.zhumabayev/.claude//**)",
       "Read(//c/Users/y.zhumabayev/.claude/plugins//**)",
-      "Bash(powershell.exe -Command ' *)"
+      "Bash(powershell.exe -Command ' *)",
+      "Bash(rtk dotnet *)"
     ]
   },
   "hooks": {

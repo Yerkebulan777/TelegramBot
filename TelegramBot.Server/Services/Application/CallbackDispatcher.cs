@@ -3,18 +3,11 @@ using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application;
 
-/// <summary>
-/// Dispatches callback queries to appropriate handlers.
-/// Implements Chain of Responsibility pattern.
-/// </summary>
 public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, ILogger<CallbackDispatcher> logger) : ICallbackDispatcher
 {
     private readonly IEnumerable<ICallbackHandler> _handlers = handlers.OrderBy(h => h.Priority).ToList();
     private readonly ILogger<CallbackDispatcher> _logger = logger;
 
-    /// <summary>
-    /// Перенаправляет callback на первый подходящий обработчик (Chain of Responsibility).
-    /// </summary>
     public async Task<bool> DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         foreach (var handler in _handlers)
