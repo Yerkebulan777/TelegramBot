@@ -32,9 +32,9 @@ public class TelegramOutputService(
         }, userId);
     }
 
-    public async Task SendErrorAsync(long userId, string errorMessage)
+    public async Task<Message?> SendErrorAsync(long userId, string errorMessage)
     {
-        await ExecuteWithRetryAsync(async () =>
+        return await ExecuteWithRetryAsync(async () =>
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
@@ -94,11 +94,18 @@ public class TelegramOutputService(
 
     public async Task ClearChatHistoryAsync(long chatId, UserSession session)
     {
-        var messageIds = session.TakeTrackedMessages();
+        var messageIds = session.GetTrackedMessages();
         if (messageIds.Count == 0) return;
 
         _logger.LogInformation("ClearChatHistoryAsync: удаление {Count} сообщений для чата {ChatId}", messageIds.Count, chatId);
-        await DeleteMessagesAsync(chatId, messageIds);
+        try
+        {
+            await DeleteMessagesAsync(chatId, messageIds);
+        }
+        finally
+        {
+            session.ClearTrackedMessages();
+        }
     }
 
     public Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)

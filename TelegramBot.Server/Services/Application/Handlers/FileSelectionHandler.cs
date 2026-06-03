@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using System.Text;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
@@ -47,7 +46,9 @@ public sealed class FileSelectionHandler(
 
         if (!session.PathMap.TryGetValue(context.ParsedCallback.Argument, out var filePath) || filePath == null)
         {
-            await _outputService.SendErrorAsync(context.UserId, "File not found.");
+            var errorMessage = await _outputService.SendErrorAsync(context.UserId, "File not found.");
+            if (errorMessage != null)
+                session.TrackMessage(errorMessage.Id);
             return true;
         }
 
@@ -118,7 +119,7 @@ public sealed class FileSelectionHandler(
 
         Logger.LogInformation("Job saved to DB for user {Username} ({UserId})", context.Username, context.UserId);
 
-        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, BuildQueueReply(session));
+        await _outputService.ClearChatHistoryAsync(context.UserId, session);
 
         session.ResetNavigation(_options.RootPath);
         session.IsFileSelectionActive = false;
@@ -133,9 +134,9 @@ public sealed class FileSelectionHandler(
 
     private async Task<bool> HandleCancelFileSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        context.Session.Reset(_options.RootPath);
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "Отменено");
-        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Выбор отменён.");
+        await _outputService.ClearChatHistoryAsync(context.UserId, context.Session);
+        context.Session.Reset(_options.RootPath);
         var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор отменен.");
         if (clearKeyboardMessage != null)
             context.Session.TrackMessage(clearKeyboardMessage.Id);
@@ -181,18 +182,4 @@ public sealed class FileSelectionHandler(
     private bool IsAtProjectLevel(UserSession session) =>
         !string.Equals(Path.GetFileName(session.CurrentPath), _options.ProjectDirectoryName,
             StringComparison.OrdinalIgnoreCase);
-
-    private static string BuildQueueReply(UserSession session)
-    {
-        var sb = new StringBuilder("Команда:\n");
-        foreach (var cmd in session.PendingCommandName)
-            sb.Append("✅ ").Append(cmd).Append('\n');
-
-        sb.Append("Добавлены файлы:\n");
-        foreach (var file in session.SelectedFiles)
-            sb.Append("✅ ").Append(Path.GetFileName(file)).Append('\n');
-
-        sb.Append("\n/status для проверки статуса команды");
-        return sb.ToString();
-    }
 }

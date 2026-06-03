@@ -63,9 +63,9 @@ public sealed class SlashCommandService(
             }
 
             if (user?.Status == UserAccessStatus.Approved)
-                await SendHelpMessageAsync(userId);
+                await SendHelpMessageAsync(userId, session);
             else
-                await SendRegistrationMessageAsync(userId);
+                await SendRegistrationMessageAsync(userId, session);
 
             return;
         }
@@ -73,7 +73,7 @@ public sealed class SlashCommandService(
         BotUser? userRecord = await _dataService.GetUserAsync(userId);
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
-            _ = await _outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа.");
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
             return;
         }
 
@@ -83,13 +83,13 @@ public sealed class SlashCommandService(
         await HandleSlashCommandAsync(text, message, session, username, cancellationToken);
     }
 
-    public async Task<bool> CheckAndNotifyAccessAsync(long userId)
+    public async Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session)
     {
         BotUser? userRecord = await _dataService.GetUserAsync(userId);
         if (userRecord?.Status == UserAccessStatus.Approved)
             return true;
 
-        _ = await _outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа.");
+        _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
         return false;
     }
 
@@ -127,7 +127,7 @@ public sealed class SlashCommandService(
             case "/help":
                 logger.LogDebug("Executing /help for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
-                await SendHelpMessageAsync(userId);
+                await SendHelpMessageAsync(userId, session);
                 break;
 
             default:
@@ -187,7 +187,7 @@ public sealed class SlashCommandService(
         if (session.PendingCommand.Count == 0)
         {
             logger.LogDebug("User {Username} ({UserId}) tried to apply with no commands selected", username, userId);
-            _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду.");
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду."), session);
             return;
         }
 
@@ -208,7 +208,7 @@ public sealed class SlashCommandService(
     {
         if (!session.FileSelectionMessageId.HasValue)
         {
-            _ = await _outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено.");
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено."), session);
             return;
         }
 
@@ -217,7 +217,7 @@ public sealed class SlashCommandService(
             string? selectedProject = session.SelectedFiles.FirstOrDefault();
             if (selectedProject == null)
             {
-                _ = await _outputService.SendMessageAsync(userId, "Сначала выберите проект.");
+                _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите проект."), session);
                 return;
             }
 
@@ -236,7 +236,7 @@ public sealed class SlashCommandService(
         IReadOnlySet<string> selectedSections = session.SelectedFiles;
         if (selectedSections.Count == 0)
         {
-            _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один раздел.");
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один раздел."), session);
             return;
         }
 
@@ -249,8 +249,7 @@ public sealed class SlashCommandService(
         await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
 
-        string queueReply = BuildQueueReply(session);
-        await _outputService.EditMessageReplyTextAsync(userId, session.FileSelectionMessageId.Value, queueReply);
+        await _outputService.ClearChatHistoryAsync(userId, session);
 
         session.ResetNavigation(_options.RootPath);
         session.ClearPendingCommands();
@@ -263,13 +262,13 @@ public sealed class SlashCommandService(
     {
         if (!session.FileSelectionMessageId.HasValue)
         {
-            _ = await _outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено.");
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено."), session);
             return;
         }
 
         if (IsAtProjectLevel(session))
         {
-            _ = await _outputService.SendMessageAsync(userId, "Вы уже в списке проектов.");
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Вы уже в списке проектов."), session);
             return;
         }
 
@@ -323,17 +322,17 @@ public sealed class SlashCommandService(
         await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
     }
 
-    private async Task SendRegistrationMessageAsync(long userId)
+    private async Task SendRegistrationMessageAsync(long userId, UserSession session)
     {
         var keyboard = new InlineKeyboardMarkup([[
             InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
         ]]);
-        _ = await _outputService.SendMessageWithKeyboardAsync(userId,
+        _ = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId,
             "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
-            keyboard);
+            keyboard), session);
     }
 
-    private async Task SendHelpMessageAsync(long userId)
+    private async Task SendHelpMessageAsync(long userId, UserSession session)
     {
         var helpText = new StringBuilder()
             .AppendLine("*Доступные команды:*\n")
@@ -343,7 +342,7 @@ public sealed class SlashCommandService(
             .AppendLine("/help — справка по командам")
             .ToString();
 
-        _ = await _outputService.SendMessageAsync(userId, helpText);
+        _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, helpText), session);
     }
 
     private static async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
@@ -393,19 +392,5 @@ public sealed class SlashCommandService(
         }
 
         return files;
-    }
-
-    private static string BuildQueueReply(UserSession session)
-    {
-        var sb = new StringBuilder("Команда:\n");
-        foreach (string cmd in session.PendingCommandName)
-            sb.Append("✅ ").Append(cmd).Append('\n');
-
-        sb.Append("Добавлены файлы:\n");
-        foreach (string file in session.SelectedFiles)
-            sb.Append("✅ ").Append(Path.GetFileName(file)).Append('\n');
-
-        sb.Append("\n/status для проверки статуса команды");
-        return sb.ToString();
     }
 }

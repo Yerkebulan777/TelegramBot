@@ -34,6 +34,7 @@ public sealed class CommandAppService(
         }
 
         UserSession session = _sessionManager.GetOrCreateSession(callback.UserId);
+        session.TrackMessage(callback.MessageId);
         ParsedCallback parsed = CallbackDataParser.Parse(callback.CallbackData);
 
         logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})", parsed.Prefix, callback.Username, callback.UserId);
@@ -43,7 +44,7 @@ public sealed class CommandAppService(
             CallbackPrefixes.ApproveUser or
             CallbackPrefixes.RejectUser;
 
-        if (!isRegistrationCallback && !await _slashCommandService.CheckAndNotifyAccessAsync(callback.UserId))
+        if (!isRegistrationCallback && !await _slashCommandService.CheckAndNotifyAccessAsync(callback.UserId, session))
             return;
 
         var context = new CallbackContext

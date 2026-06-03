@@ -114,6 +114,16 @@ public class UserSession
         lock (_messageLock) _trackedMessageIds.Add(messageId);
     }
 
+    public IReadOnlyList<int> GetTrackedMessages()
+    {
+        lock (_messageLock) return [.. _trackedMessageIds];
+    }
+
+    public void ClearTrackedMessages()
+    {
+        lock (_messageLock) _trackedMessageIds.Clear();
+    }
+
     public IReadOnlyList<int> TakeTrackedMessages()
     {
         lock (_messageLock)
@@ -138,7 +148,6 @@ public class UserSession
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;
         StatusMessageId = null;
-        lock (_messageLock) _trackedMessageIds.Clear();
     }
 
     /// <summary>
