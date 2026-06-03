@@ -1,4 +1,3 @@
-#nullable enable
 
 using Microsoft.Extensions.Options;
 using System.Text;
@@ -8,8 +7,8 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
-using TelegramBot.Server.Helpers;
 using TelegramBot.Core.Models;
+using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application;
@@ -28,11 +27,11 @@ public sealed class SlashCommandService(
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
-        long userId = message.UserId;
-        string rawText = message.Text!;
-        string username = message.Username!;
+        var userId = message.UserId;
+        var rawText = message.Text!;
+        var username = message.Username!;
 
-        string text = NormalizeCommandText(rawText);
+        var text = NormalizeCommandText(rawText);
 
         ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
 
@@ -46,7 +45,7 @@ public sealed class SlashCommandService(
 
             if (user?.Status != UserAccessStatus.Approved)
             {
-                BotUser? adminUser = await _dataService.GetBotUserAsync(userId);
+                BotUser? adminUser = await _dataService.GetUserAsync(userId);
                 if (adminUser?.Role == UserRole.Admin && adminUser.Status == UserAccessStatus.Approved)
                 {
                     DateTime now = DateTime.UtcNow;
@@ -64,9 +63,13 @@ public sealed class SlashCommandService(
             }
 
             if (user?.Status == UserAccessStatus.Approved)
+            {
                 await SendHelpMessageAsync(userId, session);
+            }
             else
+            {
                 await SendRegistrationMessageAsync(userId, session);
+            }
 
             return;
         }
@@ -79,35 +82,41 @@ public sealed class SlashCommandService(
         }
 
         if (await HandleCommandSelectionActionsAsync(userId, username, rawText, session, cancellationToken))
+        {
             return;
+        }
 
-        await HandleSlashCommandAsync(text, message, session, username, cancellationToken);
+        await HandleSlashCommandAsync(text, message, session, username);
     }
 
     public async Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session)
     {
         BotUser? userRecord = await _dataService.GetUserAsync(userId);
+
         if (userRecord?.Status == UserAccessStatus.Approved)
+        {
             return true;
+        }
 
         _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
         return false;
     }
 
-    private async Task HandleSlashCommandAsync(
-        string command, MessageDto message, UserSession session, string username, CancellationToken cancellationToken)
+    private async Task HandleSlashCommandAsync(string command, MessageDto message, UserSession session, string username)
     {
-        long userId = message.UserId;
-        bool isSlashCommand = command.StartsWith('/');
+        var userId = message.UserId;
+        var isSlashCommand = command.StartsWith('/');
 
         if (isSlashCommand)
+        {
             await _outputService.ClearChatHistoryAsync(userId, session);
+        }
 
         switch (command)
         {
             case "/export":
                 logger.LogDebug("Executing /export for {Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, isAutomation: false, cancellationToken);
+                await StartCommandSelectionAsync(userId, session, isAutomation: false);
                 break;
 
             case "/status":
@@ -122,7 +131,7 @@ public sealed class SlashCommandService(
 
             case "/automation":
                 logger.LogDebug("Executing /automation for {Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, isAutomation: true, cancellationToken);
+                await StartCommandSelectionAsync(userId, session, isAutomation: true);
                 break;
 
             case "/help":
@@ -133,9 +142,14 @@ public sealed class SlashCommandService(
 
             default:
                 if (isSlashCommand)
+                {
                     logger.LogWarning("Unknown slash command '{Command}' from {Username} ({UserId})", command, username, userId);
+                }
                 else
+                {
                     logger.LogDebug("Ignoring non-command text from {Username} ({UserId})", username, userId);
+                }
+
                 break;
         }
     }
@@ -215,7 +229,7 @@ public sealed class SlashCommandService(
 
         if (_options.IsAtProjectLevel(session.CurrentPath))
         {
-            string? selectedProject = session.SelectedFiles.FirstOrDefault();
+            var selectedProject = session.SelectedFiles.FirstOrDefault();
             if (selectedProject == null)
             {
                 _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите проект."), session);
@@ -246,15 +260,15 @@ public sealed class SlashCommandService(
             username, userId, string.Join(", ", session.PendingCommand), selectedSections.Count);
 
         IReadOnlyList<string> commandNames = session.PendingCommandName;
-        string projectName = GetCurrentProjectName(session);
-        string[] sectionNames = selectedSections
+        var projectName = GetCurrentProjectName(session);
+        var sectionNames = selectedSections
             .Select(GetSafePathName)
             .ToArray();
-        string queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames);
+        var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames);
 
         List<string> filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
 
-        long sessionId = await _dataService.CreateSessionWithCommandsAsync(
+        var sessionId = await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
 
         await _dataService.NotifyNewCommandsAsync((int)sessionId);
@@ -295,7 +309,9 @@ public sealed class SlashCommandService(
     private async Task BackToSessionsListAsync(long userId, string username, UserSession session)
     {
         if (!session.StatusMessageId.HasValue)
+        {
             return;
+        }
 
         logger.LogInformation("User {Username} ({UserId}) returning to sessions list", username, userId);
 
@@ -316,7 +332,7 @@ public sealed class SlashCommandService(
         _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard), session);
     }
 
-    private async Task StartCommandSelectionAsync(long userId, UserSession session, bool isAutomation, CancellationToken cancellationToken)
+    private async Task StartCommandSelectionAsync(long userId, UserSession session, bool isAutomation)
     {
         session.Reset(_options.RootPath);
         session.IsFileSelectionActive = false;
@@ -329,7 +345,7 @@ public sealed class SlashCommandService(
 
         Message? commandSelectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
         session.CommandSelectionMessageId = commandSelectionMessage?.Id;
-        await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
+        _=await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
     }
 
     private async Task SendRegistrationMessageAsync(long userId, UserSession session)
@@ -359,18 +375,25 @@ public sealed class SlashCommandService(
     {
         Message? msg = await task;
         if (msg != null)
+        {
             session.TrackMessage(msg.Id);
+        }
+
         return msg;
     }
 
     private static string NormalizeCommandText(string text)
     {
         if (!text.StartsWith('/'))
+        {
             return text;
+        }
 
-        int mentionIndex = text.IndexOf('@');
+        var mentionIndex = text.IndexOf('@');
         if (mentionIndex > 0)
+        {
             text = text[..mentionIndex];
+        }
 
         return text.ToLowerInvariant();
     }
@@ -383,8 +406,10 @@ public sealed class SlashCommandService(
         var builder = new StringBuilder()
             .AppendLine("🧰 *Команды*");
 
-        foreach (string commandName in commandNames)
+        foreach (var commandName in commandNames)
+        {
             _ = builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(commandName)}");
+        }
 
         _ = builder
             .AppendLine()
@@ -393,8 +418,10 @@ public sealed class SlashCommandService(
             .AppendLine()
             .AppendLine("📂 *Разделы*");
 
-        foreach (string sectionName in sectionNames)
+        foreach (var sectionName in sectionNames)
+        {
             _ = builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(sectionName)}");
+        }
 
         return builder.ToString();
     }
@@ -409,7 +436,7 @@ public sealed class SlashCommandService(
 
     private static string GetSafePathName(string path)
     {
-        string? name = Path.GetFileName(path);
+        var name = Path.GetFileName(path);
         return string.IsNullOrWhiteSpace(name) ? path : name;
     }
 
@@ -417,21 +444,23 @@ public sealed class SlashCommandService(
     {
         var files = new List<string>();
 
-        foreach (string sectionPath in sectionPaths)
+        foreach (var sectionPath in sectionPaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            string rvtDir = _options.GetRvtPath(sectionPath);
+            var rvtDir = _options.GetRvtPath(sectionPath);
             if (!Directory.Exists(rvtDir))
             {
                 logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
                 continue;
             }
 
-            foreach (string file in Directory.EnumerateFiles(rvtDir))
+            foreach (var file in Directory.EnumerateFiles(rvtDir))
             {
                 if (_options.IsRevitFile(file))
+                {
                     files.Add(file);
+                }
             }
         }
 
