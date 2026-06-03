@@ -29,68 +29,88 @@ public class FileSystemBrowser : IFileSystemBrowser
     public Task<InlineKeyboardMarkup> GetSectionsViewAsync(long userId, string path)
     {
         var session = _sessions.GetOrCreateSession(userId);
+        session.PathMap.Clear();
+
+        bool atSectionLevel = string.Equals(
+            Path.GetFileName(path), _options.ProjectDirectoryName,
+            StringComparison.OrdinalIgnoreCase);
+
+        var keyboard = atSectionLevel
+            ? BuildSectionKeyboard(session, path)
+            : BuildProjectKeyboard(session, path);
+
+        return Task.FromResult(keyboard);
+    }
+
+    private InlineKeyboardMarkup BuildProjectKeyboard(UserSession session, string path)
+    {
         var selected = session.SelectedFiles;
         var buttons = new List<List<InlineKeyboardButton>>();
 
-        session.PathMap.Clear();
-
-        foreach (var dir in EnumerateSectionDirectories(path))
+        foreach (var dir in EnumerateProjectFolders(path))
         {
             string token = NewToken();
             session.PathMap[token] = dir;
-            string label = $"{Prefix(selected.Contains(dir))}{Path.GetFileName(dir)}";
+            string label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
         }
 
-        var parent = Directory.GetParent(path);
-        bool hasParent = parent is not null && _options.IsPathWithinRoot(parent.FullName);
+        buttons.Add([
+            InlineKeyboardButton.WithCallbackData("✅ Подтвердить", CallbackPrefixes.ApplyFiles),
+            InlineKeyboardButton.WithCallbackData("❌ Отмена", CallbackPrefixes.CancelFileSelection)
+        ]);
 
-        var actionRow = new List<InlineKeyboardButton>
-        {
-            InlineKeyboardButton.WithCallbackData("✅ Подтвердить", CallbackPrefixes.ApplyFiles)
-        };
+        return new InlineKeyboardMarkup(buttons);
+    }
 
-        if (hasParent)
+    private InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
+    {
+        var selected = session.SelectedFiles;
+        var buttons = new List<List<InlineKeyboardButton>>();
+
+        foreach (var dir in EnumerateSectionFolders(path))
         {
-            string parentToken = NewToken();
-            session.PathMap[parentToken] = parent!.FullName;
-            actionRow.Add(InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"{CallbackPrefixes.GoToParent}{parentToken}"));
+            string token = NewToken();
+            session.PathMap[token] = dir;
+            string label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
         }
 
-        actionRow.Add(InlineKeyboardButton.WithCallbackData("❌ Отмена", CallbackPrefixes.CancelFileSelection));
-        buttons.Add(actionRow);
+        string rootToken = NewToken();
+        session.PathMap[rootToken] = _options.RootPath;
 
-        return Task.FromResult(new InlineKeyboardMarkup(buttons));
+        buttons.Add([
+            InlineKeyboardButton.WithCallbackData("✅ Подтвердить", CallbackPrefixes.ApplyFiles),
+            InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"{CallbackPrefixes.GoToParent}{rootToken}"),
+            InlineKeyboardButton.WithCallbackData("❌ Отмена", CallbackPrefixes.CancelFileSelection)
+        ]);
+
+        return new InlineKeyboardMarkup(buttons);
+    }
+
+    private IEnumerable<string> EnumerateProjectFolders(string path)
+    {
+        foreach (var dir in Directory.GetDirectories(path))
+        {
+            var name = Path.GetFileName(dir)!;
+            if (_folderRegex.IsMatch(name) && Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName)))
+                yield return dir;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateSectionFolders(string path)
+    {
+        foreach (var dir in Directory.GetDirectories(path))
+        {
+            if (ContainsSectionAcronym(Path.GetFileName(dir)!))
+                yield return dir;
+        }
     }
 
     private static readonly HashSet<string> SectionAcronyms = new(StringComparer.OrdinalIgnoreCase)
         { "AR", "AS", "APT", "KJ", "KR", "KG", "OV", "VK", "EOM", "EM", "PS", "SS", "OViK" };
 
     private static readonly char[] NameSeparators = ['_', '-', ' ', '.'];
-
-    private IEnumerable<string> EnumerateSectionDirectories(string path)
-    {
-        bool insideProjectDir = string.Equals(
-            Path.GetFileName(path), _options.ProjectDirectoryName,
-            StringComparison.OrdinalIgnoreCase);
-
-        foreach (var dir in Directory.GetDirectories(path))
-        {
-            var name = Path.GetFileName(dir)!;
-
-            if (insideProjectDir)
-            {
-                if (ContainsSectionAcronym(name))
-                    yield return dir;
-            }
-            else
-            {
-                if (!_folderRegex.IsMatch(name)) continue;
-                if (!Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName))) continue;
-                yield return dir;
-            }
-        }
-    }
 
     private static bool ContainsSectionAcronym(string folderName)
     {
@@ -99,8 +119,6 @@ public class FileSystemBrowser : IFileSystemBrowser
                 return true;
         return false;
     }
-
-    private static string Prefix(bool isSelected) => isSelected ? "✅ " : "📁 ";
 
     private static string NewToken() => Guid.NewGuid().ToString("N")[..8];
 }

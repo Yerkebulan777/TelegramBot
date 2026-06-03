@@ -42,6 +42,7 @@ public sealed class FileNavigationHandler(
             return true;
         }
 
+        session.ClearSelectedFiles();
         session.CurrentPath = newPath;
         Logger.LogInformation("User {Username} ({UserId}) navigated to '{Path}'",
             context.Username, context.UserId, newPath);

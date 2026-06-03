@@ -42,24 +42,34 @@ public sealed class FileSelectionHandler(
 
     private async Task<bool> HandleFileToggleAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        context.Session.FileSelectionMessageId = context.MessageId;
+        var session = context.Session;
+        session.FileSelectionMessageId = context.MessageId;
 
-        var token = context.ParsedCallback.Argument;
-        var pathMap = context.Session.PathMap;
-        if (!pathMap.TryGetValue(token, out var filePath) || filePath == null)
+        if (!session.PathMap.TryGetValue(context.ParsedCallback.Argument, out var filePath) || filePath == null)
         {
             await _outputService.SendErrorAsync(context.UserId, "File not found.");
             return true;
         }
 
-        bool wasSelected = context.Session.SelectedFiles.Contains(filePath);
-        context.Session.ToggleSelectedFile(filePath);
+        if (IsAtProjectLevel(session))
+        {
+            // Одиночный выбор: сбросить предыдущий, выбрать новый
+            session.ClearSelectedFiles();
+            session.ToggleSelectedFile(filePath);
+            Logger.LogInformation("User {Username} ({UserId}) selected project '{Project}'",
+                context.Username, context.UserId, Path.GetFileName(filePath));
+        }
+        else
+        {
+            // Множественный выбор разделов
+            bool wasSelected = session.SelectedFiles.Contains(filePath);
+            session.ToggleSelectedFile(filePath);
+            Logger.LogInformation("User {Username} ({UserId}) {Action} section '{Section}' (total: {Count})",
+                context.Username, context.UserId, wasSelected ? "deselected" : "selected",
+                Path.GetFileName(filePath), session.SelectedFiles.Count);
+        }
 
-        Logger.LogInformation("User {Username} ({UserId}) {Action} section '{File}' (total selected: {Count})",
-            context.Username, context.UserId, wasSelected ? "deselected" : "selected",
-            Path.GetFileName(filePath), context.Session.SelectedFiles.Count);
-
-        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, context.Session);
+        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
 
@@ -70,20 +80,36 @@ public sealed class FileSelectionHandler(
     {
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
-        var selectedSections = session.SelectedFiles;
 
-        if (selectedSections.Count == 0)
+        if (IsAtProjectLevel(session))
+        {
+            // Подтверждение проекта → переход в 01_PROJECT
+            var selectedProject = session.SelectedFiles.FirstOrDefault();
+            if (selectedProject == null) return true;
+
+            session.CurrentPath = Path.Combine(selectedProject, _options.ProjectDirectoryName);
+            session.ClearSelectedFiles();
+
+            Logger.LogInformation("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT",
+                context.Username, context.UserId, Path.GetFileName(selectedProject));
+
+            await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+            var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
+            await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
             return true;
+        }
+
+        // Подтверждение разделов → создание задания
+        var selectedSections = session.SelectedFiles;
+        if (selectedSections.Count == 0) return true;
 
         Logger.LogInformation(
-            "User {Username} ({UserId}) submitting job: commands=[{Commands}], selectedSections={SelectedCount}",
-            context.Username, context.UserId, string.Join(", ", session.PendingCommand),
-            selectedSections.Count);
+            "User {Username} ({UserId}) submitting job: commands=[{Commands}], sections={Count}",
+            context.Username, context.UserId, string.Join(", ", session.PendingCommand), selectedSections.Count);
 
-        var filesToProcess = await MapSectionsToRvtFilesAsync(selectedSections, cancellationToken);
+        var filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
 
-        Logger.LogInformation(
-            "User {Username} ({UserId}) job resolved to {FileCount} RVT files",
+        Logger.LogInformation("User {Username} ({UserId}) job resolved to {FileCount} RVT files",
             context.Username, context.UserId, filesToProcess.Count);
 
         await _dataService.CreateSessionWithCommandsAsync(
@@ -91,8 +117,7 @@ public sealed class FileSelectionHandler(
 
         Logger.LogInformation("Job saved to DB for user {Username} ({UserId})", context.Username, context.UserId);
 
-        var reply = BuildQueueReply(session);
-        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, reply);
+        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, BuildQueueReply(session));
 
         session.ResetNavigation(_options.RootPath);
         session.IsFileSelectionActive = false;
@@ -108,57 +133,44 @@ public sealed class FileSelectionHandler(
         return true;
     }
 
-    private Task<List<string>> MapSectionsToRvtFilesAsync(IReadOnlySet<string> selectedPaths, CancellationToken cancellationToken)
+    private List<string> CollectRvtFiles(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
     {
-        var allFiles = new List<string>();
+        var files = new List<string>();
 
-        foreach (var path in selectedPaths)
+        foreach (var sectionPath in sectionPaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var projectDir = Path.Combine(path, _options.ProjectDirectoryName);
-            if (Directory.Exists(projectDir))
+            var rvtDir = _options.GetRvtPath(sectionPath);
+            if (!Directory.Exists(rvtDir))
             {
-                foreach (var section in Directory.EnumerateDirectories(projectDir))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    CollectRvtFiles(section, allFiles);
-                }
+                Logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
+                continue;
             }
-            else
+
+            foreach (var file in Directory.EnumerateFiles(rvtDir))
             {
-                CollectRvtFiles(path, allFiles);
+                if (_options.IsRevitFile(file))
+                    files.Add(file);
             }
         }
 
-        return Task.FromResult(allFiles);
+        return files;
     }
 
-    private void CollectRvtFiles(string sectionPath, List<string> files)
-    {
-        var rvtDir = _options.GetRvtPath(sectionPath);
-        if (!Directory.Exists(rvtDir))
-        {
-            Logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
-            return;
-        }
-
-        foreach (var file in Directory.EnumerateFiles(rvtDir))
-        {
-            if (_options.IsRevitFile(file))
-                files.Add(file);
-        }
-    }
+    private bool IsAtProjectLevel(UserSession session) =>
+        !string.Equals(Path.GetFileName(session.CurrentPath), _options.ProjectDirectoryName,
+            StringComparison.OrdinalIgnoreCase);
 
     private static string BuildQueueReply(UserSession session)
     {
         var sb = new StringBuilder("Команда:\n");
         foreach (var cmd in session.PendingCommandName)
-            sb.Append("\u2705 ").Append(cmd).Append('\n');
+            sb.Append("✅ ").Append(cmd).Append('\n');
 
         sb.Append("Добавлены файлы:\n");
         foreach (var file in session.SelectedFiles)
-            sb.Append("\u2705 ").Append(Path.GetFileName(file)).Append('\n');
+            sb.Append("✅ ").Append(Path.GetFileName(file)).Append('\n');
 
         sb.Append("\n/status для проверки статуса команды");
         return sb.ToString();
