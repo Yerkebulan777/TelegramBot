@@ -1,39 +1,35 @@
 #nullable enable
 
 using Dapper;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Data;
 
-public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataService> logger) : IDataService
+public class PostgresDataService(IConfiguration configuration, ILogger<PostgresDataService> logger) : IDataService
 {
-    private readonly string _connectionString = configuration.GetConnectionString("Sqlite") ?? "Data Source=botdata.db";
+    private readonly string _connectionString = configuration.GetConnectionString("Postgres")
+        ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
 
     public async Task InitializeDatabaseAsync()
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
 
         await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
-
-        // Migrations for legacy databases that predate these columns.
-        if (await conn.ExecuteScalarAsync<int>(SqlQueries.Schema.CheckRoleColumnExists) == 0)
-            await conn.ExecuteAsync(SqlQueries.Schema.AddRoleColumn);
-
-        if (await conn.ExecuteScalarAsync<int>(SqlQueries.Schema.CheckStatusColumnExists) == 0)
-            await conn.ExecuteAsync(SqlQueries.Schema.AddStatusColumn);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
     }
 
     public async Task<BotUser?> GetUserAsync(long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         return await conn.QuerySingleOrDefaultAsync<BotUser>(SqlQueries.Users.GetById, new { UserId = userId });
     }
@@ -41,7 +37,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
     public async Task UpsertUserAsync(BotUser user)
     {
         var now = DateTime.UtcNow;
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
         {
@@ -61,11 +57,11 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
         string username,
         int filesAmount)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        await using var tx = conn.BeginTransaction();
+        await using var tx = await conn.BeginTransactionAsync();
 
-        var sessionId = await conn.ExecuteScalarAsync<long>(
+        var sessionId = await conn.QuerySingleAsync<long>(
             SqlQueries.Sessions.Insert,
             new { UserId = userId, Username = username, FilesAmount = filesAmount },
             tx);
@@ -83,7 +79,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task<List<SessionsList>> GetSessionsListAsync(long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         var result = await conn.QueryAsync<SessionsList>(SqlQueries.Sessions.GetList, new { UserId = userId });
         return result.ToList();
@@ -91,7 +87,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         var result = await conn.QuerySingleOrDefaultAsync<SessionStatus>(
             SqlQueries.Sessions.GetStatus, new { SessionId = sessionId, UserId = userId });
@@ -100,7 +96,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         var result = await conn.QueryAsync<SessionCommands>(
             SqlQueries.Commands.GetBySession, new { SessionId = sessionId, UserId = userId });
@@ -111,7 +107,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
     {
         try
         {
-            await using var conn = new SqliteConnection(_connectionString);
+            await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var tx = await conn.BeginTransactionAsync();
             try
@@ -119,7 +115,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
                 var affected = await conn.ExecuteAsync(
                     SqlQueries.Sessions.SoftDelete,
                     new { SessionId = sessionId, UserId = userId },
-                    (SqliteTransaction)tx);
+                    tx);
 
                 if (affected == 0)
                 {
@@ -129,7 +125,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
                 }
 
                 await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
-                    new { SessionId = sessionId }, (SqliteTransaction)tx);
+                    new { SessionId = sessionId }, tx);
                 await tx.CommitAsync();
             }
             catch
@@ -151,7 +147,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
     {
         try
         {
-            await using var conn = new SqliteConnection(_connectionString);
+            await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
             var affected = await conn.ExecuteAsync(
                 SqlQueries.Commands.SoftDelete, new { CommandId = commandId, UserId = userId });
@@ -173,7 +169,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task<bool> CheckCommandsStatusAsync(int sessionId, long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         var count = await conn.ExecuteScalarAsync<int>(
             SqlQueries.Commands.CountActive, new { SessionId = sessionId, UserId = userId });
@@ -182,7 +178,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         return await conn.QuerySingleOrDefaultAsync<int?>(
             SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId });
@@ -191,7 +187,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
     public async Task CreateAccessRequestAsync(long userId, string? username, string? firstName, string? lastName)
     {
         var now = DateTime.UtcNow;
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         await conn.ExecuteAsync(SqlQueries.Users.InsertIgnoreConflict, new
         {
@@ -204,11 +200,9 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
         });
     }
 
-    public Task<BotUser?> GetBotUserAsync(long userId) => GetUserAsync(userId);
-
     public async Task<bool> IsUserApprovedAsync(long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         var status = await conn.QuerySingleOrDefaultAsync<int?>(
             SqlQueries.Users.GetStatusById, new { UserId = userId });
@@ -217,7 +211,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task<bool> ApproveUserAsync(long userId, long approvedBy)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         var rows = await conn.ExecuteAsync(SqlQueries.Users.UpdateStatus, new
         {
@@ -231,7 +225,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
     public async Task EnsureAdminUserAsync(long userId, string? username)
     {
         var now = DateTime.UtcNow;
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         await conn.ExecuteAsync(SqlQueries.Users.UpsertAdmin, new
         {
@@ -246,9 +240,9 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        await using var tx = conn.BeginTransaction();
+        await using var tx = await conn.BeginTransactionAsync();
         foreach (var messageId in messageIds)
             await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId }, tx);
         await tx.CommitAsync();
@@ -256,7 +250,7 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task<ILookup<long, int>> GetAllTrackedMessagesAsync()
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         var rows = await conn.QueryAsync<(long UserId, int MessageId)>(SqlQueries.TrackedMessages.GetAll);
         return rows.ToLookup(r => r.UserId, r => r.MessageId);
@@ -264,8 +258,75 @@ public class SqliteDataService(IConfiguration configuration, ILogger<SqliteDataS
 
     public async Task DeleteTrackedMessagesAsync(long userId)
     {
-        await using var conn = new SqliteConnection(_connectionString);
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
+    }
+
+    public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        var leaseExpiry = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds();
+
+        var result = await conn.QueryAsync<PendingCommand>(
+            SqlQueries.Commands.ClaimAndReturn,
+            new { Limit = limit, LeaseExpiry = leaseExpiry },
+            tx);
+
+        await tx.CommitAsync();
+        return result.ToList().AsReadOnly();
+    }
+
+    public async Task ReleaseExpiredLeasesAsync()
+    {
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            var released = await conn.ExecuteAsync(
+                SqlQueries.Commands.ReleaseExpiredLeases,
+                new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+
+            if (released > 0)
+                logger.LogInformation("Released {Count} expired leases", released);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to release expired leases");
+        }
+    }
+
+    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status)
+    {
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateStatus,
+                new { CommandId = commandId, Status = status });
+            return affected > 0;
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to update status for command {CommandId}", commandId);
+            return false;
+        }
+    }
+
+    public async Task NotifyNewCommandsAsync(int sessionId)
+    {
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await conn.ExecuteAsync("NOTIFY new_command, @SessionId", new { SessionId = sessionId });
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to send NOTIFY for session {SessionId}", sessionId);
+        }
     }
 }

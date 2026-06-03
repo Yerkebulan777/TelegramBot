@@ -10,9 +10,6 @@ public interface IDataService
     /// <summary>Возвращает запись пользователя или null.</summary>
     Task<BotUser?> GetUserAsync(long userId);
 
-    /// <summary>Возвращает запись пользователя по ID (алиас для GetUserAsync).</summary>
-    Task<BotUser?> GetBotUserAsync(long userId);
-
     /// <summary>Создаёт или обновляет запись пользователя (upsert по UserId).</summary>
     Task UpsertUserAsync(BotUser user);
 
@@ -59,6 +56,22 @@ public interface IDataService
 
     /// <summary>Гарантирует наличие администратора в БД.</summary>
     Task EnsureAdminUserAsync(long userId, string? username);
+
+    /// <summary>
+    /// Атомарно захватывает команды со статусом 'pending' для выполнения воркером.
+    /// Использует SELECT ... FOR UPDATE SKIP LOCKED для защиты от конкурентного доступа.
+    /// После захвата статус меняется на 'processing' и устанавливается Lease (TTL).
+    /// </summary>
+    Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50);
+
+    /// <summary>Освобождает команды с истёкшим Lease (crash worker recovery).</summary>
+    Task ReleaseExpiredLeasesAsync();
+
+    /// <summary>Обновляет статус команды (done, failed, pending).</summary>
+    Task<bool> UpdateCommandStatusAsync(int commandId, string status);
+
+    /// <summary>Уведомляет Worker-ов о новых командах через Postgres LISTEN/NOTIFY.</summary>
+    Task NotifyNewCommandsAsync(int sessionId);
 
     /// <summary>Сохраняет ID сообщений для отложенной очистки (прерванный диалог).</summary>
     Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds);

@@ -5,7 +5,7 @@ internal static partial class SqlQueries
     internal static class TrackedMessages
     {
         internal const string Insert =
-            "INSERT OR IGNORE INTO TrackedMessages (UserId, MessageId) VALUES (@UserId, @MessageId);";
+            "INSERT INTO TrackedMessages (UserId, MessageId) VALUES (@UserId, @MessageId) ON CONFLICT DO NOTHING;";
 
         internal const string GetAll =
             "SELECT UserId, MessageId FROM TrackedMessages;";

@@ -66,7 +66,7 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddInfrastructureServices(this IServiceCollection services)
     {
-        _ = services.AddSingleton<IDataService, SqliteDataService>();
+        _ = services.AddSingleton<IDataService, PostgresDataService>();
         _ = services.AddSingleton<IFileSystemBrowser, FileSystemBrowser>();
 
         return services;

@@ -254,8 +254,10 @@ public sealed class SlashCommandService(
 
         List<string> filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
 
-        await _dataService.CreateSessionWithCommandsAsync(
+        long sessionId = await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
+
+        await _dataService.NotifyNewCommandsAsync((int)sessionId);
 
         await _outputService.ClearChatHistoryAsync(userId, session);
 

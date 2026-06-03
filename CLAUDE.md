@@ -22,13 +22,14 @@ There are no automated tests in this project.
 
 ## Project Structure
 
-3 projects in `TelegramBot.slnx`:
+4 projects in `TelegramBot.slnx`:
 
 | Project | Purpose | Dependencies |
 |---|---|---|
 | `TelegramBot.Core` | Models, DTOs, interfaces, config, constants (`net10.0`) | None (no Telegram SDK) |
-| `TelegramBot.Data` | SQLite persistence (Dapper, `net10.0`) | Core |
-| `TelegramBot.Server` | Telegram bot, handlers, hosting, helpers (`net10.0`)| Core + Data |
+| `TelegramBot.Data` | PostgreSQL persistence (Dapper + Npgsql, `net10.0`) | Core |
+| `TelegramBot.Server` | Telegram bot, handlers, hosting, helpers (`net10.0`) | Core + Data |
+| `TelegramBot.Worker` | Async task execution (Revit/Navisworks/AI), LISTEN/NOTIFY (`net10.0`) | Core + Data |
 
 ## Configuration
 
@@ -37,12 +38,20 @@ Bot token and root path are **not** hardcoded. Set them in `TelegramBot.Server/a
 ```json
 {
   "TelegramBot": { "Token": "<your-bot-token>" },
-  "FileSystem": { "RootPath": "B:\\" },
-  "ConnectionStrings": { "Sqlite": "Data Source=botdata.db" }
+  "FileSystem": { "RootPath": "B:\\" }
 }
 ```
 
 `TelegramBot:Token` can also be set via the environment variable `TelegramBot__Token`. The app throws on startup if the token is missing.
+
+Worker uses the same PostgreSQL database. Connection string in `TelegramBot.Worker/appsettings.json`:
+```json
+{
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
+  }
+}
+```
 
 ## Architecture
 
@@ -92,14 +101,19 @@ Use `CallbackDataParser.Parse(callbackData)` to get a `ParsedCallback` struct, t
 | `TelegramOutputService` | Server/Services/Infrastructure/Telegram | Send/edit Telegram messages with retry (429) |
 | `TelegramUpdateMapper` | Server/Services/Infrastructure/Telegram | Maps Update to MessageDto/CallbackQueryDto |
 | `TelegramBotHostedService` | Server/Services/Infrastructure/Telegram | Polling loop, cleanup, bot commands setup |
-| `SqliteDataService` | Data | All DB persistence via Dapper + SQLite |
+| `PostgresDataService` | Data | All DB persistence via Dapper + Npgsql |
+| `CommandExecutionService` | Worker/Services | LISTEN/NOTIFY queue, command execution (Revit/Navisworks/AI) |
 | `MarkdownHelper` | Server/Helpers | Unified Markdown escaping (MarkdownV2 + Markdown) |
 
-### Database
+### Database (PostgreSQL)
 
 Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Soft-delete only — rows are never physically removed (`Status = 'Deleted'`).
-DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
+Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
 All queries use Dapper with parameterized SQL. SQL constants are in `TelegramBot.Data/Sql/` (5 partial files).
+
+### Task Queue (PostgreSQL LISTEN/NOTIFY)
+
+Server уведомляет Worker-ов о новых командах через `NOTIFY new_command` после INSERT в Commands. Worker использует `NpgsqlConnection.WaitAsync()` для мгновенного пробуждения. Fallback poll — 5 минут.
 
 ### Logging
 

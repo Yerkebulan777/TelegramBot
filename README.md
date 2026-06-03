@@ -1,6 +1,6 @@
 # Telegram Bot Server
 
-Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin).
+Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin). Задачи выполняются асинхронно через отдельный Worker-процесс с использованием PostgreSQL LISTEN/NOTIFY.
 
 ## Обзор
 
@@ -11,33 +11,43 @@ Telegram-бот для навигации по файловой системе �
 - Управление сессиями и командами (PDF, DWG, NWC, IFC и др.)
 - Автоматизация: BIM-документирование, Clash Reports, AutoResolve
 - Запрос доступа и подтверждение администратором
+- Асинхронное выполнение задач в отдельном Worker-процессе (Revit, Navisworks, AI)
 
 ## Технологии
 
 - **.NET 10** — целевая платформа (`net10.0`)
 - **Telegram.Bot 22.10.0.1** — клиент Telegram Bot API
-- **SQLite** — хранение данных (Microsoft.Data.Sqlite + Dapper 2.1.79)
+- **PostgreSQL** — хранение данных (Npgsql + Dapper 2.1.79)
+- **PostgreSQL LISTEN/NOTIFY** — очереди задач для Worker (мгновенная реакция)
 - **Serilog** — структурированное логирование (Console + Seq)
 
 ## Требования к платформе
 
 ⚠️ **Windows only** — проект использует Windows-specific API для навигации по файловой системе. Запуск на Linux/macOS не поддерживается (проверка `RuntimeInformation.IsOSPlatform` в `Program.cs`).
 
+## Требования к инфраструктуре
+
+- **PostgreSQL 15+** — доступный по сети для Server и всех Worker-ов
+- **Docker** (рекомендуется для PostgreSQL) или установленный PostgreSQL сервер
+
 ## Структура решения
 
-Решение состоит из 3 проектов (solution file: `TelegramBot.slnx`):
+Решение состоит из 4 проектов (solution file: `TelegramBot.slnx`):
 
 ```
 TelegramBot.Core   ←──  TelegramBot.Data
        ↑                       ↑
-       └──── TelegramBot.Server ──┘
+       ├──── TelegramBot.Server ──┘
+       │
+       └──── TelegramBot.Worker (отдельный процесс)
 ```
 
 | Проект | Назначение | Зависимости |
 |--------|-----------|-------------|
 | `TelegramBot.Core` | Модели, DTO, интерфейсы, конфигурация, константы | Нет (без Telegram SDK) |
-| `TelegramBot.Data` | SQLite persistence через Dapper | Core |
+| `TelegramBot.Data` | PostgreSQL persistence через Dapper + Npgsql | Core |
 | `TelegramBot.Server` | Telegram инфраструктура, сервисы, хендлеры, хостинг, helpers | Core + Data |
+| `TelegramBot.Worker` | Фоновое выполнение задач (Revit, Navisworks, AI) | Core + Data |
 
 ### Дерево проекта
 
@@ -50,10 +60,10 @@ TelegramBot/
 │   ├── DTOs/             # MessageDto, CallbackQueryDto, ButtonDto
 │   ├── Extensions/       # ValidationExtensions
 │   ├── Interfaces/       # ICommandAppService, IDataService, ICallbackDispatcher, ISessionManager
-│   └── Models/           # BotUser, UserSession, ParsedCallback, FileSystemItem
+│   └── Models/           # BotUser, UserSession, PendingCommand, FileSystemItem
 ├── TelegramBot.Data/
 │   ├── DatabaseInitializer.cs
-│   ├── SqliteDataService.cs
+│   ├── PostgresDataService.cs
 │   └── Sql/              # SQL-запросы, разбитые по сущностям
 │       ├── Queries.Schema.cs
 │       ├── Queries.TrackedMessages.cs
@@ -75,6 +85,11 @@ TelegramBot/
 │   │       └── Telegram/      # TelegramBotHostedService, TelegramOutputService, KeyboardBuilder
 │   ├── Program.cs
 │   └── appsettings.json
+├── TelegramBot.Worker/
+│   ├── Services/
+│   │   └── CommandExecutionService.cs    # LISTEN/NOTIFY + выполнение задач
+│   ├── Program.cs
+│   └── appsettings.json
 ├── Docs/
 ├── scripts/
 ├── Dockerfile
@@ -84,7 +99,7 @@ TelegramBot/
 
 ## Архитектура
 
-### Поток обработки запроса
+### Поток обработки запроса (Server)
 
 ```
 Telegram API
@@ -104,11 +119,44 @@ CommandAppService
      ICallbackHandler (первый подходящий по приоритету)
 ```
 
+### Поток выполнения задач (Server → PostgreSQL → Worker)
+
+```
+Server (создание сессии)
+     │
+     ├── INSERT INTO Commands (Status='pending') ──► PostgreSQL
+     │
+     └── NOTIFY new_command ──► PostgreSQL
+                                     │
+                          ┌──────────┴──────────┐
+                          ▼                     ▼
+                    Worker №1              Worker №N
+                    (LISTEN new_command)   (LISTEN new_command)
+                          │
+                    conn.WaitAsync() — мгновенное пробуждение
+                          │
+                    SELECT ... WHERE Status='pending'
+                          │
+                    ┌─────┴──────┐
+                    │            │
+               "PDF"/"DWG"   "NWC"/"CLASHREP"
+                    │            │
+              Revit.exe    Navisworks.exe
+                    │            │
+                    └─────┬──────┘
+                          │
+                    UPDATE Status='Done'/'Failed'
+                          │
+                         PostgreSQL
+```
+
+Worker автоматически переподключается при потере соединения с PostgreSQL и использует fallback poll (5 мин) на случай, если NOTIFY был потерян.
+
 ### DI-регистрация
 
 Все сервисы регистрируются как **Singleton** в `DependencyInjectionExtensions.cs`.
 
-### Ключевые сервисы
+### Ключевые сервисы (Server)
 
 | Сервис | Расположение | Ответственность |
 |--------|-------------|-----------------|
@@ -121,7 +169,13 @@ CommandAppService
 | `KeyboardBuilder` | Server/Services/Infrastructure | Контекстно-зависимые клавиатуры (команды, файлы, сессии) |
 | `TelegramOutputService` | Server/Services/Infrastructure | Отправка/редактирование сообщений с retry (429) |
 | `TelegramUpdateMapper` | Server/Services/Infrastructure | Маппинг `Update` → `MessageDto` / `CallbackQueryDto` |
-| `SqliteDataService` | Data | Вся работа с БД через Dapper |
+| `PostgresDataService` | Data | Вся работа с БД через Dapper + Npgsql |
+
+### Ключевые сервисы (Worker)
+
+| Сервис | Расположение | Ответственность |
+|--------|-------------|-----------------|
+| `CommandExecutionService` | Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI |
 
 ### Обработчики callback-ов (Chain of Responsibility)
 
@@ -137,20 +191,31 @@ CommandAppService
 | `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:` | Управление сессиями |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` | Подтверждение/отмена выбора команд |
 
-## База данных (SQLite)
+## База данных (PostgreSQL)
 
-Файл БД: `botdata.db`. Инициализация при старте через `host.InitializeDatabaseAsync()`.
+PostgreSQL-сервер, доступный по сети. Инициализация таблиц при старте через `host.InitializeDatabaseAsync()`.
 
 **Таблицы:**
 
 | Таблица | Назначение | Ключевые поля |
 |---------|-----------|---------------|
 | `BotUsers` | Пользователи бота | `UserId` (PK), `Username`, `Role` (User/Admin), `Status` (Pending/Approved/Rejected/Blocked), `CreatedAt`, `UpdatedAt` |
-| `Sessions` | Сессии пользователей | `SessionId` (PK, auto), `UserId`, `Username`, `PriorityId`, `Status`, `FilesAmount`, `CreatedAt`, `UpdatedAt` |
-| `Commands` | Команды внутри сессии | `CommandId` (PK, auto), `SessionId` (FK), `CommandText`, `FilePath`, `ExecutionOrder`, `Status`, `GUID`, `Lease` |
+| `Sessions` | Сессии пользователей | `SessionId` (PK, SERIAL), `UserId`, `Username`, `Status` (pending/done/Deleted), `FilesAmount`, `CreatedAt`, `UpdatedAt` |
+| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/Done/Failed/Deleted), `GUID`, `Lease` |
 | `TrackedMessages` | Отслеживаемые сообщения для очистки | `UserId` + `MessageId` (composite PK) |
 
 Soft-delete — строки никогда не удаляются физически (статус `Deleted`).
+
+### Механизм очереди задач (LISTEN/NOTIFY)
+
+PostgreSQL `LISTEN/NOTIFY` используется для мгновенного уведомления Worker-ов о новых командах:
+
+1. **Server** после `INSERT` команд в БД выполняет `NOTIFY new_command, '<sessionId>'`
+2. **Worker** при старте выполняет `LISTEN new_command` и ждёт через `NpgsqlConnection.WaitAsync()`
+3. При получении NOTIFY Worker мгновенно просыпается, выбирает pending-команды и выполняет их
+4. Если NOTIFY потерян — fallback poll через 5 минут
+
+Несколько Worker-ов могут работать параллельно (competing consumers) — каждый берёт следующую команду из очереди.
 
 ## Команды бота
 
@@ -170,10 +235,10 @@ Soft-delete — строки никогда не удаляются физиче
 /start → регистрация → запрос доступа → администратор подтверждает
      ↓
 /export → выбор команд (PDF/DWG/NWC/IFC) → APPLYCOMMANDS
-     ↓                                           
+     ↓
 навигация по папкам (проект → секция) → выбор .rvt-файлов
      ↓
-APPLYFILES → создание сессии + команд в БД
+APPLYFILES → создание сессии + команд в БД → NOTIFY → Worker выполняет
      ↓
 /status → просмотр очереди → SESSIONDETAILS → DELETECOMMAND / DELETESESSION
 ```
@@ -184,8 +249,7 @@ APPLYFILES → создание сессии + команд в БД
 
 ### appsettings.json (коммитится)
 
-Содержит Serilog (Console + Seq на localhost:5341) и опции файловой системы:
-
+Server:
 ```json
 {
   "Serilog": {
@@ -194,11 +258,23 @@ APPLYFILES → создание сессии + команд в БД
       { "Name": "Seq", "Args": { "serverUrl": "http://localhost:5341" } }
     ]
   },
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
+  },
   "FileSystem": {
     "RvtDirectoryName": "01_RVT",
     "ProjectDirectoryName": "01_PROJECT",
     "RevitFileExtension": ".rvt",
     "SectionFolderPattern": "^(\\d{2}|\\d{3}|I{1,3})_"
+  }
+}
+```
+
+Worker:
+```json
+{
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
   }
 }
 ```
@@ -211,8 +287,7 @@ APPLYFILES → создание сессии + команд в БД
     "Token": "ВАШ_ТОКЕН_БОТА",
     "AdminUserIds": [ 123456789 ]
   },
-  "FileSystem": { "RootPath": "B:\\" },
-  "ConnectionStrings": { "Sqlite": "Data Source=botdata.db" }
+  "FileSystem": { "RootPath": "B:\\" }
 }
 ```
 
@@ -227,7 +302,7 @@ APPLYFILES → создание сессии + команд в БД
 | `FileSystem:ProjectDirectoryName` | — | Имя папки проекта (по умолчанию `01_PROJECT`) |
 | `FileSystem:RevitFileExtension` | — | Расширение Revit-файлов (по умолчанию `.rvt`) |
 | `FileSystem:SectionFolderPattern` | — | Regex паттерн для папок секций |
-| `ConnectionStrings:Sqlite` | `ConnectionStrings__Sqlite` | Путь к файлу БД SQLite (по умолч. `Data Source=botdata.db`) |
+| `ConnectionStrings:Postgres` | `ConnectionStrings__Postgres` | PostgreSQL connection string (по умолч. `Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres`) |
 
 Поддерживаются переменные окружения (синтаксис с `__` как разделителем секций).
 
@@ -238,9 +313,11 @@ APPLYFILES → создание сессии + команд в БД
 1. **SQL-запросы разбиты по сущностям** — монолитный `SqlQueries.cs` заменён на папку `TelegramBot.Data/Sql/` с 5 partial-файлами (`Schema`, `Users`, `Sessions`, `Commands`, `TrackedMessages`).
 2. **CommandCodes выделен** — из `CallbackPrefixes.cs` вынесен в отдельный файл `TelegramBot.Core/Constants/CommandCodes.cs`.
 3. **SessionManager перемещён** — из подпапки `Sessions/` на уровень `Services/Application/` (пустая подпапка удалена).
-4. **Markdown-экранирование унифицировано** — два приватных метода (`EscapeMarkdown` и `EscapeMarkdownV2`) объединены в `TelegramBot.Server/Helpers/MarkdownHelper.cs`. Попутно исправлен баг с экранированием обратного слеша.
-5. **Удалён мусор** — пустая директория `TelegramBot.Tests/`, артефактные файлы `nul` и `Data Source=botdata.db`.
+4. **Markdown-экранирование унифицировано** — два приватных метода объединены в `TelegramBot.Server/Helpers/MarkdownHelper.cs`.
+5. **Удалён мусор** — пустая директория `TelegramBot.Tests/`, артефактные файлы.
 6. **Добавлен `.editorconfig`** — с правилами именования, форматирования и стиля кода.
+7. **Миграция на PostgreSQL** — SQLite заменён на PostgreSQL с LISTEN/NOTIFY для распределённой очереди задач.
+8. **Добавлен TelegramBot.Worker** — отдельный процесс для асинхронного выполнения задач Revit/Navisworks/AI.
 
 ## Безопасность
 
@@ -251,6 +328,19 @@ APPLYFILES → создание сессии + команд в БД
 - Администраторы (из `AdminUserIds`) автоматически получают статус `Approved` при первом запуске
 
 ## Docker
+
+### PostgreSQL
+
+```bash
+docker run -d \
+  --name telegram-bot-db \
+  -e POSTGRES_DB=telegram_bot \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  postgres:17
+```
+
+### Server (Windows-контейнеры)
 
 Windows-контейнеры (nanoserver ltsc2022). Сборка через многостадийный Dockerfile:
 

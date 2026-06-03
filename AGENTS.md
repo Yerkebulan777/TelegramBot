@@ -4,17 +4,20 @@ Guidance for agentic coding agents working in this repository.
 
 ## Project Overview
 
-Telegram bot using long-polling, split into 3 projects. No webhooks, no MVC controllers. All services are **Singletons**.
+Telegram bot using long-polling, split into **4 projects**. No webhooks, no MVC controllers. All services are **Singletons**.
 
 ```
 TelegramBot.Core   ←──  TelegramBot.Data
        ↑                       ↑
-       └──── TelegramBot.Server ──┘
+       ├──── TelegramBot.Server ──┘
+       │
+       └──── TelegramBot.Worker (LISTEN/NOTIFY)
 ```
 
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
-- **TelegramBot.Data** — SQLite persistence via Dapper. References Core only. SQL constants in `Sql/` (5 partial files).
+- **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
+- **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data.
 
 ---
 
@@ -26,6 +29,9 @@ dotnet build TelegramBot.slnx
 
 # Run the server
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
+
+# Run the worker (separate terminal)
+dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 
 # Release publish
 dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
@@ -40,13 +46,14 @@ dotnet format TelegramBot.slnx
 
 ## Configuration
 
-- `TelegramBot.Server/appsettings.json` — committed, contains Serilog config and `FileSystem` options
+- `TelegramBot.Server/appsettings.json` — committed, contains Serilog config, `FileSystem` options, and `ConnectionStrings:Postgres`
 - `TelegramBot.Server/appsettings.Local.json` — **gitignored**, put secrets here (bot token, local overrides)
+- `TelegramBot.Worker/appsettings.json` — committed, contains `ConnectionStrings:Postgres`
 - Required config keys:
   - `TelegramBot:Token` — bot token (also settable via env var `TelegramBot__Token`)
   - `TelegramBot:AdminUserIds` — long[] of admin Telegram IDs (also settable via `TelegramBot__AdminUserIds__0`, `__1`, etc.)
   - `FileSystem:RootPath` — filesystem browser root (validated on startup via `FileSystemOptions`)
-  - `ConnectionStrings:Sqlite` — SQLite connection string (defaults to `"Data Source=botdata.db"`)
+  - `ConnectionStrings:Postgres` — PostgreSQL connection string (defaults to `"Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"`)
 
 ---
 
@@ -63,7 +70,24 @@ Telegram API -> TelegramBotHostedService (polling)
                 └── all other callbacks → user must be Approved
 ```
 
-DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section).
+### Task Execution Flow (Server → PostgreSQL → Worker)
+
+```
+SlashCommandService.ConfirmFileSelectionAsync()
+    │
+    ├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Commands
+    └── dataService.NotifyNewCommandsAsync() ---------- NOTIFY new_command
+                                                              │
+                   ┌──────────────────────────────────────────┘
+                   ▼
+    CommandExecutionService (Worker)
+        conn.WaitAsync() -- просыпается мгновенно
+        dataService.GetPendingCommandsAsync() -- SELECT ... WHERE Status='pending'
+        ExecuteOneAsync(cmd) -- запуск Revit/Navisworks/AI
+        dataService.UpdateCommandStatusAsync() -- UPDATE Status='Done'/'Failed'
+```
+
+DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker uses `PostgresDataService` registered directly in `Program.cs`.
 
 ### Callback Handling — Chain of Responsibility
 
@@ -76,8 +100,8 @@ Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/
 ### Database
 
 Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages` (composite PK). Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
-DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
-All data access uses **Dapper** (`TelegramBot.Data/SqliteDataService.cs`). SQL constants in `TelegramBot.Data/Sql/` (5 partial files per entity).
+Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
+All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). SQL constants in `TelegramBot.Data/Sql/` (5 partial files per entity).
 
 ---
 
@@ -110,11 +134,12 @@ Namespaces must match folder structure:
 - `TelegramBot.Core.Models`, `TelegramBot.Core.DTOs`, `TelegramBot.Core.Interfaces`, `TelegramBot.Core.Config`, `TelegramBot.Core.Constants`
 - `TelegramBot.Data`
 - `TelegramBot.Server.Services.Application`, `TelegramBot.Server.Services.Infrastructure.Telegram`, `TelegramBot.Server.Helpers`
+- `TelegramBot.Worker.Services`
 
 ### Imports / Using Directives
 
 - Place `using` directives at the top of the file, before the namespace
-- Order: framework namespaces, then third-party (`Dapper`, `Serilog`, `Telegram.Bot`), then project-internal (`TelegramBot.*`)
+- Order: framework namespaces, then third-party (`Dapper`, `Npgsql`, `Serilog`, `Telegram.Bot`), then project-internal (`TelegramBot.*`)
 - Do not add unnecessary usings
 
 ### Dependency Injection
@@ -139,6 +164,7 @@ Namespaces must match folder structure:
 - Do not swallow unknown exceptions — log at `LogError` or rethrow
 - Avoid empty `catch` blocks
 - Handler base class catches `OperationCanceledException` (logs + rethrows) and general `Exception` (logs at Error + rethrows)
+- Worker: outer retry loop reconnects on PostgreSQL connection loss (5 sec delay)
 
 ### Logging
 
@@ -157,12 +183,15 @@ Namespaces must match folder structure:
 
 ### SQL / Data Access (TelegramBot.Data)
 
-- Use `await using var conn = new SqliteConnection(...)` — open a fresh connection per method
-- Use **Dapper** for all queries (no raw `SqliteCommand`/`SqliteDataReader`)
+- Use `await using var conn = new NpgsqlConnection(...)` — open a fresh connection per method
+- Use **Dapper** for all queries (no raw `NpgsqlCommand`/`NpgsqlDataReader`)
 - SQL statements go in verbatim string literals (`@"..."`)
 - Use parameterized queries — never string-concatenate user input into SQL
 - Soft-delete only: `SET Status = 'Deleted'`, never `DELETE FROM`
 - For transactions, use `conn.BeginTransactionAsync()`
+- Use `RETURNING` clause for INSERT to get generated IDs (not `last_insert_rowid()`)
+- Use `ON CONFLICT DO NOTHING / DO UPDATE` for upserts (not `INSERT OR IGNORE/REPLACE`)
+- PostgreSQL data types: `TIMESTAMPTZ` for dates, `SERIAL` for auto-increment, `BIGINT` for user IDs
 
 ### Telegram Messages
 
@@ -185,6 +214,7 @@ Namespaces must match folder structure:
 - `.editorconfig` exists with naming rules, formatting preferences, and `generated_code = true` markers for data service and handlers — `dotnet format` respects these
 - No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`
 - Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
+- PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
