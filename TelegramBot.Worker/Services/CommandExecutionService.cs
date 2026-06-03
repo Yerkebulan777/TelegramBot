@@ -39,17 +39,17 @@ public sealed class CommandExecutionService(
 
     // Пул процессов: семафор для ограничения параллелизма
     private readonly SemaphoreSlim _processPool = new(MaxConcurrentProcesses, MaxConcurrentProcesses);
-    
+
     // Трекинг активных процессов для возможности принудительного завершения
     private readonly ConcurrentDictionary<int, ProcessContext> _activeProcesses = new();
-    
+
     // CancellationTokenSource для graceful shutdown
     private CancellationTokenSource? _shutdownCts;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("Worker starting with max {Max} concurrent processes...", MaxConcurrentProcesses);
-        
+
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
         // Запускаем фоновую задачу периодической очистки истёкших lease
@@ -103,13 +103,13 @@ public sealed class CommandExecutionService(
     {
         var timeout = TimeSpan.FromSeconds(30);
         var start = DateTime.UtcNow;
-        
+
         while (_activeProcesses.Count > 0 && (DateTime.UtcNow - start) < timeout)
         {
             logger.LogDebug("Waiting for {Count} active processes to complete...", _activeProcesses.Count);
             await Task.Delay(500);
         }
-        
+
         if (_activeProcesses.Count > 0)
         {
             logger.LogWarning("Forcing termination of {Count} active processes", _activeProcesses.Count);
@@ -200,13 +200,13 @@ public sealed class CommandExecutionService(
     {
         // Ждём свободного слота в пуле (блокирующее ожидание)
         await _processPool.WaitAsync(ct);
-        
+
         try
         {
             // Проверяем, не отмена ли это
             if (ct.IsCancellationRequested)
                 return;
-            
+
             // Запускаем выполнение в фоне
             _ = ExecuteOneAsync(cmd, ct);
         }
@@ -239,7 +239,7 @@ public sealed class CommandExecutionService(
             if (startInfo == null)
             {
                 logger.LogWarning("Unknown command '{Cmd}' ({Id})", cmd.CommandText, cmd.CommandId);
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, 
+                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Unknown command type: {cmd.CommandText}");
                 return;
             }
@@ -247,15 +247,15 @@ public sealed class CommandExecutionService(
             // Запуск процесса
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             process.Start();
-            
+
             // Сохраняем контекст для отслеживания
             var context = new ProcessContext(process, cmd.CommandId, sw);
             _activeProcesses[cmd.CommandId] = context;
-            
+
             // Обновляем статус с PID
             await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
-            
-            logger.LogInformation("Started process {Pid} for {Cmd} / {File} ({Id})", 
+
+            logger.LogInformation("Started process {Pid} for {Cmd} / {File} ({Id})",
                 process.Id, cmd.CommandText, cmd.FilePath, cmd.CommandId);
 
             // Ожидание с таймаутом
@@ -268,7 +268,7 @@ public sealed class CommandExecutionService(
                 logger.LogWarning("Timeout: killing process {Pid} for command {Id}", process.Id, cmd.CommandId);
                 process.Kill(true); // true = kill entire process tree
                 await process.WaitForExitAsync(ct);
-                
+
                 await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Timeout: process exceeded {ProcessTimeoutSec}s limit");
                 return;
@@ -291,7 +291,7 @@ public sealed class CommandExecutionService(
                     cmd.CommandText, cmd.FilePath, cmd.CommandId, process.ExitCode);
             }
         }
-        catch (OperationCanceledException) 
+        catch (OperationCanceledException)
         {
             // Отмена: убиваем процесс если он ещё активен
             if (process != null && !process.HasExited)
@@ -299,7 +299,8 @@ public sealed class CommandExecutionService(
                 logger.LogWarning("Cancelled: killing process {Pid} for command {Id}", process.Id, cmd.CommandId);
                 process.Kill(true);
             }
-            throw; 
+
+            throw;
         }
         catch (Exception ex)
         {
@@ -312,7 +313,7 @@ public sealed class CommandExecutionService(
         {
             // Освобождаем слот в пуле
             _processPool.Release();
-            
+
             // Удаляем из трекинга
             _activeProcesses.TryRemove(cmd.CommandId, out _);
         }
