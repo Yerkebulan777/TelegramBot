@@ -378,8 +378,6 @@ public sealed class SlashCommandService(
         IEnumerable<string> sectionNames)
     {
         var builder = new StringBuilder()
-            .AppendLine("✅ *Задание добавлено в очередь.*")
-            .AppendLine()
             .AppendLine("🧰 *Команды*");
 
         foreach (string commandName in commandNames)
