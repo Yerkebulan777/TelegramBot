@@ -93,15 +93,15 @@ public class FileSystemBrowser : IFileSystemBrowser
         }
     }
 
-    private static readonly HashSet<string> SectionAcronyms = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _sectionAcronyms = new(StringComparer.OrdinalIgnoreCase)
         { "AR", "AS", "APT", "KJ", "KR", "KG", "OV", "VK", "EOM", "EM", "PS", "SS", "OViK" };
 
-    private static readonly char[] NameSeparators = ['_', '-', ' ', '.'];
+    private static readonly char[] _nameSeparators = ['_', '-', ' ', '.'];
 
     private static bool ContainsSectionAcronym(string folderName)
     {
-        foreach (var part in folderName.Split(NameSeparators, StringSplitOptions.RemoveEmptyEntries))
-            if (SectionAcronyms.Contains(part))
+        foreach (var part in folderName.Split(_nameSeparators, StringSplitOptions.RemoveEmptyEntries))
+            if (_sectionAcronyms.Contains(part))
                 return true;
         return false;
     }

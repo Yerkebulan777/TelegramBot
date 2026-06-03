@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+set -e
+
+if command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-code-style.ps1
+elif command -v powershell.exe >/dev/null 2>&1; then
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-code-style.ps1
+else
+  dotnet restore TelegramBot.slnx
+  dotnet format TelegramBot.slnx --verify-no-changes --no-restore --verbosity diagnostic
+  dotnet build TelegramBot.slnx --no-restore --configuration Release
+fi
