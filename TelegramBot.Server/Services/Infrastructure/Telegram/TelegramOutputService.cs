@@ -4,6 +4,7 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Models;
+using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -25,7 +26,7 @@ public class TelegramOutputService(
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
-                text: EscapeMarkdownV2(message),
+                text: MarkdownHelper.EscapeMarkdownV2(message),
                 parseMode: ParseMode.MarkdownV2);
             _logger.LogDebug("Sent to {UserId}: {Message}", userId, message);
             return t;
@@ -201,27 +202,5 @@ public class TelegramOutputService(
         return null;
     }
 
-    static string EscapeMarkdownV2(string text)
-    {
-        return text
-            .Replace("\\", "\\\\")
-            .Replace("_", "\\_")
-            .Replace("*", "\\*")
-            .Replace("[", "\\[")
-            .Replace("]", "\\]")
-            .Replace("(", "\\(")
-            .Replace(")", "\\)")
-            .Replace("~", "\\~")
-            .Replace("`", "\\`")
-            .Replace(">", "\\>")
-            .Replace("#", "\\#")
-            .Replace("+", "\\+")
-            .Replace("-", "\\-")
-            .Replace("=", "\\=")
-            .Replace("|", "\\|")
-            .Replace("{", "\\{")
-            .Replace("}", "\\}")
-            .Replace(".", "\\.")
-            .Replace("!", "\\!");
-    }
+
 }

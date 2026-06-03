@@ -1,9 +1,9 @@
 # Используем Windows-контейнеры для совместимости с приложением
 # Требуется запуск Docker Desktop в режиме Windows Containers
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-nanoserver-ltsc2022 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-nanoserver-ltsc2022 AS base
 WORKDIR /app
 
-FROM mcr.microsoft.com/dotnet/sdk:9.0-nanoserver-ltsc2022 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-nanoserver-ltsc2022 AS build
 WORKDIR /src
 COPY ["TelegramBot.slnx", "."]
 COPY ["TelegramBot.Core/TelegramBot.Core.csproj", "TelegramBot.Core/"]

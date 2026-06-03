@@ -45,7 +45,7 @@ public sealed class FileSelectionHandler(
             return true;
         }
 
-        if (IsAtProjectLevel(session))
+        if (_options.IsAtProjectLevel(session.CurrentPath))
         {
             // Одиночный выбор: сбросить предыдущий, выбрать новый
             session.ClearSelectedFiles();
@@ -70,7 +70,4 @@ public sealed class FileSelectionHandler(
         return true;
     }
 
-    private bool IsAtProjectLevel(UserSession session) =>
-        !string.Equals(Path.GetFileName(session.CurrentPath), _options.ProjectDirectoryName,
-            StringComparison.OrdinalIgnoreCase);
 }

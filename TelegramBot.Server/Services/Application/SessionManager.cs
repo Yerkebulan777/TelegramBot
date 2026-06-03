@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 
-namespace TelegramBot.Server.Services.Application.Sessions;
+namespace TelegramBot.Server.Services.Application;
 
 public class SessionManager : ISessionManager, IDisposable
 {

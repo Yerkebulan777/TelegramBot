@@ -6,28 +6,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build all projects
-dotnet build TelegramBot.Server/TelegramBot.Server.csproj
+dotnet build TelegramBot.slnx
 
 # Run
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 
 # Publish
 dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
+
+# Format code (uses .editorconfig rules)
+dotnet format TelegramBot.slnx
 ```
 
 There are no automated tests in this project.
 
 ## Project Structure
 
-3 projects in `TelegramBot.sln`:
+3 projects in `TelegramBot.slnx`:
 
 | Project | Purpose | Dependencies |
 |---|---|---|
-| `TelegramBot.Core` | Models, DTOs, interfaces, config | None (no Telegram SDK) |
-| `TelegramBot.Data` | SQLite persistence (Dapper) | Core |
-| `TelegramBot.Server` | Telegram bot, handlers, hosting | Core + Data |
-
-The old `TelegramBotServer/` directory contains the legacy single-project code and is no longer used.
+| `TelegramBot.Core` | Models, DTOs, interfaces, config, constants (`net10.0`) | None (no Telegram SDK) |
+| `TelegramBot.Data` | SQLite persistence (Dapper, `net10.0`) | Core |
+| `TelegramBot.Server` | Telegram bot, handlers, hosting, helpers (`net10.0`)| Core + Data |
 
 ## Configuration
 
@@ -48,46 +49,57 @@ Bot token and root path are **not** hardcoded. Set them in `TelegramBot.Server/a
 ### Request Flow
 
 ```
-Telegram API -> TelegramBotHostedService (polling)
+Telegram API -> TelegramBotHostedService (polling, BackgroundService)
              -> TelegramUpdateMapper (Update -> MessageDto | CallbackQueryDto)
-             -> CommandAppService.HandleUserCommandAsync / HandleCallbackAsync
-             -> ICallbackDispatcher -> CallbackDispatcher.DispatchAsync (Chain of Responsibility)
+             -> CommandAppService
+                  ├── HandleUserCommandAsync (text commands)
+                  │    └── SlashCommandService (/start, /help, /export, /automation, /status)
+                  └── HandleCallbackAsync (inline keyboards)
+                       └── ICallbackDispatcher -> CallbackDispatcher (Chain of Responsibility)
+                            └── ICallbackHandler (first matching prefix)
 ```
 
 All services are registered as **Singletons** via `DependencyInjectionExtensions.cs`.
 
-**`TelegramBotHostedService`** — Entry point. Registers bot commands, starts polling, routes incoming updates. Uses `ISessionManager.AcquireUserLockAsync()` for per-user concurrency control.
+**`TelegramBotHostedService`** — Entry point. Registers bot commands, starts polling, routes incoming updates. Uses `ISessionManager.AcquireUserLockAsync()` for per-user concurrency control. Cleans up stale messages on startup.
 
-**`CommandAppService`** — Handles text commands (`/export`, `/automation`, `/status`, `/help`). Delegates all inline keyboard callbacks to `ICallbackDispatcher`.
+**`CommandAppService`** — Manages access control, creates sessions, dispatches text commands to `SlashCommandService` and inline keyboard callbacks to `ICallbackDispatcher`.
+
+**`SlashCommandService`** — Handles text commands (`/start`, `/help`, `/export`, `/automation`, `/status`), reply keyboard actions (Apply, Confirm, Back, Cancel), and file selection flow.
 
 **`CallbackDispatcher`** — Chain of Responsibility dispatcher implementing `ICallbackDispatcher`. Routes callback queries to the first `ICallbackHandler` that `CanHandle()` the prefix. Handlers sorted by `Priority` (lower = first):
 
 | Handler | Priority | Prefixes |
-|---|---|---|
-| `FileNavigationHandler` | 10 | OPENFOLDER:, GOTOPARENT: |
-| `FileSelectionHandler` | 20 | FILE:, APPLYFILES:, CANCELFILESEL: |
+|---|---|---|---|
+| `AccessRequestHandler` | 0 | REQACCESS:, APPROVEUSER:, REJECTUSER: |
+| `FileNavigationHandler` | 10 | GOTOPARENT: |
+| `FileSelectionHandler` | 20 | FILE: |
 | `ExportCommandHandler` | 100 | PDF:, DWG:, NWC:, IFC: |
 | `AutomationCommandHandler` | 100 | BIMDOC:, CLASHREP:, AUTORES: |
 | `SessionManagementHandler` | 100 | SESSIONDETAILS:, DELETESESSION:, DELETECOMMAND:, BACKTOSTATUS: |
 | `CommandSelectionHandler` | 100 | APPLYCOMMANDS:, CANCELCOMMANDSSEL: |
 
-Use `CallbackDataParser.Parse(callbackData)` to get a `ParsedCallback` struct, then match with `parsed.Is(CallbackPrefixes.OpenFolder)`.
+Use `CallbackDataParser.Parse(callbackData)` to get a `ParsedCallback` struct, then match with `parsed.Is(CallbackPrefixes.GoToParent)`.
 
 ### Key Services
 
 | Class | Location | Responsibility |
 |---|---|---|
-| `FileSystemBrowser` | Server/Infrastructure | Builds inline keyboards for filesystem navigation |
-| `KeyboardBuilder` | Server/Infrastructure | Context-aware keyboards with selection state |
-| `SessionManager` | Server/Application | In-memory sessions (`ConcurrentDictionary`, 5-min timeout) |
-| `TelegramOutputService` | Server/Infrastructure | Send/edit Telegram messages with retry |
-| `SqliteDataService` | Data | All DB persistence via Dapper |
+| `SlashCommandService` | Server/Services/Application | /start, /help, /export, /automation, /status + reply actions |
+| `SessionManager` | Server/Services/Application | In-memory sessions (`ConcurrentDictionary`, 5-min timeout, auto-cleanup) |
+| `FileSystemBrowser` | Server/Services/Infrastructure/FileSystem | Builds inline keyboards for filesystem navigation |
+| `KeyboardBuilder` | Server/Services/Infrastructure/Telegram | Context-aware keyboards with selection state |
+| `TelegramOutputService` | Server/Services/Infrastructure/Telegram | Send/edit Telegram messages with retry (429) |
+| `TelegramUpdateMapper` | Server/Services/Infrastructure/Telegram | Maps Update to MessageDto/CallbackQueryDto |
+| `TelegramBotHostedService` | Server/Services/Infrastructure/Telegram | Polling loop, cleanup, bot commands setup |
+| `SqliteDataService` | Data | All DB persistence via Dapper + SQLite |
+| `MarkdownHelper` | Server/Helpers | Unified Markdown escaping (MarkdownV2 + Markdown) |
 
 ### Database
 
-Tables: `Sessions`, `Commands`. Soft-delete only — rows are never physically removed.
-DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()`.
-All queries use Dapper with parameterized SQL.
+Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Soft-delete only — rows are never physically removed (`Status = 'Deleted'`).
+DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
+All queries use Dapper with parameterized SQL. SQL constants are in `TelegramBot.Data/Sql/` (5 partial files).
 
 ### Logging
 
@@ -96,7 +108,7 @@ Serilog configured via `appsettings.json`. Supports Console and Seq (`http://loc
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (731 symbols, 1944 relationships, 61 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (824 symbols, 2228 relationships, 68 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

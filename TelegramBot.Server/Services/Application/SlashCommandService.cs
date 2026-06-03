@@ -8,6 +8,7 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
+using TelegramBot.Server.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 
@@ -212,7 +213,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        if (IsAtProjectLevel(session))
+        if (_options.IsAtProjectLevel(session.CurrentPath))
         {
             string? selectedProject = session.SelectedFiles.FirstOrDefault();
             if (selectedProject == null)
@@ -273,7 +274,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        if (IsAtProjectLevel(session))
+        if (_options.IsAtProjectLevel(session.CurrentPath))
         {
             _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Вы уже в списке проектов."), session);
             return;
@@ -306,7 +307,7 @@ public sealed class SlashCommandService(
 
     private async Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
     {
-        ReplyKeyboardMarkup replyKeyboard = IsAtProjectLevel(session)
+        ReplyKeyboardMarkup replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
             ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
             : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
 
@@ -381,17 +382,17 @@ public sealed class SlashCommandService(
             .AppendLine("🧰 *Команды*");
 
         foreach (string commandName in commandNames)
-            _ = builder.AppendLine($"• {EscapeMarkdown(commandName)}");
+            _ = builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(commandName)}");
 
         _ = builder
             .AppendLine()
             .AppendLine("📌 *Проект*")
-            .AppendLine(EscapeMarkdown(projectName))
+            .AppendLine(MarkdownHelper.EscapeMarkdown(projectName))
             .AppendLine()
             .AppendLine("📂 *Разделы*");
 
         foreach (string sectionName in sectionNames)
-            _ = builder.AppendLine($"• {EscapeMarkdown(sectionName)}");
+            _ = builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(sectionName)}");
 
         return builder.ToString();
     }
@@ -409,23 +410,6 @@ public sealed class SlashCommandService(
         string? name = Path.GetFileName(path);
         return string.IsNullOrWhiteSpace(name) ? path : name;
     }
-
-    private static string EscapeMarkdown(string text)
-    {
-        return text
-            .Replace("\\", "\\\\")
-            .Replace("_", "\\_")
-            .Replace("*", "\\*")
-            .Replace("[", "\\[")
-            .Replace("]", "\\]")
-            .Replace("(", "\\(")
-            .Replace(")", "\\)")
-            .Replace("`", "\\`");
-    }
-
-    private bool IsAtProjectLevel(UserSession session) =>
-        !string.Equals(Path.GetFileName(session.CurrentPath), _options.ProjectDirectoryName,
-            StringComparison.OrdinalIgnoreCase);
 
     private List<string> CollectRvtFiles(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
     {

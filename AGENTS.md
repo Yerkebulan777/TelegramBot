@@ -4,7 +4,7 @@ Guidance for agentic coding agents working in this repository.
 
 ## Project Overview
 
-Telegram bot using long-polling, split into 4 projects. No webhooks, no MVC controllers. All services are **Singletons**.
+Telegram bot using long-polling, split into 3 projects. No webhooks, no MVC controllers. All services are **Singletons**.
 
 ```
 TelegramBot.Core   ←──  TelegramBot.Data
@@ -12,10 +12,9 @@ TelegramBot.Core   ←──  TelegramBot.Data
        └──── TelegramBot.Server ──┘
 ```
 
-- **TelegramBot.Core** — Models, DTOs, interfaces, config. Zero Telegram SDK dependency.
-- **TelegramBot.Data** — SQLite persistence via Dapper. References Core only.
-- **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting. References Core + Data.
-No test project is included in the solution.
+- **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
+- **TelegramBot.Data** — SQLite persistence via Dapper. References Core only. SQL constants in `Sql/` (5 partial files).
+- **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
 
 ---
 
@@ -31,7 +30,7 @@ dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 # Release publish
 dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
 
-# Format code (no .editorconfig exists — uses SDK defaults)
+# Format code (.editorconfig exists with naming rules, see Known Issues)
 dotnet format TelegramBot.slnx
 ```
 
@@ -70,15 +69,15 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 
 `CallbackDispatcher` (implements `ICallbackDispatcher`) routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (sorted by `Priority`, lower = first). All handlers extend `CallbackHandlerBase`.
 
-Handler hierarchy: `AccessRequestHandler` (0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `ExportCommandHandler`, `AutomationCommandHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
+Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `ExportCommandHandler`, `AutomationCommandHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
 
-Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Use `CallbackDataParser.Parse(data)` to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.OpenFolder)`.
+Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 
-Tables: `Sessions`, `Commands`, `BotUsers` (UserId, Username, Role, Status). Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
-DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()`.
-All data access uses **Dapper** (`TelegramBot.Data/SqliteDataService.cs`).
+Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages` (composite PK). Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
+DB file: `botdata.db`. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
+All data access uses **Dapper** (`TelegramBot.Data/SqliteDataService.cs`). SQL constants in `TelegramBot.Data/Sql/` (5 partial files per entity).
 
 ---
 
@@ -86,7 +85,7 @@ All data access uses **Dapper** (`TelegramBot.Data/SqliteDataService.cs`).
 
 ### C# Language Features
 
-- **Target framework**: .NET 8 (`net8.0`)
+- **Target framework**: .NET 10 (`net10.0`)
 - **Nullable reference types**: enabled — always annotate nullability (`string?`, `T?`)
 - **Implicit usings**: enabled — do not add `using System;` etc. unless needed beyond the implicit set
 - **File-scoped namespaces** required: `namespace TelegramBot.Core.Models;`
@@ -108,9 +107,9 @@ All data access uses **Dapper** (`TelegramBot.Data/SqliteDataService.cs`).
 ### Namespace Conventions
 
 Namespaces must match folder structure:
-- `TelegramBot.Core.Models`, `TelegramBot.Core.DTOs`, `TelegramBot.Core.Interfaces`, `TelegramBot.Core.Config`
+- `TelegramBot.Core.Models`, `TelegramBot.Core.DTOs`, `TelegramBot.Core.Interfaces`, `TelegramBot.Core.Config`, `TelegramBot.Core.Constants`
 - `TelegramBot.Data`
-- `TelegramBot.Server.Services.Application`, `TelegramBot.Server.Services.Infrastructure.Telegram`
+- `TelegramBot.Server.Services.Application`, `TelegramBot.Server.Services.Infrastructure.Telegram`, `TelegramBot.Server.Helpers`
 
 ### Imports / Using Directives
 
@@ -167,8 +166,8 @@ Namespaces must match folder structure:
 
 ### Telegram Messages
 
-- Plain messages: `ParseMode.MarkdownV2` — escape special characters with `EscapeMarkdownV2()`
-- Messages with inline keyboards: `ParseMode.Markdown`
+- Plain messages: `ParseMode.MarkdownV2` — escape special characters with `MarkdownHelper.EscapeMarkdownV2()`
+- Messages with inline keyboards: `ParseMode.Markdown` — escape with `MarkdownHelper.EscapeMarkdown()`
 - Do not mix the two parse modes
 - All Telegram API methods must be current — do not use deprecated approaches
 
@@ -183,14 +182,14 @@ Namespaces must match folder structure:
 
 ## Known Issues (Do Not Worsen)
 
-- No `.editorconfig` exists — `dotnet format` uses SDK defaults
+- `.editorconfig` exists with naming rules, formatting preferences, and `generated_code = true` markers for data service and handlers — `dotnet format` respects these
 - No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`
 - Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (731 symbols, 1944 relationships, 61 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (824 symbols, 2228 relationships, 68 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

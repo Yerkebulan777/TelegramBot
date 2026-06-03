@@ -29,6 +29,11 @@ public sealed class FileSystemOptions
     /// <summary>Проверяет, является ли файл файлом Revit.</summary>
     public bool IsRevitFile(string filePath) => filePath.EndsWith(RevitFileExtension, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Проверяет, находится ли пользователь на уровне выбора проектов (а не разделов).</summary>
+    public bool IsAtProjectLevel(string currentPath) =>
+        !string.Equals(Path.GetFileName(currentPath), ProjectDirectoryName,
+            StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Проверяет, что путь находится внутри корневой директории.</summary>
     public bool IsPathWithinRoot(string path)
     {
