@@ -39,8 +39,8 @@ public sealed class SlashCommandService(
 
         if (text == "/start")
         {
-            session.Reset(_options.RootPath);
             await _outputService.ClearChatHistoryAsync(userId, session);
+            session.Reset(_options.RootPath);
             BotUser? user = await _dataService.GetUserAsync(userId);
 
             if (user?.Status != UserAccessStatus.Approved)

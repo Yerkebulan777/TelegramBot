@@ -122,8 +122,7 @@ public class TelegramBotHostedService : BackgroundService
             var staleMessages = await _dataService.GetAllTrackedMessagesAsync();
             foreach (var group in staleMessages)
             {
-                foreach (var msgId in group)
-                    await _outputService.DeleteMessageAsync(group.Key, msgId);
+                await _outputService.DeleteMessagesAsync(group.Key, group, cancellationToken);
                 await _dataService.DeleteTrackedMessagesAsync(group.Key);
             }
         }

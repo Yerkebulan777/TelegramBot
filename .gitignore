@@ -42,6 +42,7 @@ packages/
 # Logs
 *.log
 logs/
+.claude/command-log.txt
 
 # Environment
 .env

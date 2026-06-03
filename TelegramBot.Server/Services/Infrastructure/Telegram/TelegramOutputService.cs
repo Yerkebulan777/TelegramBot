@@ -67,14 +67,38 @@ public class TelegramOutputService(
         }
     }
 
+    public async Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default)
+    {
+        int[] ids = messageIds.Distinct().ToArray();
+        if (ids.Length == 0) return;
+
+        foreach (int[] chunk in ids.Chunk(100))
+        {
+            try
+            {
+                await _botClient.DeleteMessages(chatId, chunk, cancellationToken);
+            }
+            catch (ApiRequestException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Batch delete failed for {ChatId}; falling back to single deletes for {Count} messages",
+                    chatId,
+                    chunk.Length);
+
+                foreach (int messageId in chunk)
+                    await DeleteMessageAsync(chatId, messageId);
+            }
+        }
+    }
+
     public async Task ClearChatHistoryAsync(long chatId, UserSession session)
     {
         var messageIds = session.TakeTrackedMessages();
         if (messageIds.Count == 0) return;
 
         _logger.LogInformation("ClearChatHistoryAsync: удаление {Count} сообщений для чата {ChatId}", messageIds.Count, chatId);
-        foreach (var messageId in messageIds)
-            await DeleteMessageAsync(chatId, messageId);
+        await DeleteMessagesAsync(chatId, messageIds);
     }
 
     public Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
