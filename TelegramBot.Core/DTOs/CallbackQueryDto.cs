@@ -10,5 +10,5 @@ public class CallbackQueryDto
     public int MessageId { get; set; }
     public string? CallbackData { get; set; }
     public string? CallbackQueryId { get; set; }
-    public List<List<ButtonDto>> Buttons { get; set; } = new();
+    public List<List<ButtonDto>> Buttons { get; set; } = [];
 }

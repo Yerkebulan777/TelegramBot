@@ -28,17 +28,35 @@ public class UserSession
     // Public read-only wrappers with thread-safe access
     public IReadOnlyList<string> PendingCommand
     {
-        get { lock (_commandLock) return [.. _pendingCommand]; }
+        get
+        {
+            lock (_commandLock)
+            {
+                return [.. _pendingCommand];
+            }
+        }
     }
 
     public IReadOnlyList<string> PendingCommandName
     {
-        get { lock (_commandLock) return [.. _pendingCommandName]; }
+        get
+        {
+            lock (_commandLock)
+            {
+                return [.. _pendingCommandName];
+            }
+        }
     }
 
     public IReadOnlySet<string> SelectedFiles
     {
-        get { lock (_selectionLock) return new HashSet<string>(_selectedFiles); }
+        get
+        {
+            lock (_selectionLock)
+            {
+                return new HashSet<string>(_selectedFiles);
+            }
+        }
     }
 
     /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
@@ -63,7 +81,7 @@ public class UserSession
     {
         lock (_commandLock)
         {
-            int index = _pendingCommand.IndexOf(code);
+            var index = _pendingCommand.IndexOf(code);
             if (index >= 0)
             {
                 _pendingCommand.RemoveAt(index);
@@ -76,7 +94,10 @@ public class UserSession
 
     public bool ContainsPendingCommand(string code)
     {
-        lock (_commandLock) return _pendingCommand.Contains(code);
+        lock (_commandLock)
+        {
+            return _pendingCommand.Contains(code);
+        }
     }
 
     public void ClearPendingCommands()
@@ -95,33 +116,45 @@ public class UserSession
         {
             if (_selectedFiles.Contains(filePath))
             {
-                _selectedFiles.Remove(filePath);
+                _=_selectedFiles.Remove(filePath);
                 return false;
             }
-            _selectedFiles.Add(filePath);
+            _=_selectedFiles.Add(filePath);
             return true;
         }
     }
 
     public void ClearSelectedFiles()
     {
-        lock (_selectionLock) _selectedFiles.Clear();
+        lock (_selectionLock)
+        {
+            _selectedFiles.Clear();
+        }
     }
 
     // Message tracking (user commands + bot responses)
     public void TrackMessage(int messageId)
     {
-        lock (_messageLock) _trackedMessageIds.Add(messageId);
+        lock (_messageLock)
+        {
+            _trackedMessageIds.Add(messageId);
+        }
     }
 
     public IReadOnlyList<int> GetTrackedMessages()
     {
-        lock (_messageLock) return [.. _trackedMessageIds];
+        lock (_messageLock)
+        {
+            return [.. _trackedMessageIds];
+        }
     }
 
     public void ClearTrackedMessages()
     {
-        lock (_messageLock) _trackedMessageIds.Clear();
+        lock (_messageLock)
+        {
+            _trackedMessageIds.Clear();
+        }
     }
 
     public IReadOnlyList<int> TakeTrackedMessages()

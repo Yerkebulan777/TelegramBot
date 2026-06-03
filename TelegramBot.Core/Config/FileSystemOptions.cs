@@ -24,23 +24,31 @@ public sealed class FileSystemOptions
     public string SectionFolderPattern { get; set; } = @"^(\d{2}|\d{3}|I{1,3})_";
 
     /// <summary>Возвращает полный путь к RVT-директории для раздела.</summary>
-    public string GetRvtPath(string sectionPath) => Path.Combine(sectionPath, RvtDirectoryName);
+    public string GetRvtPath(string sectionPath)
+    {
+        return Path.Combine(sectionPath, RvtDirectoryName);
+    }
 
     /// <summary>Проверяет, является ли файл файлом Revit.</summary>
-    public bool IsRevitFile(string filePath) => filePath.EndsWith(RevitFileExtension, StringComparison.OrdinalIgnoreCase);
+    public bool IsRevitFile(string filePath)
+    {
+        return filePath.EndsWith(RevitFileExtension, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>Проверяет, находится ли пользователь на уровне выбора проектов (а не разделов).</summary>
-    public bool IsAtProjectLevel(string currentPath) =>
-        !string.Equals(Path.GetFileName(currentPath), ProjectDirectoryName,
+    public bool IsAtProjectLevel(string currentPath)
+    {
+        return !string.Equals(Path.GetFileName(currentPath), ProjectDirectoryName,
             StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>Проверяет, что путь находится внутри корневой директории.</summary>
     public bool IsPathWithinRoot(string path)
     {
         try
         {
-            string root = Path.GetFullPath(RootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            string candidate = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var root = Path.GetFullPath(RootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var candidate = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
             return candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
                 || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);

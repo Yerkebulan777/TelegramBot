@@ -16,8 +16,8 @@ public static class DatabaseInitializer
     /// </summary>
     public static async Task InitializeDatabaseAsync(this IHost host)
     {
-        using IServiceScope scope = host.Services.CreateScope();
-        IDataService dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+        using var scope = host.Services.CreateScope();
+        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
         await dataService.InitializeDatabaseAsync();
     }
 
@@ -26,7 +26,7 @@ public static class DatabaseInitializer
     /// </summary>
     public static async Task SeedAdminUsersAsync(this IHost host)
     {
-        using IServiceScope scope = host.Services.CreateScope();
+        using var scope = host.Services.CreateScope();
         var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 

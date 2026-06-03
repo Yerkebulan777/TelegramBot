@@ -1,5 +1,4 @@
 using Telegram.Bot.Types;
-using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Server.Interfaces;
 
@@ -27,7 +26,7 @@ public class TelegramUpdateMapper : ITelegramUpdateMapper
         var msg = callback.Message
             ?? throw new InvalidOperationException("CallbackQuery.Message is null.");
 
-        var currentKeyboard = msg.ReplyMarkup as InlineKeyboardMarkup
+        var currentKeyboard = msg.ReplyMarkup
             ?? throw new InvalidOperationException("CallbackQuery.Message.ReplyMarkup is null.");
 
         return new CallbackQueryDto
@@ -52,9 +51,13 @@ public class TelegramUpdateMapper : ITelegramUpdateMapper
     public Task<object?> Map(Update update)
     {
         if (update.Message?.Text != null && update.Message.From != null)
+        {
             return Task.FromResult<object?>(MapMessage(update.Message));
+        }
         else if (update.CallbackQuery != null)
+        {
             return Task.FromResult<object?>(MapCallback(update.CallbackQuery));
+        }
 
         return Task.FromResult<object?>(null);
     }

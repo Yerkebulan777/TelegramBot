@@ -1,5 +1,4 @@
 using Telegram.Bot.Types.ReplyMarkups;
-using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 
@@ -15,7 +14,10 @@ public abstract class CommandToggleHandlerBase(
 
     protected abstract IReadOnlyDictionary<string, (string Code, string DisplayName)> Commands { get; }
 
-    public override bool CanHandle(string prefix) => Commands.ContainsKey(prefix);
+    public override bool CanHandle(string prefix)
+    {
+        return Commands.ContainsKey(prefix);
+    }
 
     protected abstract Task<InlineKeyboardMarkup> GetKeyboardAsync(IKeyboardBuilder keyboardBuilder, UserSession session);
 
@@ -25,7 +27,7 @@ public abstract class CommandToggleHandlerBase(
 
         if (context.Session.ContainsPendingCommand(code))
         {
-            context.Session.RemovePendingCommand(code);
+            _=context.Session.RemovePendingCommand(code);
             Logger.LogInformation("User {Username} ({UserId}) deselected command '{Code}'", context.Username, context.UserId, code);
         }
         else

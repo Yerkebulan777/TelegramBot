@@ -1,4 +1,5 @@
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 
@@ -18,5 +19,7 @@ public sealed class AutomationCommandHandler(
         };
 
     protected override Task<InlineKeyboardMarkup> GetKeyboardAsync(IKeyboardBuilder keyboardBuilder, UserSession session)
-        => keyboardBuilder.GetAutomationKeyboardAsync(session);
+    {
+        return keyboardBuilder.GetAutomationKeyboardAsync(session);
+    }
 }

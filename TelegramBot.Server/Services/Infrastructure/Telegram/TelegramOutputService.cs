@@ -20,9 +20,9 @@ public class TelegramOutputService(
 
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
-        if (string.IsNullOrWhiteSpace(message)) return null!;
-
-        return await ExecuteWithRetryAsync(async () =>
+        return string.IsNullOrWhiteSpace(message)
+            ? null!
+            : await ExecuteWithRetryAsync(async () =>
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
@@ -52,7 +52,7 @@ public class TelegramOutputService(
             return;
         }
 
-        await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
+        _=await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
     }
 
     public async Task DeleteMessageAsync(long chatId, int messageId)
@@ -64,16 +64,21 @@ public class TelegramOutputService(
         catch (ApiRequestException ex)
         {
             if (!ex.Message.Contains("message can't be deleted") && !ex.Message.Contains("message to delete not found"))
+            {
                 throw;
+            }
         }
     }
 
     public async Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default)
     {
-        int[] ids = messageIds.Distinct().ToArray();
-        if (ids.Length == 0) return;
+        var ids = messageIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return;
+        }
 
-        foreach (int[] chunk in ids.Chunk(100))
+        foreach (var chunk in ids.Chunk(100))
         {
             try
             {
@@ -87,8 +92,10 @@ public class TelegramOutputService(
                     chatId,
                     chunk.Length);
 
-                foreach (int messageId in chunk)
+                foreach (var messageId in chunk)
+                {
                     await DeleteMessageAsync(chatId, messageId);
+                }
             }
         }
     }
@@ -96,7 +103,10 @@ public class TelegramOutputService(
     public async Task ClearChatHistoryAsync(long chatId, UserSession session)
     {
         var messageIds = session.GetTrackedMessages();
-        if (messageIds.Count == 0) return;
+        if (messageIds.Count == 0)
+        {
+            return;
+        }
 
         _logger.LogInformation("ClearChatHistoryAsync: удаление {Count} сообщений для чата {ChatId}", messageIds.Count, chatId);
         try
@@ -110,16 +120,22 @@ public class TelegramOutputService(
     }
 
     public Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
-        => ExecuteWithRetryAsync(() => _botClient.SendMessage(
-            chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+    {
+        return ExecuteWithRetryAsync(() => _botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+    }
 
     public Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
-        => ExecuteWithRetryAsync(() => _botClient.SendMessage(
-            chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown), userId);
+    {
+        return ExecuteWithRetryAsync(() => _botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown), userId);
+    }
 
     public Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
-        => ExecuteWithRetryAsync(() => _botClient.SendMessage(
-            chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+    {
+        return ExecuteWithRetryAsync(() => _botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+    }
 
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
     {
@@ -137,7 +153,7 @@ public class TelegramOutputService(
     {
         try
         {
-            await _botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
+            _=await _botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
         }
         catch (ApiRequestException ex)
         {
@@ -149,7 +165,7 @@ public class TelegramOutputService(
     {
         try
         {
-            await _botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
+            _=await _botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
         }
         catch (ApiRequestException ex)
         {
@@ -161,7 +177,7 @@ public class TelegramOutputService(
     {
         try
         {
-            await _botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
+            _=await _botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
         }
         catch (ApiRequestException ex)
         {
@@ -171,7 +187,7 @@ public class TelegramOutputService(
 
     private async Task<Message?> ExecuteWithRetryAsync(Func<Task<Message>> action, long userId)
     {
-        for (int attempt = 0; attempt <= MaxRetries; attempt++)
+        for (var attempt = 0; attempt <= MaxRetries; attempt++)
         {
             try
             {
@@ -185,7 +201,9 @@ public class TelegramOutputService(
                     userId, retryAfter, attempt + 1, MaxRetries);
 
                 if (attempt < MaxRetries)
+                {
                     await Task.Delay(TimeSpan.FromSeconds(retryAfter));
+                }
                 else
                 {
                     _logger.LogError(ex, "Rate limit retries exhausted for {UserId}", userId);

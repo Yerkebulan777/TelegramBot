@@ -15,11 +15,11 @@ public static class Program
 
         try
         {
-            IHost host = Host.CreateDefaultBuilder(args)
+            var host = Host.CreateDefaultBuilder(args)
                 .ConfigureAppConfiguration((context, config) =>
                 {
-                    config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
-                    config.AddEnvironmentVariables();
+                    _=config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+                    _=config.AddEnvironmentVariables();
                 })
                 .ConfigureServices((context, services) =>
                 {

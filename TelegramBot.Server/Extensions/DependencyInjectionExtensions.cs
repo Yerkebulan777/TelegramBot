@@ -15,7 +15,7 @@ public static class DependencyInjectionExtensions
 {
     public static IServiceCollection AddTelegramBotServer(this IServiceCollection services, IConfiguration configuration)
     {
-        services
+        _=services
             .AddCallbackHandlers()
             .AddApplicationServices()
             .AddInfrastructureServices()
@@ -27,12 +27,12 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddOptions<FileSystemOptions>()
+        _=services.AddOptions<FileSystemOptions>()
             .Bind(configuration.GetSection(FileSystemOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
             .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
 
-        services.AddOptions<BotOptions>()
+        _=services.AddOptions<BotOptions>()
             .Bind(configuration.GetSection(BotOptions.SectionName))
             .ValidateOnStart()
             .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required");
@@ -78,14 +78,11 @@ public static class DependencyInjectionExtensions
         {
             var botOptions = serviceProvider.GetRequiredService<IOptions<BotOptions>>().Value;
 
-            if (string.IsNullOrWhiteSpace(botOptions.Token))
-            {
-                throw new InvalidOperationException(
+            return string.IsNullOrWhiteSpace(botOptions.Token)
+                ? throw new InvalidOperationException(
                     "TelegramBot:Token is not configured. " +
-                    "Set it in appsettings.Local.json or via environment variable TELEGRAM_BOT_TOKEN.");
-            }
-
-            return new TelegramBotClient(botOptions.Token);
+                    "Set it in appsettings.Local.json or via environment variable TELEGRAM_BOT_TOKEN.")
+                : (ITelegramBotClient)new TelegramBotClient(botOptions.Token);
         });
 
         _ = services.AddSingleton<ITelegramOutputService, TelegramOutputService>();

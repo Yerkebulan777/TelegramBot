@@ -1,7 +1,7 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
 using Dapper;
 using Npgsql;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
@@ -26,7 +26,6 @@ public sealed class CommandExecutionService(
 {
     private const int FallbackTimeoutSec = 300; // 5 мин — safety net, если NOTIFY потерян
     private const int DefaultBatchSize = 50;
-    private const int LeaseTimeoutMin = 5;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
 
     // Настройки пула процессов
@@ -129,7 +128,7 @@ public sealed class CommandExecutionService(
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(stoppingToken);
 
-        await conn.ExecuteAsync("LISTEN new_command;");
+        _=await conn.ExecuteAsync("LISTEN new_command;");
 
         conn.Notification += OnNotificationReceived;
 
@@ -148,9 +147,8 @@ public sealed class CommandExecutionService(
                 // Блокирующее ожидание NOTIFY или таймаут (5 мин)
                 // При NOTIFY — просыпается мгновенно
                 // При таймауте — fallback poll (safety net)
-                await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
+                _=await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
             }
-            catch (OperationCanceledException) { throw; }
             catch (TimeoutException)
             {
                 // Fallback poll — если NOTIFY был потерян
@@ -159,7 +157,7 @@ public sealed class CommandExecutionService(
             catch (NpgsqlException ex) when (!stoppingToken.IsCancellationRequested)
             {
                 logger.LogError(ex, "PostgreSQL connection error, reconnecting...");
-                throw; // Выходим из цикла → outer reconnect
+                // Выходим из цикла → outer reconnect
             }
 
             // Освобождаем истёкшие Lease перед каждым циклом
@@ -181,7 +179,9 @@ public sealed class CommandExecutionService(
             var claimed = await dataService.ClaimPendingCommandsAsync(DefaultBatchSize);
 
             if (claimed.Count == 0)
+            {
                 return;
+            }
 
             logger.LogInformation("Claimed {Count} commands for processing", claimed.Count);
 
@@ -205,7 +205,9 @@ public sealed class CommandExecutionService(
         {
             // Проверяем, не отмена ли это
             if (ct.IsCancellationRequested)
+            {
                 return;
+            }
 
             // Запускаем выполнение в фоне
             _ = ExecuteOneAsync(cmd, ct);
@@ -217,7 +219,7 @@ public sealed class CommandExecutionService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Error acquiring process pool slot for command {CommandId}", cmd.CommandId);
-            _processPool.Release();
+            _=_processPool.Release();
         }
     }
 
@@ -228,7 +230,7 @@ public sealed class CommandExecutionService(
 
         try
         {
-            ProcessStartInfo? startInfo = cmd.CommandText switch
+            var startInfo = cmd.CommandText switch
             {
                 "PDF" or "DWG" or "IFC" or "BIMDOC" => CreateRevitProcessStartInfo(cmd),
                 "NWC" or "CLASHREP" => CreateNavisworksProcessStartInfo(cmd),
@@ -239,21 +241,21 @@ public sealed class CommandExecutionService(
             if (startInfo == null)
             {
                 logger.LogWarning("Unknown command '{Cmd}' ({Id})", cmd.CommandText, cmd.CommandId);
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Unknown command type: {cmd.CommandText}");
                 return;
             }
 
             // Запуск процесса
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            process.Start();
+            _=process.Start();
 
             // Сохраняем контекст для отслеживания
             var context = new ProcessContext(process, cmd.CommandId, sw);
             _activeProcesses[cmd.CommandId] = context;
 
             // Обновляем статус с PID
-            await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
 
             logger.LogInformation("Started process {Pid} for {Cmd} / {File} ({Id})",
                 process.Id, cmd.CommandText, cmd.FilePath, cmd.CommandId);
@@ -269,7 +271,7 @@ public sealed class CommandExecutionService(
                 process.Kill(true); // true = kill entire process tree
                 await process.WaitForExitAsync(ct);
 
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Timeout: process exceeded {ProcessTimeoutSec}s limit");
                 return;
             }
@@ -278,14 +280,14 @@ public sealed class CommandExecutionService(
             if (process.ExitCode == 0)
             {
                 sw.Stop();
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
+                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
                 logger.LogInformation("Done: {Cmd} / {File} ({Id}) — {Ms}ms, exit code: {ExitCode}",
                     cmd.CommandText, cmd.FilePath, cmd.CommandId, sw.ElapsedMilliseconds, process.ExitCode);
             }
             else
             {
                 sw.Stop();
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Process exited with code {process.ExitCode}");
                 logger.LogWarning("Failed: {Cmd} / {File} ({Id}) — exit code: {ExitCode}",
                     cmd.CommandText, cmd.FilePath, cmd.CommandId, process.ExitCode);
@@ -306,16 +308,16 @@ public sealed class CommandExecutionService(
         {
             sw.Stop();
             logger.LogError(ex, "Failed: {Cmd} / {File} ({Id})", cmd.CommandText, cmd.FilePath, cmd.CommandId);
-            await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                 errorMessage: ex.Message);
         }
         finally
         {
             // Освобождаем слот в пуле
-            _processPool.Release();
+            _=_processPool.Release();
 
             // Удаляем из трекинга
-            _activeProcesses.TryRemove(cmd.CommandId, out _);
+            _=_activeProcesses.TryRemove(cmd.CommandId, out _);
         }
     }
 

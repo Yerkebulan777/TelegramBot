@@ -1,10 +1,8 @@
-#nullable enable
 
 using Dapper;
-using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using TelegramBot.Core.Constants;
+using Npgsql;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 
@@ -20,11 +18,11 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
 
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
     }
 
     public async Task<BotUser?> GetUserAsync(long userId)
@@ -39,7 +37,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         var now = DateTime.UtcNow;
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
+        _=await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
         {
             user.UserId,
             user.Username,
@@ -68,10 +66,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
         var order = 1;
         foreach (var command in commandText)
+        {
             foreach (var file in files)
-                await conn.ExecuteAsync(SqlQueries.Commands.Insert,
+            {
+                _=await conn.ExecuteAsync(SqlQueries.Commands.Insert,
                     new { SessionId = sessionId, CommandText = command, FilePath = file, Order = order++ },
                     tx);
+            }
+        }
 
         await tx.CommitAsync();
         return sessionId;
@@ -124,7 +126,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                     return false;
                 }
 
-                await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
+                _=await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
                     new { SessionId = sessionId }, tx);
                 await tx.CommitAsync();
             }
@@ -189,7 +191,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         var now = DateTime.UtcNow;
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.Users.InsertIgnoreConflict, new
+        _=await conn.ExecuteAsync(SqlQueries.Users.InsertIgnoreConflict, new
         {
             UserId = userId,
             Username = username,
@@ -227,7 +229,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         var now = DateTime.UtcNow;
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.Users.UpsertAdmin, new
+        _=await conn.ExecuteAsync(SqlQueries.Users.UpsertAdmin, new
         {
             UserId = userId,
             Username = username,
@@ -244,7 +246,10 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await conn.OpenAsync();
         await using var tx = await conn.BeginTransactionAsync();
         foreach (var messageId in messageIds)
-            await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId }, tx);
+        {
+            _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId }, tx);
+        }
+
         await tx.CommitAsync();
     }
 
@@ -260,7 +265,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
+        _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
     }
 
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50)
@@ -291,7 +296,9 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
 
             if (released > 0)
+            {
                 logger.LogInformation("Released {Count} expired leases", released);
+            }
         }
         catch (Exception e)
         {
@@ -327,7 +334,9 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 new { TimeoutSeconds = timeoutSeconds });
 
             if (released > 0)
+            {
                 logger.LogInformation("Released {Count} commands due to timeout", released);
+            }
         }
         catch (Exception e)
         {
@@ -341,7 +350,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            await conn.ExecuteAsync("NOTIFY new_command, @SessionId", new { SessionId = sessionId });
+            _=await conn.ExecuteAsync("NOTIFY new_command, @SessionId", new { SessionId = sessionId });
         }
         catch (Exception e)
         {

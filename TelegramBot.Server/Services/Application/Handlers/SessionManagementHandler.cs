@@ -40,7 +40,7 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleSessionDetailsAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var token = context.ParsedCallback.Argument;
-        if (!int.TryParse(token, out int sessionId) || !sessionId.IsValidId())
+        if (!int.TryParse(token, out var sessionId) || !sessionId.IsValidId())
         {
             LogInvalidInput("session ID", token, context.Username, context.UserId);
             return true;
@@ -78,7 +78,7 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleDeleteSessionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var token = context.ParsedCallback.Argument;
-        if (!int.TryParse(token, out int sessionId) || !sessionId.IsValidId())
+        if (!int.TryParse(token, out var sessionId) || !sessionId.IsValidId())
         {
             LogInvalidInput("session ID", token, context.Username, context.UserId);
             return true;
@@ -87,7 +87,9 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("User {Username} ({UserId}) deleting session {SessionId}", context.Username, context.UserId, sessionId);
 
         if (!await _dataService.DeleteSessionAsync(sessionId, context.UserId))
+        {
             return true;
+        }
 
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
@@ -98,7 +100,7 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleDeleteCommandAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var token = context.ParsedCallback.Argument;
-        if (!int.TryParse(token, out int commandId) || !commandId.IsValidId())
+        if (!int.TryParse(token, out var commandId) || !commandId.IsValidId())
         {
             LogInvalidInput("command ID", token, context.Username, context.UserId);
             return true;
@@ -114,14 +116,18 @@ public sealed class SessionManagementHandler(
         }
 
         if (!await _dataService.DeleteCommandAsync(commandId, context.UserId))
+        {
             return true;
+        }
 
         context.Session.SessionId = sessionId.Value;
 
         if (context.Buttons != null)
         {
             foreach (var row in context.Buttons)
-                row.RemoveAll(btn => btn.CallbackData!.Contains($"{commandId}"));
+            {
+                _=row.RemoveAll(btn => btn.CallbackData!.Contains($"{commandId}"));
+            }
         }
 
         var newKeyboard = ConvertDtoToKeyboard(context.Buttons);
@@ -160,21 +166,25 @@ public sealed class SessionManagementHandler(
 
         var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Сессии:");
         if (clearKeyboardMessage != null)
+        {
             context.Session.TrackMessage(clearKeyboardMessage.Id);
+        }
     }
 
     private async Task SendStatusActionsReplyKeyboardAsync(CallbackContext context)
     {
-        ReplyKeyboardMarkup replyKeyboard = await _keyboardBuilder.GetStatusActionsReplyKeyboardAsync();
+        var replyKeyboard = await _keyboardBuilder.GetStatusActionsReplyKeyboardAsync();
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
+        {
             context.Session.TrackMessage(message.Id);
+        }
     }
 
     private static string BuildStatusReply(SessionStatus sessionStatus)
     {
         var percentage = sessionStatus.TotalFiles > 0
-            ? (100 * sessionStatus.DoneFiles) / sessionStatus.TotalFiles
+            ? 100 * sessionStatus.DoneFiles / sessionStatus.TotalFiles
             : 0;
 
         return $"Статус: {sessionStatus.Status}\n" +
@@ -186,7 +196,9 @@ public sealed class SessionManagementHandler(
     private static InlineKeyboardMarkup ConvertDtoToKeyboard(List<List<ButtonDto>>? dto)
     {
         if (dto == null)
+        {
             return new InlineKeyboardMarkup(Array.Empty<InlineKeyboardButton[]>());
+        }
 
         var inlineKeyboard = dto
             .Select(row => row

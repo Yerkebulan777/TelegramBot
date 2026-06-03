@@ -41,7 +41,10 @@ public sealed class FileSelectionHandler(
         {
             var errorMessage = await _outputService.SendErrorAsync(context.UserId, "File not found.");
             if (errorMessage != null)
+            {
                 session.TrackMessage(errorMessage.Id);
+            }
+
             return true;
         }
 
@@ -49,15 +52,15 @@ public sealed class FileSelectionHandler(
         {
             // Одиночный выбор: сбросить предыдущий, выбрать новый
             session.ClearSelectedFiles();
-            session.ToggleSelectedFile(filePath);
+            _=session.ToggleSelectedFile(filePath);
             Logger.LogInformation("User {Username} ({UserId}) selected project '{Project}'",
                 context.Username, context.UserId, Path.GetFileName(filePath));
         }
         else
         {
             // Множественный выбор разделов
-            bool wasSelected = session.SelectedFiles.Contains(filePath);
-            session.ToggleSelectedFile(filePath);
+            var wasSelected = session.SelectedFiles.Contains(filePath);
+            _=session.ToggleSelectedFile(filePath);
             Logger.LogInformation("User {Username} ({UserId}) {Action} section '{Section}' (total: {Count})",
                 context.Username, context.UserId, wasSelected ? "deselected" : "selected",
                 Path.GetFileName(filePath), session.SelectedFiles.Count);

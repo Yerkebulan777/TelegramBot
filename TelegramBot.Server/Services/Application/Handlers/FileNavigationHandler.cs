@@ -31,7 +31,10 @@ public sealed class FileNavigationHandler(
         {
             var errorMessage = await _outputService.SendErrorAsync(context.UserId, "Path not found.");
             if (errorMessage != null)
+            {
                 session.TrackMessage(errorMessage.Id);
+            }
+
             return true;
         }
 
@@ -41,7 +44,10 @@ public sealed class FileNavigationHandler(
                 context.Username, context.UserId, newPath);
             var errorMessage = await _outputService.SendErrorAsync(context.UserId, "Недопустимый путь.");
             if (errorMessage != null)
+            {
                 session.TrackMessage(errorMessage.Id);
+            }
+
             session.CurrentPath = _options.RootPath;
             return true;
         }
@@ -58,7 +64,9 @@ public sealed class FileNavigationHandler(
         var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
+        {
             session.TrackMessage(message.Id);
+        }
 
         return true;
     }

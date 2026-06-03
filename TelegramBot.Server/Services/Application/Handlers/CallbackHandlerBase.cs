@@ -13,7 +13,9 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
     public virtual int Priority => HandlerPriorities.Default;
 
     public virtual bool CanHandle(string prefix)
-        => SupportedPrefixes.Count > 0 && SupportedPrefixes.Contains(prefix);
+    {
+        return SupportedPrefixes.Count > 0 && SupportedPrefixes.Contains(prefix);
+    }
 
     public async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
@@ -41,5 +43,8 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
         Logger.LogWarning("Invalid {FieldName} '{Value}' from user {Username} ({UserId})", fieldName, value, username, userId);
     }
 
-    private static string GetPrefix(CallbackContext context) => context.ParsedCallback.Prefix;
+    private static string GetPrefix(CallbackContext context)
+    {
+        return context.ParsedCallback.Prefix;
+    }
 }

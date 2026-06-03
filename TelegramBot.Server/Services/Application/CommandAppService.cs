@@ -1,6 +1,3 @@
-#nullable enable
-
-using TelegramBot.Core.Constants;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
@@ -20,7 +17,7 @@ public sealed class CommandAppService(
 
     public Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
-        UserSession session = _sessionManager.GetOrCreateSession(message.UserId);
+        var session = _sessionManager.GetOrCreateSession(message.UserId);
         session.TrackMessage(message.MessageId);
         return _slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
     }
@@ -33,19 +30,21 @@ public sealed class CommandAppService(
             return;
         }
 
-        UserSession session = _sessionManager.GetOrCreateSession(callback.UserId);
+        var session = _sessionManager.GetOrCreateSession(callback.UserId);
         session.TrackMessage(callback.MessageId);
-        ParsedCallback parsed = CallbackDataParser.Parse(callback.CallbackData);
+        var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
         logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})", parsed.Prefix, callback.Username, callback.UserId);
 
-        bool isRegistrationCallback = parsed.Prefix is
+        var isRegistrationCallback = parsed.Prefix is
             CallbackPrefixes.RequestAccess or
             CallbackPrefixes.ApproveUser or
             CallbackPrefixes.RejectUser;
 
         if (!isRegistrationCallback && !await _slashCommandService.CheckAndNotifyAccessAsync(callback.UserId, session))
+        {
             return;
+        }
 
         var context = new CallbackContext
         {

@@ -41,14 +41,14 @@ public sealed class SlashCommandService(
         {
             await _outputService.ClearChatHistoryAsync(userId, session);
             session.Reset(_options.RootPath);
-            BotUser? user = await _dataService.GetUserAsync(userId);
+            var user = await _dataService.GetUserAsync(userId);
 
             if (user?.Status != UserAccessStatus.Approved)
             {
-                BotUser? adminUser = await _dataService.GetUserAsync(userId);
+                var adminUser = await _dataService.GetUserAsync(userId);
                 if (adminUser?.Role == UserRole.Admin && adminUser.Status == UserAccessStatus.Approved)
                 {
-                    DateTime now = DateTime.UtcNow;
+                    var now = DateTime.UtcNow;
                     await _dataService.UpsertUserAsync(new BotUser
                     {
                         UserId = userId,
@@ -74,7 +74,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        BotUser? userRecord = await _dataService.GetUserAsync(userId);
+        var userRecord = await _dataService.GetUserAsync(userId);
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
             _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
@@ -91,7 +91,7 @@ public sealed class SlashCommandService(
 
     public async Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session)
     {
-        BotUser? userRecord = await _dataService.GetUserAsync(userId);
+        var userRecord = await _dataService.GetUserAsync(userId);
 
         if (userRecord?.Status == UserAccessStatus.Approved)
         {
@@ -124,8 +124,8 @@ public sealed class SlashCommandService(
                 session.Reset(_options.RootPath);
                 session.IsInStatusView = true;
                 var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
-                InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                Message? statusMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
+                var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+                var statusMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
                 session.StatusMessageId = statusMessage?.Id;
                 break;
 
@@ -213,8 +213,8 @@ public sealed class SlashCommandService(
         session.CurrentPath = _options.RootPath;
         session.IsFileSelectionActive = true;
 
-        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-        Message? selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
+        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+        var selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
         session.FileSelectionMessageId = selectionMessage?.Id;
         await SendFileActionsReplyKeyboardAsync(userId, session);
     }
@@ -242,13 +242,13 @@ public sealed class SlashCommandService(
             logger.LogInformation("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT",
                 username, userId, Path.GetFileName(selectedProject));
 
-            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
             await _outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
             await SendFileActionsReplyKeyboardAsync(userId, session);
             return;
         }
 
-        IReadOnlySet<string> selectedSections = session.SelectedFiles;
+        var selectedSections = session.SelectedFiles;
         if (selectedSections.Count == 0)
         {
             _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один раздел."), session);
@@ -259,14 +259,14 @@ public sealed class SlashCommandService(
             "User {Username} ({UserId}) submitting job: commands=[{Commands}], sections={Count}",
             username, userId, string.Join(", ", session.PendingCommand), selectedSections.Count);
 
-        IReadOnlyList<string> commandNames = session.PendingCommandName;
+        var commandNames = session.PendingCommandName;
         var projectName = GetCurrentProjectName(session);
         var sectionNames = selectedSections
             .Select(GetSafePathName)
             .ToArray();
         var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames);
 
-        List<string> filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
+        var filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
 
         var sessionId = await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
@@ -301,7 +301,7 @@ public sealed class SlashCommandService(
 
         logger.LogInformation("User {Username} ({UserId}) returned to project selection", username, userId);
 
-        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
         await _outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
         await SendFileActionsReplyKeyboardAsync(userId, session);
     }
@@ -316,7 +316,7 @@ public sealed class SlashCommandService(
         logger.LogInformation("User {Username} ({UserId}) returning to sessions list", username, userId);
 
         var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
-        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+        var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
         await _outputService.EditMessageTextWithKeyboardAsync(userId, session.StatusMessageId.Value, "Сессии:", keyboard);
 
         session.IsInStatusView = true;
@@ -325,7 +325,7 @@ public sealed class SlashCommandService(
 
     private async Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
     {
-        ReplyKeyboardMarkup replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
+        var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
             ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
             : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
 
@@ -337,13 +337,13 @@ public sealed class SlashCommandService(
         session.Reset(_options.RootPath);
         session.IsFileSelectionActive = false;
 
-        InlineKeyboardMarkup commandKeyboard = isAutomation
+        var commandKeyboard = isAutomation
             ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
             : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
 
-        ReplyKeyboardMarkup replyKeyboard = await _keyboardBuilder.GetCommandActionsReplyKeyboardAsync();
+        var replyKeyboard = await _keyboardBuilder.GetCommandActionsReplyKeyboardAsync();
 
-        Message? commandSelectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
+        var commandSelectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
         session.CommandSelectionMessageId = commandSelectionMessage?.Id;
         _=await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
     }
@@ -373,7 +373,7 @@ public sealed class SlashCommandService(
 
     private static async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
     {
-        Message? msg = await task;
+        var msg = await task;
         if (msg != null)
         {
             session.TrackMessage(msg.Id);
@@ -428,7 +428,7 @@ public sealed class SlashCommandService(
 
     private static string GetCurrentProjectName(UserSession session)
     {
-        DirectoryInfo? projectDirectory = Directory.GetParent(session.CurrentPath);
+        var projectDirectory = Directory.GetParent(session.CurrentPath);
         return projectDirectory == null
             ? GetSafePathName(session.CurrentPath)
             : GetSafePathName(projectDirectory.FullName);

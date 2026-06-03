@@ -40,55 +40,69 @@ public class SessionManager : ISessionManager, IDisposable
 
     public void RemoveSession(long userId)
     {
-        _sessions.TryRemove(userId, out _);
+        _=_sessions.TryRemove(userId, out _);
         if (_sessionLocks.TryRemove(userId, out var sl))
+        {
             sl.Dispose();
+        }
     }
 
     private void CleanUpExpiredSessions()
     {
         if (_disposed)
+        {
             return;
+        }
 
         var now = DateTime.UtcNow;
 
         foreach (var key in _sessions.Keys.ToList())
         {
             if (!_sessions.TryGetValue(key, out var session) || now - session.LastActivity <= _sessionTimeout)
+            {
                 continue;
+            }
 
             if (!_sessionLocks.TryGetValue(key, out var sessionLock))
             {
-                _sessions.TryRemove(key, out _);
+                _=_sessions.TryRemove(key, out _);
                 continue;
             }
 
             if (!sessionLock.Wait(0))
+            {
                 continue;
+            }
 
             try
             {
                 if (_disposed)
                 {
-                    sessionLock.Release();
+                    _=sessionLock.Release();
                     return;
                 }
 
                 if (_sessions.TryGetValue(key, out var candidate) && now - candidate.LastActivity > _sessionTimeout)
                 {
-                    _sessions.TryRemove(key, out _);
+                    _=_sessions.TryRemove(key, out _);
                     if (_sessionLocks.TryRemove(key, out var removedLock))
+                    {
                         removedLock.Dispose();
+                    }
 
                     var messageIds = candidate.TakeTrackedMessages();
                     if (messageIds.Count > 0)
+                    {
                         _ = Task.Run(() => _dataService.SaveTrackedMessagesAsync(key, messageIds));
+                    }
                 }
             }
             finally
             {
                 if (!_disposed)
-                    sessionLock.Release();
+                {
+                    _=sessionLock.Release();
+                }
             }
         }
 
@@ -96,12 +110,16 @@ public class SessionManager : ISessionManager, IDisposable
         foreach (var key in _sessionLocks.Keys.ToList())
         {
             if (_disposed)
+            {
                 return;
+            }
 
             if (!_sessions.ContainsKey(key))
             {
                 if (_sessionLocks.TryRemove(key, out var orphanedLock))
+                {
                     orphanedLock.Dispose();
+                }
             }
         }
     }
@@ -109,17 +127,25 @@ public class SessionManager : ISessionManager, IDisposable
     public void Dispose()
     {
         if (_disposed)
+        {
             return;
+        }
 
         _disposed = true;
         _cleanupTimer.Dispose();
         foreach (var sl in _sessionLocks.Values)
+        {
             sl.Dispose();
+        }
+
         _sessionLocks.Clear();
     }
 
     private sealed class SessionLockReleaser(SemaphoreSlim sessionLock) : IDisposable
     {
-        public void Dispose() => sessionLock.Release();
+        public void Dispose()
+        {
+            _=sessionLock.Release();
+        }
     }
 }

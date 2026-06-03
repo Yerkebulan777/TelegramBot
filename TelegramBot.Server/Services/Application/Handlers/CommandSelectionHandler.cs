@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
-using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 
@@ -37,7 +36,9 @@ public sealed class CommandSelectionHandler(
         var session = context.Session;
 
         if (session.PendingCommand.Count == 0)
+        {
             return true;
+        }
 
         Logger.LogInformation("User {Username} ({UserId}) applied command selection: [{Commands}]",
             context.Username, context.UserId, string.Join(", ", session.PendingCommand));
@@ -51,7 +52,9 @@ public sealed class CommandSelectionHandler(
         var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
+        {
             session.TrackMessage(message.Id);
+        }
 
         return true;
     }
@@ -66,7 +69,9 @@ public sealed class CommandSelectionHandler(
 
         var cancelMsg = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
         if (cancelMsg != null)
+        {
             context.Session.TrackMessage(cancelMsg.Id);
+        }
 
         return true;
     }

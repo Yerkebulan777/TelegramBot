@@ -1,4 +1,3 @@
-#nullable enable
 
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;

@@ -1,4 +1,4 @@
-namespace TelegramBot.Core.Models;
+namespace TelegramBot.Core.Constants;
 
 /// <summary>Константы кодов команд, хранящихся в сессии пользователя.</summary>
 public static class CommandCodes

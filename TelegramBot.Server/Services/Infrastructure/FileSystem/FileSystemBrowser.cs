@@ -31,7 +31,7 @@ public class FileSystemBrowser : IFileSystemBrowser
         var session = _sessions.GetOrCreateSession(userId);
         session.PathMap.Clear();
 
-        bool atSectionLevel = string.Equals(
+        var atSectionLevel = string.Equals(
             Path.GetFileName(path), _options.ProjectDirectoryName,
             StringComparison.OrdinalIgnoreCase);
 
@@ -49,9 +49,9 @@ public class FileSystemBrowser : IFileSystemBrowser
 
         foreach (var dir in EnumerateProjectFolders(path))
         {
-            string token = NewToken();
+            var token = NewToken();
             session.PathMap[token] = dir;
-            string label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
+            var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
         }
 
@@ -65,9 +65,9 @@ public class FileSystemBrowser : IFileSystemBrowser
 
         foreach (var dir in EnumerateSectionFolders(path))
         {
-            string token = NewToken();
+            var token = NewToken();
             session.PathMap[token] = dir;
-            string label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
+            var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
         }
 
@@ -80,7 +80,9 @@ public class FileSystemBrowser : IFileSystemBrowser
         {
             var name = Path.GetFileName(dir)!;
             if (_folderRegex.IsMatch(name) && Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName)))
+            {
                 yield return dir;
+            }
         }
     }
 
@@ -89,7 +91,9 @@ public class FileSystemBrowser : IFileSystemBrowser
         foreach (var dir in Directory.GetDirectories(path))
         {
             if (ContainsSectionAcronym(Path.GetFileName(dir)!))
+            {
                 yield return dir;
+            }
         }
     }
 
@@ -101,10 +105,18 @@ public class FileSystemBrowser : IFileSystemBrowser
     private static bool ContainsSectionAcronym(string folderName)
     {
         foreach (var part in folderName.Split(_nameSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
             if (_sectionAcronyms.Contains(part))
+            {
                 return true;
+            }
+        }
+
         return false;
     }
 
-    private static string NewToken() => Guid.NewGuid().ToString("N")[..8];
+    private static string NewToken()
+    {
+        return Guid.NewGuid().ToString("N")[..8];
+    }
 }

@@ -11,8 +11,10 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 {
     private readonly IFileSystemBrowser _navigationService = fileNavigationService;
 
-    public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session) =>
-        _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
+    public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
+    {
+        return _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
+    }
 
     public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session)
     {
@@ -28,22 +30,30 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
     }
 
     public Task<ReplyKeyboardMarkup> GetCommandActionsReplyKeyboardAsync()
-        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Apply, ButtonTexts.Cancel));
+    {
+        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Apply, ButtonTexts.Cancel));
+    }
 
     public Task<ReplyKeyboardMarkup> GetProjectActionsReplyKeyboardAsync()
-        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
+    {
+        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
+    }
 
     public Task<ReplyKeyboardMarkup> GetSectionActionsReplyKeyboardAsync()
-        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Back, ButtonTexts.Cancel));
+    {
+        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Back, ButtonTexts.Cancel));
+    }
 
     public Task<ReplyKeyboardMarkup> GetStatusActionsReplyKeyboardAsync()
-        => Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Back));
+    {
+        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Back));
+    }
 
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
     {
         var buttons = new List<List<InlineKeyboardButton>>();
 
-        foreach (SessionsList session in sessionsList)
+        foreach (var session in sessionsList)
         {
             buttons.Add(
             [
@@ -79,7 +89,7 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             }
         };
 
-        foreach (SessionCommands sessionCommand in sessionCommands)
+        foreach (var sessionCommand in sessionCommands)
         {
             buttons.Add(
             [
@@ -113,8 +123,8 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         var buttons = commandOptions
             .Select(option =>
             {
-                bool isSelected = session.PendingCommand.Contains(option.CommandKey);
-                string text = isSelected ? $"✅ {option.Text}" : option.Text;
+                var isSelected = session.PendingCommand.Contains(option.CommandKey);
+                var text = isSelected ? $"✅ {option.Text}" : option.Text;
                 return new List<InlineKeyboardButton>
                 {
                     InlineKeyboardButton.WithCallbackData(text, option.CallbackData)
