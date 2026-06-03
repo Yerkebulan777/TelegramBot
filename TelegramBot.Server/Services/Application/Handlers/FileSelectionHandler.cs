@@ -126,7 +126,7 @@ public sealed class FileSelectionHandler(
 
         var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Задание добавлено в очередь.");
         if (clearKeyboardMessage != null)
-            session.AddBotMessageId(clearKeyboardMessage.Id);
+            session.TrackMessage(clearKeyboardMessage.Id);
 
         return true;
     }
@@ -138,7 +138,7 @@ public sealed class FileSelectionHandler(
         await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Выбор отменён.");
         var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор отменен.");
         if (clearKeyboardMessage != null)
-            context.Session.AddBotMessageId(clearKeyboardMessage.Id);
+            context.Session.TrackMessage(clearKeyboardMessage.Id);
         return true;
     }
 
@@ -150,7 +150,7 @@ public sealed class FileSelectionHandler(
 
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
-            context.Session.AddBotMessageId(message.Id);
+            context.Session.TrackMessage(message.Id);
     }
 
     private List<string> CollectRvtFiles(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)

@@ -51,7 +51,7 @@ public sealed class CommandSelectionHandler(
         var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
-            session.AddBotMessageId(message.Id);
+            session.TrackMessage(message.Id);
 
         return true;
     }
@@ -63,7 +63,7 @@ public sealed class CommandSelectionHandler(
         context.Session.IsFileSelectionActive = false;
 
         var cancelMsg = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
-        if (cancelMsg != null) context.Session.AddBotMessageId(cancelMsg.Id);
+        if (cancelMsg != null) context.Session.TrackMessage(cancelMsg.Id);
         await _outputService.DeleteMessageAsync(context.ChatId, context.MessageId);
 
         return true;

@@ -23,7 +23,7 @@ public class UserSession
     private readonly HashSet<string> _selectedFiles = [];
 
     private readonly object _messageLock = new();
-    private readonly List<int> _botMessageIds = [];
+    private readonly List<int> _trackedMessageIds = [];
 
     // Public read-only wrappers with thread-safe access
     public IReadOnlyList<string> PendingCommand
@@ -108,18 +108,18 @@ public class UserSession
         lock (_selectionLock) _selectedFiles.Clear();
     }
 
-    // Bot message tracking methods
-    public void AddBotMessageId(int messageId)
+    // Message tracking (user commands + bot responses)
+    public void TrackMessage(int messageId)
     {
-        lock (_messageLock) _botMessageIds.Add(messageId);
+        lock (_messageLock) _trackedMessageIds.Add(messageId);
     }
 
-    public IReadOnlyList<int> TakeAllBotMessageIds()
+    public IReadOnlyList<int> TakeTrackedMessages()
     {
         lock (_messageLock)
         {
-            var ids = new List<int>(_botMessageIds);
-            _botMessageIds.Clear();
+            var ids = new List<int>(_trackedMessageIds);
+            _trackedMessageIds.Clear();
             return ids;
         }
     }
@@ -138,7 +138,7 @@ public class UserSession
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;
         StatusMessageId = null;
-        lock (_messageLock) _botMessageIds.Clear();
+        lock (_messageLock) _trackedMessageIds.Clear();
     }
 
     /// <summary>

@@ -9,12 +9,14 @@ public class SessionManager : ISessionManager, IDisposable
     private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();
     private readonly TimeSpan _sessionTimeout;
+    private readonly IDataService _dataService;
     private readonly Timer _cleanupTimer;
     private bool _disposed;
 
-    public SessionManager(TimeSpan sessionTimeout)
+    public SessionManager(TimeSpan sessionTimeout, IDataService dataService)
     {
         _sessionTimeout = sessionTimeout;
+        _dataService = dataService;
         _cleanupTimer = new Timer(
             _ => CleanUpExpiredSessions(),
             null,
@@ -77,6 +79,10 @@ public class SessionManager : ISessionManager, IDisposable
                     _sessions.TryRemove(key, out _);
                     if (_sessionLocks.TryRemove(key, out var removedLock))
                         removedLock.Dispose();
+
+                    var messageIds = candidate.TakeTrackedMessages();
+                    if (messageIds.Count > 0)
+                        _ = Task.Run(() => _dataService.SaveTrackedMessagesAsync(key, messageIds));
                 }
             }
             finally

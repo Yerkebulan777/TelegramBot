@@ -160,7 +160,7 @@ public sealed class SessionManagementHandler(
 
         var clearKeyboardMessage = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Сессии:");
         if (clearKeyboardMessage != null)
-            context.Session.AddBotMessageId(clearKeyboardMessage.Id);
+            context.Session.TrackMessage(clearKeyboardMessage.Id);
     }
 
     private async Task SendStatusActionsReplyKeyboardAsync(CallbackContext context)
@@ -168,7 +168,7 @@ public sealed class SessionManagementHandler(
         ReplyKeyboardMarkup replyKeyboard = await _keyboardBuilder.GetStatusActionsReplyKeyboardAsync();
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
-            context.Session.AddBotMessageId(message.Id);
+            context.Session.TrackMessage(message.Id);
     }
 
     private static string BuildStatusReply(SessionStatus sessionStatus)

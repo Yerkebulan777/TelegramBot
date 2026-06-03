@@ -350,7 +350,7 @@ public sealed class SlashCommandService(
     {
         Message? msg = await task;
         if (msg != null)
-            session.AddBotMessageId(msg.Id);
+            session.TrackMessage(msg.Id);
         return msg;
     }
 
