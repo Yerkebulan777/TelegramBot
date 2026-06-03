@@ -72,6 +72,8 @@ Telegram API -> TelegramBotHostedService (polling)
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 
+Полная спецификация алгоритма: **[Docs/command-execution-algorithm.md](Docs/command-execution-algorithm.md)**
+
 ```
 SlashCommandService.ConfirmFileSelectionAsync()
     │
