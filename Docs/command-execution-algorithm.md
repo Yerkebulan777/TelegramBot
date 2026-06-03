@@ -781,13 +781,13 @@ public class Command
     public int SessionId { get; set; }
     public string Code { get; set; } = null!;
     public string Status { get; set; } = "pending";
-    public string Partition { get; set; } = "default";  // Новое
-    public int Priority { get; set; } = 0;               // Новое
+    public string Partition { get; set; } = null!;
+    public int Priority { get; set; } = 0;
     public DateTime CreatedAt { get; set; }
-    public DateTime? StartedAt { get; set; }             // Новое
+    public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string? ErrorMessage { get; set; }
-    public int? ProcessId { get; set; }                  // Новое
+    public int? ProcessId { get; set; }
 }
 ```
 
