@@ -55,11 +55,6 @@ public class FileSystemBrowser : IFileSystemBrowser
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
         }
 
-        buttons.Add([
-            InlineKeyboardButton.WithCallbackData("✅ Подтвердить", CallbackPrefixes.ApplyFiles),
-            InlineKeyboardButton.WithCallbackData("❌ Отмена", CallbackPrefixes.CancelFileSelection)
-        ]);
-
         return new InlineKeyboardMarkup(buttons);
     }
 
@@ -75,15 +70,6 @@ public class FileSystemBrowser : IFileSystemBrowser
             string label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
         }
-
-        string rootToken = NewToken();
-        session.PathMap[rootToken] = _options.RootPath;
-
-        buttons.Add([
-            InlineKeyboardButton.WithCallbackData("✅ Подтвердить", CallbackPrefixes.ApplyFiles),
-            InlineKeyboardButton.WithCallbackData("⬅️ Назад", $"{CallbackPrefixes.GoToParent}{rootToken}"),
-            InlineKeyboardButton.WithCallbackData("❌ Отмена", CallbackPrefixes.CancelFileSelection)
-        ]);
 
         return new InlineKeyboardMarkup(buttons);
     }

@@ -51,6 +51,10 @@ public sealed class FileNavigationHandler(
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
+        var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
+        if (message != null)
+            session.AddBotMessageId(message.Id);
 
         return true;
     }

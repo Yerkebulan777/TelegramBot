@@ -115,7 +115,8 @@ public sealed class SlashCommandService(
                 session.IsInStatusView = true;
                 var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
                 InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-                _ = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
+                Message? statusMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
+                session.StatusMessageId = statusMessage?.Id;
                 break;
 
             case "/automation":
@@ -141,38 +142,169 @@ public sealed class SlashCommandService(
     private async Task<bool> HandleCommandSelectionActionsAsync(
         long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
     {
-        if (messageText is ButtonTexts.ExportApply or ButtonTexts.AutomationApply)
+        if (messageText == ButtonTexts.Apply ||
+            (messageText == ButtonTexts.Confirm && !session.IsFileSelectionActive && session.PendingCommand.Count > 0))
         {
-            if (session.PendingCommand.Count == 0)
-            {
-                logger.LogDebug("User {Username} ({UserId}) tried to apply with no commands selected", username, userId);
-                _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду.");
-                return true;
-            }
-
-            logger.LogInformation("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
-                username, userId, string.Join(", ", session.PendingCommand));
-            await _outputService.ClearChatHistoryAsync(userId, session);
-            session.CurrentPath = _options.RootPath;
-            session.IsFileSelectionActive = true;
-            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-            Message? selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
-            session.FileSelectionMessageId = selectionMessage?.Id;
-            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "​"), session);
+            await ApplyCommandSelectionAsync(userId, username, session);
             return true;
         }
 
-        if (messageText == ButtonTexts.Cancel)
+        if (messageText == ButtonTexts.Confirm && session.IsFileSelectionActive)
         {
-            session.ClearPendingCommands();
-            session.IsFileSelectionActive = false;
-            logger.LogDebug("User {Username} ({UserId}) cancelled command selection", username, userId);
+            await ConfirmFileSelectionAsync(userId, username, session, cancellationToken);
+            return true;
+        }
+
+        if (messageText == ButtonTexts.Back)
+        {
+            if (session.IsFileSelectionActive)
+            {
+                await BackInFileSelectionAsync(userId, username, session);
+                return true;
+            }
+
+            if (session.StatusMessageId.HasValue)
+            {
+                await BackToSessionsListAsync(userId, username, session);
+                return true;
+            }
+        }
+
+        if (messageText == ButtonTexts.Cancel && (session.IsFileSelectionActive || session.PendingCommand.Count > 0))
+        {
+            logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
             await _outputService.ClearChatHistoryAsync(userId, session);
-            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор команд отменен."), session);
+            session.Reset(_options.RootPath);
+            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор отменен."), session);
             return true;
         }
 
         return false;
+    }
+
+    private async Task ApplyCommandSelectionAsync(long userId, string username, UserSession session)
+    {
+        if (session.PendingCommand.Count == 0)
+        {
+            logger.LogDebug("User {Username} ({UserId}) tried to apply with no commands selected", username, userId);
+            _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду.");
+            return;
+        }
+
+        logger.LogInformation("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
+            username, userId, string.Join(", ", session.PendingCommand));
+
+        await _outputService.ClearChatHistoryAsync(userId, session);
+        session.CurrentPath = _options.RootPath;
+        session.IsFileSelectionActive = true;
+
+        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+        Message? selectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
+        session.FileSelectionMessageId = selectionMessage?.Id;
+        await SendFileActionsReplyKeyboardAsync(userId, session);
+    }
+
+    private async Task ConfirmFileSelectionAsync(long userId, string username, UserSession session, CancellationToken cancellationToken)
+    {
+        if (!session.FileSelectionMessageId.HasValue)
+        {
+            _ = await _outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено.");
+            return;
+        }
+
+        if (IsAtProjectLevel(session))
+        {
+            string? selectedProject = session.SelectedFiles.FirstOrDefault();
+            if (selectedProject == null)
+            {
+                _ = await _outputService.SendMessageAsync(userId, "Сначала выберите проект.");
+                return;
+            }
+
+            session.CurrentPath = Path.Combine(selectedProject, _options.ProjectDirectoryName);
+            session.ClearSelectedFiles();
+
+            logger.LogInformation("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT",
+                username, userId, Path.GetFileName(selectedProject));
+
+            InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+            await _outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
+            await SendFileActionsReplyKeyboardAsync(userId, session);
+            return;
+        }
+
+        IReadOnlySet<string> selectedSections = session.SelectedFiles;
+        if (selectedSections.Count == 0)
+        {
+            _ = await _outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один раздел.");
+            return;
+        }
+
+        logger.LogInformation(
+            "User {Username} ({UserId}) submitting job: commands=[{Commands}], sections={Count}",
+            username, userId, string.Join(", ", session.PendingCommand), selectedSections.Count);
+
+        List<string> filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
+
+        await _dataService.CreateSessionWithCommandsAsync(
+            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
+
+        string queueReply = BuildQueueReply(session);
+        await _outputService.EditMessageReplyTextAsync(userId, session.FileSelectionMessageId.Value, queueReply);
+
+        session.ResetNavigation(_options.RootPath);
+        session.ClearPendingCommands();
+        session.IsFileSelectionActive = false;
+
+        _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Задание добавлено в очередь."), session);
+    }
+
+    private async Task BackInFileSelectionAsync(long userId, string username, UserSession session)
+    {
+        if (!session.FileSelectionMessageId.HasValue)
+        {
+            _ = await _outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено.");
+            return;
+        }
+
+        if (IsAtProjectLevel(session))
+        {
+            _ = await _outputService.SendMessageAsync(userId, "Вы уже в списке проектов.");
+            return;
+        }
+
+        session.ClearSelectedFiles();
+        session.CurrentPath = _options.RootPath;
+
+        logger.LogInformation("User {Username} ({UserId}) returned to project selection", username, userId);
+
+        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
+        await _outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
+        await SendFileActionsReplyKeyboardAsync(userId, session);
+    }
+
+    private async Task BackToSessionsListAsync(long userId, string username, UserSession session)
+    {
+        if (!session.StatusMessageId.HasValue)
+            return;
+
+        logger.LogInformation("User {Username} ({UserId}) returning to sessions list", username, userId);
+
+        var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
+        InlineKeyboardMarkup keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
+        await _outputService.EditMessageTextWithKeyboardAsync(userId, session.StatusMessageId.Value, "Сессии:", keyboard);
+
+        session.IsInStatusView = true;
+        _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Сессии:"), session);
+    }
+
+    private async Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
+    {
+        ReplyKeyboardMarkup replyKeyboard = IsAtProjectLevel(session)
+            ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+            : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+
+        _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard), session);
     }
 
     private async Task StartCommandSelectionAsync(long userId, UserSession session, bool isAutomation, CancellationToken cancellationToken)
@@ -184,12 +316,10 @@ public sealed class SlashCommandService(
             ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
             : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
 
-        await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
+        ReplyKeyboardMarkup replyKeyboard = await _keyboardBuilder.GetCommandActionsReplyKeyboardAsync();
 
-        ReplyKeyboardMarkup replyKeyboard = isAutomation
-            ? await _keyboardBuilder.GetAutomationActionsReplyKeyboardAsync()
-            : await _keyboardBuilder.GetExportActionsReplyKeyboardAsync();
-
+        Message? commandSelectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
+        session.CommandSelectionMessageId = commandSelectionMessage?.Id;
         await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
     }
 
@@ -234,5 +364,48 @@ public sealed class SlashCommandService(
             text = text[..mentionIndex];
 
         return text.ToLowerInvariant();
+    }
+
+    private bool IsAtProjectLevel(UserSession session) =>
+        !string.Equals(Path.GetFileName(session.CurrentPath), _options.ProjectDirectoryName,
+            StringComparison.OrdinalIgnoreCase);
+
+    private List<string> CollectRvtFiles(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
+    {
+        var files = new List<string>();
+
+        foreach (string sectionPath in sectionPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string rvtDir = _options.GetRvtPath(sectionPath);
+            if (!Directory.Exists(rvtDir))
+            {
+                logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
+                continue;
+            }
+
+            foreach (string file in Directory.EnumerateFiles(rvtDir))
+            {
+                if (_options.IsRevitFile(file))
+                    files.Add(file);
+            }
+        }
+
+        return files;
+    }
+
+    private static string BuildQueueReply(UserSession session)
+    {
+        var sb = new StringBuilder("Команда:\n");
+        foreach (string cmd in session.PendingCommandName)
+            sb.Append("✅ ").Append(cmd).Append('\n');
+
+        sb.Append("Добавлены файлы:\n");
+        foreach (string file in session.SelectedFiles)
+            sb.Append("✅ ").Append(Path.GetFileName(file)).Append('\n');
+
+        sb.Append("\n/status для проверки статуса команды");
+        return sb.ToString();
     }
 }

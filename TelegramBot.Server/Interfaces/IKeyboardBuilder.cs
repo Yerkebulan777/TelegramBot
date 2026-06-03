@@ -7,8 +7,10 @@ public interface IKeyboardBuilder
 {
     Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session);
     Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session);
-    Task<ReplyKeyboardMarkup> GetExportActionsReplyKeyboardAsync();
-    Task<ReplyKeyboardMarkup> GetAutomationActionsReplyKeyboardAsync();
+    Task<ReplyKeyboardMarkup> GetCommandActionsReplyKeyboardAsync();
+    Task<ReplyKeyboardMarkup> GetProjectActionsReplyKeyboardAsync();
+    Task<ReplyKeyboardMarkup> GetSectionActionsReplyKeyboardAsync();
+    Task<ReplyKeyboardMarkup> GetStatusActionsReplyKeyboardAsync();
     Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsStatus);
     Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId);
     Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId);

@@ -44,8 +44,10 @@ public class UserSession
     /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
     public bool IsInStatusView { get; set; }
     public int SessionId { get; set; }
+    public int? CommandSelectionMessageId { get; set; }
     public bool IsFileSelectionActive { get; set; }
     public int? FileSelectionMessageId { get; set; }
+    public int? StatusMessageId { get; set; }
 
     // Command manipulation methods
     public void AddPendingCommand(string code, string displayName)
@@ -130,8 +132,12 @@ public class UserSession
         ClearSelectedFiles();
         ClearPendingCommands();
         CurrentPath = rootPath;
+        IsInStatusView = false;
+        SessionId = 0;
+        CommandSelectionMessageId = null;
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;
+        StatusMessageId = null;
         lock (_messageLock) _botMessageIds.Clear();
     }
 

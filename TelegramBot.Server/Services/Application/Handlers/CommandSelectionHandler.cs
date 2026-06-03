@@ -43,9 +43,15 @@ public sealed class CommandSelectionHandler(
             context.Username, context.UserId, string.Join(", ", session.PendingCommand));
 
         session.CurrentPath = _options.RootPath;
+        session.IsFileSelectionActive = true;
+        session.FileSelectionMessageId = context.MessageId;
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
+        var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
+        if (message != null)
+            session.AddBotMessageId(message.Id);
 
         return true;
     }
@@ -54,6 +60,7 @@ public sealed class CommandSelectionHandler(
     {
         Logger.LogInformation("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
         context.Session.ClearPendingCommands();
+        context.Session.IsFileSelectionActive = false;
 
         var cancelMsg = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
         if (cancelMsg != null) context.Session.AddBotMessageId(cancelMsg.Id);
