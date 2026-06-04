@@ -20,7 +20,7 @@ public static class DependencyInjectionExtensions
             .AddApplicationServices()
             .AddInfrastructureServices()
             .AddConfiguration(configuration)
-            .AddTelegramServices(configuration);
+            .AddTelegramServices();
 
         return services;
     }
@@ -45,8 +45,7 @@ public static class DependencyInjectionExtensions
         _ = services.AddSingleton<ICallbackHandler, AccessRequestHandler>();
         _ = services.AddSingleton<ICallbackHandler, FileNavigationHandler>();
         _ = services.AddSingleton<ICallbackHandler, FileSelectionHandler>();
-        _ = services.AddSingleton<ICallbackHandler, ExportCommandHandler>();
-        _ = services.AddSingleton<ICallbackHandler, AutomationCommandHandler>();
+        _ = services.AddSingleton<ICallbackHandler, CommandToggleHandler>();
         _ = services.AddSingleton<ICallbackHandler, SessionManagementHandler>();
         _ = services.AddSingleton<ICallbackHandler, CommandSelectionHandler>();
         _ = services.AddSingleton<ICallbackDispatcher, CallbackDispatcher>();
@@ -72,7 +71,7 @@ public static class DependencyInjectionExtensions
         return services;
     }
 
-    private static IServiceCollection AddTelegramServices(this IServiceCollection services, IConfiguration configuration)
+    private static IServiceCollection AddTelegramServices(this IServiceCollection services)
     {
         _ = services.AddSingleton<ITelegramBotClient>(serviceProvider =>
         {

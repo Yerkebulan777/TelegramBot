@@ -10,6 +10,7 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Models;
 
 namespace TelegramBot.Server.Services.Application;
 
@@ -116,7 +117,7 @@ public sealed class SlashCommandService(
         {
             case "/export":
                 logger.LogDebug("Executing /export for {Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, isAutomation: false);
+                await StartCommandSelectionAsync(userId, session, CommandGroup.Export);
                 break;
 
             case "/status":
@@ -131,7 +132,7 @@ public sealed class SlashCommandService(
 
             case "/automation":
                 logger.LogDebug("Executing /automation for {Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, isAutomation: true);
+                await StartCommandSelectionAsync(userId, session, CommandGroup.Automation);
                 break;
 
             case "/help":
@@ -332,14 +333,12 @@ public sealed class SlashCommandService(
         _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard), session);
     }
 
-    private async Task StartCommandSelectionAsync(long userId, UserSession session, bool isAutomation)
+    private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
     {
         session.Reset(_options.RootPath);
         session.IsFileSelectionActive = false;
 
-        var commandKeyboard = isAutomation
-            ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
-            : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
+        var commandKeyboard = await _keyboardBuilder.GetCommandKeyboardAsync(commandGroup, session);
 
         var replyKeyboard = await _keyboardBuilder.GetCommandActionsReplyKeyboardAsync();
 
