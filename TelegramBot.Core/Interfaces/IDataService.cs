@@ -61,12 +61,9 @@ public interface IDataService
     /// Атомарно захватывает команды со статусом 'pending' для выполнения воркером.
     /// Использует SELECT ... FOR UPDATE SKIP LOCKED для защиты от конкурентного доступа.
     /// После захвата статус меняется на 'processing' и устанавливается Lease (TTL).
+    /// Пропускает команды, у которых NextRetryAt > NOW().
     /// </summary>
-    /// <remarks>
-    /// TODO (ОБЯЗАТЕЛЬНО): Добавить поддержку партиций — выборка должна учитывать
-    /// балансировку между партициями, а не только глобальный приоритет.
-    /// </remarks>
-    Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50);
+    Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5);
 
     /// <summary>Освобождает команды с истёкшим Lease (crash worker recovery).</summary>
     Task ReleaseExpiredLeasesAsync();
@@ -74,11 +71,26 @@ public interface IDataService
     /// <summary>Обновляет статус команды (done, failed, pending).</summary>
     Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null);
 
+    /// <summary>
+    /// Планирует повторную попытку выполнения команды.
+    /// Устанавливает Status='pending', инкрементирует RetryCount,
+    /// устанавливает NextRetryAt (экспоненциальная задержка),
+    /// сохраняет ErrorMessage последней ошибки.
+    /// Возвращает новый RetryCount.
+    /// </summary>
+    Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage);
+
     /// <summary>Освобождает команды с истёкшим таймаутом выполнения.</summary>
     Task ReleaseTimeoutCommandsAsync(int timeoutSeconds);
 
     /// <summary>Уведомляет Worker-ов о новых командах через Postgres LISTEN/NOTIFY.</summary>
     Task NotifyNewCommandsAsync(int sessionId);
+
+    /// <summary>
+    /// Уведомляет Server о завершении/ошибке команды через Postgres LISTEN/NOTIFY.
+    /// Payload: UserId|CommandId|CommandText|Status|ErrorMessage
+    /// </summary>
+    Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? errorMessage);
 
     /// <summary>Сохраняет ID сообщений для отложенной очистки (прерванный диалог).</summary>
     Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds);

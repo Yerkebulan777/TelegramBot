@@ -12,4 +12,5 @@ public class PendingCommand
     public string? Username { get; set; }
     public string? Partition { get; set; }
     public int Priority { get; set; }
+    public int RetryCount { get; set; }
 }

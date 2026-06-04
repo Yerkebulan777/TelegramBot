@@ -42,7 +42,9 @@ internal static partial class SqlQueries
                 Partition TEXT,
                 Priority INTEGER NOT NULL DEFAULT 50,
                 ProcessId INTEGER,
-                ErrorMessage TEXT
+                ErrorMessage TEXT,
+                RetryCount INTEGER NOT NULL DEFAULT 0,
+                NextRetryAt TIMESTAMPTZ
             );";
 
         internal const string CreateTrackedMessagesTable = @"

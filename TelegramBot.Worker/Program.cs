@@ -1,4 +1,5 @@
 using Serilog;
+using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Data;
 using TelegramBot.Worker.Services;
@@ -24,6 +25,9 @@ public static class Program
                 .ConfigureServices((context, services) =>
                 {
                     _ = services.AddSingleton<IDataService, PostgresDataService>();
+
+                    _ = services.Configure<WorkerOptions>(context.Configuration.GetSection(WorkerOptions.SectionName));
+
                     _ = services.AddHostedService<CommandExecutionService>();
                 })
                 .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration

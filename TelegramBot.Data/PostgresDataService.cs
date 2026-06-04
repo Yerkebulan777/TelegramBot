@@ -268,13 +268,13 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
     }
 
-    public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50)
+    public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
-        var leaseExpiry = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds();
+        var leaseExpiry = DateTimeOffset.UtcNow.AddMinutes(leaseTimeoutMinutes).ToUnixTimeSeconds();
 
         var result = await conn.QueryAsync<PendingCommand>(
             SqlQueries.Commands.ClaimAndReturn,
@@ -285,19 +285,39 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return result.ToList().AsReadOnly();
     }
 
+
     public async Task ReleaseExpiredLeasesAsync()
     {
+        const int lockId = 1_234_567; // namespace: telegram_bot_lease_cleanup
+
         try
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            var released = await conn.ExecuteAsync(
-                SqlQueries.Commands.ReleaseExpiredLeases,
-                new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
 
-            if (released > 0)
+            var locked = await conn.QuerySingleAsync<bool>(
+                SqlQueries.Commands.TryAdvisoryLock, new { LockId = lockId });
+
+            if (!locked)
             {
-                logger.LogInformation("Released {Count} expired leases", released);
+                logger.LogDebug("Advisory lock not acquired — another worker is cleaning leases");
+                return;
+            }
+
+            try
+            {
+                var released = await conn.ExecuteAsync(
+                    SqlQueries.Commands.ReleaseExpiredLeases,
+                    new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+
+                if (released > 0)
+                {
+                    logger.LogInformation("Released {Count} expired leases", released);
+                }
+            }
+            finally
+            {
+                _=await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = lockId });
             }
         }
         catch (Exception e)
@@ -325,23 +345,67 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task ReleaseTimeoutCommandsAsync(int timeoutSeconds)
     {
+        const int lockId = 1_234_567; // namespace: telegram_bot_lease_cleanup
+
         try
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            var released = await conn.ExecuteAsync(
-                SqlQueries.Commands.ReleaseTimeoutCommands,
-                new { TimeoutSeconds = timeoutSeconds });
 
-            if (released > 0)
+            var locked = await conn.QuerySingleAsync<bool>(
+                SqlQueries.Commands.TryAdvisoryLock, new { LockId = lockId });
+
+            if (!locked)
             {
-                logger.LogInformation("Released {Count} commands due to timeout", released);
+                logger.LogDebug("Advisory lock not acquired — another worker is cleaning timed out commands");
+                return;
+            }
+
+            try
+            {
+                var released = await conn.ExecuteAsync(
+                    SqlQueries.Commands.ReleaseTimeoutCommands,
+                    new { TimeoutSeconds = timeoutSeconds });
+
+                if (released > 0)
+                {
+                    logger.LogInformation("Released {Count} commands due to timeout", released);
+                }
+            }
+            finally
+            {
+                _=await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = lockId });
             }
         }
         catch (Exception e)
         {
             logger.LogWarning(e, "Failed to release timeout commands");
         }
+    }
+
+    public async Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? errorMessage)
+    {
+        try
+        {
+            var payload = $"{userId}|{commandId}|{commandText}|{status}|{errorMessage ?? ""}";
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            _=await conn.ExecuteAsync("NOTIFY command_completed, @Payload", new { Payload = payload });
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to send command_completed NOTIFY for command {CommandId}", commandId);
+        }
+    }
+
+    public async Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        var retryCount = await conn.QuerySingleAsync<int>(
+            SqlQueries.Commands.ScheduleRetry,
+            new { CommandId = commandId, NextRetryAt = nextRetryAt, ErrorMessage = errorMessage });
+        return retryCount;
     }
 
     public async Task NotifyNewCommandsAsync(int sessionId)

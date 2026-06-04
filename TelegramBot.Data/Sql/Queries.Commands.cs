@@ -43,16 +43,6 @@ internal static partial class SqlQueries
               AND s.Status != 'Deleted'
             LIMIT 1;";
 
-        internal const string GetPending = @"
-            SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder,
-                   s.UserId, s.Username
-            FROM Commands c
-            JOIN Sessions s ON s.SessionId = c.SessionId
-            WHERE c.Status = 'pending'
-              AND s.Status != 'Deleted'
-            ORDER BY c.SessionId, c.ExecutionOrder
-            LIMIT @Limit;";
-
         internal const string UpdateStatus = @"
             UPDATE Commands
             SET Status = @Status,
@@ -64,14 +54,16 @@ internal static partial class SqlQueries
                 ErrorMessage = @ErrorMessage
             WHERE CommandId = @CommandId;";
 
+
         internal const string ClaimAndReturn = @"
             WITH selected AS (
                 SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder,
-                       s.UserId, s.Username, c.Partition, c.Priority
+                       s.UserId, s.Username, c.Partition, c.Priority, c.RetryCount
                 FROM Commands c
                 JOIN Sessions s ON s.SessionId = c.SessionId
                 WHERE c.Status = 'pending'
                   AND s.Status != 'Deleted'
+                  AND (c.NextRetryAt IS NULL OR c.NextRetryAt <= NOW())
                 ORDER BY c.Priority DESC, c.CreatedAt ASC
                 LIMIT @Limit
                 FOR UPDATE SKIP LOCKED
@@ -84,7 +76,22 @@ internal static partial class SqlQueries
             WHERE c.CommandId = selected.CommandId
             RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
                       selected.FilePath, selected.ExecutionOrder, selected.UserId, 
-                      selected.Username, selected.Partition, selected.Priority;";
+                      selected.Username, selected.Partition, selected.Priority, selected.RetryCount;";
+
+        internal const string ScheduleRetry = @"
+            UPDATE Commands
+            SET Status = 'pending',
+                Lease = NULL,
+                StartedAt = NULL,
+                RetryCount = COALESCE(RetryCount, 0) + 1,
+                NextRetryAt = @NextRetryAt,
+                ErrorMessage = @ErrorMessage
+            WHERE CommandId = @CommandId
+            RETURNING RetryCount;";
+
+        internal const string TryAdvisoryLock = "SELECT pg_try_advisory_lock(@LockId);";
+
+        internal const string ReleaseAdvisoryLock = "SELECT pg_advisory_unlock(@LockId);";
 
         internal const string ReleaseExpiredLeases = @"
             UPDATE Commands
@@ -105,6 +112,6 @@ internal static partial class SqlQueries
                 ErrorMessage = 'Timeout: process exceeded maximum execution time',
                 Lease = NULL
             WHERE Status = 'processing'
-              AND StartedAt < NOW() - INTERVAL '@TimeoutSeconds seconds';";
+              AND StartedAt < NOW() - (@TimeoutSeconds || ' seconds')::INTERVAL;";
     }
 }

@@ -9,7 +9,7 @@
 - **Lease-механизм** — аренда команды воркером с TTL для защиты от сбоев
 - **Таймауты** — принудительное завершение процессов при превышении лимита времени
 - **Приоритеты** — команды с более высоким приоритетом выполняются первыми
-- **Партиции (TODO)** — логические очереди для изоляции типов задач (резерв в БД готов)
+- **Партиции** — приоритетные уровни: команды с высоким приоритетом имеют выделенные слоты выполнения
 
 ---
 
@@ -48,34 +48,37 @@
          │                        │                          │
 ```
 
-### Концепция пула процессов
+### Концепция priority-based партиций
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Служба выполнения команд                     │
 │                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Пул процессов (N слотов)                   │   │
-│  │  ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐     │   │
-│  │  │ Слот 1│ │ Слот 2│ │ Слот 3│ │ Слот 4│ │ Слот 5│     │   │
-│  │  │Процесс│ │Процесс│ │Процесс│ │Процесс│ │Процесс│     │   │
-│  │  └───────┘ └───────┘ └───────┘ └───────┘ └───────┘     │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│  ┌────────────────────────┐ ┌──────────────┐ ┌──────────────┐  │
+│  │  Priority >= 80 (High) │ │Priority>=40  │ │Priority < 40 │  │
+│  │  SemaphoreSlim(5)      │ │SemaphoreSlim(3)│ SemaphoreSlim(1)│ │
+│  │  ┌───┐┌───┐┌───┐┌───┐ │ │ ┌───┐┌───┐  │ │ ┌───┐       │  │
+│  │  │ P ││ P ││ P ││ P │ │ │ │ P ││ P │  │ │ │ P │       │  │
+│  │  └───┘└───┘└───┘└───┘ │ │ └───┘└───┘  │ │ └───┘       │  │
+│  └────────────────────────┘ └──────────────┘ └──────────────┘  │
 │                           │                                     │
 │                           ▼                                     │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Очередь команд (приоритеты)                │   │
-│  │  [команда 1] → [команда 2] → [команда 3] → ...         │   │
+│  │        Очередь команд (Priority DESC, общая)            │   │
+│  │  [P=90] → [P=85] → [P=70] → [P=50] → [P=30] → ...     │   │
 │  │     (Priority DESC, CreatedAt ASC)                      │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
+│  Маршрутизация: cmd.Priority >= 80 → Partition 0 (High)       │
+│                 80 > cmd.Priority >= 40 → Partition 1 (Medium)  │
+│                 cmd.Priority < 40 → Partition 2 (Low)           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Преимущества пула процессов:**
-- Защита от перегрузки CPU/RAM — не более N процессов одновременно
-- Контроль нагрузки на внешние системы (CAD/CAE)
-- Graceful shutdown — завершение активных процессов при остановке воркера
+**Преимущества priority-based партиций:**
+- Высокоприоритетные команды имеют выделенные слоты и не ждут за низкоприоритетными
+- Гарантированная пропускная способность для критических задач
+- Low-priority команды не блокируют High-priority (даже если очередь забита)
 
 ---
 
@@ -99,7 +102,7 @@
 
 - Установление подключения к базе данных
 - Подписка на уведомление через `LISTEN new_command`
-- Инициализация пула процессов (SemaphoreSlim с лимитом N=5)
+- Инициализация per-partition пулов (`SortedDictionary<int, SemaphoreSlim>`) из конфигурации (`WorkerOptions.Partitions`)
 - Очистка истёкших Lease (crash recovery упавших воркеров)
 
 ### 2. Основной цикл обработки
@@ -133,24 +136,30 @@
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Параллельная обработка с ограничением пула                    │
-│  - SemaphoreSlim.WaitAsync() для каждого слота                │
-│  - Максимум 5 одновременных процессов                           │
+│  Параллельная обработка с priority-based пулами                │
+│  - Определение партиции по приоритету команды:                  │
+│    _partitionPools.Keys.Reverse().First(t => cmd.Priority >= t) │
+│  - Ожидание слота в своей партиции:                             │
+│    _partitionPools[threshold].WaitAsync()                       │
+│  - Каждая партиция (уровень приоритета) имеет свой лимит       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Выполнение одной команды:                                      │
-│  1. Создать ProcessStartInfo (Revit/Navisworks/AI)             │
-│  2. process.Start()                                             │
-│  3. Сохранить в _activeProcesses (трекинг)                     │
-│  4. Обновить статус: 'processing', ProcessId = PID             │
-│  5. WaitForExit с таймаутом (1 час)                             │
-│  6. Если таймаут → process.Kill(true) (дерево процессов)       │
-│  7. Если exit_code == 0: статус = 'Done'                       │
-│  8. Иначе: статус = 'Failed' + errorMessage                    │
-│  9. _activeProcesses.Remove()                                   │
-│  10. SemaphoreSlim.Release()                                    │
+│  1. Валидация FilePath                                         │
+│  2. Создать ProcessStartInfo из конфигурации команды           │
+│  3. process.Start()                                             │
+│  4. Сохранить в _activeProcesses (трекинг)                     │
+│  5. Обновить статус: 'processing', ProcessId = PID             │
+│  6. Асинхронное чтение stdout/stderr (BeginOutputReadLine)     │
+│  7. WaitForExit с таймаутом (ProcessTimeoutSeconds)             │
+│  8. Логирование stdout/stderr (обрезка >4KB)                   │
+│  9. Если таймаут → process.Kill(true)                          │
+│  10. Если exit_code == 0: статус = 'Done'                      │
+│  11. Иначе: статус = 'Failed' + errorMessage                   │
+│  12. _activeProcesses.Remove()                                  │
+│  13. partitionPool.Release() (в finally)                       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
@@ -159,22 +168,30 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. Управление пулом процессов
+### 3. Управление per-partition пулами процессов
 
-**Назначение:** Ограничение количества одновременно выполняемых процессов.
+**Назначение:** Ограничение количества одновременно выполняемых процессов для каждой партиции отдельно.
 
 **Принцип работы:**
-- `SemaphoreSlim` с начальным счётчиком `MaxConcurrentProcesses` (5)
-- Перед запуском процесса: `await _processPool.WaitAsync(ct)`
-- После завершения (в `finally`): `_processPool.Release()`
-- Пул общий для всех типов команд
+- `SortedDictionary<int, SemaphoreSlim>` — карта threshold приоритета → пул
+- Инициализация из `WorkerOptions.Partitions` при старте воркера
+- Ключ словаря = минимальный `Priority` (threshold), значение = `SemaphoreSlim`
+- Перед запуском процесса: `_partitionPools[threshold].WaitAsync(ct)`
+- После завершения (в `finally`): `_partitionPools[threshold].Release()`
+
+**Определение партиции команды:**
+- Находится highest threshold, где `cmd.Priority >= threshold`
+- `_partitionPools.Keys.Reverse().FirstOrDefault(t => cmd.Priority >= t)`
+- По умолчанию: Priority>=80 → pool(5), Priority>=40 → pool(3), Priority<40 → pool(1)
+- Если threshold не найден (например, отрицательный Priority) — используется минимальный threshold (0)
 
 **Алгоритм захвата слота:**
-1. `WaitAsync` блокирует поток, пока слот не освободится
-2. При отмене (CancellationToken) выбрасывает `OperationCanceledException`
+1. `threshold = _partitionPools.Keys.Reverse().First(t => cmd.Priority >= t)`
+2. `_partitionPools[threshold].WaitAsync()` блокирует поток, пока слот не освободится
+3. При отмене (CancellationToken) выбрасывает `OperationCanceledException`
 
 **Алгоритм освобождения слота:**
-1. В блоке `finally` (гарантированно)
+1. В блоке `finally` `ProcessWithPoolAsync` (гарантированно)
 2. Даже если процесс упал с исключением
 
 ### 4. Трекинг активных процессов
@@ -183,19 +200,31 @@
 
 **Реализация:**
 ```csharp
-private readonly ConcurrentDictionary<int, ProcessContext> _activeProcesses;
+private readonly ConcurrentDictionary<int, Process> _activeProcesses;
 
 // Перед запуском
-_activeProcesses[cmd.CommandId] = new ProcessContext(process, ...);
+_activeProcesses[cmd.CommandId] = process;
 
 // После завершения
 _activeProcesses.TryRemove(cmd.CommandId, out _);
+
+// Graceful shutdown
+private async Task WaitForActiveProcessesAsync()
+{
+    var timeout = TimeSpan.FromSeconds(30);
+    var start = DateTime.UtcNow;
+    while (_activeProcesses.Count > 0 && ... < timeout)
+    {
+        await Task.Delay(500);
+    }
+    foreach (var process in _activeProcesses.Values)
+    {
+        try { process.Kill(true); } catch { }
+    }
+}
 ```
 
-**ProcessContext содержит:**
-- `Process` — для доступа к PID и Kill()
-- `CommandId` — для логирования
-- `Stopwatch` — для измерения длительности
+`Process` хранится напрямую, без класса-обёртки. `Stopwatch` и `CommandId` — локальные переменные в `ExecuteOneAsync`.
 
 ### 5. Обработка ошибок подключения
 
@@ -282,30 +311,29 @@ WHERE Status = 'processing'
 
 **Проблема:** При graceful shutdown нужно завершить активные процессы корректно.
 
-**Решение:** ConcurrentDictionary для трекинга:
+**Решение:** `ConcurrentDictionary<int, Process>` для трекинга:
 
 ```csharp
-private readonly ConcurrentDictionary<int, ProcessContext> _activeProcesses;
+private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
 
 // При запуске процесса
-_activeProcesses[cmd.CommandId] = new ProcessContext(process, cmd.CommandId, sw);
+_activeProcesses[cmd.CommandId] = process;
 
 // При завершении (в finally)
 _activeProcesses.TryRemove(cmd.CommandId, out _);
 
-// Graceful shutdown
+// Graceful shutdown — ждёт до 30 сек, затем убивает оставшиеся
 private async Task WaitForActiveProcessesAsync()
 {
     var timeout = TimeSpan.FromSeconds(30);
-    while (_activeProcesses.Count > 0 && elapsed < timeout)
+    var start = DateTime.UtcNow;
+    while (_activeProcesses.Count > 0 && (DateTime.UtcNow - start) < timeout)
     {
         await Task.Delay(500);
     }
-    
-    // Принудительное завершение если не успели
-    foreach (var ctx in _activeProcesses.Values)
+    foreach (var process in _activeProcesses.Values)
     {
-        ctx.Process.Kill(true);
+        try { process.Kill(true); } catch { }
     }
 }
 ```
@@ -379,7 +407,17 @@ private async Task ExecuteOneAsync(PendingCommand cmd, CancellationToken ct)
 }
 ```
 
-### 6. Переподключение при потере связи
+### 6. Валидация FilePath
+
+**Проблема:** Некорректный путь, path traversal или неверное расширение файла.
+
+**Решение:** Каждая команда проверяется перед запуском:
+- Путь не пустой
+- Канонический путь не отличается от исходного (защита от `../` traversal)
+- Файл существует
+- Расширение файла входит в `AllowedExtensions` (если указаны)
+
+### 7. Переподключение при потере связи
 
 **Проблема:** Соединение с PostgreSQL может разорваться.
 
@@ -396,7 +434,6 @@ while (!stoppingToken.IsCancellationRequested)
     {
         logger.LogError(ex, "Connection lost. Reconnecting in {Delay}ms...", ReconnectDelayMs);
         await Task.Delay(ReconnectDelayMs, stoppingToken);
-        // Повторная попытка → новый conn, новый LISTEN
     }
 }
 ```
@@ -404,10 +441,10 @@ while (!stoppingToken.IsCancellationRequested)
 **При переподключении:**
 1. Создаётся новое подключение
 2. Выполняется `LISTEN new_command`
-3. Очищаются истёкшие Lease (включая свои)
+3. Очищаются истёкшие Lease
 4. Цикл продолжается
 
-### 7. Fallback poll (safety net)
+### 8. Fallback poll (safety net)
 
 **Проблема:** NOTIFY может быть потерян (баг, сеть, перезапуск БД).
 
@@ -430,19 +467,81 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
 
 ### 1. Определение параметров команды
 
-- Определить партию на основе типа команды
-- Определить приоритет на основе контекста (например, роль пользователя)
+- Определить приоритет команды на основе контекста (тип задачи, роль пользователя)
+- Партиция вычисляется автоматически воркером из поля `Priority` (не задаётся на сервере)
 
 ### 2. Сохранение команды в базу данных
 
 - Создать сессию (если требуется)
-- Вставить команду со статусом `pending`, указав партию и приоритет
+- Вставить команду со статусом `pending`, указав приоритет
 - Все операции в одной транзакции
 
 ### 3. Уведомление Worker
 
-- Отправить SQL-уведомление: `NOTIFY <channel_name>`
+- Отправить SQL-уведомление: `NOTIFY new_command`
 - Worker мгновенно просыпается и начинает обработку
+
+---
+
+## Уведомления пользователей (Telegram)
+
+После завершения команды (`Done`) или окончательной ошибки (`Failed` после исчерпания retry) Worker отправляет уведомление пользователю через отдельный канал LISTEN/NOTIFY.
+
+### Схема
+
+```
+┌─────────────────┐         ┌─────────────┐         ┌─────────────────┐
+│     Worker      │         │ PostgreSQL  │         │     Server      │
+│  (выполнение)   │         │             │         │  (telegram bot) │
+└────────┬────────┘         └──────┬──────┘         └────────┬────────┘
+         │                        │                          │
+         │ 1. Done/Failed         │                          │
+         │    NOTIFY              │                          │
+         │    command_completed   │                          │
+         ├───────────────────────>│                          │
+         │                        │                          │
+         │                        │ 2. Пробуждение           │
+         │                        │    CommandNotificationSvc│
+         │                        ├─────────────────────────>│
+         │                        │                          │
+         │                        │                          │ 3. SendMessageAsync
+         │                        │                          │    userId, текст
+         │                        │                          ├────────> Telegram
+         │                        │                          │
+```
+
+### Payload уведомления
+
+```
+NOTIFY command_completed, 'UserId|CommandId|CommandText|Status|ErrorMessage'
+```
+
+Формат: pipe-разделённые поля (5 частей, `ErrorMessage` может содержать `|`).
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `UserId` | BIGINT | Telegram ID пользователя |
+| `CommandId` | INT | ID команды |
+| `CommandText` | TEXT | Тип команды (PDF, DWG, AUTORES...) |
+| `Status` | TEXT | `Done` или `Failed` |
+| `ErrorMessage` | TEXT | Пусто при `Done`, текст ошибки при `Failed` |
+
+### Отправка
+
+**Сторона Worker** (`CommandExecutionService`):
+- После `UpdateCommandStatusAsync(Done)` → `NotifyCommandCompletedAsync(userId, ..., "Done")`
+- После `UpdateCommandStatusAsync(Failed)` при exhaustion retry → `NotifyCommandCompletedAsync(userId, ..., "Failed", errorMessage)`
+- Промежуточные retry не отправляют уведомления (пользователь видит только финальный результат)
+
+**Сторона Server** (`CommandNotificationService`):
+- `BackgroundService`, подписан на `LISTEN command_completed`
+- При получении NOTIFY парсит payload через `Split('|', 5)`
+- Отправляет сообщение через `ITelegramOutputService.SendMessageAsync()`
+- MarkdownV2 экранирование: `✅ *Команда* завершена` / `❌ *Команда* — ошибка: текст`
+
+### NOTIFY после retry
+
+При `ScheduleRetryAsync` Worker также отправляет `NOTIFY new_command`, чтобы воркер (или другой воркер) проверил очередь. Команда будет пропущена фильтром `NextRetryAt <= NOW()` до наступления времени retry.
 
 ---
 
@@ -450,14 +549,14 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
 
 ### Параметры конфигурации (CommandExecutionService)
 
-| Параметр | Константа | Значение | Описание |
-|----------|-----------|----------|----------|
-| `MaxConcurrentProcesses` | `MaxConcurrentProcesses` | 5 | Глобальный лимит одновременных процессов |
-| `ProcessTimeoutSec` | `ProcessTimeoutSec` | 3600 (1 час) | Максимальное время выполнения команды |
-| `CleanupIntervalSec` | `CleanupIntervalSec` | 60 | Интервал очистки истёкших Lease |
-| `LeaseTimeoutMin` | `LeaseTimeoutMin` | 5 | TTL Lease в минутах (защита от сбоев) |
-| `FallbackTimeoutSec` | `FallbackTimeoutSec` | 300 (5 мин) | Таймаут ожидания NOTIFY (safety net) |
-| `ReconnectDelayMs` | `ReconnectDelayMs` | 5000 | Задержка перед переподключением к БД |
+| Параметр | Откуда | Значение по умолч. | Описание |
+|----------|--------|-------------------|----------|
+| `Partitions` | `WorkerOptions.Partitions` | `{80→5, 40→3, 0→1}` | Priority threshold → макс. процессов. Команда с Priority >= threshold попадает в эту партицию |
+| `ProcessTimeoutSeconds` | `WorkerOptions.ProcessTimeoutSeconds` | 10800 (3 часа) | Максимальное время выполнения команды |
+| `CleanupIntervalSec` | константа | 60 | Интервал очистки истёкших Lease |
+| `LeaseTimeoutMin` | вычисляется | `ProcessTimeoutSeconds + 5 мин` | TTL Lease (защита от сбоев воркера) |
+| `FallbackTimeoutSec` | константа | 300 (5 мин) | Таймаут ожидания NOTIFY (safety net) |
+| `ReconnectDelayMs` | константа | 5000 | Задержка перед переподключением к БД |
 
 ### Настройка через appsettings.json
 
@@ -467,13 +566,40 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
     "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
   },
   "Worker": {
-    "MaxConcurrentProcesses": 5,
-    "ProcessTimeoutSeconds": 3600
+    "ProcessTimeoutSeconds": 10800,
+    "Partitions": {
+      "80": 5,
+      "40": 3,
+      "0": 1
+    },
+    "Commands": {
+      "PDF": {
+        "ExecutablePath": "Revit.exe",
+        "ArgumentsTemplate": "/command \"{CommandText}\" \"{FilePath}\"",
+        "AllowedExtensions": [".rvt", ".rfa"]
+      },
+      "DWG": {
+        "ExecutablePath": "Revit.exe",
+        "ArgumentsTemplate": "/command \"{CommandText}\" \"{FilePath}\"",
+        "AllowedExtensions": [".rvt", ".rfa"]
+      },
+      "NWC": {
+        "ExecutablePath": "FileConvert.exe",
+        "ArgumentsTemplate": "/command \"{CommandText}\" \"{FilePath}\"",
+        "AllowedExtensions": [".nwc", ".nwd", ".nwf"]
+      },
+      "AUTORES": {
+        "ExecutablePath": "python",
+        "ArgumentsTemplate": "ai_agent.py --command \"{CommandText}\" --file \"{FilePath}\"",
+        "AllowedExtensions": [".rvt", ".ifc", ".nwc"],
+        "WorkingDirectory": "."
+      }
+    }
   }
 }
 ```
 
-**Примечание:** В текущей реализации параметры заданы константами в коде. Для гибкой настройки можно вынести в конфигурацию.
+**Примечание:** `ProcessTimeoutSeconds` задаётся в секции `Worker`. Если не указан — по умолчанию 10800 сек (3 часа). Каждая команда настраивается отдельно в словаре `Commands` (без привязки к партиции). Партиции настраиваются в секции `Partitions`: ключ — минимальный Priority (threshold), значение — макс. процессов. Чтобы добавить новую команду — достаточно записи в JSON, код менять не нужно.
 
 ---
 
@@ -493,7 +619,7 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
 | `StartedAt` | TIMESTAMPTZ | Время начала выполнения (NULL пока pending) |
 | `CompletedAt` | TIMESTAMPTZ | Время завершения (NULL пока не Done/Failed) |
 | `Lease` | INTEGER | Unix timestamp (секунды) — TTL для защиты от сбоев воркера |
-| `Partition` | TEXT | Резерв для будущего расширения (партиции) |
+| `Partition` | TEXT | Резерв — не используется в текущей реализации (приоритет определяется через поле `Priority`) |
 | `Priority` | INT | Приоритет (по умолчанию 50, чем выше — тем важнее) |
 | `ProcessId` | INT | PID процесса Windows (для мониторинга и Kill) |
 | `ErrorMessage` | TEXT | Сообщение об ошибке (если Failed) |
@@ -502,7 +628,7 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
 
 - `(Status, Priority DESC, CreatedAt ASC) WHERE Status = 'pending'` — для быстрой выборки с приоритетами
 - `(Status, Lease) WHERE Status = 'processing'` — для очистки истёкших Lease
-- `(Partition, Status)` — для будущего расширения (партиции)
+- `(Partition, Status)` — для выборки по партиции (мониторинг, статистика)
 - `(SessionId)` — для выборки по сессии
 
 ---
@@ -557,11 +683,19 @@ SET "Status" = @Status,
 WHERE "CommandId" = @CommandId;
 ```
 
-### Отправка уведомления
+### Отправка уведомления Worker
 
 ```sql
 NOTIFY new_command, @SessionId;
 ```
+
+### Отправка уведомления пользователю
+
+```sql
+NOTIFY command_completed, 'UserId|CommandId|CommandText|Status|ErrorMessage';
+```
+
+Payload генерируется в `PostgresDataService.NotifyCommandCompletedAsync()`: `$"{userId}|{commandId}|{commandText}|{status}|{errorMessage ?? ""}"`.
 
 ### Очистка истёкших Lease (crash recovery)
 
@@ -600,117 +734,131 @@ WHERE "Status" = 'processing'
 |---------|------------|
 | **Логическое удаление** | Команды никогда не удаляются физически, только `Status = 'Deleted'` |
 | **Транзакционность** | Захват команд — атомарная операция с `FOR UPDATE SKIP LOCKED` |
-| **Ограничение нагрузки** | Пул процессов (SemaphoreSlim) не позволяет превысить лимит одновременных выполнений |
+| **Ограничение нагрузки** | Per-partition пулы процессов (SortedDictionary<int, SemaphoreSlim>) — каждая партиция имеет свой лимит |
 | **Приоритизация** | Высокоприоритетные команды выполняются первыми (`ORDER BY Priority DESC`) |
 | **Lease-механизм** | Защита от сбоев воркера — команды возвращаются в очередь при истечении TTL |
 | **Таймауты** | Принудительное завершение процессов при превышении лимита времени (`process.Kill(true)`) |
 | **Трекинг PID** | Сохранение ProcessId для мониторинга и принудительного завершения |
 | **Отказоустойчивость** | Переподключение при потере соединения с БД (5 сек задержка) |
-| **Логирование** | Полное контекстное логирование всех операций и ошибок |
+| **Логирование** | Полное контекстное логирование всех операций и ошибок, включая stdout/stderr процессов |
 | **Изоляция компонентов** | Server и Worker независимы, общаются только через БД |
 | **Graceful shutdown** | Корректное завершение активных процессов при остановке сервиса (30 сек таймаут) |
 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
+| **Lease (долгий TTL)** | Lease устанавливается на `ProcessTimeoutSeconds + 5 мин`, команда не вернётся в очередь раньше таймаута |
+| **Валидация FilePath** | Проверка существования, расширения (из `AllowedExtensions`) и защита от path traversal перед запуском процесса |
+| **Асинхронное чтение stdout/stderr** | Предотвращает deadlock при заполнении буфера вывода (64KB) |
+| **Уведомления пользователей** | Worker шлёт NOTIFY `command_completed`, Server (`CommandNotificationService`) слушает и отправляет Telegram-сообщение через `ITelegramOutputService` |
 | **Fallback poll** | Если NOTIFY потерян — проверка каждые 5 минут (safety net) |
 
 ---
 
 ## Выполнение внешнего процесса
 
-### Общий алгоритм
+### Общий алгоритм (`ExecuteOneAsync`)
 
-1. Получить конфигурацию для типа команды (Revit/Navisworks/AI)
-2. Создать `ProcessStartInfo` с параметрами:
-   - `FileName` — путь к исполняемому файлу
-   - `Arguments` — аргументы командной строки
-   - `WorkingDirectory` — рабочая директория
-   - `RedirectStandardOutput/Error = true` — для логирования
-   - `UseShellExecute = false` — для перенаправления потоков
-   - `CreateNoWindow = true` — без UI
-3. `process.Start()` — запуск процесса
-4. Сохранить в `_activeProcesses[CommandId]` для трекинга
-5. Обновить статус: `processing`, `ProcessId = process.Id`
-6. `WaitForExit(timeout)` — ожидание с таймаутом
-7. Если таймаут — `process.Kill(true)` (дерево процессов)
-8. Проверить `ExitCode`:
-   - `0` → статус `Done`
-   - `!= 0` → статус `Failed` + `ErrorMessage`
-9. Удалить из `_activeProcesses`
-10. `_processPool.Release()` — освободить слот
+1. **Валидация FilePath** — существование, расширение, path traversal
+2. **Поиск конфигурации** — `WorkerOptions.Commands.TryGetValue(CommandText)` → `CommandConfig`
+3. **Создание `ProcessStartInfo`** — `CreateProcessStartInfo(cmd, commandCfg)`:
+   - `FileName` из `ExecutablePath`
+   - `Arguments` из `ArgumentsTemplate` (с подстановкой `{CommandText}`, `{FilePath}`)
+   - `WorkingDirectory` из `WorkingDirectory` / папка файла / `Environment.CurrentDirectory`
+   - `RedirectStandardOutput/Error = true`, `UseShellExecute = false`, `CreateNoWindow = true`
+4. **Запуск** — `process.Start()`
+5. **Трекинг** — `_activeProcesses[CommandId] = process`
+6. **Статус** — `UpdateCommandStatus(Processing, ProcessId=PID)`
+7. **stdout/stderr** — асинхронное чтение через `BeginOutputReadLine / BeginErrorReadLine`
+8. **Ожидание** — `WaitForExit(ProcessTimeoutSeconds)`
+9. **Логирование** — stdout/stderr (обрезка >4KB)
+10. **Результат**:
+    - Таймаут → `Kill(true)`, статус `Failed`
+    - `ExitCode == 0` → статус `Done`
+    - Иначе → статус `Failed`
+11. **Очистка** (в `finally`) — `partitionPool.Release()`, `_activeProcesses.TryRemove()`
 
-### Обработка результатов
+### Универсальное создание процесса
 
+Вся конфигурация берётся из `WorkerOptions.Commands[CommandText]` — словаря, где ключ — код команды из БД, значение — `CommandConfig`:
+
+| Поле | Описание |
+|------|----------|
+| `ExecutablePath` | Исполняемый файл (например, `Revit.exe`, `python`) |
+| `ArgumentsTemplate` | Шаблон аргументов. `{CommandText}` и `{FilePath}` подставляются из команды |
+| `AllowedExtensions` | Разрешённые расширения файлов. `null` — любое |
+| `WorkingDirectory` | Рабочая директория. `null` — папка файла. `"."` — корень процесса |
+
+```csharp
+private static ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, CommandConfig cfg)
+{
+    var args = cfg.ArgumentsTemplate
+        .Replace("{CommandText}", cmd.CommandText)
+        .Replace("{FilePath}", cmd.FilePath);
+
+    var workingDir = cfg.WorkingDirectory switch
+    {
+        null or "" => Path.GetDirectoryName(cmd.FilePath),
+        "." => Environment.CurrentDirectory,
+        var dir => dir
+    } ?? Environment.CurrentDirectory;
+
+    return new ProcessStartInfo
+    {
+        FileName = cfg.ExecutablePath,
+        Arguments = args,
+        WorkingDirectory = workingDir,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        StandardOutputEncoding = Encoding.UTF8,
+        StandardErrorEncoding = Encoding.UTF8
+    };
+}
 ```
-try
-    создать ProcessStartInfo
-    process.Start()
-    _activeProcesses[CommandId] = context
-    UpdateCommandStatus(Processing, ProcessId=PID)
-    WaitForExit(timeout)
-    если timeout → Kill(true), UpdateCommandStatus(Failed, "Timeout")
-    если exit_code == 0 → UpdateCommandStatus(Done)
-    иначе → UpdateCommandStatus(Failed, "Exit code N")
-catch (OperationCanceledException)
-    если процесс активен → Kill(true)
-    throw
-catch (exception)
-    записать ошибку в лог
-    UpdateCommandStatus(Failed, errorMessage)
-finally
-    _activeProcesses.Remove(CommandId)
-    _processPool.Release()  ← обязательно!
-```
-
-### Заглушки для типов команд
-
-В текущей реализации методы создания `ProcessStartInfo` содержат TODO:
-
-- `CreateRevitProcessStartInfo()` — Revit.exe с аргументами
-- `CreateNavisworksProcessStartInfo()` — FileConvert.exe или COM API
-- `CreateAiAgentProcessStartInfo()` — Python скрипт или HTTP-клиент
 
 ---
 
 ## Расширение системы (добавление новой команды)
 
-### Шаг 1: Определить код новой команды
+### Шаг 1: Добавить конфигурацию в appsettings.json
 
-Добавить константу с уникальным идентификатором команды (например, `XLSEXPORT`).
-
-### Шаг 2: Добавить обработку в CommandExecutionService
-
-Добавить кейс в `ExecuteOneAsync`:
-
-```csharp
-"XLSEXPORT" => CreateExcelExportProcessStartInfo(cmd),
-```
-
-### Шаг 3: Реализовать метод-фабрику
-
-```csharp
-private ProcessStartInfo CreateExcelExportProcessStartInfo(PendingCommand cmd)
-{
-    return new ProcessStartInfo
-    {
-        FileName = "excel_exporter.exe",
-        Arguments = $"--input \"{cmd.FilePath}\"",
-        WorkingDirectory = Environment.CurrentDirectory,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true
-    };
+```json
+"Commands": {
+  "XLSEXPORT": {
+    "ExecutablePath": "excel_exporter.exe",
+    "ArgumentsTemplate": "--input \"{FilePath}\"",
+    "AllowedExtensions": [".xlsx", ".xls"]
+  }
 }
 ```
 
-### Шаг 4: Настроить приоритет (опционально)
+**Партиция** не указывается в команде — определяется автоматически по полю `Priority` из БД. Если нужно изменить пул для уровня приоритета — правим секцию `Partitions`.
 
-При создании команды указать приоритет:
+**Ни строчки C# менять не нужно.** Команда `XLSEXPORT` из БД автоматически подхватится через `TryGetValue`, партиция определится по её `Priority`.
 
+### Шаг 2: Настроить приоритет (при создании команды)
+
+Приоритет задаётся в момент создания команды в БД. SQL:
 ```sql
 INSERT INTO "Commands" (..., "Priority") VALUES (..., 75); -- Выше среднего
 ```
 
-### Шаг 5: Обновить пользовательский интерфейс (при необходимости)
+Значение `Priority` определяет, в какую партицию попадёт команда:
+- `Priority >= 80` → High (до 5 одновременных)
+- `Priority >= 40` → Medium (до 3)
+- `Priority < 40` → Low (до 1)
+
+### Шаг 3 (опционально): Настроить лимиты партиций
+
+Если стандартные лимиты не подходят:
+```json
+"Partitions": {
+  "80": 8,  // Больше высокоприоритетных слотов
+  "40": 4,
+  "0": 2
+}
+```
+
+### Шаг 4 (опционально): Обновить пользовательский интерфейс
 
 Добавить кнопку/команду выбора в интерфейс бота.
 
@@ -787,7 +935,7 @@ GROUP BY "Status";
 **Проверка подписки на уведомления:**
 ```sql
 SELECT * FROM pg_listening_channels();
--- Должен вернуть 'new_command'
+-- Должен вернуть 'new_command' (Worker) и 'command_completed' (Server)
 ```
 
 **Мониторинг процессов (активные PID):**
@@ -813,10 +961,10 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 
 | № | Критерий | Описание |
 |---|----------|----------|
-| 1 | **Лимит процессов** | Никогда не выполняется более `MaxConcurrentProcesses` (5) одновременно |
+| 1 | **Лимит процессов** | Для каждого уровня приоритета не выполняется более его лимита одновременно (по умолчанию: High>=80 → 5, Medium>=40 → 3, Low<40 → 1) |
 | 2 | **Приоритизация** | Высокоприоритетные команды стартуют раньше низкоприоритетных |
 | 3 | **Lease-механизм** | При сбое воркера команда возвращается в очередь после истечения Lease |
-| 4 | **Таймауты** | Процессы, выполняющиеся дольше 1 часа, принудительно завершаются |
+| 4 | **Таймауты** | Процессы, выполняющиеся дольше `ProcessTimeoutSeconds` (по умолчанию 3 часа), принудительно завершаются |
 | 5 | **Трекинг PID** | ProcessId сохраняется для мониторинга и принудительного завершения |
 | 6 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
 | 7 | **Graceful shutdown** | При остановке воркер завершает активные процессы (30 сек таймаут) |
@@ -832,13 +980,13 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 
 | ID | Описание | Влияние | Приоритет | Статус |
 |----|----------|---------|-----------|--------|
-| DOC-001 | **Lease (5 мин) < ProcessTimeout (1 час)** — не описан механизм продления Lease во время длительного выполнения | Команда может быть ошибочно возвращена в очередь другим воркером во время выполнения | 🔴 HIGH | Требуется fix (v1.1) |
-| DOC-002 | **Не описано чтение stdout/stderr** процессов — указано `RedirectStandardOutput/Error = true`, но нет асинхронного чтения | Риск deadlock при заполнении буфера вывода (64KB) | 🔴 HIGH | Требуется fix (v1.1) |
-| DOC-003 | **Нет валидации FilePath** — отсутствует защита от path traversal атак и проверка существования файлов | Потенциальная уязвимость безопасности | 🔴 HIGH | Требуется fix (v1.1) |
-| DOC-004 | **Партиции заявлены, но не реализованы** — поле `Partition` есть в схеме, но логика партиционирования отсутствует | Путаница при расширении системы, неиспользуемое поле в БД | 🟠 MEDIUM | В планах (v1.1) |
-| DOC-005 | **Отсутствует retry logic** для Failed команд — временные ошибки требуют ручного вмешательства | Временные ошибки (сеть, блокировка файла) приводят к永久ному Failed | 🟠 MEDIUM | В планах (v1.2) |
+| DOC-001 | **Lease (5 мин) < ProcessTimeout (1 час)** — не описан механизм продления Lease во время длительного выполнения | Команда может быть ошибочно возвращена в очередь другим воркером во время выполнения | 🔴 HIGH | ✅ Исправлено (v1.1) |
+| DOC-002 | **Не описано чтение stdout/stderr** процессов — указано `RedirectStandardOutput/Error = true`, но нет асинхронного чтения | Риск deadlock при заполнении буфера вывода (64KB) | 🔴 HIGH | ✅ Исправлено (v1.1) |
+| DOC-003 | **Нет валидации FilePath** — отсутствует защита от path traversal атак и проверка существования файлов | Потенциальная уязвимость безопасности | 🔴 HIGH | ✅ Исправлено (v1.1) |
+| DOC-004 | **Партиции (priority-based)** — `SortedDictionary<int, SemaphoreSlim>` с threshold приоритета как ключ. Команды сортируются по `Priority`: High (>=80) → 5 слотов, Medium (>=40) → 3, Low (<40) → 1 | Высокоприоритетные команды не ждут за низкоприоритетными | 🟠 MEDIUM | ✅ Реализовано (v1.1) |
+| DOC-005 | **Retry logic** — экспоненциальная задержка (base*2^attempt), лимит попыток (MaxRetries=5). Команда возвращается в `pending` с `NextRetryAt` | Самовосстановление при временных ошибках (файл заблокирован, сеть недоступна) | 🟠 MEDIUM | ✅ Реализовано (v1.2) |
 | DOC-006 | **Нет автоматических метрик** (Prometheus/Grafana) — только ручные SQL-запросы | Ограниченный мониторинг в production, сложность-alerting | 🟠 MEDIUM | В планах (v1.2) |
-| DOC-007 | **Гонка очистки Lease** — несколько воркеров независимо очищают истёкшие Lease без координации | Лишняя нагрузка на БД, возможный шум в логах | 🟡 LOW | Улучшение |
+| DOC-007 | **Координация очистки Lease** — `pg_try_advisory_lock(1234567)` перед каждой очисткой. Только один воркер выполняет `ReleaseExpiredLeasesAsync`/`ReleaseTimeoutCommandsAsync`, остальные пропускают цикл | Снижение нагрузки на БД при нескольких воркерах | 🟡 LOW | ✅ Реализовано (v1.2) |
 | DOC-008 | **Graceful shutdown deadlock** — если процесс не реагирует на `Kill(true)`, цикл ожидания может заблокироваться | Воркер не завершится корректно при остановке | 🟡 LOW | Улучшение |
 | DOC-009 | **Нет health checks** для Worker — нет эндпоинтов или механизмов проверки здоровья сервиса | Сложность мониторинга доступности в orchestration-системах | 🟡 LOW | Улучшение |
 | DOC-010 | **Нет ограничения очереди** — не описан лимит на количество pending-команд на пользователя/сессию | Риск разрастания таблицы при аномальной нагрузке | 🟡 LOW | Улучшение |
@@ -855,15 +1003,16 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 ### План работ
 
 **v1.1 (Обязательно):**
-- [ ] DOC-001: Реализовать heartbeat для продления Lease во время выполнения
-- [ ] DOC-002: Добавить асинхронное чтение stdout/stderr процессов
-- [ ] DOC-003: Валидация FilePath (canonical path, проверка существования, защита от traversal)
-- [ ] DOC-004: Базовая реализация партиций (хотя бы одна партиция по умолчанию)
+- [x] DOC-001: Реализовать heartbeat для продления Lease во время выполнения
+- [x] DOC-002: Добавить асинхронное чтение stdout/stderr процессов
+- [x] DOC-003: Валидация FilePath (canonical path, проверка существования, защита от traversal)
+- [x] DOC-004: Базовая реализация партиций (хотя бы одна партиция по умолчанию)
 
 **v1.2 (Желательно):**
-- [ ] DOC-005: Retry logic с лимитом попыток и экспоненциальной задержкой
+- [x] DOC-005: Retry logic с лимитом попыток и экспоненциальной задержкой
+- [x] Telegram-уведомления о завершении/ошибках команд через LISTEN/NOTIFY
 - [ ] DOC-006: Интеграция метрик (Prometheus exporter или структурированные логи)
-- [ ] DOC-007: Координация очистки Lease (advisory locks или jitter)
+- [x] DOC-007: Координация очистки Lease (advisory locks)
 - [ ] DOC-008: Таймаут на каждый цикл graceful shutdown
 
 **v2.0 (Будущее):**
@@ -888,25 +1037,35 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 - [x] Поля `StartedAt`, `CompletedAt`, `ProcessId`, `ErrorMessage`
 - [x] Приоритеты команд (`Priority DESC`)
 
-### 🔴 TODO: Обязательно (v1.1)
+### ✅ Реализовано (v1.1)
 
-- [ ] **Партиции (логические очереди)** — изоляция типов задач
-  - [ ] Per-partition пул процессов (`ConcurrentDictionary<string, SemaphoreSlim>`)
-  - [ ] Маппинг `CommandCode → PartitionName`
-  - [ ] Конфигурация партиций (appsettings.json)
-  - [ ] Балансировка между партициями (fair queuing)
-  - [ ] SQL: фильтрация по партиции при выборке
-- [ ] **Heartbeat для Lease** — продление аренды во время выполнения (DOC-001)
-- [ ] **Чтение stdout/stderr** — асинхронное чтение потоков процессов (DOC-002)
-- [ ] **Валидация FilePath** — защита от path traversal и проверка существования (DOC-003)
+- [x] **Lease с долгим TTL** — при захвате команды Lease = `ProcessTimeoutSeconds + 5 мин` (DOC-001)
+  - Команда не вернётся в очередь раньше ProcessTimeout
+  - Фоновая очистка каждые 60 сек возвращает команды с истёкшим Lease
+- [x] **Асинхронное чтение stdout/stderr** — `BeginOutputReadLine` / `BeginErrorReadLine` (DOC-002)
+  - Вывод собирается в `StringBuilder` через событийные хендлеры
+  - Больше нет deadlock при заполнении буфера 64KB
+  - Логируется: stdout → `LogInformation`, stderr → `LogWarning`
+  - Обрезка >4KB для защиты от раздувания логов
+- [x] **Валидация FilePath** — существует, расширение, path traversal (DOC-003)
+  - `File.Exists()` — проверка существования файла
+  - `Path.GetFullPath()` — защита от path traversal
+  - Whitelist расширений: `.rvt/.rfa` для Revit, `.nwc/.nwd/.nwf` для Navisworks
+- [x] **Партиции (priority-based)** — приоритетные уровни выполнения (DOC-004)
+  - `SortedDictionary<int, SemaphoreSlim>` — ключ = threshold приоритета, значение = пул
+  - Маршрутизация: `_partitionPools.Keys.Reverse().First(t => cmd.Priority >= t)`
+  - Конфигурация: `WorkerOptions.Partitions` + appsettings.json
+  - High (Priority>=80, 5 слотов), Medium (Priority>=40, 3 слота), Low (Priority<40, 1 слот)
+
+### 🔴 v1.1 — Всё выполнено
+
+Все задачи v1.1 (DOC-001..004) реализованы. См. дорожную карту ниже.
 
 ### 🟡 TODO: Желательно (v1.2)
 
-- [ ] **Retry logic** — автоматические повторные попытки для временных ошибок (DOC-005)
 - [ ] **Метрики** — интеграция с Prometheus/Grafana (DOC-006)
 - [ ] **Статистика выполнения** — среднее время, успех/ошибки по типам команд
-- [ ] **Уведомления в Telegram** — о завершении/ошибках команд
-- [ ] **Координация очистки Lease** — advisory locks или jitter (DOC-007)
+- [x] **Координация очистки Lease** — advisory locks (DOC-007)
 
 ### ⚪ TODO: Будущее (v2.0)
 

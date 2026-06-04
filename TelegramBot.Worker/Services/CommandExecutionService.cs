@@ -1,7 +1,10 @@
 using Dapper;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
+using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
@@ -11,43 +14,41 @@ namespace TelegramBot.Worker.Services;
 /// <summary>
 /// Background service: ожидает уведомления через Postgres LISTEN/NOTIFY,
 /// при получении сигнала проверяет БД на наличие новых команд и выполняет их.
-/// Реализует пул процессов с лимитами для защиты от перегрузки системы.
+/// Реализует per-partition пул процессов с лимитами для защиты от перегрузки.
 /// Автоматически переподключается при потере соединения.
-/// 
-/// TODO (ОБЯЗАТЕЛЬНО): Реализовать концепцию партиций (логических очередей)
-/// - Поле Partition уже добавлено в БД
-/// - Требуется: per-partition пул процессов, маппинг команд, конфигурация
-/// - См. документацию: Docs/command-execution-algorithm.md раздел "Партиции"
 /// </summary>
 public sealed class CommandExecutionService(
     IDataService dataService,
     IConfiguration configuration,
+    IOptions<WorkerOptions> workerOptions,
     ILogger<CommandExecutionService> logger) : BackgroundService
 {
     private const int FallbackTimeoutSec = 300; // 5 мин — safety net, если NOTIFY потерян
     private const int DefaultBatchSize = 50;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
-
-    // Настройки пула процессов
-    private const int MaxConcurrentProcesses = 5; // Глобальный лимит одновременных процессов
-    private const int ProcessTimeoutSec = 3600; // 1 час — максимальное время выполнения команды
     private const int CleanupIntervalSec = 60; // Интервал очистки истёкших lease
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
 
-    // Пул процессов: семафор для ограничения параллелизма
-    private readonly SemaphoreSlim _processPool = new(MaxConcurrentProcesses, MaxConcurrentProcesses);
+    private readonly WorkerOptions _workerOptions = workerOptions.Value;
+
+    // Партиции: ID → пул процессов. SortedDictionary гарантирует порядок по возрастанию ID.
+    private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = new();
 
     // Трекинг активных процессов для возможности принудительного завершения
-    private readonly ConcurrentDictionary<int, ProcessContext> _activeProcesses = new();
+    private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
 
     // CancellationTokenSource для graceful shutdown
     private CancellationTokenSource? _shutdownCts;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Worker starting with max {Max} concurrent processes...", MaxConcurrentProcesses);
+        InitializePartitionPools();
+
+        logger.LogInformation("Worker starting with {PartitionCount} partitions: {Pools}",
+            _partitionPools.Count,
+            string.Join(", ", _partitionPools.Select(p => $"{p.Key}={p.Value.CurrentCount}")));
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -60,7 +61,7 @@ public sealed class CommandExecutionService(
                 {
                     await Task.Delay(TimeSpan.FromSeconds(CleanupIntervalSec), _shutdownCts.Token);
                     await dataService.ReleaseExpiredLeasesAsync();
-                    await dataService.ReleaseTimeoutCommandsAsync(ProcessTimeoutSec);
+                    await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
@@ -92,10 +93,29 @@ public sealed class CommandExecutionService(
             logger.LogInformation("Shutting down, waiting for active processes to complete...");
             await WaitForActiveProcessesAsync();
             _shutdownCts?.Dispose();
-            _processPool.Dispose();
+
+            foreach (var pool in _partitionPools.Values)
+                pool.Dispose();
         }
 
         logger.LogInformation("Worker stopped");
+    }
+
+    /// <summary>
+    /// Инициализирует per-partition пулы из конфигурации.
+    /// Ключ словаря — минимальный порог приоритета (threshold).
+    /// Команды с Priority >= threshold попадают в соответствующую партицию.
+    /// </summary>
+    private void InitializePartitionPools()
+    {
+        foreach (var (threshold, poolSize) in _workerOptions.Partitions)
+        {
+            _partitionPools[threshold] = new SemaphoreSlim(poolSize, poolSize);
+        }
+
+        // Гарантируем, что хотя бы один пул существует
+        if (_partitionPools.Count == 0)
+            _partitionPools[0] = new SemaphoreSlim(5, 5);
     }
 
     private async Task WaitForActiveProcessesAsync()
@@ -112,13 +132,10 @@ public sealed class CommandExecutionService(
         if (_activeProcesses.Count > 0)
         {
             logger.LogWarning("Forcing termination of {Count} active processes", _activeProcesses.Count);
-            foreach (var ctx in _activeProcesses.Values)
+            foreach (var process in _activeProcesses.Values)
             {
-                try
-                {
-                    ctx.Process.Kill(true); // Убить дерево процессов
-                }
-                catch { /* Игнорируем ошибки при завершении */ }
+                try { process.Kill(true); }
+                catch { }
             }
         }
     }
@@ -160,8 +177,6 @@ public sealed class CommandExecutionService(
                 // Выходим из цикла → outer reconnect
             }
 
-            // Освобождаем истёкшие Lease перед каждым циклом
-            await dataService.ReleaseExpiredLeasesAsync();
             await ProcessBatchAsync(stoppingToken);
         }
     }
@@ -176,7 +191,7 @@ public sealed class CommandExecutionService(
     {
         try
         {
-            var claimed = await dataService.ClaimPendingCommandsAsync(DefaultBatchSize);
+            var claimed = await dataService.ClaimPendingCommandsAsync(DefaultBatchSize, (_workerOptions.ProcessTimeoutSeconds + 300) / 60);
 
             if (claimed.Count == 0)
             {
@@ -185,7 +200,7 @@ public sealed class CommandExecutionService(
 
             logger.LogInformation("Claimed {Count} commands for processing", claimed.Count);
 
-            // Запускаем все команды параллельно, но с ограничением пула
+            // Запускаем все команды параллельно, но каждая ждёт свободный слот своей партиции
             var tasks = claimed.Select(cmd => ProcessWithPoolAsync(cmd, ct));
             await Task.WhenAll(tasks);
         }
@@ -198,28 +213,31 @@ public sealed class CommandExecutionService(
 
     private async Task ProcessWithPoolAsync(PendingCommand cmd, CancellationToken ct)
     {
-        // Ждём свободного слота в пуле (блокирующее ожидание)
-        await _processPool.WaitAsync(ct);
+        // Определяем партицию по приоритету команды (ищем highest threshold <= cmd.Priority)
+        // FirstOrDefault возвращает 0 (default int), если ни один threshold не подошёл.
+        // Threshold 0 гарантированно существует в _partitionPools (см. InitializePartitionPools).
+        var threshold = _partitionPools.Keys
+            .Reverse()
+            .FirstOrDefault(t => cmd.Priority >= t);
+
+        var pool = _partitionPools[threshold];
+
+        logger.LogDebug("Command {Cmd} ({Id}) with Priority {Prio} -> partition (threshold={Threshold}, slots={Slots})",
+            cmd.CommandText, cmd.CommandId, cmd.Priority, threshold, pool.CurrentCount);
+
+        await pool.WaitAsync(ct);
 
         try
         {
-            // Проверяем, не отмена ли это
-            if (ct.IsCancellationRequested)
-            {
-                return;
-            }
-
-            // Запускаем выполнение в фоне
-            _ = ExecuteOneAsync(cmd, ct);
+            await ExecuteOneAsync(cmd, ct);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw;
+            logger.LogError(ex, "Error executing command {CommandId}", cmd.CommandId);
         }
-        catch (Exception ex)
+        finally
         {
-            logger.LogError(ex, "Error acquiring process pool slot for command {CommandId}", cmd.CommandId);
-            _=_processPool.Release();
+            pool.Release();
         }
     }
 
@@ -230,156 +248,215 @@ public sealed class CommandExecutionService(
 
         try
         {
-            var startInfo = cmd.CommandText switch
+            if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
             {
-                "PDF" or "DWG" or "IFC" or "BIMDOC" => CreateRevitProcessStartInfo(cmd),
-                "NWC" or "CLASHREP" => CreateNavisworksProcessStartInfo(cmd),
-                "AUTORES" => CreateAiAgentProcessStartInfo(cmd),
-                _ => null
-            };
-
-            if (startInfo == null)
-            {
-                logger.LogWarning("Unknown command '{Cmd}' ({Id})", cmd.CommandText, cmd.CommandId);
                 _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Unknown command type: {cmd.CommandText}");
                 return;
             }
 
-            // Запуск процесса
-            process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            _=process.Start();
-
-            // Сохраняем контекст для отслеживания
-            var context = new ProcessContext(process, cmd.CommandId, sw);
-            _activeProcesses[cmd.CommandId] = context;
-
-            // Обновляем статус с PID
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
-
-            logger.LogInformation("Started process {Pid} for {Cmd} / {File} ({Id})",
-                process.Id, cmd.CommandText, cmd.FilePath, cmd.CommandId);
-
-            // Ожидание с таймаутом
-            var timeout = TimeSpan.FromSeconds(ProcessTimeoutSec);
-            var completed = await Task.Run(() => process.WaitForExit((int)timeout.TotalMilliseconds), ct);
-
-            if (!completed)
+            if (!ValidateFilePath(cmd, commandCfg))
             {
-                // Таймаут: убиваем процесс и всё дерево потомков
-                logger.LogWarning("Timeout: killing process {Pid} for command {Id}", process.Id, cmd.CommandId);
-                process.Kill(true); // true = kill entire process tree
-                await process.WaitForExitAsync(ct);
-
                 _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
-                    errorMessage: $"Timeout: process exceeded {ProcessTimeoutSec}s limit");
+                    errorMessage: $"File validation failed for path: {cmd.FilePath}");
                 return;
             }
 
-            // Проверяем код выхода
-            if (process.ExitCode == 0)
+            var startInfo = CreateProcessStartInfo(cmd, commandCfg);
+
+            process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            _=process.Start();
+            _activeProcesses[cmd.CommandId] = process;
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
+
+            var outputBuilder = new StringBuilder();
+            var errorBuilder = new StringBuilder();
+
+            process.OutputDataReceived += (_, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) errorBuilder.AppendLine(e.Data); };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            var timeoutMs = _workerOptions.ProcessTimeoutSeconds * 1000;
+            var completed = await Task.Run(() => process.WaitForExit(timeoutMs), ct);
+
+            LogProcessOutput(cmd, outputBuilder, errorBuilder);
+
+            var errorMessage = (string?)null;
+
+            if (!completed)
             {
-                sw.Stop();
+                process.Kill(true);
+                await process.WaitForExitAsync(ct);
+                errorMessage = $"Timeout: process exceeded {_workerOptions.ProcessTimeoutSeconds}s limit";
+            }
+            else if (process.ExitCode != 0)
+            {
+                errorMessage = $"Process exited with code {process.ExitCode}";
+            }
+
+            sw.Stop();
+
+            if (completed && process.ExitCode == 0)
+            {
                 _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
-                logger.LogInformation("Done: {Cmd} / {File} ({Id}) — {Ms}ms, exit code: {ExitCode}",
-                    cmd.CommandText, cmd.FilePath, cmd.CommandId, sw.ElapsedMilliseconds, process.ExitCode);
+                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Done, null);
+            }
+            else if (errorMessage != null && cmd.RetryCount < _workerOptions.MaxRetries)
+            {
+                var nextRetryAt = DateTime.UtcNow.AddSeconds(
+                    _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
+                var newRetryCount = await dataService.ScheduleRetryAsync(
+                    cmd.CommandId, nextRetryAt, errorMessage);
+                logger.LogWarning("Command {Cmd} ({Id}) failed (attempt {Attempt}/{Max}), retry at {Next}. Error: {Msg}",
+                    cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
+                    nextRetryAt.ToString("O"), errorMessage);
+                // Будим воркер, чтобы он проверил очередь (команда подхватится после NextRetryAt)
+                await dataService.NotifyNewCommandsAsync(cmd.SessionId);
             }
             else
             {
-                sw.Stop();
                 _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
-                    errorMessage: $"Process exited with code {process.ExitCode}");
-                logger.LogWarning("Failed: {Cmd} / {File} ({Id}) — exit code: {ExitCode}",
-                    cmd.CommandText, cmd.FilePath, cmd.CommandId, process.ExitCode);
+                    errorMessage: errorMessage ?? "Unknown error");
+                logger.LogError("Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
+                    cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
+                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, errorMessage);
             }
         }
         catch (OperationCanceledException)
         {
-            // Отмена: убиваем процесс если он ещё активен
-            if (process != null && !process.HasExited)
-            {
-                logger.LogWarning("Cancelled: killing process {Pid} for command {Id}", process.Id, cmd.CommandId);
-                process.Kill(true);
-            }
-
+            if (process != null && !process.HasExited) process.Kill(true);
             throw;
         }
         catch (Exception ex)
         {
             sw.Stop();
-            logger.LogError(ex, "Failed: {Cmd} / {File} ({Id})", cmd.CommandText, cmd.FilePath, cmd.CommandId);
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
-                errorMessage: ex.Message);
+            if (cmd.RetryCount < _workerOptions.MaxRetries)
+            {
+                var nextRetryAt = DateTime.UtcNow.AddSeconds(
+                    _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
+                var newRetryCount = await dataService.ScheduleRetryAsync(
+                    cmd.CommandId, nextRetryAt, ex.Message);
+                logger.LogWarning(ex, "Command {Cmd} ({Id}) failed with exception (attempt {Attempt}/{Max}), retry at {Next}",
+                    cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
+                    nextRetryAt.ToString("O"));
+                // Будим воркер, чтобы он проверил очередь
+                await dataService.NotifyNewCommandsAsync(cmd.SessionId);
+            }
+            else
+            {
+                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: ex.Message);
+                logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts",
+                    cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1);
+                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, ex.Message);
+            }
         }
         finally
         {
-            // Освобождаем слот в пуле
-            _=_processPool.Release();
-
-            // Удаляем из трекинга
             _=_activeProcesses.TryRemove(cmd.CommandId, out _);
         }
     }
 
-    /// <summary>Контекст выполняющегося процесса для трекинга.</summary>
-    private sealed class ProcessContext
+    /// <summary>Валидация FilePath: существование файла, расширение, path traversal.</summary>
+    private bool ValidateFilePath(PendingCommand cmd, CommandConfig cfg)
     {
-        public Process Process { get; }
-        public int CommandId { get; }
-        public Stopwatch Stopwatch { get; }
-
-        public ProcessContext(Process process, int commandId, Stopwatch stopwatch)
+        if (string.IsNullOrWhiteSpace(cmd.FilePath))
         {
-            Process = process;
-            CommandId = commandId;
-            Stopwatch = stopwatch;
+            logger.LogWarning("Validation failed: empty file path for command {Cmd} ({Id})",
+                cmd.CommandText, cmd.CommandId);
+            return false;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(cmd.FilePath);
+            if (fullPath != cmd.FilePath && !fullPath.Equals(cmd.FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning("Validation failed: path traversal detected for '{File}' ({Id})",
+                    cmd.FilePath, cmd.CommandId);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Validation failed: invalid path '{File}' ({Id})",
+                cmd.FilePath, cmd.CommandId);
+            return false;
+        }
+
+        if (!File.Exists(cmd.FilePath))
+        {
+            logger.LogWarning("Validation failed: file not found '{File}' for {Cmd} ({Id})",
+                cmd.FilePath, cmd.CommandText, cmd.CommandId);
+            return false;
+        }
+
+        if (cfg.AllowedExtensions == null || cfg.AllowedExtensions.Count == 0) return true;
+
+        var ext = Path.GetExtension(cmd.FilePath)?.ToLowerInvariant();
+        if (!cfg.AllowedExtensions.Contains(ext ?? ""))
+        {
+            logger.LogWarning("Validation failed: extension '{Ext}' not allowed for {Cmd} ({Id}). Allowed: {Allowed}",
+                ext, cmd.CommandText, cmd.CommandId, string.Join(", ", cfg.AllowedExtensions));
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Логирует stdout и stderr процесса.</summary>
+    private void LogProcessOutput(PendingCommand cmd, StringBuilder outputBuilder, StringBuilder errorBuilder)
+    {
+        var output = outputBuilder.ToString();
+        var error = errorBuilder.ToString();
+
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            logger.LogInformation("Output [{Cmd} {Id}]: {Output}",
+                cmd.CommandText, cmd.CommandId, TruncateOutput(outputBuilder));
+        }
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            logger.LogWarning("Stderr [{Cmd} {Id}]: {Error}",
+                cmd.CommandText, cmd.CommandId, TruncateOutput(errorBuilder));
         }
     }
 
-    private ProcessStartInfo CreateRevitProcessStartInfo(PendingCommand cmd)
+    /// <summary>Обрезает вывод процесса до 4 KB для предотвращения раздувания логов.</summary>
+    private static string TruncateOutput(StringBuilder builder)
     {
-        // TODO: настроить путь к Revit.exe и аргументы
-        // Пример: Revit.exe /language eng-USA /al "C:\Path\To\Addin.addin"
-        return new ProcessStartInfo
-        {
-            FileName = "Revit.exe",
-            Arguments = $"/command \"{cmd.CommandText}\" \"{cmd.FilePath}\"",
-            WorkingDirectory = Path.GetDirectoryName(cmd.FilePath) ?? Environment.CurrentDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        const int maxLength = 4096;
+        return builder.Length > maxLength
+            ? builder.ToString(0, maxLength) + $"\n... (truncated, total {builder.Length} chars)"
+            : builder.ToString();
     }
 
-    private ProcessStartInfo CreateNavisworksProcessStartInfo(PendingCommand cmd)
+    /// <summary>Создаёт ProcessStartInfo из конфигурации команды (ExecutablePath + ArgumentsTemplate).</summary>
+    private static ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, CommandConfig cfg)
     {
-        // TODO: настроить путь к Navisworks FileConvert.exe или COM API
-        return new ProcessStartInfo
-        {
-            FileName = "FileConvert.exe",
-            Arguments = $"/command \"{cmd.CommandText}\" \"{cmd.FilePath}\"",
-            WorkingDirectory = Path.GetDirectoryName(cmd.FilePath) ?? Environment.CurrentDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-    }
+        var args = cfg.ArgumentsTemplate
+            .Replace("{CommandText}", cmd.CommandText)
+            .Replace("{FilePath}", cmd.FilePath);
 
-    private ProcessStartInfo CreateAiAgentProcessStartInfo(PendingCommand cmd)
-    {
-        // TODO: настроить путь к скрипту AI-агента или HTTP-клиент
+        var workingDir = cfg.WorkingDirectory switch
+        {
+            null or "" => Path.GetDirectoryName(cmd.FilePath),
+            "." => Environment.CurrentDirectory,
+            var dir => dir
+        } ?? Environment.CurrentDirectory;
+
         return new ProcessStartInfo
         {
-            FileName = "python",
-            Arguments = $"ai_agent.py --command \"{cmd.CommandText}\" --file \"{cmd.FilePath}\"",
-            WorkingDirectory = Environment.CurrentDirectory,
+            FileName = cfg.ExecutablePath,
+            Arguments = args,
+            WorkingDirectory = workingDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
     }
 }
-

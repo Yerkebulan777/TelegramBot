@@ -89,6 +89,7 @@ public static class DependencyInjectionExtensions
         _ = services.AddSingleton<ITelegramUpdateMapper, TelegramUpdateMapper>();
         _ = services.AddSingleton<IKeyboardBuilder, KeyboardBuilder>();
         _ = services.AddHostedService<TelegramBotHostedService>();
+        _ = services.AddHostedService<CommandNotificationService>();
 
         return services;
     }
