@@ -123,26 +123,49 @@ public class TelegramOutputService(
         }
     }
 
-    public async Task ClearChatHistoryAsync(long chatId, UserSession session)
+    public async Task ClearChatHistoryAsync(long chatId, UserSession session, IEnumerable<int>? exceptMessageIds = null)
     {
-        var messageIds = session.GetTrackedMessages()
+        var exceptIds = exceptMessageIds?.ToHashSet() ?? [];
+        var allMessageIds = session.GetTrackedMessages()
             .Concat(await _dataService.GetTrackedMessagesAsync(chatId))
             .Distinct()
             .ToArray();
 
-        if (messageIds.Length == 0)
+        var messageIds = allMessageIds
+            .Where(messageId => !exceptIds.Contains(messageId))
+            .ToArray();
+
+        if (allMessageIds.Length == 0)
         {
             return;
         }
 
         try
         {
-            await DeleteMessagesAsync(chatId, messageIds);
+            if (messageIds.Length > 0)
+            {
+                await DeleteMessagesAsync(chatId, messageIds);
+            }
         }
         finally
         {
             session.ClearTrackedMessages();
-            await _dataService.DeleteTrackedMessagesAsync(chatId);
+            foreach (var messageId in exceptIds.Intersect(allMessageIds))
+            {
+                session.TrackMessage(messageId);
+            }
+
+            if (exceptIds.Count == 0)
+            {
+                await _dataService.DeleteTrackedMessagesAsync(chatId);
+            }
+            else
+            {
+                foreach (var messageId in messageIds)
+                {
+                    await _dataService.DeleteTrackedMessageAsync(chatId, messageId);
+                }
+            }
         }
     }
 

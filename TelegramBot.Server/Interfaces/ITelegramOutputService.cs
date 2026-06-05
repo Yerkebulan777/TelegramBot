@@ -15,7 +15,7 @@ public interface ITelegramOutputService
     Task DeleteMessageAsync(long chatId, int messageId);
     Task DeleteMessageAsync(long chatId, int messageId, UserSession session);
     Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default);
-    Task ClearChatHistoryAsync(long chatId, UserSession session);
+    Task ClearChatHistoryAsync(long chatId, UserSession session, IEnumerable<int>? exceptMessageIds = null);
     Task AnswerCallbackAsync(string callbackId, string messageText);
     Task EditMessageReplyMarkupAsync(long userId, int messageId, InlineKeyboardMarkup keyboard);
     Task EditMessageReplyTextAsync(long userId, int messageId, string message);

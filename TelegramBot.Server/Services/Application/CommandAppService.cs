@@ -22,10 +22,15 @@ public sealed class CommandAppService(
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
         var session = _sessionManager.GetOrCreateSession(message.UserId);
-        await _outputService.ClearChatHistoryAsync(message.UserId, session);
+        var cleanupCandidates = session.GetTrackedMessages()
+            .Concat(await _dataService.GetTrackedMessagesAsync(message.UserId))
+            .Distinct()
+            .ToArray();
+
         session.TrackMessage(message.MessageId);
         await _dataService.SaveTrackedMessageAsync(message.UserId, message.MessageId);
         await _slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
+        await DeleteOldMessagesAsync(message, session, cleanupCandidates, cancellationToken);
     }
 
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
@@ -64,5 +69,54 @@ public sealed class CommandAppService(
         };
 
         _ = await _callbackDispatcher.DispatchAsync(context, cancellationToken);
+    }
+
+    private async Task DeleteOldMessagesAsync(
+        MessageDto message,
+        UserSession session,
+        IReadOnlyCollection<int> cleanupCandidates,
+        CancellationToken cancellationToken)
+    {
+        if (cleanupCandidates.Count == 0)
+        {
+            return;
+        }
+
+        var protectedMessageIds = GetProtectedMessageIds(message, session);
+        var messageIds = cleanupCandidates
+            .Where(messageId => !protectedMessageIds.Contains(messageId))
+            .ToArray();
+
+        if (messageIds.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _outputService.DeleteMessagesAsync(message.UserId, messageIds, cancellationToken);
+        }
+        finally
+        {
+            session.UntrackMessages(messageIds);
+            foreach (var messageId in messageIds)
+            {
+                await _dataService.DeleteTrackedMessageAsync(message.UserId, messageId);
+            }
+        }
+    }
+
+    private static HashSet<int> GetProtectedMessageIds(MessageDto message, UserSession session)
+    {
+        return new int?[]
+            {
+                message.MessageId,
+                session.CommandSelectionMessageId,
+                session.FileSelectionMessageId,
+                session.StatusMessageId
+            }
+            .Where(messageId => messageId.HasValue)
+            .Select(messageId => messageId!.Value)
+            .ToHashSet();
     }
 }
