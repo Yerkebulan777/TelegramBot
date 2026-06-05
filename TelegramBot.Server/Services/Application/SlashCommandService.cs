@@ -237,7 +237,7 @@ public sealed class SlashCommandService(
             if (selectedProject == null)
             {
                 logger.LogDebug("Project confirm blocked: user={UserId}, reason=no_project_selected", userId);
-                _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите проект."), session);
+                _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "⚠️ Сначала выберите проект."), session);
                 return;
             }
 
@@ -257,7 +257,7 @@ public sealed class SlashCommandService(
         if (selectedSections.Count == 0)
         {
             logger.LogDebug("Job submit blocked: user={UserId}, reason=no_sections_selected", userId);
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один раздел."), session);
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "⚠️ Сначала выберите хотя бы один раздел."), session);
             return;
         }
 
