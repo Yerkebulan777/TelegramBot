@@ -66,6 +66,7 @@ public class UserSession
     public bool IsFileSelectionActive { get; set; }
     public int? FileSelectionMessageId { get; set; }
     public int? StatusMessageId { get; set; }
+    public int? LastActionsMessageId { get; set; }
 
     // Command manipulation methods
     public void AddPendingCommand(string code, string displayName)
@@ -181,6 +182,7 @@ public class UserSession
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;
         StatusMessageId = null;
+        LastActionsMessageId = null;
     }
 
     /// <summary>

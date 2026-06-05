@@ -341,11 +341,21 @@ public sealed class SlashCommandService(
 
     private async Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
     {
+        if (session.LastActionsMessageId.HasValue)
+        {
+            await _outputService.DeleteMessageAsync(userId, session.LastActionsMessageId.Value, session);
+            session.LastActionsMessageId = null;
+        }
+
         var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
             ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
             : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
 
-        _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard), session);
+        var message = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard), session);
+        if (message != null)
+        {
+            session.LastActionsMessageId = message.Id;
+        }
     }
 
     private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)

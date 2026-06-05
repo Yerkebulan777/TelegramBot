@@ -49,11 +49,19 @@ public sealed class CommandSelectionHandler(
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+
+        if (session.LastActionsMessageId.HasValue)
+        {
+            await _outputService.DeleteMessageAsync(context.UserId, session.LastActionsMessageId.Value, session);
+            session.LastActionsMessageId = null;
+        }
+
         var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
         {
             session.TrackMessage(message.Id);
+            session.LastActionsMessageId = message.Id;
         }
 
         return true;
@@ -66,6 +74,7 @@ public sealed class CommandSelectionHandler(
 
         context.Session.ClearPendingCommands();
         context.Session.IsFileSelectionActive = false;
+        context.Session.LastActionsMessageId = null;
 
         var cancelMsg = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
         if (cancelMsg != null)

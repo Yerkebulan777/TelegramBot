@@ -54,16 +54,26 @@ public sealed class FileNavigationHandler(
 
         session.ClearSelectedFiles();
         session.CurrentPath = newPath;
-
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
+
+        if (session.LastActionsMessageId.HasValue)
+        {
+            await _outputService.DeleteMessageAsync(context.UserId, session.LastActionsMessageId.Value, session);
+            session.LastActionsMessageId = null;
+        }
+
+        var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
+            ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+            : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+
         var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
         if (message != null)
         {
             session.TrackMessage(message.Id);
+            session.LastActionsMessageId = message.Id;
         }
 
         return true;

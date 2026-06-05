@@ -87,6 +87,12 @@ public class TelegramOutputService(
         }
     }
 
+    public async Task DeleteMessageAsync(long chatId, int messageId, UserSession session)
+    {
+        await DeleteMessageAsync(chatId, messageId);
+        _ = Task.Run(async () => await _dataService.DeleteTrackedMessageAsync(chatId, messageId));
+    }
+
     public async Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default)
     {
         var ids = messageIds.Distinct().ToArray();
