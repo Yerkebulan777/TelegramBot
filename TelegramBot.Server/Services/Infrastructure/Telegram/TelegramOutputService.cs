@@ -24,8 +24,8 @@ public class TelegramOutputService(
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
         if (string.IsNullOrWhiteSpace(message)) return null;
-        
-        var msg = await ExecuteWithRetryAsync(async () =>
+
+        return await TrackAsync(ExecuteWithRetryAsync(async () =>
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
@@ -33,32 +33,18 @@ public class TelegramOutputService(
                 parseMode: ParseMode.MarkdownV2);
             _logger.LogDebug("Sent to {UserId}: {Message}", userId, message);
             return t;
-        }, userId);
-
-        if (msg != null)
-        {
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
-        }
-
-        return msg;
+        }, userId), userId);
     }
 
     public async Task<Message?> SendErrorAsync(long userId, string errorMessage)
     {
-        var msg = await ExecuteWithRetryAsync(async () =>
+        return await TrackAsync(ExecuteWithRetryAsync(async () =>
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
                 text: $"⚠ Error: {errorMessage}");
             return t;
-        }, userId);
-
-        if (msg != null)
-        {
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
-        }
-
-        return msg;
+        }, userId), userId);
     }
 
     public async Task SendNotificationAsync(string message)
@@ -125,20 +111,49 @@ public class TelegramOutputService(
 
     public async Task ClearChatHistoryAsync(long chatId, UserSession session)
     {
+        await CleanupTrackedMessagesAsync(chatId, session, []);
+    }
+
+    public async Task CleanupTrackedMessagesAsync(
+        long chatId,
+        UserSession session,
+        IEnumerable<int> keepMessageIds,
+        CancellationToken cancellationToken = default)
+    {
         var messageIds = session.GetTrackedMessages();
         if (messageIds.Count == 0)
         {
             return;
         }
 
+        var keepIds = keepMessageIds.ToHashSet();
+        var staleIds = messageIds
+            .Distinct()
+            .Where(messageId => !keepIds.Contains(messageId))
+            .ToArray();
+
         try
         {
-            await DeleteMessagesAsync(chatId, messageIds);
+            await DeleteMessagesAsync(chatId, staleIds, cancellationToken);
         }
         finally
         {
             session.ClearTrackedMessages();
-            _ = Task.Run(async () => await _dataService.DeleteTrackedMessagesAsync(chatId));
+            var keptIds = messageIds
+                .Distinct()
+                .Where(keepIds.Contains)
+                .ToArray();
+
+            foreach (var messageId in keptIds)
+            {
+                session.TrackMessage(messageId);
+            }
+
+            await _dataService.DeleteTrackedMessagesAsync(chatId);
+            if (keptIds.Length > 0)
+            {
+                await _dataService.SaveTrackedMessagesAsync(chatId, keptIds);
+            }
         }
     }
 

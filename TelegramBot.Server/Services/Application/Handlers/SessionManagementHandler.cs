@@ -168,7 +168,6 @@ public sealed class SessionManagementHandler(
         if (clearKeyboardMessage != null)
         {
             context.Session.TrackMessage(clearKeyboardMessage.Id);
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(context.UserId, clearKeyboardMessage.Id));
         }
     }
 
@@ -179,7 +178,6 @@ public sealed class SessionManagementHandler(
         if (message != null)
         {
             context.Session.TrackMessage(message.Id);
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(context.UserId, message.Id));
         }
     }
 
