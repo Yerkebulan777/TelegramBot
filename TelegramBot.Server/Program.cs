@@ -1,4 +1,5 @@
 using Serilog;
+using Serilog.Events;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using TelegramBot.Data;
@@ -22,8 +23,12 @@ public static class Program
                 "Это приложение разработано исключительно для операционной системы Windows.");
         }
 
+        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var logPath = Path.Combine(documentsPath, "TelegramBot", "Logs", "Server", "log-.txt");
+
         Log.Logger = new LoggerConfiguration()
             .WriteTo.Console()
+            .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
             .CreateBootstrapLogger();
 
         try
@@ -35,10 +40,17 @@ public static class Program
                     _=config.AddEnvironmentVariables();
                 })
                 .ConfigureServices((context, services) => _ = services.AddTelegramBotServer(context.Configuration))
-                .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
-                    .ReadFrom.Configuration(context.Configuration)
-                    .ReadFrom.Services(services)
-                    .Enrich.FromLogContext())
+                .UseSerilog((context, services, loggerConfiguration) =>
+                {
+                    var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                    var logPath = Path.Combine(documentsPath, "TelegramBot", "Logs", "Server", "log-.txt");
+
+                    loggerConfiguration
+                        .ReadFrom.Configuration(context.Configuration)
+                        .ReadFrom.Services(services)
+                        .Enrich.FromLogContext()
+                        .WriteTo.File(logPath, rollingInterval: RollingInterval.Day);
+                })
                 .Build();
 
             await host.InitializeDatabaseAsync();
