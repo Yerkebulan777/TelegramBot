@@ -2,10 +2,9 @@ using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Models;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
-
-public readonly record struct CommandOption(string Text, string CallbackData, string CommandKey);
 
 public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
 {
@@ -16,17 +15,9 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
     }
 
-    public Task<InlineKeyboardMarkup> GetCommandsKeyboardAsync(UserSession session)
+    public Task<InlineKeyboardMarkup> GetCommandKeyboardAsync(CommandGroup group, UserSession session)
     {
-        var commandOptions = new List<CommandOption>
-        {
-            new("Export to PDF", CallbackPrefixes.Pdf, CommandCodes.Pdf),
-            new("Export to DWG", CallbackPrefixes.Dwg, CommandCodes.Dwg),
-            new("Export to NWC", CallbackPrefixes.Nwc, CommandCodes.Nwc),
-            new("Export to IFC", CallbackPrefixes.Ifc, CommandCodes.Ifc)
-        };
-
-        return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
+        return Task.FromResult(BuildSelectableCommandsKeyboard(session, CommandCatalog.GetByGroup(group)));
     }
 
     public Task<ReplyKeyboardMarkup> GetCommandActionsReplyKeyboardAsync()
@@ -105,29 +96,17 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
-    public Task<InlineKeyboardMarkup> GetAutomationKeyboardAsync(UserSession session)
-    {
-        var commandOptions = new List<CommandOption>
-        {
-            new("BIM Doctor", CallbackPrefixes.BimDoc, CommandCodes.BimDoc),
-            new("Clash Report", CallbackPrefixes.ClashRep, CommandCodes.ClashRep),
-            new("Auto Resolver", CallbackPrefixes.AutoRes, CommandCodes.AutoRes)
-        };
-
-        return Task.FromResult(BuildSelectableCommandsKeyboard(session, commandOptions));
-    }
-
     private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(
-        UserSession session, List<CommandOption> commandOptions)
+        UserSession session, IEnumerable<CommandDefinition> commandOptions)
     {
         var buttons = commandOptions
             .Select(option =>
             {
-                var isSelected = session.PendingCommand.Contains(option.CommandKey);
-                var text = isSelected ? $"✅ {option.Text}" : option.Text;
+                var isSelected = session.PendingCommand.Contains(option.Code);
+                var text = isSelected ? $"✅ {option.DisplayName}" : option.DisplayName;
                 return new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData(text, option.CallbackData)
+                    InlineKeyboardButton.WithCallbackData(text, option.CallbackPrefix)
                 };
             })
             .ToList();

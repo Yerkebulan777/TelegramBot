@@ -10,6 +10,7 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Models;
 
 namespace TelegramBot.Server.Services.Application;
 
@@ -35,7 +36,7 @@ public sealed class SlashCommandService(
 
         ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
 
-        logger.LogInformation("Received command '{Command}' from {Username} ({UserId})", rawText, username, userId);
+        logger.LogInformation("Command received: command={Command}, user={UserId}", text, userId);
 
         if (text == "/start")
         {
@@ -77,6 +78,7 @@ public sealed class SlashCommandService(
         var userRecord = await _dataService.GetUserAsync(userId);
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
+            logger.LogWarning("Command rejected: command={Command}, user={UserId}, reason=access_denied", text, userId);
             _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
             return;
         }
@@ -116,7 +118,7 @@ public sealed class SlashCommandService(
         {
             case "/export":
                 logger.LogDebug("Executing /export for {Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, isAutomation: false);
+                await StartCommandSelectionAsync(userId, session, CommandGroup.Export);
                 break;
 
             case "/status":
@@ -131,7 +133,7 @@ public sealed class SlashCommandService(
 
             case "/automation":
                 logger.LogDebug("Executing /automation for {Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, isAutomation: true);
+                await StartCommandSelectionAsync(userId, session, CommandGroup.Automation);
                 break;
 
             case "/help":
@@ -223,6 +225,7 @@ public sealed class SlashCommandService(
     {
         if (!session.FileSelectionMessageId.HasValue)
         {
+            logger.LogWarning("Job submit blocked: user={UserId}, reason=missing_file_selection_message", userId);
             _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено."), session);
             return;
         }
@@ -232,6 +235,7 @@ public sealed class SlashCommandService(
             var selectedProject = session.SelectedFiles.FirstOrDefault();
             if (selectedProject == null)
             {
+                logger.LogDebug("Project confirm blocked: user={UserId}, reason=no_project_selected", userId);
                 _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите проект."), session);
                 return;
             }
@@ -251,13 +255,14 @@ public sealed class SlashCommandService(
         var selectedSections = session.SelectedFiles;
         if (selectedSections.Count == 0)
         {
+            logger.LogDebug("Job submit blocked: user={UserId}, reason=no_sections_selected", userId);
             _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите хотя бы один раздел."), session);
             return;
         }
 
         logger.LogInformation(
-            "User {Username} ({UserId}) submitting job: commands=[{Commands}], sections={Count}",
-            username, userId, string.Join(", ", session.PendingCommand), selectedSections.Count);
+            "Job submit: user={UserId}, commands={CommandCount}, sections={SectionCount}",
+            userId, session.PendingCommand.Count, selectedSections.Count);
 
         var commandNames = session.PendingCommandName;
         var projectName = GetCurrentProjectName(session);
@@ -267,9 +272,16 @@ public sealed class SlashCommandService(
         var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames);
 
         var filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
+        if (filesToProcess.Count == 0)
+        {
+            logger.LogWarning("Job submit: user={UserId}, commands={CommandCount}, files=0", userId, session.PendingCommand.Count);
+        }
 
         var sessionId = await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
+        logger.LogInformation(
+            "Job queued: session={SessionId}, user={UserId}, commands={CommandCount}, files={FileCount}",
+            sessionId, userId, session.PendingCommand.Count, filesToProcess.Count);
 
         await _dataService.NotifyNewCommandsAsync((int)sessionId);
 
@@ -332,14 +344,12 @@ public sealed class SlashCommandService(
         _ = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard), session);
     }
 
-    private async Task StartCommandSelectionAsync(long userId, UserSession session, bool isAutomation)
+    private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
     {
         session.Reset(_options.RootPath);
         session.IsFileSelectionActive = false;
 
-        var commandKeyboard = isAutomation
-            ? await _keyboardBuilder.GetAutomationKeyboardAsync(session)
-            : await _keyboardBuilder.GetCommandsKeyboardAsync(session);
+        var commandKeyboard = await _keyboardBuilder.GetCommandKeyboardAsync(commandGroup, session);
 
         var replyKeyboard = await _keyboardBuilder.GetCommandActionsReplyKeyboardAsync();
 

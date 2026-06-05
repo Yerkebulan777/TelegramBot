@@ -34,7 +34,7 @@ public sealed class CommandExecutionService(
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
     // Партиции: ID → пул процессов. SortedDictionary гарантирует порядок по возрастанию ID.
-    private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = new();
+    private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = [];
 
     // Трекинг активных процессов для возможности принудительного завершения
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
@@ -46,7 +46,7 @@ public sealed class CommandExecutionService(
     {
         InitializePartitionPools();
 
-        logger.LogInformation("Worker starting with {PartitionCount} partitions: {Pools}",
+        logger.LogInformation("Worker starting: partitions={PartitionCount}, pools={Pools}",
             _partitionPools.Count,
             string.Join(", ", _partitionPools.Select(p => $"{p.Key}={p.Value.CurrentCount}")));
 
@@ -82,7 +82,7 @@ public sealed class CommandExecutionService(
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Connection lost. Reconnecting in {Delay}ms...", ReconnectDelayMs);
+                    logger.LogError(ex, "Worker listener lost: retryMs={Delay}", ReconnectDelayMs);
                     await Task.Delay(ReconnectDelayMs, stoppingToken);
                 }
             }
@@ -90,12 +90,14 @@ public sealed class CommandExecutionService(
         finally
         {
             // Graceful shutdown: ждём завершения активных процессов
-            logger.LogInformation("Shutting down, waiting for active processes to complete...");
+            logger.LogInformation("Worker stopping: activeProcesses={Count}", _activeProcesses.Count);
             await WaitForActiveProcessesAsync();
             _shutdownCts?.Dispose();
 
             foreach (var pool in _partitionPools.Values)
+            {
                 pool.Dispose();
+            }
         }
 
         logger.LogInformation("Worker stopped");
@@ -115,7 +117,9 @@ public sealed class CommandExecutionService(
 
         // Гарантируем, что хотя бы один пул существует
         if (_partitionPools.Count == 0)
+        {
             _partitionPools[0] = new SemaphoreSlim(5, 5);
+        }
     }
 
     private async Task WaitForActiveProcessesAsync()
@@ -149,7 +153,7 @@ public sealed class CommandExecutionService(
 
         conn.Notification += OnNotificationReceived;
 
-        logger.LogInformation("Connected. Listening for NOTIFY on 'new_command'...");
+        logger.LogInformation("Worker listening: channel=new_command");
 
         // Освобождаем истёкшие Lease (crash recovery упавших воркеров)
         await dataService.ReleaseExpiredLeasesAsync();
@@ -169,11 +173,11 @@ public sealed class CommandExecutionService(
             catch (TimeoutException)
             {
                 // Fallback poll — если NOTIFY был потерян
-                logger.LogDebug("Fallback poll: checking for pending commands");
+                logger.LogDebug("Worker poll: reason=timeout");
             }
             catch (NpgsqlException ex) when (!stoppingToken.IsCancellationRequested)
             {
-                logger.LogError(ex, "PostgreSQL connection error, reconnecting...");
+                logger.LogError(ex, "Worker listener error: source=postgres");
                 // Выходим из цикла → outer reconnect
             }
 
@@ -183,7 +187,7 @@ public sealed class CommandExecutionService(
 
     private void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
     {
-        logger.LogDebug("NOTIFY received: channel='{Channel}', payload='{Payload}'",
+        logger.LogDebug("Worker notify: channel={Channel}, payload={Payload}",
             e.Channel, e.Payload);
     }
 
@@ -198,7 +202,8 @@ public sealed class CommandExecutionService(
                 return;
             }
 
-            logger.LogInformation("Claimed {Count} commands for processing", claimed.Count);
+            logger.LogInformation("Worker batch claimed: count={Count}, ids={CommandIds}",
+                claimed.Count, string.Join(",", claimed.Select(c => c.CommandId)));
 
             // Запускаем все команды параллельно, но каждая ждёт свободный слот своей партиции
             var tasks = claimed.Select(cmd => ProcessWithPoolAsync(cmd, ct));
@@ -222,8 +227,8 @@ public sealed class CommandExecutionService(
 
         var pool = _partitionPools[threshold];
 
-        logger.LogDebug("Command {Cmd} ({Id}) with Priority {Prio} -> partition (threshold={Threshold}, slots={Slots})",
-            cmd.CommandText, cmd.CommandId, cmd.Priority, threshold, pool.CurrentCount);
+        logger.LogDebug("Command partition: id={Id}, command={Cmd}, priority={Prio}, threshold={Threshold}, slots={Slots}",
+            cmd.CommandId, cmd.CommandText, cmd.Priority, threshold, pool.CurrentCount);
 
         await pool.WaitAsync(ct);
 
@@ -237,7 +242,7 @@ public sealed class CommandExecutionService(
         }
         finally
         {
-            pool.Release();
+            _=pool.Release();
         }
     }
 
@@ -250,6 +255,7 @@ public sealed class CommandExecutionService(
         {
             if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
             {
+                logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
                 _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Unknown command type: {cmd.CommandText}");
                 return;
@@ -257,12 +263,15 @@ public sealed class CommandExecutionService(
 
             if (!ValidateFilePath(cmd, commandCfg))
             {
+                logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
                 _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"File validation failed for path: {cmd.FilePath}");
                 return;
             }
 
             var startInfo = CreateProcessStartInfo(cmd, commandCfg);
+            logger.LogInformation("Command start: id={Id}, command={Cmd}, attempt={Attempt}",
+                cmd.CommandId, cmd.CommandText, cmd.RetryCount + 1);
 
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             _=process.Start();
@@ -272,8 +281,8 @@ public sealed class CommandExecutionService(
             var outputBuilder = new StringBuilder();
             var errorBuilder = new StringBuilder();
 
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) errorBuilder.AppendLine(e.Data); };
+            process.OutputDataReceived += (_, e) => { if (e.Data != null) { _=outputBuilder.AppendLine(e.Data); } };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) { _=errorBuilder.AppendLine(e.Data); } };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
@@ -289,10 +298,14 @@ public sealed class CommandExecutionService(
                 process.Kill(true);
                 await process.WaitForExitAsync(ct);
                 errorMessage = $"Timeout: process exceeded {_workerOptions.ProcessTimeoutSeconds}s limit";
+                logger.LogWarning("Command timeout: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
+                    cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
             }
             else if (process.ExitCode != 0)
             {
                 errorMessage = $"Process exited with code {process.ExitCode}";
+                logger.LogWarning("Command exit: id={Id}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
+                    cmd.CommandId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
             }
 
             sw.Stop();
@@ -300,6 +313,8 @@ public sealed class CommandExecutionService(
             if (completed && process.ExitCode == 0)
             {
                 _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
+                logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
+                    cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
                 await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Done, null);
             }
             else if (errorMessage != null && cmd.RetryCount < _workerOptions.MaxRetries)
@@ -325,7 +340,11 @@ public sealed class CommandExecutionService(
         }
         catch (OperationCanceledException)
         {
-            if (process != null && !process.HasExited) process.Kill(true);
+            if (process != null && !process.HasExited)
+            {
+                process.Kill(true);
+            }
+
             throw;
         }
         catch (Exception ex)
@@ -391,7 +410,10 @@ public sealed class CommandExecutionService(
             return false;
         }
 
-        if (cfg.AllowedExtensions == null || cfg.AllowedExtensions.Count == 0) return true;
+        if (cfg.AllowedExtensions == null || cfg.AllowedExtensions.Count == 0)
+        {
+            return true;
+        }
 
         var ext = Path.GetExtension(cmd.FilePath)?.ToLowerInvariant();
         if (!cfg.AllowedExtensions.Contains(ext ?? ""))

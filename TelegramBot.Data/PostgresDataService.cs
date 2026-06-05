@@ -390,7 +390,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             var payload = $"{userId}|{commandId}|{commandText}|{status}|{errorMessage ?? ""}";
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            _=await conn.ExecuteAsync("NOTIFY command_completed, @Payload", new { Payload = payload });
+            _=await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
         }
         catch (Exception e)
         {
@@ -414,7 +414,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            _=await conn.ExecuteAsync("NOTIFY new_command, @SessionId", new { SessionId = sessionId });
+            _=await conn.ExecuteAsync("SELECT pg_notify('new_command', CAST(@SessionId AS text))", new { SessionId = sessionId });
         }
         catch (Exception e)
         {

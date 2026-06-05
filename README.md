@@ -21,6 +21,11 @@ Telegram-бот для навигации по файловой системе �
 - **PostgreSQL LISTEN/NOTIFY** — очереди задач для Worker (мгновенная реакция)
 - **Serilog** — структурированное логирование (Console + Seq)
 
+## Качество кода
+
+- **dotnet format** — форматирование кода согласно `.editorconfig`.
+- **Qodana** — статический анализ и поиск мертвого кода. Подробности в [Docs/qodana-setup.md](Docs/qodana-setup.md).
+
 ## Требования к платформе
 
 ⚠️ **Windows only** — проект использует Windows-specific API для навигации по файловой системе. Запуск на Linux/macOS не поддерживается (проверка `RuntimeInformation.IsOSPlatform` в `Program.cs`).
@@ -29,6 +34,7 @@ Telegram-бот для навигации по файловой системе �
 
 - **PostgreSQL 15+** — доступный по сети для Server и всех Worker-ов
 - **Docker** (рекомендуется для PostgreSQL) или установленный PostgreSQL сервер
+- **Qodana** (рекомендуется) — статический анализ кода (линтер)
 
 ## Структура решения
 
