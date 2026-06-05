@@ -28,7 +28,7 @@ public static class CommandCatalog
         new(CommandCodes.AutoRes, "Auto Resolver", CallbackPrefixes.AutoRes, CommandGroup.Automation)
     ];
 
-    private static readonly IReadOnlyDictionary<string, CommandDefinition> ByPrefix =
+    private static readonly IReadOnlyDictionary<string, CommandDefinition> _byPrefix =
         All.ToDictionary(command => command.CallbackPrefix);
 
     public static IEnumerable<CommandDefinition> GetByGroup(CommandGroup group)
@@ -38,6 +38,6 @@ public static class CommandCatalog
 
     public static bool TryGetByCallbackPrefix(string prefix, out CommandDefinition definition)
     {
-        return ByPrefix.TryGetValue(prefix, out definition);
+        return _byPrefix.TryGetValue(prefix, out definition);
     }
 }

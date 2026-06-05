@@ -11,6 +11,7 @@ using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Models;
+using Message = Telegram.Bot.Types.Message;
 
 namespace TelegramBot.Server.Services.Application;
 
@@ -269,13 +270,14 @@ public sealed class SlashCommandService(
         var sectionNames = selectedSections
             .Select(GetSafePathName)
             .ToArray();
-        var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames);
 
         var filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
         if (filesToProcess.Count == 0)
         {
             logger.LogWarning("Job submit: user={UserId}, commands={CommandCount}, files=0", userId, session.PendingCommand.Count);
         }
+
+        var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
 
         var sessionId = await _dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
@@ -360,8 +362,8 @@ public sealed class SlashCommandService(
 
     private async Task SendRegistrationMessageAsync(long userId, UserSession session)
     {
-        var keyboard = new InlineKeyboardMarkup([[
-            InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
+        var keyboard = new Telegram.Bot.Types.ReplyMarkups.InlineKeyboardMarkup([[
+            Telegram.Bot.Types.ReplyMarkups.InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
         ]]);
         _ = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId,
             "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
@@ -411,7 +413,8 @@ public sealed class SlashCommandService(
     private static string BuildJobQueuedMessage(
         IReadOnlyList<string> commandNames,
         string projectName,
-        IEnumerable<string> sectionNames)
+        IEnumerable<string> sectionNames,
+        int fileCount)
     {
         var builder = new StringBuilder()
             .AppendLine("🧰 *Команды*");
@@ -432,6 +435,10 @@ public sealed class SlashCommandService(
         {
             _ = builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(sectionName)}");
         }
+
+        _ = builder
+            .AppendLine()
+            .AppendLine($"📄 *Количество файлов:* {fileCount}");
 
         return builder.ToString();
     }
