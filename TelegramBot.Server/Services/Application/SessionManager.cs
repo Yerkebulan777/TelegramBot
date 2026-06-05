@@ -9,14 +9,12 @@ public class SessionManager : ISessionManager, IDisposable
     private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();
     private readonly TimeSpan _sessionTimeout;
-    private readonly IDataService _dataService;
     private readonly Timer _cleanupTimer;
     private bool _disposed;
 
-    public SessionManager(TimeSpan sessionTimeout, IDataService dataService)
+    public SessionManager(TimeSpan sessionTimeout)
     {
         _sessionTimeout = sessionTimeout;
-        _dataService = dataService;
         _cleanupTimer = new Timer(
             _ => CleanUpExpiredSessions(),
             null,
@@ -26,32 +24,7 @@ public class SessionManager : ISessionManager, IDisposable
 
     public UserSession GetOrCreateSession(long userId)
     {
-        var session = _sessions.GetOrAdd(userId, key =>
-        {
-            var session = new UserSession { UserId = key };
-            
-            // Sync with DB
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var allTracked = await _dataService.GetAllTrackedMessagesAsync();
-                    if (allTracked.Contains(key))
-                    {
-                        foreach (var messageId in allTracked[key])
-                        {
-                            session.TrackMessage(messageId);
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    // Ignore
-                }
-            });
-
-            return session;
-        });
+        var session = _sessions.GetOrAdd(userId, key => new UserSession { UserId = key });
         session.LastActivity = DateTime.UtcNow;
         return session;
     }
@@ -113,12 +86,6 @@ public class SessionManager : ISessionManager, IDisposable
                     if (_sessionLocks.TryRemove(key, out var removedLock))
                     {
                         removedLock.Dispose();
-                    }
-
-                    var messageIds = candidate.TakeTrackedMessages();
-                    if (messageIds.Count > 0)
-                    {
-                        _ = Task.Run(() => _dataService.SaveTrackedMessagesAsync(key, messageIds));
                     }
                 }
             }

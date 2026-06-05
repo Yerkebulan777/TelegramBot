@@ -9,17 +9,23 @@ public sealed class CommandAppService(
     ISessionManager sessionManager,
     ICallbackDispatcher callbackDispatcher,
     ISlashCommandService slashCommandService,
+    ITelegramOutputService outputService,
+    IDataService dataService,
     ILogger<CommandAppService> logger) : ICommandAppService
 {
     private readonly ISessionManager _sessionManager = sessionManager;
     private readonly ICallbackDispatcher _callbackDispatcher = callbackDispatcher;
     private readonly ISlashCommandService _slashCommandService = slashCommandService;
+    private readonly ITelegramOutputService _outputService = outputService;
+    private readonly IDataService _dataService = dataService;
 
-    public Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
+    public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
         var session = _sessionManager.GetOrCreateSession(message.UserId);
+        await _outputService.ClearChatHistoryAsync(message.UserId, session);
         session.TrackMessage(message.MessageId);
-        return _slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
+        await _dataService.SaveTrackedMessageAsync(message.UserId, message.MessageId);
+        await _slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
     }
 
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)

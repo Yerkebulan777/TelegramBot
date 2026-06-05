@@ -23,7 +23,7 @@ public class UserSession
     private readonly HashSet<string> _selectedFiles = [];
 
     private readonly object _messageLock = new();
-    private readonly List<int> _trackedMessageIds = [];
+    private readonly HashSet<int> _trackedMessageIds = [];
 
     // Public read-only wrappers with thread-safe access
     public IReadOnlyList<string> PendingCommand
@@ -138,7 +138,7 @@ public class UserSession
     {
         lock (_messageLock)
         {
-            _trackedMessageIds.Add(messageId);
+            _ = _trackedMessageIds.Add(messageId);
         }
     }
 
@@ -162,7 +162,7 @@ public class UserSession
     {
         lock (_messageLock)
         {
-            var ids = new List<int>(_trackedMessageIds);
+            var ids = _trackedMessageIds.ToList();
             _trackedMessageIds.Clear();
             return ids;
         }

@@ -10,6 +10,9 @@ internal static partial class SqlQueries
         internal const string GetAll =
             "SELECT UserId, MessageId FROM TrackedMessages;";
 
+        internal const string GetByUser =
+            "SELECT MessageId FROM TrackedMessages WHERE UserId = @UserId;";
+
         internal const string DeleteByUser =
             "DELETE FROM TrackedMessages WHERE UserId = @UserId;";
 

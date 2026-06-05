@@ -81,13 +81,9 @@ public sealed class AccessRequestHandler(
 
         foreach (var adminId in _adminIds)
         {
-            var adminMsg = await _outputService.SendMessageWithKeyboardAsync(adminId,
+            _ = await _outputService.SendMessageWithKeyboardAsync(adminId,
                 $"Запрос доступа от {displayName} (ID: {context.UserId})",
                 keyboard);
-            if (adminMsg != null)
-            {
-                _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(adminId, adminMsg.Id));
-            }
         }
 
         return true;
@@ -130,12 +126,7 @@ public sealed class AccessRequestHandler(
 
         var displayName = string.IsNullOrEmpty(user.Username) ? targetUserId.ToString() : $"@{user.Username}";
         await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));
-        var userNotifMsg = await _outputService.SendMessageAsync(targetUserId, userMessage);
-
-        if (userNotifMsg != null)
-        {
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(targetUserId, userNotifMsg.Id));
-        }
+        _ = await _outputService.SendMessageAsync(targetUserId, userMessage);
 
         return true;
     }

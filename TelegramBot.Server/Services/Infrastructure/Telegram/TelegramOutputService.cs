@@ -37,7 +37,7 @@ public class TelegramOutputService(
 
         if (msg != null)
         {
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
+            await _dataService.SaveTrackedMessageAsync(userId, msg.Id);
         }
 
         return msg;
@@ -55,7 +55,7 @@ public class TelegramOutputService(
 
         if (msg != null)
         {
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
+            await _dataService.SaveTrackedMessageAsync(userId, msg.Id);
         }
 
         return msg;
@@ -90,7 +90,7 @@ public class TelegramOutputService(
     public async Task DeleteMessageAsync(long chatId, int messageId, UserSession session)
     {
         await DeleteMessageAsync(chatId, messageId);
-        _ = Task.Run(async () => await _dataService.DeleteTrackedMessageAsync(chatId, messageId));
+        await _dataService.DeleteTrackedMessageAsync(chatId, messageId);
     }
 
     public async Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default)
@@ -125,8 +125,12 @@ public class TelegramOutputService(
 
     public async Task ClearChatHistoryAsync(long chatId, UserSession session)
     {
-        var messageIds = session.GetTrackedMessages();
-        if (messageIds.Count == 0)
+        var messageIds = session.GetTrackedMessages()
+            .Concat(await _dataService.GetTrackedMessagesAsync(chatId))
+            .Distinct()
+            .ToArray();
+
+        if (messageIds.Length == 0)
         {
             return;
         }
@@ -138,7 +142,7 @@ public class TelegramOutputService(
         finally
         {
             session.ClearTrackedMessages();
-            _ = Task.Run(async () => await _dataService.DeleteTrackedMessagesAsync(chatId));
+            await _dataService.DeleteTrackedMessagesAsync(chatId);
         }
     }
 
@@ -165,7 +169,7 @@ public class TelegramOutputService(
         var msg = await task;
         if (msg != null)
         {
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
+            await _dataService.SaveTrackedMessageAsync(userId, msg.Id);
         }
         return msg;
     }
