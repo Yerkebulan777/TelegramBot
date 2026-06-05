@@ -35,6 +35,9 @@ public sealed class WorkerOptions
         [0] = 1,
     };
 
+    /// <summary>Через сколько дней удалять (soft-delete) отменённые команды (по умолчанию 7).</summary>
+    public int CleanupOlderThanDays { get; set; } = 7;
+
     /// <summary>
     /// Маппинг кодов команд (CommandText) на конфигурацию исполняемого файла.
     /// По умолчанию: PDF/DWG/IFC/BIMDOC → Revit.exe, NWC/CLASHREP → FileConvert.exe, AUTORES → python ai_agent.py

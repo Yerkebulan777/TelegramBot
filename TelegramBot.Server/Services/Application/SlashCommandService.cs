@@ -1,7 +1,6 @@
 
 using Microsoft.Extensions.Options;
 using System.Text;
-using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
@@ -84,7 +83,7 @@ public sealed class SlashCommandService(
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
             logger.LogWarning("Command rejected: command={Command}, user={UserId}, reason=access_denied", text, userId);
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
+            await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
             return;
         }
 
@@ -105,7 +104,7 @@ public sealed class SlashCommandService(
             return true;
         }
 
-        _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
+        await TrackMessageAsync(_outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
         return false;
     }
 
@@ -191,7 +190,7 @@ public sealed class SlashCommandService(
         {
             logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
             session.Reset(_options.RootPath);
-            _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор отменен."), session);
+            await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор отменен."), session);
             return true;
         }
 
@@ -293,7 +292,7 @@ public sealed class SlashCommandService(
         session.ClearPendingCommands();
         session.IsFileSelectionActive = false;
 
-        _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
+        await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
     }
 
     private async Task BackInFileSelectionAsync(long userId, string username, UserSession session)
@@ -381,7 +380,7 @@ public sealed class SlashCommandService(
                 InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
             ]
         ]);
-        _ = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId,
+        await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId,
             "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
             keyboard), session);
     }
@@ -396,7 +395,7 @@ public sealed class SlashCommandService(
             .AppendLine("/help — справка по командам")
             .ToString();
 
-        _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, helpText), session);
+        await TrackMessageAsync(_outputService.SendMessageAsync(userId, helpText), session);
     }
 
     private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
@@ -460,10 +459,10 @@ public sealed class SlashCommandService(
 
         foreach (var commandName in commandNames)
         {
-            _ = builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(commandName)}");
+            builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(commandName)}");
         }
 
-        _ = builder
+        builder
             .AppendLine()
             .AppendLine("📌 *Проект*")
             .AppendLine($"`{MarkdownHelper.EscapeMarkdown(projectName)}`")
@@ -472,10 +471,10 @@ public sealed class SlashCommandService(
 
         foreach (var sectionName in sectionNames)
         {
-            _ = builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(sectionName)}");
+            builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(sectionName)}");
         }
 
-        _ = builder
+        builder
             .AppendLine()
             .AppendLine($"📄 *Количество файлов:* `{fileCount}`");
 

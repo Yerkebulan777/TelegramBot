@@ -22,7 +22,9 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.SessionDetails,
         CallbackPrefixes.DeleteSession,
         CallbackPrefixes.DeleteCommand,
-        CallbackPrefixes.BackToStatus
+        CallbackPrefixes.BackToStatus,
+        CallbackPrefixes.CancelCommand,
+        CallbackPrefixes.ConfirmCancelCmd
     ];
 
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
@@ -32,6 +34,8 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.SessionDetails => await HandleSessionDetailsAsync(context, cancellationToken),
             CallbackPrefixes.DeleteSession => await HandleDeleteSessionAsync(context, cancellationToken),
             CallbackPrefixes.DeleteCommand => await HandleDeleteCommandAsync(context, cancellationToken),
+            CallbackPrefixes.CancelCommand => await HandleCancelCommandAsync(context, cancellationToken),
+            CallbackPrefixes.ConfirmCancelCmd => await HandleConfirmCancelAsync(context, cancellationToken),
             CallbackPrefixes.BackToStatus => await HandleBackToStatusAsync(context, cancellationToken),
             _ => false
         };
@@ -157,6 +161,111 @@ public sealed class SessionManagementHandler(
         return true;
     }
 
+    private async Task<bool> HandleCancelCommandAsync(CallbackContext context, CancellationToken cancellationToken)
+    {
+        var token = context.ParsedCallback.Argument;
+        if (!int.TryParse(token, out var commandId) || !commandId.IsValidId())
+        {
+            LogInvalidInput("command ID", token, context.Username, context.UserId);
+            return true;
+        }
+
+        Logger.LogDebug("User {Username} ({UserId}) initiating cancel for command {CommandId}", context.Username, context.UserId, commandId);
+
+        // Проверяем, принадлежит ли команда пользователю
+        var command = await _dataService.GetCommandByIdAsync(commandId, context.UserId);
+        if (command == null)
+        {
+            Logger.LogWarning("User {Username} ({UserId}) attempted to cancel foreign/missing command {CommandId}",
+                context.Username, context.UserId, commandId);
+            return true;
+        }
+
+        // Переключаем IsInStatusView = false, чтобы "Нет" (SESSIONDETAILS) попало в ветку показа команд
+        context.Session.IsInStatusView = false;
+
+        // Показываем диалог подтверждения
+        var confirmKeyboard = new InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton.WithCallbackData("✅ Да, отменить", $"{CallbackPrefixes.ConfirmCancelCmd}{commandId}"),
+                InlineKeyboardButton.WithCallbackData("❌ Нет", $"{CallbackPrefixes.SessionDetails}{command.SessionId}")
+            ]
+        ]);
+
+        await _outputService.EditMessageTextWithKeyboardAsync(
+            context.UserId,
+            context.MessageId,
+            $"❓ Вы уверены, что хотите отменить команду *#{command.CommandId} ({command.CommandText})*?",
+            confirmKeyboard);
+
+        return true;
+    }
+
+    private async Task<bool> HandleConfirmCancelAsync(CallbackContext context, CancellationToken cancellationToken)
+    {
+        var token = context.ParsedCallback.Argument;
+        if (!int.TryParse(token, out var commandId) || !commandId.IsValidId())
+        {
+            LogInvalidInput("command ID", token, context.Username, context.UserId);
+            return true;
+        }
+
+        Logger.LogDebug("User {Username} ({UserId}) confirmed cancel for command {CommandId}", context.Username, context.UserId, commandId);
+
+        // Проверяем, принадлежит ли команда пользователю
+        var command = await _dataService.GetCommandByIdAsync(commandId, context.UserId);
+        if (command == null)
+        {
+            Logger.LogWarning("User {Username} ({UserId}) attempted to cancel foreign/missing command {CommandId}",
+                context.Username, context.UserId, commandId);
+            return true;
+        }
+
+        // Обновляем статус в БД на Cancelled
+        var cancelled = await _dataService.CancelCommandAsync(commandId, context.UserId);
+        if (!cancelled)
+        {
+            Logger.LogWarning("Cancel failed or command already finished: commandId={CommandId}", commandId);
+            await _outputService.SendMessageAsync(context.UserId,
+                "⛔ Не удалось отменить команду (возможно, она уже завершена).");
+            return true;
+        }
+
+        // Уведомляем Worker о необходимости принудительно завершить процесс
+        await _dataService.NotifyCommandCancelAsync(commandId);
+
+        Logger.LogInformation("Command cancelled: commandId={CommandId}, userId={UserId}",
+            commandId, context.UserId);
+
+        // Уведомляем пользователя
+        await _outputService.SendMessageAsync(context.UserId,
+            $"⛔ Команда #{commandId} ({command.CommandText}) отменена.");
+
+        // Обновляем отображение сессии
+        context.Session.SessionId = command.SessionId;
+        var sessionCommands = await _dataService.GetSessionsCommandsAsync(command.SessionId, context.UserId);
+        var keyboard = await _keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, command.SessionId);
+
+        // Проверяем, остались ли ещё активные команды в сессии
+        var hasActive = sessionCommands.Any(c =>
+            c.Status == "pending" || c.Status == "processing");
+
+        if (!hasActive)
+        {
+            // Если активных команд не осталось — показываем статус сессии
+            var sessionStatus = await _dataService.GetSessionsStatusAsync(command.SessionId, context.UserId);
+            await _outputService.EditMessageTextWithKeyboardAsync(
+                context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
+        }
+        else
+        {
+            await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        }
+
+        return true;
+    }
+
     private async Task ShowSessionsListAsync(CallbackContext context)
     {
         var sessionsStatus = await _dataService.GetSessionsListAsync(context.UserId);
@@ -187,10 +296,34 @@ public sealed class SessionManagementHandler(
             ? 100 * sessionStatus.DoneFiles / sessionStatus.TotalFiles
             : 0;
 
-        return $"Статус: {sessionStatus.Status}\n" +
-               $"Файлов: {sessionStatus.TotalFiles}\n" +
-               $"Завершено: {sessionStatus.DoneFiles}\n" +
-               $"{percentage}%";
+        var statusIcon = sessionStatus.Status switch
+        {
+            "Done" => "✅",
+            "Failed" => "❌",
+            "Cancelled" => "🚫",
+            "Deleted" => "🗑",
+            _ => "🔄"
+        };
+
+        var progressBar = BuildProgressBar(percentage, 10);
+
+        return $"{statusIcon} *Статус сессии*\n" +
+               $"{progressBar} {percentage}%" +
+               $"\n\n📊 *Сводка:*" +
+               $"\n📄 Всего: {sessionStatus.TotalFiles}" +
+               $"\n✅ Готово: {sessionStatus.DoneFiles}" +
+               $"\n🔄 Выполняется: {sessionStatus.ProcessingFiles}" +
+               $"\n⏳ В очереди: {sessionStatus.PendingFiles}" +
+               $"\n❌ Ошибок: {sessionStatus.FailedFiles}" +
+               $"\n🚫 Отменено: {sessionStatus.CancelledFiles}";
+    }
+
+    private static string BuildProgressBar(int percentage, int segments)
+    {
+        var filled = percentage * segments / 100;
+        var empty = segments - filled;
+        var bar = new string('█', filled) + new string('░', empty);
+        return bar;
     }
 
     private static InlineKeyboardMarkup ConvertDtoToKeyboard(List<List<ButtonDto>>? dto)

@@ -68,7 +68,7 @@ public sealed class CommandAppService(
             Buttons = callback.Buttons
         };
 
-        _ = await _callbackDispatcher.DispatchAsync(context, cancellationToken);
+        await _callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
     private async Task DeleteOldMessagesAsync(

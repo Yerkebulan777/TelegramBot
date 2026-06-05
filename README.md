@@ -204,9 +204,9 @@ Worker автоматически переподключается при пот
 |---------|----------|----------|------------|
 | `AccessRequestHandler` | 0 | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` | Запрос/подтверждение доступа |
 | `FileNavigationHandler` | 10 | `GOTOPARENT:` | Навигация по файловой системе |
-| `FileSelectionHandler` | 20 | `FILE:`, `APPLYFILES:`, `CANCELFILESEL:` | Выбор файлов/проектов/секций |
+| `FileSelectionHandler` | 20 | `FILE:` | Выбор файлов/проектов/секций (toggle) |
 | `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` | Переключение команд экспорта и автоматизации |
-| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:` | Управление сессиями |
+| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:`, `CANCELCMD:`, `CONFIRM_CANCEL:` | Управление сессиями (включая отмену команд с диалогом подтверждения) |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` | Подтверждение/отмена выбора команд |
 
 ## База данных (PostgreSQL)
@@ -219,19 +219,20 @@ PostgreSQL-сервер, доступный по сети. Инициализа�
 |---------|-----------|---------------|
 | `BotUsers` | Пользователи бота | `UserId` (PK), `Username`, `Role` (User/Admin), `Status` (Pending/Approved/Rejected/Blocked), `CreatedAt`, `UpdatedAt` |
 | `Sessions` | Сессии пользователей | `SessionId` (PK, SERIAL), `UserId`, `Username`, `Status` (pending/done/Deleted), `FilesAmount`, `CreatedAt`, `UpdatedAt` |
-| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/Done/Failed/Deleted), `GUID`, `Lease` |
+| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Cancelled/Deleted), `GUID`, `Lease`, `Priority` |
 | `TrackedMessages` | Отслеживаемые сообщения для очистки | `UserId` + `MessageId` (composite PK) |
 
 Soft-delete — строки никогда не удаляются физически (статус `Deleted`).
 
 ### Механизм очереди задач (LISTEN/NOTIFY)
 
-PostgreSQL `LISTEN/NOTIFY` используется для мгновенного уведомления Worker-ов о новых командах:
+PostgreSQL `LISTEN/NOTIFY` используется для мгновенного уведомления Worker-ов о новых командах и отменах:
 
 1. **Server** после `INSERT` команд в БД выполняет `NOTIFY new_command, '<sessionId>'`
-2. **Worker** при старте выполняет `LISTEN new_command` и ждёт через `NpgsqlConnection.WaitAsync()`
+2. **Worker** при старте выполняет `LISTEN new_command` и `LISTEN command_cancel`, ждёт через `NpgsqlConnection.WaitAsync()`
 3. При получении NOTIFY Worker мгновенно просыпается, выбирает pending-команды и выполняет их
 4. Если NOTIFY потерян — fallback poll через 5 минут
+5. **Отмена команд** — пользователь через `/status` → кнопку «⛔ Отменить» → диалог подтверждения → Server меняет статус на `Cancelled` и шлёт `NOTIFY command_cancel`. Worker при получении уведомления отменяет CancellationToken, убивает процесс и не перезаписывает статус
 
 Несколько Worker-ов могут работать параллельно (competing consumers) — каждый берёт следующую команду из очереди.
 
@@ -244,7 +245,7 @@ PostgreSQL `LISTEN/NOTIFY` используется для мгновенног�
 | `/start` | Начало работы, регистрация, запрос доступа |
 | `/export` | Меню выбора команд экспорта |
 | `/automation` | Меню команд автоматизации |
-| `/status` | Просмотр статуса сессий и команд |
+| `/status` | Просмотр статуса сессий, управление командами (удаление/отмена с подтверждением) |
 | `/help` | Справка по командам |
 
 ### Базовый флоу работы
@@ -259,6 +260,8 @@ PostgreSQL `LISTEN/NOTIFY` используется для мгновенног�
 APPLYFILES → создание сессии + команд в БД → NOTIFY → Worker выполняет
      ↓
 /status → просмотр очереди → SESSIONDETAILS → DELETECOMMAND / DELETESESSION
+     ↓
+⛔ Отменить → CANCELCMD → диалог подтверждения → CONFIRM_CANCEL → отмена (БД + NOTIFY)
 ```
 
 Аналогичный флоу для `/automation` (BIMDOC/CLASHREP/AUTORES).

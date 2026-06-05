@@ -11,11 +11,6 @@ public readonly record struct ParsedCallback(string Prefix, string Argument)
         return string.Equals(Prefix, prefix, StringComparison.Ordinal);
     }
 
-    /// <summary>Проверяет, совпадает ли префикс с одним из двух значений.</summary>
-    public bool IsAny(string prefix1, string prefix2)
-    {
-        return Is(prefix1) || Is(prefix2);
-    }
 }
 
 /// <summary>

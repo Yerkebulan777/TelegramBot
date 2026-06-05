@@ -154,6 +154,8 @@
 | CommandNotificationService | ✅ Готово | Fire-and-forget исправлен на корректную асинхронную обработку |
 | TelegramBotHostedService | ✅ Готово | Рефакторинг на primary constructor |
 | UserSession.Reset() | ✅ Готово | Порядок сброса полей унифицирован |
+| **Отмена команд через NOTIFY `command_cancel`** | ✅ Готово | Полноценный механизм отмены команд: кнопка «⛔ Отменить» в /status → Server меняет статус на `Cancelled` → NOTIFY command_cancel → Worker отменяет CTS + убивает процесс |
+| **Улучшенный статус сессий** | ✅ Готово | Детальная разбивка (Pending, Processing, Done, Failed, Cancelled), прогресс-бар, иконки статусов, информативные списки сессий |
 
 ---
 

@@ -11,9 +11,4 @@ public static class CommandCodes
     public const string ClashRep = "CLASHREP";
     public const string AutoRes = "AUTORES";
 
-    public static readonly IReadOnlySet<string> AutomationCodes =
-        new HashSet<string>([BimDoc, ClashRep, AutoRes]);
-
-    public static readonly IReadOnlySet<string> ExportCodes =
-        new HashSet<string>([Pdf, Dwg, Nwc, Ifc]);
 }

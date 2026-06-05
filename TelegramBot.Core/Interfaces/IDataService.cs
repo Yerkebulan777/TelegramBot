@@ -45,18 +45,6 @@ public interface IDataService
     /// <summary>Возвращает ID сессии по ID команды.</summary>
     Task<int?> GetSessionIdByCommandAsync(int commandId, long userId);
 
-    /// <summary>Создает запрос на доступ для пользователя (статус Pending).</summary>
-    Task CreateAccessRequestAsync(long userId, string? username, string? firstName, string? lastName);
-
-    /// <summary>Проверяет, одобрен ли пользователь.</summary>
-    Task<bool> IsUserApprovedAsync(long userId);
-
-    /// <summary>Одобряет доступ пользователю.</summary>
-    Task<bool> ApproveUserAsync(long userId, long approvedBy);
-
-    /// <summary>Гарантирует наличие администратора в БД.</summary>
-    Task EnsureAdminUserAsync(long userId, string? username);
-
     /// <summary>
     /// Атомарно захватывает команды со статусом 'pending' для выполнения воркером.
     /// Использует SELECT ... FOR UPDATE SKIP LOCKED для защиты от конкурентного доступа.
@@ -82,6 +70,18 @@ public interface IDataService
 
     /// <summary>Освобождает команды с истёкшим таймаутом выполнения.</summary>
     Task ReleaseTimeoutCommandsAsync(int timeoutSeconds);
+
+    /// <summary>Soft-delete отменённых команд, завершённых более указанного количества дней назад.</summary>
+    Task CleanupOldCancelledCommandsAsync(int olderThanDays);
+
+    /// <summary>Отменяет команду: обновляет статус на 'Cancelled'.</summary>
+    Task<bool> CancelCommandAsync(int commandId, long userId);
+
+    /// <summary>Уведомляет Worker о необходимости отменить команду через NOTIFY command_cancel.</summary>
+    Task NotifyCommandCancelAsync(int commandId);
+
+    /// <summary>Возвращает команду по ID (для проверки принадлежности пользователю).</summary>
+    Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId);
 
     /// <summary>Уведомляет Worker-ов о новых командах через Postgres LISTEN/NOTIFY.</summary>
     Task NotifyNewCommandsAsync(int sessionId);

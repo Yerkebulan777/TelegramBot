@@ -81,7 +81,7 @@ public sealed class AccessRequestHandler(
 
         foreach (var adminId in _adminIds)
         {
-            _ = await _outputService.SendMessageWithKeyboardAsync(adminId,
+            await _outputService.SendMessageWithKeyboardAsync(adminId,
                 $"Запрос доступа от {displayName} (ID: {context.UserId})",
                 keyboard);
         }
@@ -126,7 +126,7 @@ public sealed class AccessRequestHandler(
 
         var displayName = string.IsNullOrEmpty(user.Username) ? targetUserId.ToString() : $"@{user.Username}";
         await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));
-        _ = await _outputService.SendMessageAsync(targetUserId, userMessage);
+        await _outputService.SendMessageAsync(targetUserId, userMessage);
 
         return true;
     }

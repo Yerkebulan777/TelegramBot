@@ -10,9 +10,10 @@
 - [Алгоритм работы Worker](#алгоритм-работы-worker-службы-выполнения)
 - [Защита от зависаний и сбоев](#защита-от-зависаний-и-сбоев)
 - [Алгоритм работы Server](#алгоритм-работы-server-создание-команд)
+- [Отмена команды пользователем](#отмена-команды-пользователем)
 - [Уведомления пользователей](#уведомления-пользователей-telegram)
 - [Конфигурация системы](#конфигурация-системы)
-- [Структура данных](#структура-данных)
+- [Как устроена база данных](#как-устроена-база-данных)
 - [SQL-операции](#sql-операции)
 - [Безопасность и надёжность](#безопасность-и-надёжность)
 - [Выполнение внешнего процесса](#выполнение-внешнего-процесса)
@@ -31,8 +32,9 @@
 |---------|-----------|----------|
 | **Chain of Responsibility** | Обработка callback-запросов (`CallbackDispatcher`) | Каждый хендлер проверяет, может ли он обработать callback. Если нет — передаёт следующему |
 | **Strategy** | Исполнение команд (`CommandConfig`) | Конфигурация команды определяет, какую стратегию запуска применить (Revit, Navisworks, Python) |
-| **Observer (Pub/Sub)** | Очередь задач (PostgreSQL LISTEN/NOTIFY) | Server публикует NOTIFY, Worker подписан через LISTEN |
+| **Observer (Pub/Sub)** | Очередь задач (PostgreSQL LISTEN/NOTIFY) | Server публикует NOTIFY, Worker подписан через LISTEN. 3 канала: `new_command`, `command_completed`, `command_cancel` |
 | **Competing Consumers** | Параллельная обработка (FOR UPDATE SKIP LOCKED) | Несколько Worker-ов конкурируют за команды, каждая выполняется ровно одним |
+| **CQRS (Command Query Responsibility Segregation)** | Отмена команд (Server → command_cancel → Worker) | Server изменяет статус в БД и отправляет NOTIFY, Worker получает команду и убивает процесс |
 | **Bulkhead (изоляция)** | Priority-based партиции (`SemaphoreSlim`) | Каждый уровень приоритета имеет изолированный пул слотов |
 | **Circuit Breaker** | Reconnect loop + fallback poll | При потере соединения — пауза 5 сек, затем восстановление |
 | **Retry with Exponential Backoff** | Повторные попытки (`MaxRetries=5`) | Задержка растёт экспоненциально: 60s → 120s → 240s → 480s → 960s |
@@ -52,6 +54,7 @@
 - **Таймауты** — принудительное завершение процессов при превышении лимита времени
 - **Приоритеты** — команды с более высоким приоритетом выполняются первыми
 - **Партиции** — приоритетные уровни: команды с высоким приоритетом имеют выделенные слоты выполнения
+- **Отмена команд** — пользователь может отменить команду через `/status` → кнопка «⛔ Отменить»; Server меняет статус на `Cancelled` и отправляет NOTIFY `command_cancel`; Worker убивает процесс
 
 ---
 
@@ -132,9 +135,11 @@
 | `processing` | Команда захвачена воркером и выполняется (Lease установлен) |
 | `Done` | Команда успешно завершена |
 | `Failed` | Команда завершена с ошибкой |
+| `Cancelled` | Команда отменена пользователем (через `/status` → кнопка «⛔ Отменить»). Статус устанавливается Server-ом, Worker при получении NOTIFY `command_cancel` убивает процесс |
 | `Deleted` | Команда удалена (логическое удаление, soft-delete) |
 
 **Примечание:** Статус `processing` устанавливается атомарно при захвате команды с использованием `SELECT ... FOR UPDATE SKIP LOCKED`.
+Статус `Cancelled` является финальным — команда не может быть изменена после отмены.
 
 ---
 
@@ -143,7 +148,7 @@
 ### 1. Инициализация
 
 - Установление подключения к базе данных
-- Подписка на уведомление через `LISTEN new_command`
+- Подписка на уведомление через `LISTEN new_command` и `LISTEN command_cancel`
 - Инициализация per-partition пулов (`SortedDictionary<int, SemaphoreSlim>`) из конфигурации (`WorkerOptions.Partitions`)
 - Очистка истёкших Lease (crash recovery упавших воркеров)
 
@@ -157,7 +162,7 @@
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Ожидание уведомления (блокировка)                              │
-│  - LISTEN new_command                                           │
+│  - LISTEN new_command, command_cancel                           │
 │  - WaitAsync с таймаутом 5 мин (fallback)                       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
@@ -198,10 +203,12 @@
 │  7. WaitForExit с таймаутом (ProcessTimeoutSeconds)             │
 │  8. Логирование stdout/stderr (обрезка >4KB)                   │
 │  9. Если таймаут → process.Kill(true)                          │
-│  10. Если exit_code == 0: статус = 'Done'                      │
-│  11. Иначе: статус = 'Failed' + errorMessage                   │
-│  12. _activeProcesses.Remove()                                  │
-│  13. partitionPool.Release() (в finally)                       │
+│  10. Per-command CTS + проверка отмены                        │
+│  11. Если exit_code == 0: статус = 'Done'                      │
+│  12. Если cmdCt.IsCancellationRequested → return (без update)  │
+│  13. Иначе: статус = 'Failed' + errorMessage                   │
+│  14. _activeProcesses.Remove() + _commandCts.Dispose()         │
+│  15. partitionPool.Release() (в finally)                       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
@@ -238,7 +245,7 @@
 
 ### 4. Трекинг активных процессов
 
-**Назначение:** Возможность принудительного завершения при graceful shutdown или таймауте.
+**Назначение:** Возможность принудительного завершения при graceful shutdown, таймауте или отмене команды пользователем.
 
 **Реализация:**
 ```csharp
@@ -267,6 +274,34 @@ private async Task WaitForActiveProcessesAsync()
 ```
 
 `Process` хранится напрямую, без класса-обёртки. `Stopwatch` и `CommandId` — локальные переменные в `ExecuteOneAsync`.
+
+### 4a. Per-command CancellationTokenSource (отмена команд)
+
+**Назначение:** Защита от race condition при отмене команды пользователем. Без этого механизма Worker может перезаписать статус `Cancelled` на `Failed` после принудительного завершения процесса.
+
+**Реализация:**
+```csharp
+private readonly ConcurrentDictionary<int, CancellationTokenSource> _commandCts = new();
+
+// В ExecuteOneAsync — создание linked CTS
+var cmdCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+_commandCts[cmd.CommandId] = cmdCts;
+var cmdCt = cmdCts.Token;
+
+// В HandleCancelNotificationAsync — отмена CTS перед Kill
+if (_commandCts.TryRemove(commandId, out var cts))
+{
+    cts.Cancel();  // Флаг IsCancellationRequested = true
+    cts.Dispose();
+}
+
+// В ExecuteOneAsync — проверка после WaitForExit
+if (cmdCt.IsCancellationRequested)
+{
+    // Статус уже 'Cancelled' в БД — ничего не делаем
+    return;
+}
+```
 
 ### 5. Обработка ошибок подключения
 
@@ -525,6 +560,131 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
 
 ---
 
+## Отмена команды пользователем
+
+Пользователь может отменить команду через интерфейс `/status`. Отмена проходит в два этапа:
+сначала **диалог подтверждения** на стороне Server, затем — принудительное завершение процесса
+на стороне Worker.
+
+### Схема взаимодействия
+
+```
+┌───────────────────┐         ┌──────────────┐         ┌──────────────────────┐
+│     Server        │         │  PostgreSQL   │         │       Worker        │
+│  (Telegram bot)   │         │   (очередь)   │         │   (выполнение)      │
+└────────┬──────────┘         └──────┬───────┘         └──────────┬───────────┘
+         │                          │                             │
+         │ 1. Кнопка «⛔ Отменить»   │                             │
+         │    → CANCELCMD:{cmdId}    │                             │
+         │                          │                             │
+         │ 2. Диалог подтверждения   │                             │
+         │    «Да, отменить / Нет»   │                             │
+         │                          │                             │
+         │ 3. «Да, отменить»         │                             │
+         │    → CONFIRM_CANCEL:{cmdId}│                            │
+         │                          │                             │
+         │ 4. UPDATE Status='Cancelled'│                           │
+         ├──────────────────────────>│                             │
+         │                          │                             │
+         │ 5. NOTIFY command_cancel  │                             │
+         ├──────────────────────────>│                             │
+         │                          │ 6. Уведомление Worker       │
+         │                          ├────────────────────────────>│
+         │                          │                             │
+         │                          │                             │ 7. Отмена CTS
+         │                          │                             │    + process.Kill()
+         │                          │                             │
+         │ 8. Уведомление           │                             │
+         │    пользователю          │                             │
+         │    «Команда отменена»     │                             │
+         │                          │                             │
+```
+
+### Этап 1: Диалог подтверждения (Server)
+
+При нажатии кнопки «⛔ Отменить» в списке команд сессии Server не отменяет команду сразу,
+а показывает диалог подтверждения:
+
+**Callback-запрос:** `CANCELCMD:{commandId}`
+
+**Обработчик:** `SessionManagementHandler.HandleCancelCommandAsync`
+
+1. Проверка, принадлежит ли команда пользователю (`GetCommandByIdAsync`)
+2. Если команда не найдена — отказ с логированием
+3. Отображение InlineKeyboard с двумя кнопками:
+   - `✅ Да, отменить` → `CONFIRM_CANCEL:{commandId}`
+   - `❌ Нет` → `SESSIONDETAILS:{sessionId}` (возврат к списку команд)
+
+Перед показом диалога флаг `IsInStatusView` устанавливается в `false`, чтобы кнопка «Нет»
+корректно направляла в ветку показа команд сессии (через `HandleSessionDetailsAsync`).
+
+### Этап 2: Исполнение отмены (Server)
+
+**Callback-запрос:** `CONFIRM_CANCEL:{commandId}`
+
+**Обработчик:** `SessionManagementHandler.HandleConfirmCancelAsync`
+
+1. Повторная проверка принадлежности команды пользователю (`GetCommandByIdAsync`)
+2. Обновление статуса в БД:
+   - Запрос: `Commands.Status = 'Cancelled'`
+   - Условия: только если `Status IN ('pending', 'processing')`
+   - Дополнительно: `SessionId` должен принадлежать пользователю
+3. Отправка NOTIFY:
+   ```sql
+   NOTIFY command_cancel, 'CommandId';
+   ```
+4. Уведомление пользователя через Telegram: `⛔ Команда #{commandId} ({commandText}) отменена.`
+5. Обновление отображения сессии:
+   - Если остались активные команды — обновляется InlineKeyboard списка команд
+   - Если активных команд не осталось — показывается статус сессии с прогресс-баром
+
+### Этап 3: Обработка отмены на стороне Worker
+
+**Канал:** `LISTEN command_cancel`
+
+**Обработчик:** `CommandExecutionService.OnNotificationReceived` → `HandleCancelNotificationAsync`
+
+1. Парсинг payload: `commandId` (INT)
+2. Поиск per-command `CancellationTokenSource` в `_commandCts`
+3. Отмена CTS: `cts.Cancel()` — устанавливает флаг `IsCancellationRequested = true`
+4. Поиск активного процесса в `_activeProcesses`
+5. Принудительное завершение: `process.Kill(true)`
+6. Очистка: `_commandCts.TryRemove()`, `_activeProcesses.TryRemove()`, `process.Dispose()`
+
+### Защита от race condition
+
+**Проблема:** Worker может перезаписать статус `Cancelled` на `Failed` после того, как Server
+уже установил `Cancelled`, но процесс ещё не завершён.
+
+**Решение:**
+
+```csharp
+// В ExecuteOneAsync
+var cmdCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+_commandCts[cmd.CommandId] = cmdCts;
+var cmdCt = cmdCts.Token;
+
+// ... WaitForExit ...
+
+// Проверка после завершения процесса
+if (cmdCt.IsCancellationRequested)
+{
+    // Статус уже 'Cancelled' в БД — ничего не делаем
+    return;
+}
+```
+
+### Обработка ошибок
+
+| Ситуация | Действие |
+|----------|----------|
+| Команда уже завершена (Done/Failed) | `CancelCommandAsync` возвращает false, пользователь видит сообщение «Не удалось отменить» |
+| Команда принадлежит другому пользователю | `GetCommandByIdAsync` возвращает null, запрос игнорируется с предупреждением в лог |
+| NOTIFY не дошёл до Worker | Fallback poll каждые 5 мин + очистка истёкших Lease |
+| Worker не успел отменить CTS до завершения процесса | Проверка `cmdCt.IsCancellationRequested` после `WaitForExit` защищает от перезаписи статуса |
+
+---
+
 ## Уведомления пользователей (Telegram)
 
 После завершения команды (`Done`) или окончательной ошибки (`Failed` после исчерпания retry) Worker отправляет уведомление пользователю через отдельный канал LISTEN/NOTIFY.
@@ -645,33 +805,152 @@ NOTIFY command_completed, 'UserId|CommandId|CommandText|Status|ErrorMessage'
 
 ---
 
-## Структура данных
+## Как устроена база данных
 
-### Таблица Commands
+В этом разделе мы разберём, как устроена база данных простыми словами.
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `CommandId` | SERIAL | Первичный ключ |
-| `SessionId` | INT | Внешний ключ на сессию |
-| `CommandText` | VARCHAR | Код типа команды (PDF, DWG, IFC, NWC, AUTORES) |
-| `FilePath` | TEXT | Путь к файлу |
-| `ExecutionOrder` | INT | Порядок выполнения в сессии |
-| `Status` | VARCHAR | Статус: `pending`, `processing`, `Done`, `Failed`, `Deleted` |
-| `CreatedAt` | TIMESTAMPTZ | Время создания |
-| `StartedAt` | TIMESTAMPTZ | Время начала выполнения (NULL пока pending) |
-| `CompletedAt` | TIMESTAMPTZ | Время завершения (NULL пока не Done/Failed) |
-| `Lease` | INTEGER | Unix timestamp (секунды) — TTL для защиты от сбоев воркера |
-| `Partition` | TEXT | Резерв — не используется в текущей реализации (приоритет определяется через поле `Priority`) |
-| `Priority` | INT | Приоритет (по умолчанию 50, чем выше — тем важнее) |
-| `ProcessId` | INT | PID процесса Windows (для мониторинга и Kill) |
-| `ErrorMessage` | TEXT | Сообщение об ошибке (если Failed) |
+### Какие таблицы есть и зачем они нужны
 
-### Индексы
+В системе **4 таблицы**. Каждая отвечает за свою часть:
 
-- `(Status, Priority DESC, CreatedAt ASC) WHERE Status = 'pending'` — для быстрой выборки с приоритетами
-- `(Status, Lease) WHERE Status = 'processing'` — для очистки истёкших Lease
-- `(Partition, Status)` — для выборки по партиции (мониторинг, статистика)
-- `(SessionId)` — для выборки по сессии
+| Таблица | Что хранит | Пример записи |
+|---------|-----------|---------------|
+| `BotUsers` | Кто пользовался ботом, какой у него статус (одобрен/заблокирован) | `UserId: 12345, Status: Approved` |
+| `Sessions` | Сессии — «папки» для групп команд (одна сессия = один раз выбрали проект и нажали «Подтвердить») | `SessionId: 42, UserId: 12345, CreatedAt: 2025-01-15` |
+| `Commands` | Отдельные задачи внутри сессии (каждая строчка = одна команда для одного файла) | `CommandId: 100, SessionId: 42, Status: Done` |
+| `TrackedMessages` | Какие сообщения от бота нужно удалить при очистке чата | `UserId: 12345, MessageId: 555` |
+
+### Как таблицы связаны между собой
+
+```
+┌──────────────┐       ┌──────────────┐       ┌──────────────┐
+│   BotUsers   │ 1──N  │   Sessions   │ 1──N  │   Commands   │
+│  (пользоват.)│──────>│   (сессии)   │──────>│  (команды)   │
+└──────┬───────┘       └──────────────┘       └──────┬───────┘
+       │              ┌─────────────────┐            │
+       └──────────────│  TrackedMessages│            │
+                      │ (сообщения для  │            │
+                      │    очистки)     │            │
+                      └─────────────────┘            │
+                                                     │
+                                                     ▼
+                                            ┌───────────────────────┐
+                                            │  Status lifecycle      │
+                                            │  (поле Status в таблице│
+                                            │  Commands)             │
+                                            │                       │
+                                            │  pending ──▶ processing│
+                                            │               ├──▶ Done│
+                                            │               └──▶ Failed│
+                                            │  pending ──▶ Cancelled │
+                                            │  (любой) ──▶ Deleted   │
+                                            └────────────────────────┘
+```
+
+- **Один пользователь** → может иметь **много сессий**
+- **Одна сессия** → может содержать **много команд**
+- `TrackedMessages` — отдельная табличка, привязана только к `UserId`
+
+### Что такое «сессия»?
+
+Представьте, что вы зашли в бот, выбрали проект и нажали «Подтвердить». Бот создаёт **сессию** — это как заказ в интернет-магазине. Внутри этого заказа (сессии) лежат **команды** — отдельные задачи: например, «Экспортировать файл A.rvt в PDF» и «Экспортировать файл B.rvt в DWG».
+
+### Как данные путешествуют по системе (пошагово)
+
+```
+Шаг 1: Пользователь выбирает проект и команды в Telegram
+        │
+Шаг 2: Server создаёт Сессию (Sessions) и
+        │     внутри неё — несколько Команд (Commands)
+        │     Статус каждой команды: 'pending' (ждёт очереди)
+        ▼
+Шаг 3: Server шлёт сигнал «NOTIFY new_command»
+        │     (как крикнуть «Эй, есть работа!»)
+        ▼
+Шаг 4: Worker слышит сигнал, просыпается и
+        │     забирает pending-команды себе
+        │     Статус: 'processing' (выполняется)
+        ▼
+Шаг 5: Worker запускает Revit (или другую программу)
+        │     и ждёт результат
+        ▼
+Шаг 6: Готово! Worker обновляет статус:
+          'Done' (успешно) или 'Failed' (ошибка)
+          И шлёт уведомление пользователю
+```
+
+### Важные понятия простыми словами
+
+#### Soft-delete («мягкое удаление»)
+
+Мы **никогда** не удаляем строки из БД физически.
+Вместо `DELETE FROM Commands` мы пишем:
+```sql
+UPDATE Commands SET Status = 'Deleted' WHERE ...
+```
+
+**Зачем?**
+- Если что-то пошло не так, данные можно восстановить
+- Можно посмотреть историю: кто, когда и что делал
+- Данные остаются для статистики и отладки
+
+#### LISTEN/NOTIFY — как рация
+
+Представьте, что Server и Worker — это два человека с рациями:
+- **NOTIFY** = Server нажимает кнопку на рации и кричит: «Новая работа!»
+- **LISTEN** = Worker держит рацию включённой и ждёт сигнала
+
+Это гораздо быстрее, чем если бы Worker каждые 5 секунд проверял: «Ну что, есть работа? Есть работа?»
+
+**Важно:** Если сигнал потерялся (рация забавкала) — Worker всё равно раз в 5 минут проверяет очередь сам (это называется **fallback poll**).
+
+#### FOR UPDATE SKIP LOCKED — очередь в магазине
+
+Если у вас **два Worker** (два кассира), они не должны взять один и тот же товар (команду).
+
+`FOR UPDATE SKIP LOCKED` работает как очередь:
+- Первый Worker забирает команды, которые свободны
+- Второй Worker видит только то, что ещё не забрал первый
+- Они не мешают друг другу
+
+#### Lease — страховка от падения Worker
+
+Когда Worker забирает команду, он говорит:
+> «Я забрал эту команду. Если через 5 минут я не отвечу — значит, я упал, забирайте её обратно в очередь»
+
+Это защита от ситуации, когда Worker выключился, а команда навсегда зависла в статусе «выполняется».
+
+### Таблица Commands (подробно)
+
+Это главная таблица. Вот что хранит каждая колонка:
+
+| Поле | Смысл простыми словами |
+|------|----------------------|
+| `CommandId` | Уникальный номер команды (1, 2, 3...) |
+| `SessionId` | Номер сессии, к которой относится команда |
+| `CommandText` | Тип задачи: `PDF`, `DWG`, `NWC`, `IFC`, `BIMDOC` и т.д. |
+| `FilePath` | Какой файл нужно обработать (например, `B:\Project\01_RVT\building.rvt`) |
+| `ExecutionOrder` | В каком порядке выполнять в сессии (1, 2, 3...) |
+| `Status` | Где сейчас команда: `pending` → `processing` → `Done` / `Failed` / `Cancelled` / `Deleted` |
+| `CreatedAt` | Когда создали команду |
+| `StartedAt` | Когда Worker начал выполнять (`NULL` — пока не начали) |
+| `CompletedAt` | Когда закончили (`NULL` — пока не закончили) |
+| `Lease` | Срок аренды (см. Lease выше). Unix-время в секундах |
+| `Priority` | Насколько задача важная (0–100, чем выше — тем важнее). По умолчанию 50 |
+| `ProcessId` | ID процесса Windows (чтобы можно было «убить» программу, если что-то пошло не так) |
+| `ErrorMessage` | Если команда упала с ошибкой — тут текст ошибки |
+
+### Индексы — ускорители поиска
+
+Чтобы БД не перебирала все строки подряд, мы добавляем **индексы**. Это как оглавление в книге:
+
+| Индекс | Зачем нужен |
+|--------|-------------|
+| `(Status, Priority, CreatedAt)` | Быстро находить, какие команды ждут в очереди, и сортировать по важности |
+| `(Status, Lease) WHERE Status = 'processing'` | Быстро находить «зависшие» команды (у которых истёк Lease) |
+| `(SessionId)` | Быстро искать все команды одной сессии |
+| `(Status) WHERE Status = 'Cancelled'` | Быстро считать статистику по отменённым командам |
+| `(UserId, CreatedAt DESC)` | Быстро показывать пользователю список его сессий |
 
 ---
 
@@ -768,6 +1047,28 @@ WHERE "Status" = 'processing'
   AND "StartedAt" < NOW() - INTERVAL '@TimeoutSeconds seconds';
 ```
 
+### Отмена команды пользователем (CancelCommand)
+
+```sql
+-- Server: обновляет статус на Cancelled (только если pending или processing)
+UPDATE Commands
+SET Status = 'Cancelled',
+    CompletedAt = NOW(),
+    ErrorMessage = 'Cancelled by user'
+WHERE CommandId = @CommandId
+  AND SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId)
+  AND Status IN ('pending', 'processing')
+RETURNING CommandId;
+```
+
+### Уведомление Worker об отмене
+
+```sql
+NOTIFY command_cancel, 'CommandId';
+```
+
+Payload: ID команды в текстовом виде.
+
 ---
 
 ## Безопасность и надёжность
@@ -790,6 +1091,7 @@ WHERE "Status" = 'processing'
 | **Валидация FilePath** | Проверка существования, расширения (из `AllowedExtensions`) и защита от path traversal перед запуском процесса |
 | **Асинхронное чтение stdout/stderr** | Предотвращает deadlock при заполнении буфера вывода (64KB) |
 | **Уведомления пользователей** | Worker шлёт NOTIFY `command_completed`, Server (`CommandNotificationService`) слушает и отправляет Telegram-сообщение через `ITelegramOutputService` |
+| **Отмена команд** | Пользователь отменяет команду через UI `/status` → кнопка «⛔ Отменить». Server обновляет статус на `Cancelled` и шлёт NOTIFY `command_cancel`. Worker получает, отменяет per-command CTS и убивает процесс. После `WaitForExit` проверяется `cmdCt.IsCancellationRequested` — статус не перезаписывается |
 | **Fallback poll** | Если NOTIFY потерян — проверка каждые 5 минут (safety net) |
 
 ---
@@ -811,11 +1113,13 @@ WHERE "Status" = 'processing'
 7. **stdout/stderr** — асинхронное чтение через `BeginOutputReadLine / BeginErrorReadLine`
 8. **Ожидание** — `WaitForExit(ProcessTimeoutSeconds)`
 9. **Логирование** — stdout/stderr (обрезка >4KB)
-10. **Результат**:
+10. **Per-command CTS**: создаётся `CancellationTokenSource.CreateLinkedTokenSource(ct)`, сохраняется в `_commandCts`
+11. **Результат**:
+    - Если `cmdCt.IsCancellationRequested` → return (статус `Cancelled` уже установлен Server-ом)
     - Таймаут → `Kill(true)`, статус `Failed`
     - `ExitCode == 0` → статус `Done`
     - Иначе → статус `Failed`
-11. **Очистка** (в `finally`) — `partitionPool.Release()`, `_activeProcesses.TryRemove()`
+12. **Очистка** (в `finally`) — `partitionPool.Release()`, `_activeProcesses.TryRemove()`, `_commandCts.TryRemove().Dispose()`
 
 ### Универсальное создание процесса
 
@@ -974,10 +1278,19 @@ WHERE "CreatedAt" > NOW() - INTERVAL '24 hours'
 GROUP BY "Status";
 ```
 
+**Отменённые команды (статистика):**
+```sql
+SELECT "CommandId", "CommandText", "SessionId", "CreatedAt", "CompletedAt"
+FROM "Commands"
+WHERE "Status" = 'Cancelled'
+ORDER BY "CompletedAt" DESC
+LIMIT 20;
+```
+
 **Проверка подписки на уведомления:**
 ```sql
 SELECT * FROM pg_listening_channels();
--- Должен вернуть 'new_command' (Worker) и 'command_completed' (Server)
+-- Должен вернуть 'new_command', 'command_cancel' (Worker) и 'command_completed' (Server)
 ```
 
 **Мониторинг процессов (активные PID):**
@@ -1013,6 +1326,7 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 | 8 | **Fallback poll** | Если NOTIFY потерян — проверка каждые 5 минут |
 | 9 | **Восстановление** | При перезапуске Worker очищает истёкшие Lease и продолжает обработку |
 | 10 | **Наблюдаемость** | Диагностические запросы показывают актуальное состояние (PID, Lease, длительность) |
+| 11 | **Отмена команд** | Пользователь может отменить команду через `/status`. Server меняет статус на `Cancelled` и шлёт NOTIFY `command_cancel`. Worker получает NOTIFY, отменяет CTS, убивает процесс. Проверка `cmdCt.IsCancellationRequested` предотвращает перезапись статуса |
 
 ---
 

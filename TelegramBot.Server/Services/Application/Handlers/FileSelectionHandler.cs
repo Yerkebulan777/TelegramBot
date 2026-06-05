@@ -58,7 +58,6 @@ public sealed class FileSelectionHandler(
         else
         {
             // Множественный выбор разделов
-            _ = session.GetSelectedFiles().Contains(filePath);
             _=session.ToggleSelectedFile(filePath);
         }
 

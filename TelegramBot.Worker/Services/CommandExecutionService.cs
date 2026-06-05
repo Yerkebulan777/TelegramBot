@@ -39,6 +39,10 @@ public sealed class CommandExecutionService(
     // Трекинг активных процессов для возможности принудительного завершения
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
 
+    // Per-command CancellationTokenSource для отмены команды пользователем
+    // Ключ: CommandId, значение: CTS, который отменяется при получении NOTIFY command_cancel
+    private readonly ConcurrentDictionary<int, CancellationTokenSource> _commandCts = new();
+
     // CancellationTokenSource для graceful shutdown
     private CancellationTokenSource? _shutdownCts;
 
@@ -62,6 +66,7 @@ public sealed class CommandExecutionService(
                     await Task.Delay(TimeSpan.FromSeconds(CleanupIntervalSec), _shutdownCts.Token);
                     await dataService.ReleaseExpiredLeasesAsync();
                     await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
+                    await dataService.CleanupOldCancelledCommandsAsync(_workerOptions.CleanupOlderThanDays);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
@@ -149,11 +154,12 @@ public sealed class CommandExecutionService(
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(stoppingToken);
 
-        _=await conn.ExecuteAsync("LISTEN new_command;");
+        await conn.ExecuteAsync("LISTEN new_command;");
+        await conn.ExecuteAsync("LISTEN command_cancel;");
 
         conn.Notification += OnNotificationReceived;
 
-        logger.LogInformation("Worker listening: channel=new_command");
+        logger.LogInformation("Worker listening: channels=new_command, command_cancel");
 
         // Освобождаем истёкшие Lease (crash recovery упавших воркеров)
         await dataService.ReleaseExpiredLeasesAsync();
@@ -168,7 +174,7 @@ public sealed class CommandExecutionService(
                 // Блокирующее ожидание NOTIFY или таймаут (5 мин)
                 // При NOTIFY — просыпается мгновенно
                 // При таймауте — fallback poll (safety net)
-                _=await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
+                await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
             }
             catch (TimeoutException)
             {
@@ -187,8 +193,66 @@ public sealed class CommandExecutionService(
 
     private void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
     {
-        logger.LogDebug("Worker notify: channel={Channel}, payload={Payload}",
-            e.Channel, e.Payload);
+        if (e.Channel == "command_cancel")
+        {
+            _ = HandleCancelNotificationAsync(e.Payload);
+        }
+        else
+        {
+            logger.LogDebug("Worker notify: channel={Channel}, payload={Payload}",
+                e.Channel, e.Payload);
+        }
+    }
+
+    private async Task HandleCancelNotificationAsync(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload) || !int.TryParse(payload, out var commandId))
+        {
+            logger.LogWarning("Cancel notify ignored: reason=invalid_payload");
+            return;
+        }
+
+        logger.LogInformation("Cancel requested: commandId={CommandId}", commandId);
+
+        // Отменяем per-command CTS, чтобы ExecuteOneAsync не перезаписал статус
+        if (_commandCts.TryRemove(commandId, out var cts))
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
+            finally
+            {
+                cts.Dispose();
+            }
+        }
+
+        if (_activeProcesses.TryRemove(commandId, out var process))
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(true);
+                    logger.LogInformation("Cancel executed: commandId={CommandId}, processId={ProcessId}",
+                        commandId, process.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Cancel failed to kill process: commandId={CommandId}", commandId);
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+        else
+        {
+            logger.LogDebug("Cancel skipped: commandId={CommandId}, reason=process_not_found_or_already_completed",
+                commandId);
+        }
     }
 
     private async Task ProcessBatchAsync(CancellationToken ct)
@@ -256,7 +320,7 @@ public sealed class CommandExecutionService(
             if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
             {
                 logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
-                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Unknown command type: {cmd.CommandText}");
                 return;
             }
@@ -264,7 +328,7 @@ public sealed class CommandExecutionService(
             if (!ValidateFilePath(cmd, commandCfg))
             {
                 logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
-                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"File validation failed for path: {cmd.FilePath}");
                 return;
             }
@@ -273,10 +337,15 @@ public sealed class CommandExecutionService(
             logger.LogInformation("Command start: id={Id}, command={Cmd}, attempt={Attempt}",
                 cmd.CommandId, cmd.CommandText, cmd.RetryCount + 1);
 
+            // Создаём linked CTS для возможности отмены команды пользователем
+            var cmdCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _commandCts[cmd.CommandId] = cmdCts;
+            var cmdCt = cmdCts.Token;
+
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            _=process.Start();
+            process.Start();
             _activeProcesses[cmd.CommandId] = process;
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
+            await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
 
             var outputBuilder = new StringBuilder();
             var errorBuilder = new StringBuilder();
@@ -292,6 +361,16 @@ public sealed class CommandExecutionService(
             LogProcessOutput(cmd, outputBuilder, errorBuilder);
 
             var errorMessage = (string?)null;
+
+            // Проверяем, не была ли команда отменена пользователем через NOTIFY command_cancel
+            if (cmdCt.IsCancellationRequested)
+            {
+                logger.LogInformation("Command cancelled by user: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
+                    cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
+                sw.Stop();
+                // Статус уже обновлён на 'Cancelled' сервером, ничего не делаем
+                return;
+            }
 
             if (!completed)
             {
@@ -312,7 +391,7 @@ public sealed class CommandExecutionService(
 
             if (completed && process.ExitCode == 0)
             {
-                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
+                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
                 logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
                     cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
                 await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Done, null);
@@ -331,7 +410,7 @@ public sealed class CommandExecutionService(
             }
             else
             {
-                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: errorMessage ?? "Unknown error");
                 logger.LogError("Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
                     cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
@@ -364,7 +443,7 @@ public sealed class CommandExecutionService(
             }
             else
             {
-                _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: ex.Message);
+                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: ex.Message);
                 logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts",
                     cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1);
                 await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, ex.Message);
@@ -373,6 +452,10 @@ public sealed class CommandExecutionService(
         finally
         {
             _=_activeProcesses.TryRemove(cmd.CommandId, out _);
+            if (_commandCts.TryRemove(cmd.CommandId, out var cmdCts))
+            {
+                cmdCts.Dispose();
+            }
         }
     }
 

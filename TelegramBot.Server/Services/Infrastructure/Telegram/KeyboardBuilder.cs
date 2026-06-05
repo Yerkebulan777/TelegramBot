@@ -46,9 +46,21 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 
         foreach (var session in sessionsList)
         {
+            var statusIcon = GetSessionStatusIcon(session.Status, session.ActiveCommands);
+            var summary = session.DoneCommands + session.FailedCommands == session.TotalCommands
+                ? $"{session.DoneCommands}/{session.TotalCommands} ✅"
+                : $"{session.DoneCommands}/{session.TotalCommands} ({session.ActiveCommands} актив.)";
+
+            if (session.FailedCommands > 0)
+            {
+                summary += $" ❌{session.FailedCommands}";
+            }
+
             buttons.Add(
             [
-                InlineKeyboardButton.WithCallbackData(session.Date.ToString(), $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
+                InlineKeyboardButton.WithCallbackData(
+                    $"{statusIcon} {session.Date:dd.MM.yy HH:mm} — {summary}",
+                    $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
             ]);
         }
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
@@ -56,14 +68,12 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
 
     public Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
     {
-        _ = sessionStatus;
-
         var buttons = new List<List<InlineKeyboardButton>>
         {
             new()
             {
-                InlineKeyboardButton.WithCallbackData("More", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
-                InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}")
+                InlineKeyboardButton.WithCallbackData("📋 Команды", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
+                InlineKeyboardButton.WithCallbackData("🗑 Удалить", $"{CallbackPrefixes.DeleteSession}{sessionId}")
             }
         };
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
@@ -75,25 +85,76 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
         {
             new()
             {
-                InlineKeyboardButton.WithCallbackData("Less", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
-                InlineKeyboardButton.WithCallbackData("Delete All", $"{CallbackPrefixes.DeleteSession}{sessionId}")
+                InlineKeyboardButton.WithCallbackData("◀ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
+                InlineKeyboardButton.WithCallbackData("🗑 Удалить всё", $"{CallbackPrefixes.DeleteSession}{sessionId}")
             }
         };
 
         foreach (var sessionCommand in sessionCommands)
         {
+            var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
+            var fileName = Path.GetFileName(sessionCommand.FileName);
+
+            // Row 1: order + command type + status
             buttons.Add(
             [
-                InlineKeyboardButton.WithCallbackData($"{sessionCommand.ExecOrder} | {sessionCommand.Command} | {Path.GetFileName(sessionCommand.FileName)} | {sessionCommand.Status}", $"{sessionCommand.CommandId}"),
+                InlineKeyboardButton.WithCallbackData(
+                    $"{sessionCommand.ExecOrder}. {sessionCommand.Command} {statusIcon}",
+                    $"{sessionCommand.CommandId}"),
             ]);
-            buttons.Add(
-            [
-                InlineKeyboardButton.WithCallbackData($"{sessionCommand.Date}", $"{sessionCommand.CommandId}"),
-                InlineKeyboardButton.WithCallbackData("🗑 Delete", $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}")
-            ]);
+
+            // Row 2: filename + action buttons
+            var actionButtons = new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData(
+                    $"📄 {fileName}",
+                    $"{sessionCommand.CommandId}")
+            };
+
+            // Allow cancel only if command is pending or processing
+            if (sessionCommand.Status == "pending" || sessionCommand.Status == "processing")
+            {
+                actionButtons.Add(
+                    InlineKeyboardButton.WithCallbackData("⛔ Отменить", $"{CallbackPrefixes.CancelCommand}{sessionCommand.CommandId}"));
+            }
+
+            if (sessionCommand.Status != "processing")
+            {
+                actionButtons.Add(
+                    InlineKeyboardButton.WithCallbackData("🗑", $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}"));
+            }
+
+            buttons.Add(actionButtons);
         }
 
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
+    }
+
+    private static string GetCommandStatusIcon(string status)
+    {
+        return status switch
+        {
+            "pending" => "⏳",
+            "processing" => "🔄",
+            "Done" => "✅",
+            "Failed" => "❌",
+            "Cancelled" => "🚫",
+            "Deleted" => "🗑",
+            _ => "❓"
+        };
+    }
+
+    private static string GetSessionStatusIcon(string status, int activeCommands)
+    {
+        if (activeCommands > 0) return "🔄";
+        return status switch
+        {
+            "Done" => "✅",
+            "Failed" => "❌",
+            "Cancelled" => "🚫",
+            "Deleted" => "🗑",
+            _ => "📋"
+        };
     }
 
     private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(

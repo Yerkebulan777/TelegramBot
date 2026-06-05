@@ -99,7 +99,11 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 
 Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `CommandToggleHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
 
-Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
+Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. 
+
+> **SessionManagementHandler** поддерживает отмену команд с подтверждением: `CANCELCMD:{commandId}` → диалог → `CONFIRM_CANCEL:{commandId}`. `CONFIRM_CANCEL` срабатывает только после явного подтверждения пользователем (кнопка «Да, отменить»).
+
+For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 

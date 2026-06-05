@@ -17,6 +17,15 @@ public static class CommandStatuses
     /// <summary>Команда завершилась ошибкой.</summary>
     public const string Failed = "Failed";
 
+    /// <summary>Команда отменена пользователем.</summary>
+    public const string Cancelled = "Cancelled";
+
     /// <summary>Команда/сессия мягко удалена.</summary>
     public const string Deleted = "Deleted";
+
+    /// <summary>Статусы, считающиеся финальными (команда больше не может быть изменена).</summary>
+    public static readonly IReadOnlySet<string> FinalStatuses = new HashSet<string>([Done, Failed, Cancelled, Deleted]);
+
+    /// <summary>Статусы, в которых команда активна (ожидает или выполняется).</summary>
+    public static readonly IReadOnlySet<string> ActiveStatuses = new HashSet<string>([Pending, Processing]);
 }

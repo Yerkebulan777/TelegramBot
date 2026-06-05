@@ -1,9 +1,13 @@
 namespace TelegramBot.Core.Models;
 
-/// <summary>Статус сессии (количество файлов, выполнено).</summary>
+/// <summary>Детальный статус сессии с разбивкой по состояниям команд.</summary>
 public class SessionStatus
 {
     public string Status { get; set; } = string.Empty;
     public int TotalFiles { get; set; }
     public int DoneFiles { get; set; }
+    public int FailedFiles { get; set; }
+    public int CancelledFiles { get; set; }
+    public int ProcessingFiles { get; set; }
+    public int PendingFiles { get; set; }
 }

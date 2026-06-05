@@ -87,9 +87,9 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 |---|---|---|---|
 | `AccessRequestHandler` | 0 | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` |
 | `FileNavigationHandler` | 10 | `GOTOPARENT:` |
-| `FileSelectionHandler` | 20 | `FILE:`, `APPLYFILES:`, `CANCELFILESEL:` |
+| `FileSelectionHandler` | 20 | `FILE:` |
 | `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` |
-| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:` |
+| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:`, `CANCELCMD:`, `CONFIRM_CANCEL:` |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
 
 All handlers extend `CallbackHandlerBase` and use `CommandCatalog.TryGetByPrefix()` for prefix matching.

@@ -1,6 +1,6 @@
 using Serilog;
-using Serilog.Events;
 using TelegramBot.Core.Config;
+using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Data;
 using TelegramBot.Worker.Services;
@@ -11,13 +11,7 @@ public static class Program
 {
     public static async Task Main(string[]? args)
     {
-        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var logPath = Path.Combine(documentsPath, "TelegramBot", "Logs", "Worker", "log-.txt");
-
-        Log.Logger = new LoggerConfiguration()
-            .WriteTo.Console()
-            .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
-            .CreateBootstrapLogger();
+        SerilogSetup.ConfigureBootstrapLogger("Worker");
 
         try
         {
@@ -36,16 +30,7 @@ public static class Program
                     _ = services.AddHostedService<CommandExecutionService>();
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>
-                {
-                    var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                    var logPath = Path.Combine(documentsPath, "TelegramBot", "Logs", "Worker", "log-.txt");
-
-                    loggerConfiguration
-                        .ReadFrom.Configuration(context.Configuration)
-                        .ReadFrom.Services(services)
-                        .Enrich.FromLogContext()
-                        .WriteTo.File(logPath, rollingInterval: RollingInterval.Day);
-                })
+                    SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker"))
                 .Build();
 
             await host.InitializeDatabaseAsync();

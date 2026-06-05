@@ -18,11 +18,11 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
 
-        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
-        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
-        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
-        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
-        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
     }
 
     public async Task<BotUser?> GetUserAsync(long userId)
@@ -37,7 +37,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         var now = DateTime.UtcNow;
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        _=await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
+        await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
         {
             user.UserId,
             user.Username,
@@ -69,7 +69,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         {
             foreach (var file in files)
             {
-                _=await conn.ExecuteAsync(SqlQueries.Commands.Insert,
+                await conn.ExecuteAsync(SqlQueries.Commands.Insert,
                     new { SessionId = sessionId, CommandText = command, FilePath = file, Order = order++ },
                     tx);
             }
@@ -126,7 +126,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                     return false;
                 }
 
-                _=await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
+                await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
                     new { SessionId = sessionId }, tx);
                 await tx.CommitAsync();
             }
@@ -186,78 +186,24 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId });
     }
 
-    public async Task CreateAccessRequestAsync(long userId, string? username, string? firstName, string? lastName)
-    {
-        var now = DateTime.UtcNow;
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        _=await conn.ExecuteAsync(SqlQueries.Users.InsertIgnoreConflict, new
-        {
-            UserId = userId,
-            Username = username,
-            Role = (int)UserRole.User,
-            Status = (int)UserAccessStatus.Pending,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
-    }
-
-    public async Task<bool> IsUserApprovedAsync(long userId)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        var status = await conn.QuerySingleOrDefaultAsync<int?>(
-            SqlQueries.Users.GetStatusById, new { UserId = userId });
-        return status == (int)UserAccessStatus.Approved;
-    }
-
-    public async Task<bool> ApproveUserAsync(long userId, long approvedBy)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        var rows = await conn.ExecuteAsync(SqlQueries.Users.UpdateStatus, new
-        {
-            UserId = userId,
-            Status = (int)UserAccessStatus.Approved,
-            UpdatedAt = DateTime.UtcNow
-        });
-        return rows > 0;
-    }
-
-    public async Task EnsureAdminUserAsync(long userId, string? username)
-    {
-        var now = DateTime.UtcNow;
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        _=await conn.ExecuteAsync(SqlQueries.Users.UpsertAdmin, new
-        {
-            UserId = userId,
-            Username = username,
-            Role = (int)UserRole.Admin,
-            Status = (int)UserAccessStatus.Approved,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
-    }
-
     public async Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        await using var tx = await conn.BeginTransactionAsync();
-        foreach (var messageId in messageIds)
+        var ids = messageIds.ToArray();
+        if (ids.Length == 0)
         {
-            _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId }, tx);
+            return;
         }
 
-        await tx.CommitAsync();
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync(SqlQueries.TrackedMessages.InsertBatch, new { UserId = userId, MessageIds = ids });
     }
 
     public async Task SaveTrackedMessageAsync(long userId, int messageId)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId });
+        await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId });
     }
 
     public async Task<ILookup<long, int>> GetAllTrackedMessagesAsync()
@@ -280,14 +226,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
+        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
     }
 
     public async Task DeleteTrackedMessageAsync(long userId, int messageId)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
-        _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteSingle, new { UserId = userId, MessageId = messageId });
+        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteSingle, new { UserId = userId, MessageId = messageId });
     }
 
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
@@ -308,44 +254,54 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     }
 
 
-    public async Task ReleaseExpiredLeasesAsync()
-    {
-        const int lockId = 1_234_567; // namespace: telegram_bot_lease_cleanup
+    private const int AdvisoryLockId = 1_234_567; // namespace: telegram_bot_lease_cleanup
 
+    private async Task<bool> TryExecuteWithAdvisoryLockAsync(
+        string description,
+        Func<NpgsqlConnection, Task<int>> operation)
+    {
         try
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
 
             var locked = await conn.QuerySingleAsync<bool>(
-                SqlQueries.Commands.TryAdvisoryLock, new { LockId = lockId });
+                SqlQueries.Commands.TryAdvisoryLock, new { LockId = AdvisoryLockId });
 
             if (!locked)
             {
-                logger.LogDebug("Advisory lock not acquired — another worker is cleaning leases");
-                return;
+                logger.LogDebug("Advisory lock for '{Description}' not acquired — another worker is processing", description);
+                return false;
             }
 
             try
             {
-                var released = await conn.ExecuteAsync(
-                    SqlQueries.Commands.ReleaseExpiredLeases,
-                    new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
-
-                if (released > 0)
+                var count = await operation(conn);
+                if (count > 0)
                 {
-                    logger.LogInformation("Released {Count} expired leases", released);
+                    logger.LogInformation("{Description}: affected {Count}", description, count);
                 }
             }
             finally
             {
-                _=await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = lockId });
+                await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = AdvisoryLockId });
             }
         }
         catch (Exception e)
         {
-            logger.LogWarning(e, "Failed to release expired leases");
+            logger.LogWarning(e, "Failed to {Description}", description);
         }
+
+        return true;
+    }
+
+    public async Task ReleaseExpiredLeasesAsync()
+    {
+        await TryExecuteWithAdvisoryLockAsync(
+            "release expired leases",
+            conn => conn.ExecuteAsync(
+                SqlQueries.Commands.ReleaseExpiredLeases,
+                new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }));
     }
 
     public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null)
@@ -367,42 +323,20 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task ReleaseTimeoutCommandsAsync(int timeoutSeconds)
     {
-        const int lockId = 1_234_567; // namespace: telegram_bot_lease_cleanup
+        await TryExecuteWithAdvisoryLockAsync(
+            "release timeout commands",
+            conn => conn.ExecuteAsync(
+                SqlQueries.Commands.ReleaseTimeoutCommands,
+                new { TimeoutSeconds = timeoutSeconds }));
+    }
 
-        try
-        {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
-
-            var locked = await conn.QuerySingleAsync<bool>(
-                SqlQueries.Commands.TryAdvisoryLock, new { LockId = lockId });
-
-            if (!locked)
-            {
-                logger.LogDebug("Advisory lock not acquired — another worker is cleaning timed out commands");
-                return;
-            }
-
-            try
-            {
-                var released = await conn.ExecuteAsync(
-                    SqlQueries.Commands.ReleaseTimeoutCommands,
-                    new { TimeoutSeconds = timeoutSeconds });
-
-                if (released > 0)
-                {
-                    logger.LogInformation("Released {Count} commands due to timeout", released);
-                }
-            }
-            finally
-            {
-                _=await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = lockId });
-            }
-        }
-        catch (Exception e)
-        {
-            logger.LogWarning(e, "Failed to release timeout commands");
-        }
+    public async Task CleanupOldCancelledCommandsAsync(int olderThanDays)
+    {
+        await TryExecuteWithAdvisoryLockAsync(
+            "cleanup old cancelled commands",
+            conn => conn.ExecuteAsync(
+                SqlQueries.Commands.SoftDeleteOldCancelled,
+                new { OlderThanDays = olderThanDays }));
     }
 
     public async Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? errorMessage)
@@ -412,7 +346,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             var payload = $"{userId}|{commandId}|{commandText}|{status}|{errorMessage ?? ""}";
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            _=await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
+            await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
         }
         catch (Exception e)
         {
@@ -436,11 +370,55 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            _=await conn.ExecuteAsync("SELECT pg_notify('new_command', CAST(@SessionId AS text))", new { SessionId = sessionId });
+            await conn.ExecuteAsync("SELECT pg_notify('new_command', CAST(@SessionId AS text))", new { SessionId = sessionId });
         }
         catch (Exception e)
         {
             logger.LogWarning(e, "Failed to send NOTIFY for session {SessionId}", sessionId);
         }
+    }
+
+    public async Task<bool> CancelCommandAsync(int commandId, long userId)
+    {
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            var affected = await conn.QuerySingleOrDefaultAsync<int?>(
+                SqlQueries.Commands.CancelCommand,
+                new { CommandId = commandId, UserId = userId });
+            return affected.HasValue;
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to cancel command {CommandId}", commandId);
+            return false;
+        }
+    }
+
+    public async Task NotifyCommandCancelAsync(int commandId)
+    {
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await conn.ExecuteAsync(
+                "SELECT pg_notify('command_cancel', CAST(@CommandId AS text))",
+                new { CommandId = commandId });
+            logger.LogDebug("Sent command_cancel NOTIFY for command {CommandId}", commandId);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to send command_cancel NOTIFY for command {CommandId}", commandId);
+        }
+    }
+
+    public async Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        return await conn.QuerySingleOrDefaultAsync<PendingCommand>(
+            SqlQueries.Commands.GetById,
+            new { CommandId = commandId, UserId = userId });
     }
 }

@@ -58,6 +58,15 @@ public sealed class FileNavigationHandler(
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
+        await SendActionsReplyKeyboardAsync(context);
+
+        return true;
+    }
+
+    private async Task SendActionsReplyKeyboardAsync(CallbackContext context)
+    {
+        var session = context.Session;
+
         if (session.LastActionsMessageId.HasValue)
         {
             await _outputService.DeleteMessageAsync(context.UserId, session.LastActionsMessageId.Value, session);
@@ -74,7 +83,5 @@ public sealed class FileNavigationHandler(
             session.TrackMessage(message.Id);
             session.LastActionsMessageId = message.Id;
         }
-
-        return true;
     }
 }

@@ -45,7 +45,7 @@ public sealed class CommandNotificationService(
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(stoppingToken);
 
-        _ = await conn.ExecuteAsync("LISTEN command_completed;");
+        await conn.ExecuteAsync("LISTEN command_completed;");
         conn.Notification += OnNotificationReceived;
 
         logger.LogInformation("Command notifications listening: channel=command_completed");
@@ -105,7 +105,7 @@ public sealed class CommandNotificationService(
                 ? $"✅ *{MarkdownHelper.EscapeMarkdownV2(commandText)}* завершена"
                 : $"❌ *{MarkdownHelper.EscapeMarkdownV2(commandText)}* — ошибка:\n{MarkdownHelper.EscapeMarkdownV2(errorMessage)}";
 
-            _ = await telegramOutput.SendMessageAsync(userId, message);
+            await telegramOutput.SendMessageAsync(userId, message);
             logger.LogInformation("Completion notified: command={CommandId}, user={UserId}, status={Status}",
                 commandId, userId, status);
         }

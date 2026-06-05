@@ -113,5 +113,32 @@ internal static partial class SqlQueries
                 Lease = NULL
             WHERE Status = 'processing'
               AND StartedAt < NOW() - (@TimeoutSeconds || ' seconds')::INTERVAL;";
+
+        internal const string CancelCommand = @"
+            UPDATE Commands
+            SET Status = 'Cancelled',
+                CompletedAt = NOW(),
+                ErrorMessage = 'Cancelled by user'
+            WHERE CommandId = @CommandId
+              AND SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId)
+              AND Status IN ('pending', 'processing')
+            RETURNING CommandId;";
+
+        internal const string GetById = @"
+            SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath,
+                   c.ExecutionOrder, s.UserId, s.Username, c.Partition, c.Priority, c.RetryCount
+            FROM Commands c
+            JOIN Sessions s ON s.SessionId = c.SessionId
+            WHERE c.CommandId = @CommandId
+              AND s.UserId = @UserId
+              AND c.Status != 'Deleted'
+              AND s.Status != 'Deleted';";
+
+        internal const string SoftDeleteOldCancelled = @"
+            UPDATE Commands
+            SET Status = 'Deleted'
+            WHERE Status = 'Cancelled'
+              AND CompletedAt IS NOT NULL
+              AND CompletedAt < NOW() - (@OlderThanDays || ' days')::INTERVAL;";
     }
 }

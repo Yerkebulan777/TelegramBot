@@ -7,6 +7,9 @@ internal static partial class SqlQueries
         internal const string Insert =
             "INSERT INTO TrackedMessages (UserId, MessageId) VALUES (@UserId, @MessageId) ON CONFLICT DO NOTHING;";
 
+        internal const string InsertBatch =
+            "INSERT INTO TrackedMessages (UserId, MessageId) SELECT @UserId, unnest(@MessageIds::int[]) ON CONFLICT DO NOTHING;";
+
         internal const string GetAll =
             "SELECT UserId, MessageId FROM TrackedMessages;";
 

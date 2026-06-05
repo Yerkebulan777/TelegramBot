@@ -52,7 +52,7 @@ public class TelegramOutputService(
             return;
         }
 
-        _=await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
+        await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
     }
 
     public async Task DeleteMessageAsync(long chatId, int messageId)
@@ -201,7 +201,7 @@ public class TelegramOutputService(
     {
         try
         {
-            _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
+            await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
         }
         catch (ApiRequestException ex)
         {
@@ -213,7 +213,7 @@ public class TelegramOutputService(
     {
         try
         {
-            _=await botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
+            await botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
         }
         catch (ApiRequestException ex)
         {
@@ -225,7 +225,7 @@ public class TelegramOutputService(
     {
         try
         {
-            _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
+            await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
         }
         catch (ApiRequestException ex)
         {

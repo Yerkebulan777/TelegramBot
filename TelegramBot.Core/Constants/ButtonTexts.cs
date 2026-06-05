@@ -10,6 +10,4 @@ public static class ButtonTexts
     public const string Back = "⬅️ Назад";
     public const string Cancel = "❌ Отмена";
 
-    public const string ExportApply = Apply;
-    public const string AutomationApply = Confirm;
 }

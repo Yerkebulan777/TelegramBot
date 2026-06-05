@@ -162,16 +162,6 @@ public class UserSession
         }
     }
 
-    public IReadOnlyList<int> TakeTrackedMessages()
-    {
-        lock (_messageLock)
-        {
-            var ids = _trackedMessageIds.ToList();
-            _trackedMessageIds.Clear();
-            return ids;
-        }
-    }
-
     /// <summary>
     /// Resets the session state for a new command flow.
     /// </summary>
