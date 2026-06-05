@@ -386,14 +386,14 @@ public sealed class SlashCommandService(
         _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, helpText), session);
     }
 
-    private static async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
+    private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
     {
         var msg = await task;
         if (msg != null)
         {
             session.TrackMessage(msg.Id);
+            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(session.UserId, msg.Id));
         }
-
         return msg;
     }
 

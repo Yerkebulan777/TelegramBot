@@ -94,6 +94,7 @@ public interface IDataService
 
     /// <summary>Сохраняет ID сообщений для отложенной очистки (прерванный диалог).</summary>
     Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds);
+    Task SaveTrackedMessageAsync(long userId, int messageId);
 
     /// <summary>Возвращает все сохранённые ID сообщений, сгруппированные по userId.</summary>
     Task<ILookup<long, int>> GetAllTrackedMessagesAsync();

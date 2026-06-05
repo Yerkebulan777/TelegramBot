@@ -79,7 +79,16 @@ public static class DependencyInjectionExtensions
                 : (ITelegramBotClient)new TelegramBotClient(botOptions.Token);
         });
 
-        _ = services.AddSingleton<ITelegramOutputService, TelegramOutputService>();
+        _ = services.AddSingleton<ITelegramOutputService>(sp =>
+        {
+            var botClient = sp.GetRequiredService<ITelegramBotClient>();
+            var dataService = sp.GetRequiredService<IDataService>();
+            var logger = sp.GetRequiredService<ILogger<TelegramOutputService>>();
+            var botOptions = sp.GetRequiredService<IOptions<BotOptions>>().Value;
+            var adminId = botOptions.AdminUserIds?.FirstOrDefault();
+
+            return new TelegramOutputService(botClient, dataService, logger, adminId);
+        });
         _ = services.AddSingleton<ITelegramUpdateMapper, TelegramUpdateMapper>();
         _ = services.AddSingleton<IKeyboardBuilder, KeyboardBuilder>();
         _ = services.AddHostedService<TelegramBotHostedService>();

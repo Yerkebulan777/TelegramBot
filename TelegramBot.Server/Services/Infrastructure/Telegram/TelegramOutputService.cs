@@ -3,6 +3,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
@@ -11,10 +12,12 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public class TelegramOutputService(
     ITelegramBotClient botClient,
+    IDataService dataService,
     ILogger<TelegramOutputService> logger,
     long? adminChatId = null) : ITelegramOutputService
 {
     private readonly ITelegramBotClient _botClient = botClient ?? throw new ArgumentNullException(nameof(botClient));
+    private readonly IDataService _dataService = dataService;
     private readonly ILogger<TelegramOutputService> _logger = logger;
     private const int MaxRetries = 2;
 
@@ -115,6 +118,7 @@ public class TelegramOutputService(
         finally
         {
             session.ClearTrackedMessages();
+            _ = Task.Run(async () => await _dataService.DeleteTrackedMessagesAsync(chatId));
         }
     }
 

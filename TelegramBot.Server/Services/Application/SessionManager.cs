@@ -26,7 +26,32 @@ public class SessionManager : ISessionManager, IDisposable
 
     public UserSession GetOrCreateSession(long userId)
     {
-        var session = _sessions.GetOrAdd(userId, _ => new UserSession { UserId = userId });
+        var session = _sessions.GetOrAdd(userId, key =>
+        {
+            var session = new UserSession { UserId = key };
+            
+            // Sync with DB
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var allTracked = await _dataService.GetAllTrackedMessagesAsync();
+                    if (allTracked.Contains(key))
+                    {
+                        foreach (var messageId in allTracked[key])
+                        {
+                            session.TrackMessage(messageId);
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Ignore
+                }
+            });
+
+            return session;
+        });
         session.LastActivity = DateTime.UtcNow;
         return session;
     }

@@ -253,6 +253,13 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await tx.CommitAsync();
     }
 
+    public async Task SaveTrackedMessageAsync(long userId, int messageId)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId });
+    }
+
     public async Task<ILookup<long, int>> GetAllTrackedMessagesAsync()
     {
         await using var conn = new NpgsqlConnection(_connectionString);
