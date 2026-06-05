@@ -187,6 +187,26 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    public async Task UpsertUsersBatchAsync(long[] userIds, int role, int status)
+    {
+        if (userIds.Length == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync(SqlQueries.Users.UpsertBatch, new
+        {
+            UserIds = userIds,
+            Role = role,
+            Status = status,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+    }
+
     public async Task<bool> CheckCommandsStatusAsync(int sessionId, long userId)
     {
         await using var conn = new NpgsqlConnection(_connectionString);

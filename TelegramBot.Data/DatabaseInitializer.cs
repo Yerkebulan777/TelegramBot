@@ -31,20 +31,11 @@ public static class DatabaseInitializer
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
         var adminIds = configuration.GetSection("TelegramBot:AdminUserIds").Get<long[]>() ?? [];
-        var now = DateTime.UtcNow;
-
-        foreach (var adminId in adminIds)
+        if (adminIds.Length == 0)
         {
-            var existing = await dataService.GetUserAsync(adminId);
-            await dataService.UpsertUserAsync(new BotUser
-            {
-                UserId = adminId,
-                Username = existing?.Username,
-                Role = UserRole.Admin,
-                Status = UserAccessStatus.Approved,
-                CreatedAt = existing?.CreatedAt ?? now,
-                UpdatedAt = now
-            });
+            return;
         }
+
+        await dataService.UpsertUsersBatchAsync(adminIds, (int)UserRole.Admin, (int)UserAccessStatus.Approved);
     }
 }

@@ -92,6 +92,9 @@ public interface IDataService
     /// </summary>
     Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? errorMessage);
 
+    /// <summary>Массовый upsert пользователей (batch через UNNEST).</summary>
+    Task UpsertUsersBatchAsync(long[] userIds, int role, int status);
+
     /// <summary>Сохраняет ID сообщений для отложенной очистки (прерванный диалог).</summary>
     Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds);
     Task SaveTrackedMessageAsync(long userId, int messageId);
