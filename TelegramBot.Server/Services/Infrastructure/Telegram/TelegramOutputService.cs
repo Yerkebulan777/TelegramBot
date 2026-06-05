@@ -108,7 +108,6 @@ public class TelegramOutputService(
             return;
         }
 
-        _logger.LogInformation("ClearChatHistoryAsync: удаление {Count} сообщений для чата {ChatId}", messageIds.Count, chatId);
         try
         {
             await DeleteMessagesAsync(chatId, messageIds);
