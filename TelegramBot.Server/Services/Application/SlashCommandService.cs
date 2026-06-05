@@ -419,8 +419,11 @@ public sealed class SlashCommandService(
         IEnumerable<string> sectionNames,
         int fileCount)
     {
+        var statusEmoji = fileCount > 0 ? "✅" : "⚠️";
+        var statusText = fileCount > 0 ? "Задание успешно добавлено в очередь" : "Задание добавлено, но файлы не найдены";
+
         var builder = new StringBuilder()
-            .AppendLine("✅ *Задание успешно добавлено в очередь*")
+            .AppendLine($"{statusEmoji} *{statusText}*")
             .AppendLine()
             .AppendLine("🧰 *Команды*");
 
