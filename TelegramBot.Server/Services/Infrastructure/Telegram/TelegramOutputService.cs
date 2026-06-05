@@ -203,6 +203,10 @@ public class TelegramOutputService(
         {
             await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
         }
+        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
+        {
+            logger.LogDebug("Skipped unchanged message reply text edit for {UserId} messageId={MessageId}", userId, messageId);
+        }
         catch (ApiRequestException ex)
         {
             logger.LogWarning(ex, "Failed to edit message reply text for {UserId} messageId={MessageId}", userId, messageId);
@@ -214,6 +218,10 @@ public class TelegramOutputService(
         try
         {
             await botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
+        }
+        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
+        {
+            logger.LogDebug("Skipped unchanged message reply markup edit for {UserId} messageId={MessageId}", userId, messageId);
         }
         catch (ApiRequestException ex)
         {
@@ -227,10 +235,20 @@ public class TelegramOutputService(
         {
             await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
         }
+        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
+        {
+            logger.LogDebug("Skipped unchanged message text with keyboard edit for {UserId} messageId={MessageId}", userId, messageId);
+        }
         catch (ApiRequestException ex)
         {
             logger.LogWarning(ex, "Failed to edit message text with keyboard for {UserId} messageId={MessageId}", userId, messageId);
         }
+    }
+
+    private static bool IsMessageNotModified(ApiRequestException ex)
+    {
+        return ex.ErrorCode == 400
+            && ex.Message.Contains("message is not modified", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<Message?> ExecuteWithRetryAsync(Func<Task<Message>> action, long userId)
