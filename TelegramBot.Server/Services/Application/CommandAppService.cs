@@ -34,8 +34,6 @@ public sealed class CommandAppService(
         session.TrackMessage(callback.MessageId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
-        logger.LogInformation("Callback received: prefix={Prefix}, user={UserId}", parsed.Prefix, callback.UserId);
-
         var isRegistrationCallback = parsed.Prefix is
             CallbackPrefixes.RequestAccess or
             CallbackPrefixes.ApproveUser or
