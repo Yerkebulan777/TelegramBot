@@ -57,8 +57,7 @@ public static class DependencyInjectionExtensions
     {
         _ = services.AddSingleton<ICommandAppService, CommandAppService>();
         _ = services.AddSingleton<ISlashCommandService, SlashCommandService>();
-        _ = services.AddSingleton<ISessionManager>(sp =>
-            new SessionManager(TimeSpan.FromMinutes(5), sp.GetRequiredService<IDataService>()));
+        _ = services.AddSingleton<ISessionManager>(sp => new SessionManager(TimeSpan.FromMinutes(5), sp.GetRequiredService<IDataService>()));
 
         return services;
     }
@@ -78,9 +77,7 @@ public static class DependencyInjectionExtensions
             var botOptions = serviceProvider.GetRequiredService<IOptions<BotOptions>>().Value;
 
             return string.IsNullOrWhiteSpace(botOptions.Token)
-                ? throw new InvalidOperationException(
-                    "TelegramBot:Token is not configured. " +
-                    "Set it in appsettings.Local.json or via environment variable TELEGRAM_BOT_TOKEN.")
+                ? throw new InvalidOperationException("TelegramBot:Token is not configured.")
                 : (ITelegramBotClient)new TelegramBotClient(botOptions.Token);
         });
 

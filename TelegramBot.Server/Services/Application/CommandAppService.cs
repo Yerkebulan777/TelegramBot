@@ -34,7 +34,7 @@ public sealed class CommandAppService(
         session.TrackMessage(callback.MessageId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
-        logger.LogInformation("Received callback '{Prefix}' from {Username} ({UserId})", parsed.Prefix, callback.Username, callback.UserId);
+        logger.LogInformation("Callback received: prefix={Prefix}, user={UserId}", parsed.Prefix, callback.UserId);
 
         var isRegistrationCallback = parsed.Prefix is
             CallbackPrefixes.RequestAccess or
@@ -43,6 +43,7 @@ public sealed class CommandAppService(
 
         if (!isRegistrationCallback && !await _slashCommandService.CheckAndNotifyAccessAsync(callback.UserId, session))
         {
+            logger.LogWarning("Callback rejected: prefix={Prefix}, user={UserId}, reason=access_denied", parsed.Prefix, callback.UserId);
             return;
         }
 

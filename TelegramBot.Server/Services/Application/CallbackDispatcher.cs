@@ -15,9 +15,10 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
             if (handler.CanHandle(context.ParsedCallback.Prefix))
             {
                 _logger.LogDebug(
-                    "Dispatching callback '{Prefix}' to {HandlerName}",
+                    "Callback dispatch: prefix={Prefix}, handler={HandlerName}, user={UserId}",
                     context.ParsedCallback.Prefix,
-                    handler.GetType().Name);
+                    handler.GetType().Name,
+                    context.UserId);
 
                 try
                 {
@@ -25,9 +26,10 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
                     if (handled)
                     {
                         _logger.LogDebug(
-                            "Callback '{Prefix}' handled by {HandlerName}",
+                            "Callback handled: prefix={Prefix}, handler={HandlerName}, user={UserId}",
                             context.ParsedCallback.Prefix,
-                            handler.GetType().Name);
+                            handler.GetType().Name,
+                            context.UserId);
                         return true;
                     }
                 }
@@ -50,9 +52,8 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
         }
 
         _logger.LogDebug(
-            "No handler found for callback '{Prefix}' from user {Username} ({UserId})",
+            "Callback ignored: prefix={Prefix}, user={UserId}, reason=no_handler",
             context.ParsedCallback.Prefix,
-            context.Username,
             context.UserId);
 
         return false;

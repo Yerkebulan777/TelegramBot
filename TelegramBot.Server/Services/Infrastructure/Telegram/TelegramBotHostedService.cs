@@ -39,7 +39,7 @@ public class TelegramBotHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Starting Telegram polling");
+        _logger.LogInformation("Telegram polling starting");
 
         await CleanupStaleMessagesAsync(stoppingToken);
         await BotCommandsSetup.ConfigureAsync(_botClient, _logger);
@@ -65,7 +65,7 @@ public class TelegramBotHostedService : BackgroundService
             // Expected when the host is stopping
         }
 
-        _logger.LogInformation("Stopping Telegram polling");
+        _logger.LogInformation("Telegram polling stopped");
     }
 
     public async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken token)
@@ -73,6 +73,8 @@ public class TelegramBotHostedService : BackgroundService
         try
         {
             var dto = await _inputService.Map(update);
+            _logger.LogDebug("Update received: id={UpdateId}, type={UpdateType}, dto={DtoType}",
+                update.Id, update.Type, dto?.GetType().Name ?? "null");
 
             switch (dto)
             {
@@ -120,6 +122,13 @@ public class TelegramBotHostedService : BackgroundService
         try
         {
             var staleMessages = await _dataService.GetAllTrackedMessagesAsync();
+            var totalMessages = staleMessages.Sum(g => g.Count());
+            if (totalMessages > 0)
+            {
+                _logger.LogInformation("Startup cleanup: chats={ChatCount}, messages={MessageCount}",
+                    staleMessages.Count, totalMessages);
+            }
+
             foreach (var group in staleMessages)
             {
                 await _outputService.DeleteMessagesAsync(group.Key, group, cancellationToken);
