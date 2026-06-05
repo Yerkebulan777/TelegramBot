@@ -274,7 +274,9 @@ public sealed class SlashCommandService(
         var filesToProcess = CollectRvtFiles(selectedSections, cancellationToken);
         if (filesToProcess.Count == 0)
         {
-            logger.LogWarning("Job submit: user={UserId}, commands={CommandCount}, files=0", userId, session.PendingCommand.Count);
+            logger.LogWarning("Job submit blocked: user={UserId}, reason=no_files_found", userId);
+            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "⚠️ В выбранных разделах не найдены файлы для обработки."), session);
+            return;
         }
 
         var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
@@ -419,11 +421,8 @@ public sealed class SlashCommandService(
         IEnumerable<string> sectionNames,
         int fileCount)
     {
-        var statusEmoji = fileCount > 0 ? "✅" : "⚠️";
-        var statusText = fileCount > 0 ? "Задание успешно добавлено в очередь" : "Задание добавлено, но файлы не найдены";
-
         var builder = new StringBuilder()
-            .AppendLine($"{statusEmoji} *{statusText}*")
+            .AppendLine("✅ *Задание успешно добавлено в очередь*")
             .AppendLine()
             .AppendLine("🧰 *Команды*");
 
