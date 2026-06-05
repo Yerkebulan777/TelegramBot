@@ -4,9 +4,9 @@ internal static partial class SqlQueries
 {
     internal static class Commands
     {
-        internal const string Insert = @"
+        internal const string InsertBatch = @"
             INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder)
-            VALUES (@SessionId, @CommandText, @FilePath, @Order)";
+            SELECT @SessionId, unnest(@CommandTexts::text[]), unnest(@FilePaths::text[]), unnest(@Orders::int[])";
 
         internal const string GetBySession = @"
             SELECT c.ExecutionOrder AS ExecOrder, c.CommandText AS Command,

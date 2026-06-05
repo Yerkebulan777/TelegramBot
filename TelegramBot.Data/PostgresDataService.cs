@@ -55,6 +55,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         string username,
         int filesAmount)
     {
+        var commands = commandText.ToArray();
+        var fileList = files.ToArray();
+
+        if (commands.Length == 0 || fileList.Length == 0)
+        {
+            throw new ArgumentException("Commands and files must not be empty");
+        }
+
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
         await using var tx = await conn.BeginTransactionAsync();
@@ -64,16 +72,26 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             new { UserId = userId, Username = username, FilesAmount = filesAmount },
             tx);
 
-        var order = 1;
-        foreach (var command in commandText)
+        var totalRows = commands.Length * fileList.Length;
+        var commandTexts = new string[totalRows];
+        var filePaths = new string[totalRows];
+        var orders = new int[totalRows];
+
+        var index = 0;
+        foreach (var cmd in commands)
         {
-            foreach (var file in files)
+            foreach (var file in fileList)
             {
-                await conn.ExecuteAsync(SqlQueries.Commands.Insert,
-                    new { SessionId = sessionId, CommandText = command, FilePath = file, Order = order++ },
-                    tx);
+                commandTexts[index] = cmd;
+                filePaths[index] = file;
+                orders[index] = index + 1;
+                index++;
             }
         }
+
+        await conn.ExecuteAsync(SqlQueries.Commands.InsertBatch,
+            new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders },
+            tx);
 
         await tx.CommitAsync();
         return sessionId;
