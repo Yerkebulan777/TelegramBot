@@ -21,5 +21,8 @@ internal static partial class SqlQueries
 
         internal const string DeleteSingle =
             "DELETE FROM TrackedMessages WHERE UserId = @UserId AND MessageId = @MessageId;";
+
+        internal const string DeleteBatch =
+            "DELETE FROM TrackedMessages WHERE UserId = @UserId AND MessageId = ANY(@MessageIds);";
     }
 }

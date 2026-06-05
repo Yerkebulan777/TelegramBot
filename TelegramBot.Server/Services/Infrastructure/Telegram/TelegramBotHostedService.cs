@@ -113,18 +113,21 @@ public class TelegramBotHostedService(
             foreach (var group in staleMessages)
             {
                 var chatId = group.Key;
-                foreach (var messageId in group)
+                var messageIds = group.ToArray();
+
+                foreach (var messageId in messageIds)
                 {
                     try
                     {
                         await outputService.DeleteMessageAsync(chatId, messageId);
-                        await dataService.DeleteTrackedMessageAsync(chatId, messageId);
                     }
                     catch (Exception ex)
                     {
                         logger.LogWarning(ex, "Failed to delete stale message {MessageId} in chat {ChatId}", messageId, chatId);
                     }
                 }
+
+                await dataService.DeleteTrackedMessagesBatchAsync(chatId, messageIds);
             }
         }
         catch (Exception ex)

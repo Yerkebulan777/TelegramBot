@@ -99,10 +99,7 @@ public sealed class CommandAppService(
         finally
         {
             session.UntrackMessages(messageIds);
-            foreach (var messageId in messageIds)
-            {
-                await _dataService.DeleteTrackedMessageAsync(message.UserId, messageId);
-            }
+            await _dataService.DeleteTrackedMessagesBatchAsync(message.UserId, messageIds);
         }
     }
 

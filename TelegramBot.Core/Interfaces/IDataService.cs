@@ -105,6 +105,9 @@ public interface IDataService
     /// <summary>Удаляет конкретное сохранённое сообщение.</summary>
     Task DeleteTrackedMessageAsync(long userId, int messageId);
 
+    /// <summary>Удаляет несколько сообщений за один batch-запрос.</summary>
+    Task DeleteTrackedMessagesBatchAsync(long userId, int[] messageIds);
+
     /// <summary>Удаляет все сохранённые ID сообщений для пользователя.</summary>
     Task DeleteTrackedMessagesAsync(long userId);
 }

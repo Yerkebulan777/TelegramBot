@@ -254,6 +254,18 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteSingle, new { UserId = userId, MessageId = messageId });
     }
 
+    public async Task DeleteTrackedMessagesBatchAsync(long userId, int[] messageIds)
+    {
+        if (messageIds.Length == 0)
+        {
+            return;
+        }
+
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteBatch, new { UserId = userId, MessageIds = messageIds });
+    }
+
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
