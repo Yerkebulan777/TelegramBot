@@ -99,6 +99,9 @@ public interface IDataService
     /// <summary>Возвращает все сохранённые ID сообщений, сгруппированные по userId.</summary>
     Task<ILookup<long, int>> GetAllTrackedMessagesAsync();
 
+    /// <summary>Удаляет конкретное сохранённое сообщение.</summary>
+    Task DeleteTrackedMessageAsync(long userId, int messageId);
+
     /// <summary>Удаляет все сохранённые ID сообщений для пользователя.</summary>
     Task DeleteTrackedMessagesAsync(long userId);
 }

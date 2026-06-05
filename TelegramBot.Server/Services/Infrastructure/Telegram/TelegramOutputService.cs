@@ -23,9 +23,9 @@ public class TelegramOutputService(
 
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
-        return string.IsNullOrWhiteSpace(message)
-            ? null!
-            : await ExecuteWithRetryAsync(async () =>
+        if (string.IsNullOrWhiteSpace(message)) return null;
+        
+        var msg = await ExecuteWithRetryAsync(async () =>
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
@@ -34,17 +34,31 @@ public class TelegramOutputService(
             _logger.LogDebug("Sent to {UserId}: {Message}", userId, message);
             return t;
         }, userId);
+
+        if (msg != null)
+        {
+            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
+        }
+
+        return msg;
     }
 
     public async Task<Message?> SendErrorAsync(long userId, string errorMessage)
     {
-        return await ExecuteWithRetryAsync(async () =>
+        var msg = await ExecuteWithRetryAsync(async () =>
         {
             var t = await _botClient.SendMessage(
                 chatId: new ChatId(userId),
                 text: $"⚠ Error: {errorMessage}");
             return t;
         }, userId);
+
+        if (msg != null)
+        {
+            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
+        }
+
+        return msg;
     }
 
     public async Task SendNotificationAsync(string message)
@@ -124,20 +138,30 @@ public class TelegramOutputService(
 
     public Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
     {
-        return ExecuteWithRetryAsync(() => _botClient.SendMessage(
-                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+        return TrackAsync(ExecuteWithRetryAsync(() => _botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId), userId);
     }
 
     public Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
     {
-        return ExecuteWithRetryAsync(() => _botClient.SendMessage(
-                chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown), userId);
+        return TrackAsync(ExecuteWithRetryAsync(() => _botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown), userId), userId);
     }
 
     public Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
-        return ExecuteWithRetryAsync(() => _botClient.SendMessage(
-                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+        return TrackAsync(ExecuteWithRetryAsync(() => _botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId), userId);
+    }
+
+    private async Task<Message?> TrackAsync(Task<Message?> task, long userId)
+    {
+        var msg = await task;
+        if (msg != null)
+        {
+            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
+        }
+        return msg;
     }
 
     public async Task AnswerCallbackAsync(string callbackId, string messageText)

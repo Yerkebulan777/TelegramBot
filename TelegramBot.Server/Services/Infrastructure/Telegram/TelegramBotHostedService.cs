@@ -131,8 +131,19 @@ public class TelegramBotHostedService : BackgroundService
 
             foreach (var group in staleMessages)
             {
-                await _outputService.DeleteMessagesAsync(group.Key, group, cancellationToken);
-                await _dataService.DeleteTrackedMessagesAsync(group.Key);
+                var chatId = group.Key;
+                foreach (var messageId in group)
+                {
+                    try
+                    {
+                        await _outputService.DeleteMessageAsync(chatId, messageId);
+                        await _dataService.DeleteTrackedMessageAsync(chatId, messageId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete stale message {MessageId} in chat {ChatId}", messageId, chatId);
+                    }
+                }
             }
         }
         catch (Exception ex)
