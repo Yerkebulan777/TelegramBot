@@ -103,10 +103,10 @@ public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboa
             .Select(option =>
             {
                 var isSelected = session.PendingCommand.Contains(option.Code);
-                var text = isSelected ? $"✅ {option.DisplayName}" : option.DisplayName;
+                var text = isSelected ? $"✅ {option.Name}" : option.Name;
                 return new List<InlineKeyboardButton>
                 {
-                    InlineKeyboardButton.WithCallbackData(text, option.CallbackPrefix)
+                    InlineKeyboardButton.WithCallbackData(text, option.Prefix)
                 };
             })
             .ToList();

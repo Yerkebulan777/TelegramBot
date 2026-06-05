@@ -362,9 +362,12 @@ public sealed class SlashCommandService(
 
     private async Task SendRegistrationMessageAsync(long userId, UserSession session)
     {
-        var keyboard = new Telegram.Bot.Types.ReplyMarkups.InlineKeyboardMarkup([[
-            Telegram.Bot.Types.ReplyMarkups.InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
-        ]]);
+        var keyboard = new InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
+            ]
+        ]);
         _ = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId,
             "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
             keyboard), session);
@@ -417,6 +420,8 @@ public sealed class SlashCommandService(
         int fileCount)
     {
         var builder = new StringBuilder()
+            .AppendLine("✅ *Задание успешно добавлено в очередь*")
+            .AppendLine()
             .AppendLine("🧰 *Команды*");
 
         foreach (var commandName in commandNames)
@@ -427,7 +432,7 @@ public sealed class SlashCommandService(
         _ = builder
             .AppendLine()
             .AppendLine("📌 *Проект*")
-            .AppendLine(MarkdownHelper.EscapeMarkdown(projectName))
+            .AppendLine($"`{MarkdownHelper.EscapeMarkdown(projectName)}`")
             .AppendLine()
             .AppendLine("📂 *Разделы*");
 
@@ -438,7 +443,7 @@ public sealed class SlashCommandService(
 
         _ = builder
             .AppendLine()
-            .AppendLine($"📄 *Количество файлов:* {fileCount}");
+            .AppendLine($"📄 *Количество файлов:* `{fileCount}`");
 
         return builder.ToString();
     }

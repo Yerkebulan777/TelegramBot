@@ -14,12 +14,12 @@ public sealed class CommandToggleHandler(
 
     public override bool CanHandle(string prefix)
     {
-        return CommandCatalog.TryGetByCallbackPrefix(prefix, out _);
+        return CommandCatalog.TryGetByPrefix(prefix, out _);
     }
 
     protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
     {
-        if (!CommandCatalog.TryGetByCallbackPrefix(context.ParsedCallback.Prefix, out var command))
+        if (!CommandCatalog.TryGetByPrefix(context.ParsedCallback.Prefix, out var command))
         {
             return false;
         }
@@ -32,7 +32,7 @@ public sealed class CommandToggleHandler(
         }
         else
         {
-            context.Session.AddPendingCommand(command.Code, command.DisplayName);
+            context.Session.AddPendingCommand(command.Code, command.Name);
             Logger.LogInformation("User {Username} ({UserId}) selected command '{Code}' (pending: [{Commands}])",
                 context.Username, context.UserId, command.Code, string.Join(", ", context.Session.PendingCommand));
         }

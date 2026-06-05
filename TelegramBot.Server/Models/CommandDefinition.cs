@@ -11,8 +11,8 @@ public enum CommandGroup
 
 public readonly record struct CommandDefinition(
     string Code,
-    string DisplayName,
-    string CallbackPrefix,
+    string Name,
+    string Prefix,
     CommandGroup Group);
 
 public static class CommandCatalog
@@ -29,14 +29,14 @@ public static class CommandCatalog
     ];
 
     private static readonly IReadOnlyDictionary<string, CommandDefinition> _byPrefix =
-        All.ToDictionary(command => command.CallbackPrefix);
+        All.ToDictionary(command => command.Prefix);
 
     public static IEnumerable<CommandDefinition> GetByGroup(CommandGroup group)
     {
         return All.Where(command => command.Group == group);
     }
 
-    public static bool TryGetByCallbackPrefix(string prefix, out CommandDefinition definition)
+    public static bool TryGetByPrefix(string prefix, out CommandDefinition definition)
     {
         return _byPrefix.TryGetValue(prefix, out definition);
     }
