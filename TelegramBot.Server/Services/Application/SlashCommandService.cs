@@ -37,7 +37,7 @@ public sealed class SlashCommandService(
 
         ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
 
-        logger.LogInformation("Command received: command={Command}, user={UserId}", text, userId);
+        logger.LogDebug("Command received: command={Command}, user={UserId}", text, userId);
 
         if (text == "/start")
         {
@@ -209,7 +209,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        logger.LogInformation("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
+        logger.LogDebug("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
             username, userId, string.Join(", ", session.PendingCommand));
 
         await _outputService.ClearChatHistoryAsync(userId, session);
@@ -244,7 +244,7 @@ public sealed class SlashCommandService(
             session.CurrentPath = Path.Combine(selectedProject, _options.ProjectDirectoryName);
             session.ClearSelectedFiles();
 
-            logger.LogInformation("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT",
+            logger.LogDebug("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT",
                 username, userId, Path.GetFileName(selectedProject));
 
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
@@ -261,7 +261,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        logger.LogInformation(
+        logger.LogDebug(
             "Job submit: user={UserId}, commands={CommandCount}, sections={SectionCount}",
             userId, session.PendingCommand.Count, selectedSections.Count);
 
@@ -313,7 +313,7 @@ public sealed class SlashCommandService(
         session.ClearSelectedFiles();
         session.CurrentPath = _options.RootPath;
 
-        logger.LogInformation("User {Username} ({UserId}) returned to project selection", username, userId);
+        logger.LogDebug("User {Username} ({UserId}) returned to project selection", username, userId);
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
         await _outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
@@ -327,7 +327,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        logger.LogInformation("User {Username} ({UserId}) returning to sessions list", username, userId);
+        logger.LogDebug("User {Username} ({UserId}) returning to sessions list", username, userId);
 
         var sessionsStatus = await _dataService.GetSessionsListAsync(userId);
         var keyboard = await _keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);

@@ -48,7 +48,7 @@ public sealed class SessionManagementHandler(
 
         var session = context.Session;
 
-        Logger.LogInformation("User {Username} ({UserId}) viewing session details for session {SessionId}", context.Username, context.UserId, sessionId);
+        Logger.LogDebug("User {Username} ({UserId}) viewing session details for session {SessionId}", context.Username, context.UserId, sessionId);
 
         if (session.IsInStatusView)
         {
@@ -84,7 +84,7 @@ public sealed class SessionManagementHandler(
             return true;
         }
 
-        Logger.LogInformation("User {Username} ({UserId}) deleting session {SessionId}", context.Username, context.UserId, sessionId);
+        Logger.LogDebug("User {Username} ({UserId}) deleting session {SessionId}", context.Username, context.UserId, sessionId);
 
         if (!await _dataService.DeleteSessionAsync(sessionId, context.UserId))
         {
@@ -106,7 +106,7 @@ public sealed class SessionManagementHandler(
             return true;
         }
 
-        Logger.LogInformation("User {Username} ({UserId}) deleting command {CommandId}", context.Username, context.UserId, commandId);
+        Logger.LogDebug("User {Username} ({UserId}) deleting command {CommandId}", context.Username, context.UserId, commandId);
 
         var sessionId = await _dataService.GetSessionIdByCommandAsync(commandId, context.UserId);
         if (!sessionId.HasValue)
@@ -151,7 +151,7 @@ public sealed class SessionManagementHandler(
 
     private async Task<bool> HandleBackToStatusAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("User {Username} ({UserId}) returning to sessions list", context.Username, context.UserId);
+        Logger.LogDebug("User {Username} ({UserId}) returning to sessions list", context.Username, context.UserId);
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
         return true;

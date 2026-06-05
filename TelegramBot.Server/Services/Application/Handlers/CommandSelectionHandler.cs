@@ -40,7 +40,7 @@ public sealed class CommandSelectionHandler(
             return true;
         }
 
-        Logger.LogInformation("User {Username} ({UserId}) applied command selection: [{Commands}]",
+        Logger.LogDebug("User {Username} ({UserId}) applied command selection: [{Commands}]",
             context.Username, context.UserId, string.Join(", ", session.PendingCommand));
 
         session.CurrentPath = _options.RootPath;
@@ -61,7 +61,7 @@ public sealed class CommandSelectionHandler(
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
+        Logger.LogDebug("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
         await _outputService.ClearChatHistoryAsync(context.UserId, context.Session);
 
         context.Session.ClearPendingCommands();
