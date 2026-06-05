@@ -9,40 +9,21 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
-public class TelegramBotHostedService : BackgroundService
+public class TelegramBotHostedService(
+    ITelegramBotClient botClient,
+    ICommandAppService commandAppService,
+    ILogger<TelegramBotHostedService> logger,
+    ITelegramUpdateMapper inputService,
+    ISessionManager sessionManager,
+    IDataService dataService,
+    ITelegramOutputService outputService) : BackgroundService
 {
-    private readonly ITelegramBotClient _botClient;
-    private readonly ICommandAppService _commandAppService;
-    private readonly ILogger<TelegramBotHostedService> _logger;
-    private readonly ITelegramUpdateMapper _inputService;
-    private readonly ISessionManager _sessionManager;
-    private readonly IDataService _dataService;
-    private readonly ITelegramOutputService _outputService;
-
-    public TelegramBotHostedService(
-        ITelegramBotClient botClient,
-        ICommandAppService commandAppService,
-        ILogger<TelegramBotHostedService> logger,
-        ITelegramUpdateMapper inputService,
-        ISessionManager sessionManager,
-        IDataService dataService,
-        ITelegramOutputService outputService)
-    {
-        _botClient = botClient;
-        _commandAppService = commandAppService;
-        _logger = logger;
-        _inputService = inputService;
-        _sessionManager = sessionManager;
-        _dataService = dataService;
-        _outputService = outputService;
-    }
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Telegram polling starting");
+        logger.LogInformation("Telegram polling starting");
 
         await CleanupStaleMessagesAsync(stoppingToken);
-        await BotCommandsSetup.ConfigureAsync(_botClient, _logger);
+        await BotCommandsSetup.ConfigureAsync(botClient, logger);
 
         var receiverOptions = new ReceiverOptions
         {
@@ -54,7 +35,7 @@ public class TelegramBotHostedService : BackgroundService
             errorHandler: HandleErrorAsync
         );
 
-        _botClient.StartReceiving(updateHandler, receiverOptions, stoppingToken);
+        botClient.StartReceiving(updateHandler, receiverOptions, stoppingToken);
 
         try
         {
@@ -65,43 +46,43 @@ public class TelegramBotHostedService : BackgroundService
             // Expected when the host is stopping
         }
 
-        _logger.LogInformation("Telegram polling stopped");
+        logger.LogInformation("Telegram polling stopped");
     }
 
     public async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken token)
     {
         try
         {
-            var dto = await _inputService.Map(update);
-            _logger.LogDebug("Update received: id={UpdateId}, type={UpdateType}, dto={DtoType}",
+            var dto = await inputService.Map(update);
+            logger.LogDebug("Update received: id={UpdateId}, type={UpdateType}, dto={DtoType}",
                 update.Id, update.Type, dto?.GetType().Name ?? "null");
 
             switch (dto)
             {
                 case MessageDto message:
-                    using (await _sessionManager.AcquireUserLockAsync(message.UserId))
+                    using (await sessionManager.AcquireUserLockAsync(message.UserId))
                     {
-                        _ = _sessionManager.GetOrCreateSession(message.UserId);
+                        _ = sessionManager.GetOrCreateSession(message.UserId);
 
                         if (message.Text == null)
                         {
-                            _logger.LogWarning("Received message with null Text from {Username} ({UserId})", message.Username, message.UserId);
+                            logger.LogWarning("Received message with null Text from {Username} ({UserId})", message.Username, message.UserId);
                             return;
                         }
 
-                        await _commandAppService.HandleUserCommandAsync(message, token);
+                        await commandAppService.HandleUserCommandAsync(message, token);
                     }
                     break;
                 case CallbackQueryDto callback:
                     if (callback.CallbackQueryId == null)
                     {
-                        _logger.LogWarning("Received callback with null CallbackQueryId from {Username} ({UserId})", callback.Username, callback.UserId);
+                        logger.LogWarning("Received callback with null CallbackQueryId from {Username} ({UserId})", callback.Username, callback.UserId);
                         return;
                     }
-                    using (await _sessionManager.AcquireUserLockAsync(callback.UserId))
+                    using (await sessionManager.AcquireUserLockAsync(callback.UserId))
                     {
-                        _ = _sessionManager.GetOrCreateSession(callback.UserId);
-                        await _commandAppService.HandleCallbackAsync(callback, token);
+                        _ = sessionManager.GetOrCreateSession(callback.UserId);
+                        await commandAppService.HandleCallbackAsync(callback, token);
                         await bot.AnswerCallbackQuery(callback.CallbackQueryId, cancellationToken: token);
                     }
                     break;
@@ -109,11 +90,11 @@ public class TelegramBotHostedService : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("Update handling was cancelled");
+            logger.LogDebug("Update handling was cancelled");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unhandled exception processing update {UpdateId}", update.Id);
+            logger.LogError(ex, "Unhandled exception processing update {UpdateId}", update.Id);
         }
     }
 
@@ -121,11 +102,11 @@ public class TelegramBotHostedService : BackgroundService
     {
         try
         {
-            var staleMessages = await _dataService.GetAllTrackedMessagesAsync();
+            var staleMessages = await dataService.GetAllTrackedMessagesAsync();
             var totalMessages = staleMessages.Sum(g => g.Count());
             if (totalMessages > 0)
             {
-                _logger.LogInformation("Startup cleanup: chats={ChatCount}, messages={MessageCount}",
+                logger.LogInformation("Startup cleanup: chats={ChatCount}, messages={MessageCount}",
                     staleMessages.Count, totalMessages);
             }
 
@@ -136,25 +117,25 @@ public class TelegramBotHostedService : BackgroundService
                 {
                     try
                     {
-                        await _outputService.DeleteMessageAsync(chatId, messageId);
-                        await _dataService.DeleteTrackedMessageAsync(chatId, messageId);
+                        await outputService.DeleteMessageAsync(chatId, messageId);
+                        await dataService.DeleteTrackedMessageAsync(chatId, messageId);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to delete stale message {MessageId} in chat {ChatId}", messageId, chatId);
+                        logger.LogWarning(ex, "Failed to delete stale message {MessageId} in chat {ChatId}", messageId, chatId);
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to cleanup stale messages on startup");
+            logger.LogError(ex, "Failed to cleanup stale messages on startup");
         }
     }
 
     private Task HandleErrorAsync(ITelegramBotClient client, Exception exception, CancellationToken token)
     {
-        _logger.LogError(exception, "Polling error");
+        logger.LogError(exception, "Polling error");
         return Task.CompletedTask;
     }
 }

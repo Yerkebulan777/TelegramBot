@@ -6,7 +6,6 @@ namespace TelegramBot.Server.Services.Application;
 public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, ILogger<CallbackDispatcher> logger) : ICallbackDispatcher
 {
     private readonly IEnumerable<ICallbackHandler> _handlers = handlers.OrderBy(h => h.Priority).ToList();
-    private readonly ILogger<CallbackDispatcher> _logger = logger;
 
     public async Task<bool> DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
@@ -14,7 +13,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
         {
             if (handler.CanHandle(context.ParsedCallback.Prefix))
             {
-                _logger.LogDebug(
+                logger.LogDebug(
                     "Callback dispatch: prefix={Prefix}, handler={HandlerName}, user={UserId}",
                     context.ParsedCallback.Prefix,
                     handler.GetType().Name,
@@ -25,7 +24,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
                     var handled = await handler.HandleAsync(context, cancellationToken);
                     if (handled)
                     {
-                        _logger.LogDebug(
+                        logger.LogDebug(
                             "Callback handled: prefix={Prefix}, handler={HandlerName}, user={UserId}",
                             context.ParsedCallback.Prefix,
                             handler.GetType().Name,
@@ -35,14 +34,14 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogInformation(
+                    logger.LogInformation(
                         "Callback '{Prefix}' handling was cancelled",
                         context.ParsedCallback.Prefix);
                     throw;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex,
+                    logger.LogError(ex,
                         "Error in handler {HandlerName} for callback '{Prefix}'",
                         handler.GetType().Name,
                         context.ParsedCallback.Prefix);
@@ -51,7 +50,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
             }
         }
 
-        _logger.LogDebug(
+        logger.LogDebug(
             "Callback ignored: prefix={Prefix}, user={UserId}, reason=no_handler",
             context.ParsedCallback.Prefix,
             context.UserId);

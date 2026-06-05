@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace TelegramBot.Core.Models;
 
 /// <summary>
@@ -12,8 +10,6 @@ public class UserSession
 
     public string CurrentPath { get; set; } = Directory.GetCurrentDirectory();
 
-    // ConcurrentDictionary: token-to-path mapping used by FileSystemBrowser and handlers
-    public ConcurrentDictionary<string, string> PathMap { get; } = new();
 
     private readonly object _commandLock = new();
     private readonly List<string> _pendingCommand = [];
@@ -48,14 +44,11 @@ public class UserSession
         }
     }
 
-    public IReadOnlySet<string> SelectedFiles
+    public IReadOnlySet<string> GetSelectedFiles()
     {
-        get
+        lock (_selectionLock)
         {
-            lock (_selectionLock)
-            {
-                return new HashSet<string>(_selectedFiles);
-            }
+            return new HashSet<string>(_selectedFiles);
         }
     }
 
@@ -150,6 +143,17 @@ public class UserSession
         }
     }
 
+    public void UntrackMessages(IEnumerable<int> messageIds)
+    {
+        lock (_messageLock)
+        {
+            foreach (var messageId in messageIds)
+            {
+                _ = _trackedMessageIds.Remove(messageId);
+            }
+        }
+    }
+
     public void ClearTrackedMessages()
     {
         lock (_messageLock)
@@ -177,12 +181,12 @@ public class UserSession
         ClearPendingCommands();
         CurrentPath = rootPath;
         IsInStatusView = false;
-        SessionId = 0;
         CommandSelectionMessageId = null;
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;
-        StatusMessageId = null;
         LastActionsMessageId = null;
+        StatusMessageId = null;
+        SessionId = 0;
     }
 
     /// <summary>
@@ -191,8 +195,8 @@ public class UserSession
     /// </summary>
     public void ResetNavigation(string rootPath)
     {
-        CurrentPath = rootPath;
         ClearSelectedFiles();
+        CurrentPath = rootPath;
         FileSelectionMessageId = null;
     }
 }

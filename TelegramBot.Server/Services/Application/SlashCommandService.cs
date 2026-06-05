@@ -39,6 +39,11 @@ public sealed class SlashCommandService(
 
         logger.LogDebug("Command received: command={Command}, user={UserId}", text, userId);
 
+        if (text.StartsWith('/'))
+        {
+            await _outputService.ClearChatHistoryAsync(userId, session);
+        }
+
         if (text == "/start")
         {
             session.Reset(_options.RootPath);
@@ -198,13 +203,15 @@ public sealed class SlashCommandService(
         if (session.PendingCommand.Count == 0)
         {
             logger.LogDebug("User {Username} ({UserId}) tried to apply with no commands selected", username, userId);
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сначала выберите хотя бы одну команду."), session);
+            await SendWarningAndCleanupAsync(userId, session, "Сначала выберите хотя бы одну команду.");
             return;
         }
 
         logger.LogDebug("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
             username, userId, string.Join(", ", session.PendingCommand));
 
+        await _outputService.ClearChatHistoryAsync(userId, session);
+        session.CommandSelectionMessageId = null;
         session.CurrentPath = _options.RootPath;
         session.IsFileSelectionActive = true;
 
@@ -219,17 +226,17 @@ public sealed class SlashCommandService(
         if (!session.FileSelectionMessageId.HasValue)
         {
             logger.LogWarning("Job submit blocked: user={UserId}, reason=missing_file_selection_message", userId);
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено."), session);
+            await SendWarningAndCleanupAsync(userId, session, "Сообщение выбора файлов не найдено.");
             return;
         }
 
         if (_options.IsAtProjectLevel(session.CurrentPath))
         {
-            var selectedProject = session.SelectedFiles.FirstOrDefault();
+            var selectedProject = session.GetSelectedFiles().FirstOrDefault();
             if (selectedProject == null)
             {
                 logger.LogDebug("Project confirm blocked: user={UserId}, reason=no_project_selected", userId);
-                _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "⚠️ Сначала выберите проект."), session);
+                await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите проект.");
                 return;
             }
 
@@ -242,14 +249,15 @@ public sealed class SlashCommandService(
             var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
             await _outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
             await SendFileActionsReplyKeyboardAsync(userId, session);
+            await CleanupCurrentViewAsync(userId, session);
             return;
         }
 
-        var selectedSections = session.SelectedFiles;
+        var selectedSections = session.GetSelectedFiles();
         if (selectedSections.Count == 0)
         {
             logger.LogDebug("Job submit blocked: user={UserId}, reason=no_sections_selected", userId);
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "⚠️ Сначала выберите хотя бы один раздел."), session);
+            await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите хотя бы один раздел.");
             return;
         }
 
@@ -267,7 +275,7 @@ public sealed class SlashCommandService(
         if (filesToProcess.Count == 0)
         {
             logger.LogWarning("Job submit blocked: user={UserId}, reason=no_files_found", userId);
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "⚠️ В выбранных разделах не найдены файлы для обработки."), session);
+            await SendWarningAndCleanupAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
             return;
         }
 
@@ -292,13 +300,13 @@ public sealed class SlashCommandService(
     {
         if (!session.FileSelectionMessageId.HasValue)
         {
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Сообщение выбора файлов не найдено."), session);
+            await SendWarningAndCleanupAsync(userId, session, "Сообщение выбора файлов не найдено.");
             return;
         }
 
         if (_options.IsAtProjectLevel(session.CurrentPath))
         {
-            _ = await TrackMessageAsync(_outputService.SendMessageAsync(userId, "Вы уже в списке проектов."), session);
+            await SendWarningAndCleanupAsync(userId, session, "Вы уже в списке проектов.");
             return;
         }
 
@@ -310,6 +318,7 @@ public sealed class SlashCommandService(
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
         await _outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
         await SendFileActionsReplyKeyboardAsync(userId, session);
+        await CleanupCurrentViewAsync(userId, session);
     }
 
     private async Task BackToSessionsListAsync(long userId, string username, UserSession session)
@@ -326,7 +335,8 @@ public sealed class SlashCommandService(
         await _outputService.EditMessageTextWithKeyboardAsync(userId, session.StatusMessageId.Value, "Сессии:", keyboard);
 
         session.IsInStatusView = true;
-        _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Сессии:"), session);
+        var clearKeyboardMessage = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Сессии:"), session);
+        await CleanupCurrentViewAsync(userId, session, clearKeyboardMessage?.Id);
     }
 
     private async Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
@@ -359,7 +369,8 @@ public sealed class SlashCommandService(
 
         var commandSelectionMessage = await TrackMessageAsync(_outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
         session.CommandSelectionMessageId = commandSelectionMessage?.Id;
-        _=await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
+        var actionsMessage = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
+        session.LastActionsMessageId = actionsMessage?.Id;
     }
 
     private async Task SendRegistrationMessageAsync(long userId, UserSession session)
@@ -396,6 +407,28 @@ public sealed class SlashCommandService(
             session.TrackMessage(msg.Id);
         }
         return msg;
+    }
+
+    private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
+    {
+        var warning = await TrackMessageAsync(_outputService.SendMessageAsync(userId, message), session);
+        await CleanupCurrentViewAsync(userId, session, warning?.Id);
+    }
+
+    private async Task CleanupCurrentViewAsync(long userId, UserSession session, params int?[] extraKeepMessageIds)
+    {
+        var keepMessageIds = new[]
+            {
+                session.CommandSelectionMessageId,
+                session.FileSelectionMessageId,
+                session.StatusMessageId,
+                session.LastActionsMessageId
+            }
+            .Concat(extraKeepMessageIds)
+            .Where(messageId => messageId.HasValue)
+            .Select(messageId => messageId!.Value);
+
+        await _outputService.CleanupTrackedMessagesAsync(userId, session, keepMessageIds);
     }
 
     private static string NormalizeCommandText(string text)

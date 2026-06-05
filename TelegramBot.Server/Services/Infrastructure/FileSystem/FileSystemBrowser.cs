@@ -8,28 +8,22 @@ using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.FileSystem;
 
-public class FileSystemBrowser : IFileSystemBrowser
+public class FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOptions> options) : IFileSystemBrowser
 {
-    private readonly ISessionManager _sessions;
-    private readonly FileSystemOptions _options;
-    private readonly Regex _folderRegex;
+    private readonly ISessionManager _sessions = sessions;
+    private readonly FileSystemOptions _options = options.Value;
+    private readonly Regex _folderRegex = new(options.Value.SectionFolderPattern, RegexOptions.IgnoreCase);
 
-    public FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOptions> options)
+    private static readonly HashSet<string> _sectionAcronyms = new(StringComparer.OrdinalIgnoreCase)
     {
-        _sessions = sessions;
-        _options = options.Value;
-        _folderRegex = new Regex(_options.SectionFolderPattern, RegexOptions.IgnoreCase);
-    }
+        "AR", "AS", "APT", "KJ", "KR", "KG", "OV", "VK", "EOM", "EM", "PS", "SS", "OViK"
+    };
 
-    public bool TryResolvePath(long userId, string token, out string? path)
-    {
-        return _sessions.GetOrCreateSession(userId).PathMap.TryGetValue(token, out path);
-    }
+    private static readonly char[] _nameSeparators = ['_', '-', ' ', '.'];
 
     public Task<InlineKeyboardMarkup> GetSectionsViewAsync(long userId, string path)
     {
         var session = _sessions.GetOrCreateSession(userId);
-        session.PathMap.Clear();
 
         var atSectionLevel = string.Equals(
             Path.GetFileName(path), _options.ProjectDirectoryName,
@@ -44,31 +38,27 @@ public class FileSystemBrowser : IFileSystemBrowser
 
     private InlineKeyboardMarkup BuildProjectKeyboard(UserSession session, string path)
     {
-        var selected = session.SelectedFiles;
+        var selected = session.GetSelectedFiles();
         var buttons = new List<List<InlineKeyboardButton>>();
 
         foreach (var dir in EnumerateProjectFolders(path))
         {
-            var token = NewToken();
-            session.PathMap[token] = dir;
             var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{dir}")]);
         }
 
         return new InlineKeyboardMarkup(buttons);
     }
 
-    private InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
+    private static InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
     {
-        var selected = session.SelectedFiles;
+        var selected = session.GetSelectedFiles();
         var buttons = new List<List<InlineKeyboardButton>>();
 
         foreach (var dir in EnumerateSectionFolders(path))
         {
-            var token = NewToken();
-            session.PathMap[token] = dir;
             var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{token}")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{dir}")]);
         }
 
         return new InlineKeyboardMarkup(buttons);
@@ -79,6 +69,7 @@ public class FileSystemBrowser : IFileSystemBrowser
         foreach (var dir in Directory.GetDirectories(path))
         {
             var name = Path.GetFileName(dir)!;
+
             if (_folderRegex.IsMatch(name) && Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName)))
             {
                 yield return dir;
@@ -88,35 +79,13 @@ public class FileSystemBrowser : IFileSystemBrowser
 
     private static IEnumerable<string> EnumerateSectionFolders(string path)
     {
-        foreach (var dir in Directory.GetDirectories(path))
-        {
-            if (ContainsSectionAcronym(Path.GetFileName(dir)!))
-            {
-                yield return dir;
-            }
-        }
+        return Directory.GetDirectories(path).Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)));
     }
-
-    private static readonly HashSet<string> _sectionAcronyms = new(StringComparer.OrdinalIgnoreCase)
-        { "AR", "AS", "APT", "KJ", "KR", "KG", "OV", "VK", "EOM", "EM", "PS", "SS", "OViK" };
-
-    private static readonly char[] _nameSeparators = ['_', '-', ' ', '.'];
 
     private static bool ContainsSectionAcronym(string folderName)
     {
-        foreach (var part in folderName.Split(_nameSeparators, StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (_sectionAcronyms.Contains(part))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        var nameSegments = folderName.Split(_nameSeparators, StringSplitOptions.RemoveEmptyEntries);
+        return nameSegments.Any(_sectionAcronyms.Contains);
     }
 
-    private static string NewToken()
-    {
-        return Guid.NewGuid().ToString("N")[..8];
-    }
 }

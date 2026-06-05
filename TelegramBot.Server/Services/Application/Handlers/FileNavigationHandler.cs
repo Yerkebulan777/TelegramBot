@@ -7,13 +7,11 @@ using TelegramBot.Server.Interfaces;
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class FileNavigationHandler(
-    IFileSystemBrowser fileNavigationService,
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
     IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IFileSystemBrowser _fileNavigationService = fileNavigationService;
     private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
     private readonly ITelegramOutputService _outputService = outputService;
     private readonly FileSystemOptions _options = options.Value;
@@ -27,7 +25,8 @@ public sealed class FileNavigationHandler(
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
 
-        if (!_fileNavigationService.TryResolvePath(context.UserId, context.ParsedCallback.Argument, out var newPath) || newPath is null)
+        var newPath = context.ParsedCallback.Argument;
+        if (string.IsNullOrEmpty(newPath))
         {
             var errorMessage = await _outputService.SendErrorAsync(context.UserId, "Path not found.");
             if (errorMessage != null)

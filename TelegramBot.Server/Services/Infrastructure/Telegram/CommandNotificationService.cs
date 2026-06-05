@@ -65,15 +65,21 @@ public sealed class CommandNotificationService(
         }
     }
 
-    private async void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
+    private void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
     {
-        if (e.Payload == null)
-        {
-            return;
-        }
+        // Fire-and-forget: событие Npgsql требует void, асинхронная работа — в HandleNotificationAsync
+        _ = HandleNotificationAsync(e);
+    }
 
+    private async Task HandleNotificationAsync(NpgsqlNotificationEventArgs e)
+    {
         try
         {
+            if (e.Payload == null)
+            {
+                return;
+            }
+
             // Payload: UserId|CommandId|CommandText|Status|ErrorMessage
             var parts = e.Payload.Split('|', 5);
             if (parts.Length < 4)

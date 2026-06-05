@@ -42,6 +42,8 @@ dotnet format TelegramBot.slnx
 
 **Tests are intentionally disabled for this project.** Do not add test projects, do not add unit/integration tests, and do not run `dotnet test`. After making changes, verify correctness by building successfully with `dotnet build TelegramBot.slnx`.
 
+> **Roadmap:** См. [ROADMAP.md](ROADMAP.md) для полной дорожной карты проекта.
+
 ---
 
 ## Configuration
@@ -72,7 +74,7 @@ Telegram API -> TelegramBotHostedService (polling)
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 
-Полная спецификация алгоритма: **[Docs/command-execution-algorithm.md](Docs/command-execution-algorithm.md)**
+Полная спецификация алгоритма: **[Docs/execution-algorithm.md](Docs/execution-algorithm.md)**
 
 ```
 SlashCommandService.ConfirmFileSelectionAsync()
@@ -97,7 +99,7 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 
 Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `CommandToggleHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
 
-Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
+Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 
@@ -180,7 +182,7 @@ Namespaces must match folder structure:
 ### Collections & Thread Safety
 
 - `UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`, `_navigationLock`, `_messageLock`) — follow this pattern for new mutable state
-- `PathMap` uses `ConcurrentDictionary<string, string>`
+- Paths in callback data are passed directly (no `PathMap`/tokens) since v1.1 refactoring
 - For new shared dictionaries, prefer `ConcurrentDictionary<,>`
 
 ### SQL / Data Access (TelegramBot.Data)
@@ -221,7 +223,7 @@ Namespaces must match folder structure:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1060 symbols, 2773 relationships, 89 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1098 symbols, 2900 relationships, 92 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

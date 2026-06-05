@@ -2,6 +2,19 @@
 
 Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin). Задачи выполняются асинхронно через отдельный Worker-процесс с использованием PostgreSQL LISTEN/NOTIFY.
 
+## Документация
+
+| Документ | Описание |
+|----------|----------|
+| [ROADMAP.md](ROADMAP.md) | Дорожная карта проекта (v1.0–v2.0+) |
+| [Docs/execution-algorithm.md](Docs/execution-algorithm.md) | Полная спецификация алгоритма выполнения команд |
+| [Docs/qodana-setup.md](Docs/qodana-setup.md) | Настройка статического анализа Qodana |
+| [AGENTS.md](AGENTS.md) | Руководство для AI-агентов по работе с кодом |
+| [CLAUDE.md](CLAUDE.md) | Руководство для Claude Code |
+| [README.TOKEN.md](README.TOKEN.md) | Настройка токена Telegram-бота |
+
+---
+
 ## Обзор
 
 .NET 10 background service — Telegram-бот с long-polling (webhook-ов нет). Авторизованным пользователям доступно:
@@ -66,7 +79,7 @@ TelegramBot/
 │   ├── DTOs/             # MessageDto, CallbackQueryDto, ButtonDto
 │   ├── Extensions/       # ValidationExtensions
 │   ├── Interfaces/       # ICommandAppService, IDataService, ICallbackDispatcher, ISessionManager
-│   └── Models/           # BotUser, UserSession, PendingCommand, FileSystemItem
+│   └── Models/           # BotUser, UserSession, PendingCommand, ParsedCallback
 ├── TelegramBot.Data/
 │   ├── DatabaseInitializer.cs
 │   ├── PostgresDataService.cs
@@ -166,22 +179,22 @@ Worker автоматически переподключается при пот
 
 | Сервис | Расположение | Ответственность |
 |--------|-------------|-----------------|
-| `TelegramBotHostedService` | Server/Services/Infrastructure | Точка входа, polling-цикл, очистка старых сообщений |
+| `TelegramBotHostedService` | Server/Services/Infrastructure/Telegram | Точка входа, polling-цикл, очистка старых сообщений |
 | `CommandAppService` | Server/Services/Application | Центральный диспетчер, проверка доступа |
 | `SlashCommandService` | Server/Services/Application | Обработка `/export`, `/automation`, `/status`, `/start`, `/help` |
 | `CallbackDispatcher` | Server/Services/Application | Chain-of-responsibility маршрутизация callback-ов |
 | `SessionManager` | Server/Services/Application | In-memory сессии (`ConcurrentDictionary`, 5 мин timeout, автоочистка) |
-| `FileSystemBrowser` | Server/Services/Infrastructure | Построение inline-клавиатур для навигации по папкам |
-| `KeyboardBuilder` | Server/Services/Infrastructure | Контекстно-зависимые клавиатуры (команды, файлы, сессии) |
-| `TelegramOutputService` | Server/Services/Infrastructure | Отправка/редактирование сообщений с retry (429) |
-| `TelegramUpdateMapper` | Server/Services/Infrastructure | Маппинг `Update` → `MessageDto` / `CallbackQueryDto` |
-| `PostgresDataService` | Data | Вся работа с БД через Dapper + Npgsql |
+| `FileSystemBrowser` | Server/Services/Infrastructure/FileSystem | Построение inline-клавиатур для навигации по папкам |
+| `KeyboardBuilder` | Server/Services/Infrastructure/Telegram | Контекстно-зависимые клавиатуры (команды, файлы, сессии) |
+| `TelegramOutputService` | Server/Services/Infrastructure/Telegram | Отправка/редактирование сообщений с retry (429) |
+| `TelegramUpdateMapper` | Server/Services/Infrastructure/Telegram | Маппинг `Update` → `MessageDto` / `CallbackQueryDto` |
+| `PostgresDataService` | TelegramBot.Data | Вся работа с БД через Dapper + Npgsql |
 
 ### Ключевые сервисы (Worker)
 
 | Сервис | Расположение | Ответственность |
 |--------|-------------|-----------------|
-| `CommandExecutionService` | Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI |
+| `CommandExecutionService` | TelegramBot.Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI |
 
 ### Обработчики callback-ов (Chain of Responsibility)
 
@@ -192,8 +205,7 @@ Worker автоматически переподключается при пот
 | `AccessRequestHandler` | 0 | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` | Запрос/подтверждение доступа |
 | `FileNavigationHandler` | 10 | `GOTOPARENT:` | Навигация по файловой системе |
 | `FileSelectionHandler` | 20 | `FILE:`, `APPLYFILES:`, `CANCELFILESEL:` | Выбор файлов/проектов/секций |
-| `ExportCommandHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:` | Переключение команд экспорта (`CommandToggleHandlerBase`) |
-| `AutomationCommandHandler` | 100 | `BIMDOC:`, `CLASHREP:`, `AUTORES:` | Переключение команд автоматизации (`CommandToggleHandlerBase`) |
+| `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` | Переключение команд экспорта и автоматизации |
 | `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:` | Управление сессиями |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` | Подтверждение/отмена выбора команд |
 
@@ -312,18 +324,9 @@ Worker:
 
 Поддерживаются переменные окружения (синтаксис с `__` как разделителем секций).
 
-## Структурные улучшения
+## История изменений
 
-В ходе рефакторинга проекта были выполнены следующие изменения:
-
-1. **SQL-запросы разбиты по сущностям** — монолитный `SqlQueries.cs` заменён на папку `TelegramBot.Data/Sql/` с 5 partial-файлами (`Schema`, `Users`, `Sessions`, `Commands`, `TrackedMessages`).
-2. **CommandCodes выделен** — из `CallbackPrefixes.cs` вынесен в отдельный файл `TelegramBot.Core/Constants/CommandCodes.cs`.
-3. **SessionManager перемещён** — из подпапки `Sessions/` на уровень `Services/Application/` (пустая подпапка удалена).
-4. **Markdown-экранирование унифицировано** — два приватных метода объединены в `TelegramBot.Server/Helpers/MarkdownHelper.cs`.
-5. **Удалён мусор** — пустая директория `TelegramBot.Tests/`, артефактные файлы.
-6. **Добавлен `.editorconfig`** — с правилами именования, форматирования и стиля кода.
-7. **Миграция на PostgreSQL** — SQLite заменён на PostgreSQL с LISTEN/NOTIFY для распределённой очереди задач.
-8. **Добавлен TelegramBot.Worker** — отдельный процесс для асинхронного выполнения задач Revit/Navisworks/AI.
+Полный список структурных улучшений и рефакторингов — в [ROADMAP.md](ROADMAP.md) (разделы v1.0, v1.1, текущий спринт).
 
 ## Безопасность
 
@@ -355,4 +358,4 @@ docker build -t telegram-bot-server -f Dockerfile .
 docker run --rm telegram-bot-server
 ```
 
-Подробнее: `README.TOKEN.md` — настройка токена.
+Подробнее: [README.TOKEN.md](README.TOKEN.md) — настройка токена.

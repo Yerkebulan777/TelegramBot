@@ -16,7 +16,7 @@ participant "CommandAppService" as App
 participant "SlashCommandService" as Slash
 participant "CallbackDispatcher" as Dispatcher
 participant "ICallbackHandler\n(chain of responsibility)" as Handler
-participant "CommandToggleHandlerBase" as Toggle
+participant "CommandToggleHandler" as Toggle
 participant "IKeyboardBuilder" as Keyboard
 participant "ITelegramOutputService" as Output
 participant "IDataService" as Data
@@ -70,7 +70,7 @@ loop For each incoming Telegram Update
             Dispatcher -> Handler: CanHandle(prefix)
             alt Handler supports prefix
                 Handler -> Handler: HandleAsync(context)
-                alt CommandToggleHandlerBase (ExportCommand / AutomationCommand)
+                alt CommandToggleHandler (ExportCommand / AutomationCommand)
                     Toggle -> Toggle: HandleAsyncInternal(context)
                     Toggle -> Toggle: Toggle pending command in session
                     Toggle -> Keyboard: GetCommandsKeyboardAsync(session, isExport)
@@ -80,30 +80,56 @@ loop For each incoming Telegram Update
                     Handler -> Data: UpsertUser / UpdateStatus
                     Handler -> Output: Notify admin or user
                 else FileNavigationHandler
-                    Handler -> FileSystemBrowser: Resolve path
-                    Handler -> Output: Send navigation keyboard
-                else FileSelectionHandler
-                    Handler -> Sessions: ToggleSelectedFile(file)
-                    Handler -> Keyboard: GetFileSelectionKeyboardAsync(session)
+                    Handler -> Handler: Validate path (IsPathWithinRoot)
+                    Handler -> Handler: Set session.CurrentPath
+                    Handler -> Output: AnswerCallback(path)
+                    Handler -> Keyboard: GetSelectionKeyboardAsync(userId, session)
+                    Keyboard --> Handler: InlineKeyboardMarkup
                     Handler -> Output: EditMessageReplyMarkupAsync(keyboard)
+                    Handler -> Output: Send reply keyboard with actions
+                else FileSelectionHandler
+                    Handler -> Handler: ToggleSelectedFile(filePath)
+                    Handler -> Keyboard: GetSelectionKeyboardAsync(userId, session)
+                    Keyboard --> Handler: InlineKeyboardMarkup
+                    Handler -> Output: EditMessageReplyMarkupAsync(keyboard)
+                    Handler -> Output: AnswerCallback(callbackQueryId)
                 else CommandSelectionHandler
-                    Handler -> Sessions: AddPendingCommand / Reset
+                    Handler -> Handler: HandleApplyCommands / HandleCancel
                     alt APPLYCOMMANDS
-                        Handler -> Keyboard: GetProjectSelectionKeyboardAsync()
+                        Handler -> Keyboard: GetSelectionKeyboardAsync(userId, session)
+                        Keyboard --> Handler: InlineKeyboardMarkup
+                        Handler -> Output: EditMessageReplyMarkupAsync(keyboard)
+                        Handler -> Keyboard: GetProjectActionsReplyKeyboardAsync()
+                        Keyboard --> Handler: ReplyKeyboardMarkup
+                        Handler -> Output: SendMessageWithReplyKeyboardAsync
                     else CANCELCOMMANDSSEL
-                        Handler -> Sessions: ResetNavigation / Clear commands
+                        Handler -> Output: ClearChatHistoryAsync(userId, session)
+                        Handler -> Sessions: ClearPendingCommands / Reset
+                        Handler -> Output: RemoveReplyKeyboardAsync("Выбор отменен")
                     end
-                    Handler -> Output: Send new keyboard
                 else SessionManagementHandler
                     alt SESSIONDETAILS
-                        Handler -> Sessions: SetStatusView / SetCommandsView
-                    else DELETESESSION / DELETECOMMAND
-                        Handler -> Data: Soft-delete session or command
+                        Handler -> Data: GetSessionsStatusAsync / GetSessionsCommandsAsync
+                        Handler -> Keyboard: GetSessionStatusKeyboardAsync
+                        Keyboard --> Handler: InlineKeyboardMarkup
+                        Handler -> Output: EditMessageTextWithKeyboardAsync
+                    else DELETESESSION
+                        Handler -> Data: DeleteSessionAsync(sessionId, userId)
+                        Handler -> Output: EditMessageTextWithKeyboardAsync("Сессии:")
+                    else DELETECOMMAND
+                        Handler -> Data: DeleteCommandAsync(commandId, userId)
+                        Handler -> Data: CheckCommandsStatusAsync(sessionId, userId)
+                        alt No commands left -> Delete session
+                            Handler -> Data: DeleteSessionAsync(sessionId, userId)
+                        end
+                        Handler -> Output: EditMessageReplyMarkupAsync(newKeyboard)
                     else BACKTOSTATUS
-                        Handler -> Sessions: ResetStatusView
+                        Handler -> Data: GetSessionsListAsync(userId)
+                        Handler -> Keyboard: GetSessionsListKeyboardAsync
+                        Keyboard --> Handler: InlineKeyboardMarkup
+                        Handler -> Output: EditMessageTextWithKeyboardAsync("Сессии:")
                     end
-                    Handler -> Keyboard: Build session keyboard
-                    Handler -> Output: EditMessageReplyMarkupAsync(keyboard)
+                    Handler -> Output: Send reply keyboard with status actions
                 end
                 Dispatcher --> App: handled = true
                 break
@@ -114,16 +140,14 @@ loop For each incoming Telegram Update
 
         Hosted -> Output: AnswerCallbackQuery(callbackQueryId)
     end
-end
-
-note over Hosted,App
+end  note over Hosted,App
   Main idea:
   1) long-polling, no webhooks
   2) update mapped to DTO; session lock prevents concurrent user actions
   3) messages handled by SlashCommandService (commands) or reply actions
   4) callbacks dispatched by CallbackDispatcher via Chain of Responsibility
-  5) command toggle handlers update session state and rebuild keyboards
-  6) all data persisted via Dapper + SQLite (soft-delete only)
+  5) CommandToggleHandler updates session state and rebuilds keyboards
+  6) all data persisted via Dapper + PostgreSQL (soft-delete only)
 end note
 
 @enduml
