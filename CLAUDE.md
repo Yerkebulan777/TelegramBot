@@ -11,6 +11,9 @@ dotnet build TelegramBot.slnx
 # Run
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 
+# Run worker (separate terminal)
+dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
+
 # Publish
 dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
 
@@ -19,6 +22,8 @@ dotnet format TelegramBot.slnx
 ```
 
 There are no automated tests in this project.
+
+> **Roadmap:** See [ROADMAP.md](ROADMAP.md) for the full project roadmap (v1.0–v2.0+).
 
 ## Project Structure
 
@@ -80,15 +85,15 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 
 | Handler | Priority | Prefixes |
 |---|---|---|---|
-| `AccessRequestHandler` | 0 | REQACCESS:, APPROVEUSER:, REJECTUSER: |
-| `FileNavigationHandler` | 10 | GOTOPARENT: |
-| `FileSelectionHandler` | 20 | FILE: |
-| `ExportCommandHandler` | 100 | PDF:, DWG:, NWC:, IFC: |
-| `AutomationCommandHandler` | 100 | BIMDOC:, CLASHREP:, AUTORES: |
-| `SessionManagementHandler` | 100 | SESSIONDETAILS:, DELETESESSION:, DELETECOMMAND:, BACKTOSTATUS: |
-| `CommandSelectionHandler` | 100 | APPLYCOMMANDS:, CANCELCOMMANDSSEL: |
+| `AccessRequestHandler` | 0 | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` |
+| `FileNavigationHandler` | 10 | `GOTOPARENT:` |
+| `FileSelectionHandler` | 20 | `FILE:`, `APPLYFILES:`, `CANCELFILESEL:` |
+| `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` |
+| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:` |
+| `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
 
-Use `CallbackDataParser.Parse(callbackData)` to get a `ParsedCallback` struct, then match with `parsed.Is(CallbackPrefixes.GoToParent)`.
+All handlers extend `CallbackHandlerBase` and use `CommandCatalog.TryGetByPrefix()` for prefix matching.
+Use `CallbackDataParser.Parse(callbackData)` (from `ParsedCallback.cs`) to get a `ParsedCallback` struct, then match with `parsed.Is(CallbackPrefixes.GoToParent)`.
 
 ### Key Services
 
@@ -119,10 +124,19 @@ Server уведомляет Worker-ов о новых командах чере�
 
 Serilog configured via `appsettings.json`. Supports Console and Seq (`http://localhost:5341`) sinks.
 
+### Documentation
+
+| Document | Description |
+|---|---|
+| [ROADMAP.md](ROADMAP.md) | Project roadmap (v1.0–v2.0+) |
+| [Docs/execution-algorithm.md](Docs/execution-algorithm.md) | Command execution algorithm specification |
+| [AGENTS.md](AGENTS.md) | Guidance for AI agents |
+| [README.md](README.md) | Project overview (Russian) |
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1060 symbols, 2773 relationships, 89 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1098 symbols, 2900 relationships, 92 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

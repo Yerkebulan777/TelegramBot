@@ -37,7 +37,8 @@ public sealed class FileSelectionHandler(
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
 
-        if (!session.PathMap.TryGetValue(context.ParsedCallback.Argument, out var filePath) || filePath == null)
+        var filePath = context.ParsedCallback.Argument;
+        if (string.IsNullOrEmpty(filePath))
         {
             var errorMessage = await _outputService.SendErrorAsync(context.UserId, "File not found.");
             if (errorMessage != null)
@@ -57,7 +58,7 @@ public sealed class FileSelectionHandler(
         else
         {
             // Множественный выбор разделов
-            var wasSelected = session.SelectedFiles.Contains(filePath);
+            _ = session.GetSelectedFiles().Contains(filePath);
             _=session.ToggleSelectedFile(filePath);
         }
 

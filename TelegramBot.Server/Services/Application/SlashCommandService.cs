@@ -232,7 +232,7 @@ public sealed class SlashCommandService(
 
         if (_options.IsAtProjectLevel(session.CurrentPath))
         {
-            var selectedProject = session.SelectedFiles.FirstOrDefault();
+            var selectedProject = session.GetSelectedFiles().FirstOrDefault();
             if (selectedProject == null)
             {
                 logger.LogDebug("Project confirm blocked: user={UserId}, reason=no_project_selected", userId);
@@ -253,7 +253,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        var selectedSections = session.SelectedFiles;
+        var selectedSections = session.GetSelectedFiles();
         if (selectedSections.Count == 0)
         {
             logger.LogDebug("Job submit blocked: user={UserId}, reason=no_sections_selected", userId);
