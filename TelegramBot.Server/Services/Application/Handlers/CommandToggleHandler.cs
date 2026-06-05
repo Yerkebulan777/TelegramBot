@@ -27,14 +27,10 @@ public sealed class CommandToggleHandler(
         if (context.Session.ContainsPendingCommand(command.Code))
         {
             _ = context.Session.RemovePendingCommand(command.Code);
-            Logger.LogInformation("User {Username} ({UserId}) deselected command '{Code}'",
-                context.Username, context.UserId, command.Code);
         }
         else
         {
             context.Session.AddPendingCommand(command.Code, command.Name);
-            Logger.LogInformation("User {Username} ({UserId}) selected command '{Code}' (pending: [{Commands}])",
-                context.Username, context.UserId, command.Code, string.Join(", ", context.Session.PendingCommand));
         }
 
         var keyboard = await _keyboardBuilder.GetCommandKeyboardAsync(command.Group, context.Session);

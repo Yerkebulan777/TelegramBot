@@ -54,8 +54,6 @@ public sealed class FileNavigationHandler(
 
         session.ClearSelectedFiles();
         session.CurrentPath = newPath;
-        Logger.LogInformation("User {Username} ({UserId}) navigated to '{Path}'",
-            context.Username, context.UserId, newPath);
 
         await _outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 

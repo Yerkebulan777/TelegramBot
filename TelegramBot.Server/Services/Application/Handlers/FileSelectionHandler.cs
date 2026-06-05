@@ -53,17 +53,12 @@ public sealed class FileSelectionHandler(
             // Одиночный выбор: сбросить предыдущий, выбрать новый
             session.ClearSelectedFiles();
             _=session.ToggleSelectedFile(filePath);
-            Logger.LogInformation("User {Username} ({UserId}) selected project '{Project}'",
-                context.Username, context.UserId, Path.GetFileName(filePath));
         }
         else
         {
             // Множественный выбор разделов
             var wasSelected = session.SelectedFiles.Contains(filePath);
             _=session.ToggleSelectedFile(filePath);
-            Logger.LogInformation("User {Username} ({UserId}) {Action} section '{Section}' (total: {Count})",
-                context.Username, context.UserId, wasSelected ? "deselected" : "selected",
-                Path.GetFileName(filePath), session.SelectedFiles.Count);
         }
 
         var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
