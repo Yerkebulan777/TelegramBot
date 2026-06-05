@@ -190,7 +190,6 @@ public sealed class SlashCommandService(
         if (messageText == ButtonTexts.Cancel && (session.IsFileSelectionActive || session.PendingCommand.Count > 0))
         {
             logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
-            await _outputService.ClearChatHistoryAsync(userId, session);
             session.Reset(_options.RootPath);
             _ = await TrackMessageAsync(_outputService.RemoveReplyKeyboardAsync(userId, "Выбор отменен."), session);
             return true;
@@ -289,8 +288,6 @@ public sealed class SlashCommandService(
             sessionId, userId, session.PendingCommand.Count, filesToProcess.Count);
 
         await _dataService.NotifyNewCommandsAsync((int)sessionId);
-
-        await _outputService.ClearChatHistoryAsync(userId, session);
 
         session.ResetNavigation(_options.RootPath);
         session.ClearPendingCommands();

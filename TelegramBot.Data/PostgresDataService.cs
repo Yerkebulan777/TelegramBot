@@ -268,6 +268,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return rows.ToLookup(r => r.UserId, r => r.MessageId);
     }
 
+    public async Task<IReadOnlyList<int>> GetTrackedMessagesAsync(long userId)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        var rows = await conn.QueryAsync<int>(SqlQueries.TrackedMessages.GetByUser, new { UserId = userId });
+        return rows.ToList();
+    }
+
     public async Task DeleteTrackedMessagesAsync(long userId)
     {
         await using var conn = new NpgsqlConnection(_connectionString);

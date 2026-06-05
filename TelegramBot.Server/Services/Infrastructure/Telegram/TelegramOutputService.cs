@@ -76,7 +76,7 @@ public class TelegramOutputService(
     public async Task DeleteMessageAsync(long chatId, int messageId, UserSession session)
     {
         await DeleteMessageAsync(chatId, messageId);
-        _ = Task.Run(async () => await _dataService.DeleteTrackedMessageAsync(chatId, messageId));
+        await _dataService.DeleteTrackedMessageAsync(chatId, messageId);
     }
 
     public async Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default)
@@ -109,9 +109,9 @@ public class TelegramOutputService(
         }
     }
 
-    public async Task ClearChatHistoryAsync(long chatId, UserSession session)
+    public async Task ClearChatHistoryAsync(long chatId, UserSession session, IEnumerable<int>? exceptMessageIds = null)
     {
-        await CleanupTrackedMessagesAsync(chatId, session, []);
+        await CleanupTrackedMessagesAsync(chatId, session, exceptMessageIds ?? [], CancellationToken.None);
     }
 
     public async Task CleanupTrackedMessagesAsync(
@@ -120,15 +120,18 @@ public class TelegramOutputService(
         IEnumerable<int> keepMessageIds,
         CancellationToken cancellationToken = default)
     {
-        var messageIds = session.GetTrackedMessages();
-        if (messageIds.Count == 0)
+        var allMessageIds = session.GetTrackedMessages()
+            .Concat(await _dataService.GetTrackedMessagesAsync(chatId))
+            .Distinct()
+            .ToArray();
+
+        if (allMessageIds.Length == 0)
         {
             return;
         }
 
         var keepIds = keepMessageIds.ToHashSet();
-        var staleIds = messageIds
-            .Distinct()
+        var staleIds = allMessageIds
             .Where(messageId => !keepIds.Contains(messageId))
             .ToArray();
 
@@ -139,8 +142,8 @@ public class TelegramOutputService(
         finally
         {
             session.ClearTrackedMessages();
-            var keptIds = messageIds
-                .Distinct()
+
+            var keptIds = allMessageIds
                 .Where(keepIds.Contains)
                 .ToArray();
 
@@ -180,7 +183,7 @@ public class TelegramOutputService(
         var msg = await task;
         if (msg != null)
         {
-            _ = Task.Run(() => _dataService.SaveTrackedMessageAsync(userId, msg.Id));
+            await _dataService.SaveTrackedMessageAsync(userId, msg.Id);
         }
         return msg;
     }

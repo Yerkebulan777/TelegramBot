@@ -55,7 +55,7 @@ public static class DependencyInjectionExtensions
     {
         _ = services.AddSingleton<ICommandAppService, CommandAppService>();
         _ = services.AddSingleton<ISlashCommandService, SlashCommandService>();
-        _ = services.AddSingleton<ISessionManager>(sp => new SessionManager(TimeSpan.FromMinutes(5), sp.GetRequiredService<IDataService>()));
+        _ = services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
         return services;
     }
