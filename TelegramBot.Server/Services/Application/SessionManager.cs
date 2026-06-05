@@ -39,10 +39,6 @@ public class SessionManager : ISessionManager, IDisposable
     public void RemoveSession(long userId)
     {
         _=_sessions.TryRemove(userId, out _);
-        if (_sessionLocks.TryRemove(userId, out var sl))
-        {
-            sl.Dispose();
-        }
     }
 
     private void CleanUpExpiredSessions()
@@ -83,10 +79,6 @@ public class SessionManager : ISessionManager, IDisposable
                 if (_sessions.TryGetValue(key, out var candidate) && now - candidate.LastActivity > _sessionTimeout)
                 {
                     _=_sessions.TryRemove(key, out _);
-                    if (_sessionLocks.TryRemove(key, out var removedLock))
-                    {
-                        removedLock.Dispose();
-                    }
                 }
             }
             finally
@@ -94,23 +86,6 @@ public class SessionManager : ISessionManager, IDisposable
                 if (!_disposed)
                 {
                     _=sessionLock.Release();
-                }
-            }
-        }
-
-        // Clean up orphaned locks (locks for users without sessions)
-        foreach (var key in _sessionLocks.Keys.ToList())
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            if (!_sessions.ContainsKey(key))
-            {
-                if (_sessionLocks.TryRemove(key, out var orphanedLock))
-                {
-                    orphanedLock.Dispose();
                 }
             }
         }
@@ -125,11 +100,6 @@ public class SessionManager : ISessionManager, IDisposable
 
         _disposed = true;
         _cleanupTimer.Dispose();
-        foreach (var sl in _sessionLocks.Values)
-        {
-            sl.Dispose();
-        }
-
         _sessionLocks.Clear();
     }
 
