@@ -1,6 +1,5 @@
 using Dapper;
 using Npgsql;
-using TelegramBot.Core.Interfaces;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 
@@ -68,7 +67,10 @@ public sealed class CommandNotificationService(
 
     private async void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
     {
-        if (e.Payload == null) return;
+        if (e.Payload == null)
+        {
+            return;
+        }
 
         try
         {

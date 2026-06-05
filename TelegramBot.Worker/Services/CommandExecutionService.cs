@@ -34,7 +34,7 @@ public sealed class CommandExecutionService(
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
     // Партиции: ID → пул процессов. SortedDictionary гарантирует порядок по возрастанию ID.
-    private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = new();
+    private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = [];
 
     // Трекинг активных процессов для возможности принудительного завершения
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
@@ -95,7 +95,9 @@ public sealed class CommandExecutionService(
             _shutdownCts?.Dispose();
 
             foreach (var pool in _partitionPools.Values)
+            {
                 pool.Dispose();
+            }
         }
 
         logger.LogInformation("Worker stopped");
@@ -115,7 +117,9 @@ public sealed class CommandExecutionService(
 
         // Гарантируем, что хотя бы один пул существует
         if (_partitionPools.Count == 0)
+        {
             _partitionPools[0] = new SemaphoreSlim(5, 5);
+        }
     }
 
     private async Task WaitForActiveProcessesAsync()
@@ -238,7 +242,7 @@ public sealed class CommandExecutionService(
         }
         finally
         {
-            pool.Release();
+            _=pool.Release();
         }
     }
 
@@ -277,8 +281,8 @@ public sealed class CommandExecutionService(
             var outputBuilder = new StringBuilder();
             var errorBuilder = new StringBuilder();
 
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) errorBuilder.AppendLine(e.Data); };
+            process.OutputDataReceived += (_, e) => { if (e.Data != null) { _=outputBuilder.AppendLine(e.Data); } };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) { _=errorBuilder.AppendLine(e.Data); } };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
@@ -336,7 +340,11 @@ public sealed class CommandExecutionService(
         }
         catch (OperationCanceledException)
         {
-            if (process != null && !process.HasExited) process.Kill(true);
+            if (process != null && !process.HasExited)
+            {
+                process.Kill(true);
+            }
+
             throw;
         }
         catch (Exception ex)
@@ -402,7 +410,10 @@ public sealed class CommandExecutionService(
             return false;
         }
 
-        if (cfg.AllowedExtensions == null || cfg.AllowedExtensions.Count == 0) return true;
+        if (cfg.AllowedExtensions == null || cfg.AllowedExtensions.Count == 0)
+        {
+            return true;
+        }
 
         var ext = Path.GetExtension(cmd.FilePath)?.ToLowerInvariant();
         if (!cfg.AllowedExtensions.Contains(ext ?? ""))

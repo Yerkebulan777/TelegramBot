@@ -15,14 +15,12 @@ public static class DependencyInjectionExtensions
 {
     public static IServiceCollection AddTelegramBotServer(this IServiceCollection services, IConfiguration configuration)
     {
-        _=services
-            .AddCallbackHandlers()
-            .AddApplicationServices()
-            .AddInfrastructureServices()
-            .AddConfiguration(configuration)
-            .AddTelegramServices();
-
-        return services;
+        return services
+           .AddCallbackHandlers()
+           .AddApplicationServices()
+           .AddInfrastructureServices()
+           .AddConfiguration(configuration)
+           .AddTelegramServices();
     }
 
     private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
