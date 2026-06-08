@@ -273,6 +273,31 @@ services.AddSingleton<NavisworksProcessTracker>();
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
+│  Мониторинг здоровья процессов (фоновая задача 30 сек)          │
+│  - ProcessHealthHelper.CheckHealth()                            │
+│  - DialogDismisser.DismissDialogsForProcess()                   │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Поллинг: Task.Delay(5 мин)                                     │
+│  - Worker просыпается по таймеру каждые 5 минут                │
+│  - Никаких LISTEN/NOTIFY — только таймер                       │
+└────────────────────────────┬────────────────────────────────────┘
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Цикл выполнения (фоновая служба)                               │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Очистка истёкших Lease (каждый цикл, фоновая задача 60 сек)   │
+│  - ReleaseExpiredLeasesAsync()                                  │
+│  - ReleaseTimeoutCommandsAsync()                                │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
 │  Поллинг: Task.Delay(5 мин)                                     │
 │  - Worker просыпается по таймеру каждые 5 минут                │
 │  - Никаких LISTEN/NOTIFY — только таймер                       │
@@ -349,7 +374,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 
 ### 4. Трекинг активных процессов
 
-**Назначение:** Возможность принудительного завершения при graceful shutdown, таймауте или отмене команды пользователем.
+**Назначение:** Логируние активных процессов при graceful shutdown. Процессы **не завершаются принудительно** — Revit/Navisworks могут выполнять важную работу, и их прерывание может привести к повреждению данных. Worker просто останавливается, а процессы продолжают работу. Команды таких процессов будут подхвачены при следующем запуске через Crash Recovery.
 
 **Реализация:**
 ```csharp
@@ -358,21 +383,27 @@ private readonly ConcurrentDictionary<int, Process> _activeProcesses;
 // Перед запуском
 _activeProcesses[cmd.CommandId] = process;
 
-// После завершения
+// После завершения (в finally)
 _activeProcesses.TryRemove(cmd.CommandId, out _);
 
-// Graceful shutdown
-private async Task WaitForActiveProcessesAsync()
+// Graceful shutdown — ждёт до 30 сек, затем логирует оставшиеся
+private async Task LogActiveProcessesOnShutdownAsync()
 {
-    var timeout = TimeSpan.FromSeconds(30);
-    var start = DateTime.UtcNow;
-    while (_activeProcesses.Count > 0 && ... < timeout)
+    logger.LogInformation("Worker shutdown: waiting up to 30s for {Count} active processes",
+        _activeProcesses.Count);
+    
+    // Даём процессам шанс завершиться самостоятельно
+    var deadline = DateTime.UtcNow.AddSeconds(30);
+    while (DateTime.UtcNow < deadline && _activeProcesses.Values.Any(p => !p.HasExited))
     {
         await Task.Delay(500);
     }
+    
+    // Процессы не убиваем — просто логируем
     foreach (var process in _activeProcesses.Values)
     {
-        try { process.Kill(true); } catch { }
+        if (!process.HasExited)
+            logger.LogInformation("Process left running: commandId={Id}, pid={Pid}", ...);
     }
 }
 ```
@@ -414,7 +445,7 @@ private async Task WaitForActiveProcessesAsync()
 
 ```sql
 -- При захвате команды
-UPDATE Commands 
+UPDATE Commands
 SET Status = 'processing', 
     Lease = @LeaseExpiry,  -- Unix timestamp (секунды)
     StartedAt = NOW()
@@ -536,7 +567,7 @@ RETURNING ...;
 
 **Проблема:** Нужно корректно завершить работу при остановке сервиса.
 
-**Решение:** CancellationToken threading:
+**Решение:** CancellationToken threading + graceful shutdown:
 
 ```csharp
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -545,11 +576,14 @@ protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     
     try
     {
-        await RunListenerLoopAsync(stoppingToken);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            await RunListenerLoopAsync(stoppingToken);
+        }
     }
     finally
     {
-        await WaitForActiveProcessesAsync(); // Graceful shutdown
+        await LogActiveProcessesOnShutdownAsync(); // Graceful shutdown — не убиваем процессы
     }
 }
 
@@ -562,10 +596,10 @@ private async Task ExecuteOneAsync(PendingCommand cmd, CancellationToken ct)
     }
     catch (OperationCanceledException) 
     {
-        // Отмена: убиваем процесс
+        // Отмена при shutdown — процесс оставляем running, логируем
         if (process != null && !process.HasExited)
         {
-            process.Kill(true);
+            logger.LogInformation("Process left running on Worker shutdown: commandId={Id}", cmd.CommandId);
         }
         throw; 
     }
@@ -695,20 +729,15 @@ race condition с per-command CTS.
 ### Payload уведомления
 
 ```
-NOTIFY command_completed, 'UserId|SessionId|CommandId|CommandText|Status|FilePath|ErrorMessage|Done|Total|ProjectName'
+NOTIFY command_completed, 'UserId|SessionId|Done|Total|ProjectName'
 ```
 
-Формат: pipe-разделённые поля (10 частей, `Split('|', 10)`).
+Формат: pipe-разделённые поля (`Split('|', 5)`).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `UserId` | BIGINT | Telegram ID пользователя |
 | `SessionId` | INT | ID сессии (для запроса списка Failed-файлов) |
-| `CommandId` | INT | ID последней завершённой команды |
-| `CommandText` | TEXT | Тип команды (PDF, DWG, AUTORES...) |
-| `Status` | TEXT | `Done` или `Failed` (все успешно/были ошибки) |
-| `FilePath` | TEXT | Путь к файлу последней команды |
-| `ErrorMessage` | TEXT | Текст ошибки (пусто при успехе) |
 | `Done` | INT | Количество успешно выполненных команд |
 | `Total` | INT | Общее количество команд в сессии |
 | `ProjectName` | TEXT | Имя проекта (пусто для старых сессий) |
@@ -751,15 +780,21 @@ var newRemaining = _sessionRemaining.AddOrUpdate(
 
 if (newRemaining == 0) // последняя команда → шлём уведомление
 {
-    var status = await dataService.GetSessionsStatusAsync(cmd.SessionId);
-    await dataService.NotifyCommandCompletedAsync(
-        cmd.UserId, cmd.SessionId, ..., status.DoneFiles, status.TotalFiles, status.ProjectName);
+    // Проверяем БД на предмет оставшихся pending/processing команд
+    var remainingInDb = await dataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
+    if (remainingInDb == 0)
+    {
+        var status = await dataService.GetSessionsStatusAsync(cmd.SessionId);
+        await dataService.NotifyCommandCompletedAsync(
+            cmd.UserId, cmd.SessionId, status.DoneFiles, status.TotalFiles, status.ProjectName);
+    }
 }
 ```
 
 **Преимущества:**
 - Нет per-command SQL запросов (удалён `GetSessionProgressAsync`)
 - Атомарный `AddOrUpdate` — только один поток отправляет уведомление
+- `CountPendingProcessingBySessionAsync` корректно обрабатывает случай, когда команд в сессии > DefaultBatchSize
 - Lock-free, не требует блокировок
 
 ### Запрос списка Failed-файлов (Server side)
@@ -800,10 +835,12 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 
 | Параметр | Откуда | Значение по умолч. | Описание |
 |----------|--------|-------------------|----------|
-| `Partitions` | `WorkerOptions.Partitions` | `{1→3, 2→5, 3→3, 4→1, 5→1}` | Priority threshold → макс. процессов. Команда с Priority <= threshold попадает в эту партицию. Чем меньше Priority, тем выше приоритет |
+| `Partitions` | `WorkerOptions.Partitions` | `{1→3, 2→5, 3→3, 4→1, 5→1}` | Priority threshold → макс. процессов. Команда с Priority <= threshold попадает в эту партицию. Чем меньше Priority, тем выше приоритет (SortedDictionary) |
 | `ProcessTimeoutSeconds` | `WorkerOptions.ProcessTimeoutSeconds` | 10800 (3 часа) | Максимальное время выполнения команды |
+| `MaxRetries` | `WorkerOptions.MaxRetries` | 5 | Максимальное количество попыток retry |
+| `RetryDelayBaseSeconds` | `WorkerOptions.RetryDelayBaseSeconds` | 60 | Базовая задержка для экспоненциального backoff |
 | `CleanupIntervalSec` | константа | 60 | Интервал очистки истёкших Lease |
-| `LeaseTimeoutMin` | вычисляется | `ProcessTimeoutSeconds + 5 мин` | TTL Lease (защита от сбоев воркера) |
+| `HealthCheckIntervalSec` | константа | 30 | Интервал мониторинга здоровья процессов |
 | `FallbackTimeoutSec` | константа | 300 (5 мин) | Интервал поллинга очереди |
 | `ReconnectDelayMs` | константа | 5000 | Задержка перед переподключением к БД |
 
@@ -850,7 +887,19 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 }
 ```
 
-**Примечание:** `ProcessTimeoutSeconds` задаётся в секции `Worker`. Если не указан — по умолчанию 10800 сек (3 часа). Каждая команда настраивается отдельно в словаре `Commands` (без привязки к партиции). Партиции настраиваются в секции `Partitions`: ключ — максимальный Priority (threshold), значение — макс. процессов. **Чем меньше Priority, тем выше приоритет.** Команда с Priority ≤ threshold попадает в соответствующую партицию. Чтобы добавить новую команду — достаточно записи в JSON + записи в таблице CommandPriorityMap (Server), если нужен особый приоритет.
+**Примечание:** `ProcessTimeoutSeconds` задаётся в секции `Worker`. Если не указан — по умолчанию 10800 сек (3 часа). Каждая команда настраивается отдельно в словаре `Commands` (без привязки к партиции). Партиции настраиваются в секции `Partitions`: ключ — максимальный Priority (threshold), значение — макс. процессов. **Чем меньше Priority, тем выше приоритет.** Команда с Priority ≤ threshold попадает в соответствующую партицию.
+
+**Приоритеты команд (CommandPriorityMap в `SlashCommandService.cs`):**
+
+| Команда | Priority | Партиция |
+|---------|----------|----------|
+| PDF | 1 | Critical |
+| DWG | 2 | High |
+| NWC, IFC, BIMDOC, CLASHREP | 3 | Medium |
+| AUTORES | 4 | Low |
+| Не указана в мапе | 50 | Lowest (fallback) |
+
+Чтобы добавить новую команду — достаточно записи в JSON + записи в `CommandPriorityMap` (Server), если нужен особый приоритет.
 
 ---
 
@@ -860,14 +909,15 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 
 ### Какие таблицы есть и зачем они нужны
 
-В системе **4 таблицы**. Каждая отвечает за свою часть:
+В системе **3 таблицы**. Каждая отвечает за свою часть:
 
 | Таблица | Что хранит | Пример записи |
 |---------|-----------|---------------|
 | `BotUsers` | Кто пользовался ботом, какой у него статус (одобрен/заблокирован) | `UserId: 12345, Status: Approved` |
 | `Sessions` | Сессии — «папки» для групп команд (одна сессия = один раз выбрали проект и нажали «Подтвердить») | `SessionId: 42, UserId: 12345, CreatedAt: 2025-01-15` |
 | `Commands` | Отдельные задачи внутри сессии (каждая строчка = одна команда для одного файла) | `CommandId: 100, SessionId: 42, Status: Done` |
-| `TrackedMessages` | Какие сообщения от бота нужно удалить при очистке чата | `UserId: 12345, MessageId: 555` |
+
+**`TrackedMessages` удалена** — трекинг сообщений теперь в памяти через `UserSession._trackedMessageIds`.
 
 ### Как таблицы связаны между собой
 
@@ -875,12 +925,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 ┌──────────────┐       ┌──────────────┐       ┌──────────────┐
 │   BotUsers   │ 1──N  │   Sessions   │ 1──N  │   Commands   │
 │  (пользоват.)│──────>│   (сессии)   │──────>│  (команды)   │
-└──────┬───────┘       └──────────────┘       └──────┬───────┘
-       │              ┌─────────────────┐            │
-       └──────────────│  TrackedMessages│            │
-                      │ (сообщения для  │            │
-                      │    очистки)     │            │
-                      └─────────────────┘            │
+└──────────────┘       └──────────────┘       └──────┬───────┘
                                                      │
                                                      ▼
                                             ┌───────────────────────┐
@@ -897,7 +942,6 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 
 - **Один пользователь** → может иметь **много сессий**
 - **Одна сессия** → может содержать **много команд**
-- `TrackedMessages` — отдельная табличка, привязана только к `UserId`
 
 ### Что такое «сессия»?
 
@@ -984,7 +1028,7 @@ UPDATE Commands SET Status = 'Deleted' WHERE ...
 | `StartedAt` | Когда Worker начал выполнять (`NULL` — пока не начали) |
 | `CompletedAt` | Когда закончили (`NULL` — пока не закончили) |
 | `Lease` | Срок аренды (см. Lease выше). Unix-время в секундах |
-| `Priority` | Насколько задача важная (1–5, чем **меньше** — тем важнее). По умолчанию 50 (через код передаётся из CommandPriorityMap) |
+| `Priority` | Насколько задача важная (1–5, чем **меньше** — тем важнее). По умолчанию 50 (из CommandPriorityMap: PDF=1, DWG=2, NWC/IFC/BIMDOC/CLASHREP=3, AUTORES=4) |
 | `ProcessId` | ID процесса Windows (чтобы можно было «убить» программу, если что-то пошло не так) |
 | `ErrorMessage` | Если команда упала с ошибкой — тут текст ошибки |
 
@@ -1210,12 +1254,12 @@ private static ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, Comma
 
 **Партиция** не указывается в команде — определяется автоматически по полю `Priority` из БД. Если нужно изменить пул для уровня приоритета — правим секцию `Partitions`.
 
-Для новой команды нужно **добавить запись в `CommandPriorityMap`** в `SlashCommandService.cs`, если нужен особый приоритет. Если не добавить — команда получит Priority=50 и попадёт в Critical (50 ≤ 5).
+Для новой команды нужно **добавить запись в `CommandPriorityMap`** в `SlashCommandService.cs`, если нужен особый приоритет. Если не добавить — команда получит Priority=50 и попадёт в Lowest (50 > 5).
 
 ### Шаг 2: Настроить приоритет (при создании команды)
 
 Приоритет задаётся в момент создания команды через `CommandPriorityMap` в `SlashCommandService.cs`. 
-Если команды нет в мапе — по умолчанию Priority=50 (попадёт в Critical, т.к. 50 ≤ 5).
+Если команды нет в мапе — по умолчанию Priority=50 (попадёт в Lowest, т.к. 50 > 5).
 
 Значение `Priority` (1 = наивысший) определяет, в какую партицию попадёт команда:
 - `Priority ≤ 1` → Critical (до 3 одновременных)
@@ -1223,6 +1267,7 @@ private static ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, Comma
 - `Priority ≤ 3` → Medium (до 3)
 - `Priority ≤ 4` → Low (до 1)
 - `Priority ≤ 5` → Lowest (до 1)
+- `Priority > 5` → Lowest (fallback, до 1)
 
 ### Шаг 3 (опционально): Настроить лимиты партиций
 

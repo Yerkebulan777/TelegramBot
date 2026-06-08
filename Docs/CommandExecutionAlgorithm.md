@@ -36,7 +36,9 @@ User                          Server                    App                     
  │                              │                        │     │ Batch INSERT:       │
  │                              │                        │     │ Session + Commands  │
  │                              │                        │     │ Status = 'pending'  │
- ││                              │     │ Priority из CommandPriorityMap │
+ │                              │                        │     │ Session + Commands  │
+│                              │                        │     │ Status = 'pending'  │
+│                              │                        │     │ Priority из CommandPriorityMap │
  │                              │                        │     └─────────────────────┤
  │                              │                        │<──────────────────────────│ sessionId
  │                              │                        │                           │

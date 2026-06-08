@@ -33,9 +33,8 @@ There are no automated tests in this project.
 |---|---|---|
 | `TelegramBot.Core` | Models, DTOs, interfaces, config, constants (`net10.0`) | None (no Telegram SDK) |
 | `TelegramBot.Data` | PostgreSQL persistence (Dapper + Npgsql, `net10.0`) | Core |
-| `TelegramBot.BimLib` | BIM integration (Revit/Navisworks), `net10.0`, Windows-only | None (NuGet only) |
 | `TelegramBot.Server` | Telegram bot, handlers, hosting, helpers (`net10.0`) | Core + Data |
-| `TelegramBot.Worker` | Async task execution (Revit/Navisworks/AI), LISTEN/NOTIFY (`net10.0`) | Core + Data |
+| `TelegramBot.Worker` | Async task execution (Revit/Navisworks/AI), LISTEN/NOTIFY + BimLib (`net10.0`) | Core + Data |
 
 ## Configuration
 

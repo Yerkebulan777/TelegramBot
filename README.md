@@ -262,7 +262,8 @@ services.AddSingleton<NavisworksProcessTracker>();
 
 | Сервис | Расположение | Ответственность |
 |--------|-------------|-----------------|
-| `CommandExecutionService` | TelegramBot.Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI |
+| `CommandExecutionService` | TelegramBot.Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI, in-memory счётчик сессий, мониторинг здоровья процессов (30 сек), graceful shutdown |
+| `BimLibLogFilter` | TelegramBot.Worker/Services | Фильтр логов для BimLib-событий (отдельный файл для BIM-специфичных логов) |
 
 ### Обработчики callback-ов (Chain of Responsibility)
 
@@ -287,7 +288,7 @@ PostgreSQL-сервер, доступный по сети. Инициализа�
 |---------|-----------|---------------|
 | `BotUsers` | Пользователи бота | `UserId` (PK), `Username`, `Role` (User/Admin), `Status` (Pending/Approved/Rejected/Blocked), `CreatedAt`, `UpdatedAt` |
 | `Sessions` | Сессии пользователей | `SessionId` (PK, SERIAL), `UserId`, `Username`, `Status` (pending/done/Deleted), `FilesAmount`, `CreatedAt`, `UpdatedAt` |
-| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Deleted), `GUID`, `Lease`, `Priority` |
+| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Deleted), `GUID`, `Lease`, `Priority`, `RetryCount`, `NextRetryAt` |
 Soft-delete — строки никогда не удаляются физически (статус `Deleted`).
 
 ### Механизм очереди задач (LISTEN/NOTIFY)

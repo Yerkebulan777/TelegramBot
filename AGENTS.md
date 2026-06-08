@@ -20,7 +20,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
 - **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
 
-> **Note:** BimLib was previously a separate project (`TelegramBot.BimLib`). During v1.2 refactoring it was moved into `TelegramBot.Worker/BimLib/` as a directory. Namespaces remain `TelegramBot.BimLib.*`. OpenMcdf dependency is in Worker's `.csproj`.
+> **Note:** BimLib is **not a separate project** — it lives as a directory inside Worker (`TelegramBot.Worker/BimLib/`). Namespaces remain `TelegramBot.BimLib.*`. OpenMcdf dependency is in Worker's `.csproj`.
 
 ---
 
@@ -162,7 +162,7 @@ SlashCommandService.ConfirmFileSelectionAsync()
                    ┌──────────────────────────────────────────┘
                    ▼
     CommandNotificationService (Server)
-        Получает NOTIFY → парсит payload (Done/Total/ProjectName)
+        Получает NOTIFY → парсит payload (UserId|SessionId|Done|Total|ProjectName)
         При наличии ошибок → запрашивает список Failed-файлов из БД
         → telegramOutput.SendMessageAsync() со сводкой по сессии
 ```
@@ -200,6 +200,10 @@ Tables: `BotUsers`, `Sessions`, `Commands`. **`TrackedMessages` was removed** �
 
 **`GetCommandStatusAsync` removed** — was dead code. Deleted commands never appear as `'pending'`
 in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant.
+
+**`CountPendingProcessingBySessionAsync` added** — используется в `TryNotifySessionCompletedAsync`
+для проверки, не осталось ли ещё pending/processing команд в БД (корректно обрабатывает случай,
+когда команд в сессии > DefaultBatchSize).
 
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
 All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). SQL constants in `TelegramBot.Data/Sql/` (4 partial files total).
