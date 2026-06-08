@@ -15,9 +15,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     private async Task<NpgsqlConnection> CreateConnectionAsync()
     {
-        var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        return conn;
+        return await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString);
     }
 
     public async Task InitializeDatabaseAsync()
