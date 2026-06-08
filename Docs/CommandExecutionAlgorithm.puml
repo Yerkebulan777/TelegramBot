@@ -1,0 +1,289 @@
+@startuml
+title TelegramBot - Command Execution Algorithm
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam participantPadding 25
+skinparam boxPadding 15
+autonumber
+
+actor User
+participant "TelegramBot\nHostedService" as Server
+participant "CommandAppService\n+ SlashCommandService" as App
+participant "PostgreSQL\n(Queue + LISTEN/NOTIFY)" as DB
+participant "CommandExecutionService\n(Worker)" as Worker
+participant "External Process\n(Revit / Navisworks / Python)" as Process
+
+== 1. USER CREATES A TASK ==
+
+User -> Server: /export → select commands → choose files → Confirm
+Server -> App: ConfirmFileSelectionAsync()
+App -> App: CollectRvtFiles() — собирает .rvt из выбранных секций
+App -> DB: CreateSessionWithCommandsAsync()
+note right
+  Batch INSERT:
+  Session + Commands (pending)
+  Status = 'pending'
+  Priority = 50 (default)
+end note
+DB --> App: sessionId
+App -> DB: NotifyNewCommandsAsync(sessionId)
+note right
+  SELECT pg_notify(
+    'new_command', '42')
+end note
+
+== 2. WORKER WAKES UP ==
+
+DB ->> Worker: NOTIFY new_command
+note right
+  conn.WaitAsync()
+  просыпается мгновенно
+end note
+Worker -> Worker: ProcessBatchAsync()
+
+== 3. WORKER CLAIMS PENDING COMMANDS ==
+
+Worker -> DB: ClaimPendingCommandsAsync(limit=50)
+note right
+  WITH selected AS (
+    SELECT ...
+    FROM Commands c
+    JOIN Sessions s ...
+    WHERE c.Status = 'pending'
+    ORDER BY Priority DESC, CreatedAt ASC
+    LIMIT 50
+    FOR UPDATE SKIP LOCKED
+  )
+  UPDATE Commands c
+  SET Status = 'processing',
+      Lease = @LeaseExpiry,
+      StartedAt = NOW()
+  FROM selected
+  WHERE c.CommandId = selected.CommandId
+  RETURNING ...;
+end note
+DB --> Worker: List<PendingCommand>
+
+== 4. PRIORITY-BASED PARTITION ROUTING ==
+
+Worker -> Worker: ProcessWithPoolAsync(cmd)
+note right
+  Определяем партицию:
+  Priority >= 80 → High (5 слотов)
+  Priority >= 40 → Medium (3 слота)
+  Priority < 40  → Low (1 слот)
+
+  await pool.WaitAsync(ct)
+  — ждём свободный слот
+end note
+
+== 5. FILE VALIDATION ==
+
+Worker -> Worker: ValidateFilePath()
+note right
+  1. Path.GetFullPath()
+     — защита от path traversal
+  2. File.Exists()
+  3. AllowedExtensions
+     — из конфигурации команды
+end note
+
+alt Validation failed
+  Worker -> DB: UpdateCommandStatus(Failed, errorMessage)
+  DB --> Worker: Status updated
+  note right #FF6B6B
+    Команда сразу
+    получает статус Failed
+  end note
+  return
+end
+
+== 6. PROCESS EXECUTION ==
+
+Worker -> Worker: CreateProcessStartInfo()
+note right
+  ExecutablePath: "Revit.exe"
+  ArgumentsTemplate: "/command ..."
+  WorkingDirectory: из конфига
+  RedirectStandardOutput = true
+  RedirectStandardError = true
+end note
+
+Worker -> Process: process.Start()
+Worker -> DB: UpdateCommandStatus(Processing, ProcessId=PID)
+note right
+  Сохраняем PID,
+  чтобы можно было
+  принудительно убить
+end note
+Worker -> Worker: BeginOutputReadLine()
+Worker -> Worker: BeginErrorReadLine()
+note right
+  Асинхронное чтение
+  stdout/stderr в StringBuilder
+  — предотвращает deadlock
+  при заполнении буфера 64KB
+end note
+
+Process -> Worker: Выполнение (может быть часы)
+
+== 7. PROCESS COMPLETION ==
+
+Worker -> Worker: process.WaitForExit(timeoutMs)
+
+alt Timeout (превышен ProcessTimeoutSeconds)
+  Worker -> Process: process.Kill(true)
+  Worker -> DB: UpdateCommandStatus(Failed, "Timeout...")
+  note right #FF6B6B
+    Принудительно
+    завершаем процесс
+    и всё дерево потомков
+  end note
+else ExitCode == 0 (успех)
+  Worker -> DB: UpdateCommandStatus(Done)
+  note right #90EE90
+    Команда выполнена
+    успешно!
+  end note
+  Worker -> DB: NotifyCommandCompletedAsync()
+  note right
+    NOTIFY command_completed,
+    'UserId|CmdId|CmdText|Done|'
+  end note
+else ExitCode != 0 (ошибка)
+  Worker -> Worker: ScheduleRetryAsync()
+  note right
+    Retry #1: +60s
+    Retry #2: +120s
+    Retry #3: +240s
+    Retry #4: +480s
+    Retry #5: +960s
+    MaxRetries = 5
+    Экспоненциальная задержка
+  end note
+  Worker -> DB: UPDATE Status='pending', NextRetryAt=...
+  Worker -> DB: NOTIFY new_command (будим воркер)
+  return
+  ...
+  alt All retries exhausted
+    Worker -> DB: UpdateCommandStatus(Failed, errorMessage)
+    Worker -> DB: NotifyCommandCompletedAsync()
+    note right
+      NOTIFY command_completed,
+      'UserId|...|Failed|error'
+    end note
+  end
+end
+
+== 8. NOTIFY USER ==
+
+DB ->> Server: NOTIFY command_completed
+note right
+  CommandNotificationService
+  слушает канал
+  command_completed
+end note
+
+Server -> Server: Parse payload (UserId|CmdId|CmdText|Status|Error)
+Server -> User: Send Telegram message
+note right
+  ✅ *PDF* завершена
+  или
+  ❌ *PDF* — ошибка: ...
+  MarkdownV2 экранирование
+end note
+
+== 9. CLEANUP ==
+
+Worker -> Worker: _activeProcesses.TryRemove()
+Worker -> Worker: _commandCts.TryRemove() + Dispose()
+note right
+  Освобождаем ресурсы
+  и слот партиции:
+  pool.Release()
+end note
+
+== ФОНОВЫЕ ЗАДАЧИ (каждые 60 сек) ==
+
+|||
+note over DB #FFE4B5
+  === BACKGROUND CLEANUP TASKS (every 60s) ===
+end note
+
+Worker -> DB: ReleaseExpiredLeasesAsync()
+note right
+  UPDATE Commands
+  SET Status='pending', ...
+  WHERE Status='processing'
+    AND Lease < @Now
+  — Защита от сбоев воркеров
+  — pg_try_advisory_lock(1234567)
+    предотвращает дублирование
+end note
+
+Worker -> DB: ReleaseTimeoutCommandsAsync()
+note right
+  UPDATE Commands
+  SET Status='pending', ...
+  WHERE Status='processing'
+    AND StartedAt < NOW() - INTERVAL
+  — Дополнительная защита
+    от зависших процессов
+end note
+
+Worker -> DB: CleanupOldCancelledCommandsAsync()
+note right
+  UPDATE Commands
+  SET Status='Deleted'
+  WHERE Status='Cancelled'
+    AND CompletedAt < NOW() - N days
+end note
+
+== ОТМЕНА КОМАНДЫ ПОЛЬЗОВАТЕЛЕМ ==
+
+|||
+note over User, Process #FFB6C1
+  === CANCEL FLOW (user-initiated) ===
+end note
+
+User -> Server: /status → кнопка "⛔ Отменить"
+Server -> Server: Диалог подтверждения
+User -> Server: "✅ Да, отменить" (CONFIRM_CANCEL)
+Server -> DB: CancelCommandAsync(commandId, userId)
+note right
+  UPDATE Commands
+  SET Status='Cancelled',
+      CompletedAt=NOW()
+  WHERE CommandId=@CommandId
+    AND SessionId IN (...)
+    AND Status IN ('pending','processing')
+  RETURNING CommandId;
+end note
+Server -> DB: NotifyCommandCancelAsync(commandId)
+note right
+  NOTIFY command_cancel,
+  '123'
+end note
+Server -> User: "⛔ Команда #123 отменена"
+
+DB ->> Worker: NOTIFY command_cancel
+
+Worker -> Worker: HandleCancelNotificationAsync(payload)
+note right
+  1. Парсинг commandId
+  2. Cancel per-command CTS
+  3. process.Kill(true)
+  4. Очистка _commandCts + _activeProcesses
+end note
+
+Worker -> Process: process.Kill(true)
+note right #FFB6C1
+  Процесс принудительно
+  завершён. Проверка
+  cmdCt.IsCancellationRequested
+  после WaitForExit предотвращает
+  перезапись статуса на Failed.
+end note
+
+@enduml
