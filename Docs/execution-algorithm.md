@@ -33,7 +33,7 @@
 | **Chain of Responsibility** | Обработка callback-запросов (`CallbackDispatcher`) | Каждый хендлер проверяет, может ли он обработать callback. Если нет — передаёт следующему |
 | **Strategy** | Исполнение команд (`CommandConfig`) | Конфигурация команды определяет, какую стратегию запуска применить (Revit, Navisworks, Python) |
 | **Competing Consumers** | Параллельная обработка (FOR UPDATE SKIP LOCKED) | Несколько Worker-ов конкурируют за команды, каждая выполняется ровно одним |
-| **Polling** | Очередь задач (Task.Delay) | Worker просыпается каждые 5 минут для проверки новых команд. Server получает уведомления через `command_completed` |
+| **Polling** | Очередь задач (Task.Delay) | Worker просыпается каждую минуту для проверки новых команд. Server получает уведомления через `command_completed` |
 | **Bulkhead (изоляция)** | Priority-based партиции (`SemaphoreSlim`) | Каждый уровень приоритета имеет изолированный пул слотов |
 | **Circuit Breaker** | Reconnect loop + fallback poll | При потере соединения — пауза 5 сек, затем восстановление |
 | **Retry with Exponential Backoff** | Повторные попытки (`MaxRetries=5`) | Задержка растёт экспоненциально: 60s → 120s → 240s → 480s → 960s |
@@ -72,7 +72,7 @@
          ├───────────────────────>│                          │
          │                        ││         │ 2. Worker просыпается    │                          │
          │                        │    по таймеру            │
-         │                        │    (каждые 5 мин)        │
+         │                        │    (каждую минуту)       │
          │                        ├─────────────────────────>│
          │                        │                          │
          │                        │ 3. Захват команд         │
@@ -96,14 +96,14 @@
 │                    Служба выполнения команд                     │
 │                                                                 │
 │  ┌────────────────────┐ ┌──────────────┐ ┌──────────────┐      │
-│  │ Priority ≤ 1 (Crit)│ │Priority ≤ 2  │ │Priority ≤ 3  │      │
+│  │ Priority 1 (Crit) │ │Priority 2    │ │Priority 3    │      │
 │  │ SemaphoreSlim(3)   │ │SemaphoreSlim(5)│ SemaphoreSlim(3)│   │
 │  │  ┌───┐┌───┐┌───┐  │ │ ┌───┐┌───┐┌───┐┌───┐┌───┐  │      │
 │  │  │ P ││ P ││ P │  │ │ │ P ││ P ││ P ││ P ││ P │  │      │
 │  │  └───┘└───┘└───┘  │ │ └───┘└───┘└───┘└───┘└───┘  │      │
 │  └────────────────────┘ └──────────────┘ └──────────────┘      │
 │  ┌────────────┐ ┌────────────┐                                  │
-│  │Priority ≤ 4│ │Priority ≤ 5│                                  │
+│  │Priority 4  │ │Priority 5+ │                                  │
 │  │Semaphore(1)│ │Semaphore(1)│                                  │
 │  │  ┌───┐     │ │  ┌───┐     │                                  │
 │  │  │ P │     │ │  │ P │     │                                  │
@@ -114,15 +114,15 @@
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │        Очередь команд (Priority ASC, общая)             │   │
 │  │  [P=1] → [P=1] → [P=2] → [P=3] → [P=4] → ...          │   │
-│  │     (Priority ASC, CreatedAt ASC)                       │   │
+│  │     (Priority ASC, CreatedAt ASC, CommandId ASC)        │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
-│  Маршрутизация (ищем первый threshold, где Priority ≤ t):      │
-│  cmd.Priority ≤ 1 → Critical, SemaphoreSlim(3)                 │
-│  cmd.Priority ≤ 2 → High,     SemaphoreSlim(5)                 │
-│  cmd.Priority ≤ 3 → Medium,   SemaphoreSlim(3)                 │
-│  cmd.Priority ≤ 4 → Low,      SemaphoreSlim(1)                 │
-│  cmd.Priority ≤ 5 → Lowest,   SemaphoreSlim(1)                 │
+│  Лимит параллельности (первый threshold >= Priority):          │
+│  Priority 1  → Critical, SemaphoreSlim(3)                      │
+│  Priority 2  → High,     SemaphoreSlim(5)                      │
+│  Priority 3  → Medium,   SemaphoreSlim(3)                      │
+│  Priority 4  → Low,      SemaphoreSlim(1)                      │
+│  Priority 5+ → Lowest,   SemaphoreSlim(1)                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -280,8 +280,8 @@ services.AddSingleton<NavisworksProcessTracker>();
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Поллинг: Task.Delay(5 мин)                                     │
-│  - Worker просыпается по таймеру каждые 5 минут                │
+│  Поллинг: Task.Delay(1 мин)                                     │
+│  - Worker просыпается по таймеру каждую минуту                 │
 │  - Никаких LISTEN/NOTIFY — только таймер                       │
 └────────────────────────────┬────────────────────────────────────┘
 ```
@@ -298,8 +298,8 @@ services.AddSingleton<NavisworksProcessTracker>();
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Поллинг: Task.Delay(5 мин)                                     │
-│  - Worker просыпается по таймеру каждые 5 минут                │
+│  Поллинг: Task.Delay(1 мин)                                     │
+│  - Worker просыпается по таймеру каждую минуту                 │
 │  - Никаких LISTEN/NOTIFY — только таймер                       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
@@ -307,7 +307,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 ┌─────────────────────────────────────────────────────────────────┐
 │  Захват pending-команд из БД (до DefaultBatchSize=5)           │
 │  - SELECT ... FOR UPDATE SKIP LOCKED                            │
-│  - ORDER BY Priority ASC, CreatedAt ASC                        │
+│  - ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC         │
 │  - Статус → 'processing', Lease = timestamp                     │
 └────────────────────────────┬────────────────────────────────────┘
                              │
@@ -315,7 +315,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 ┌─────────────────────────────────────────────────────────────────┐
 │  Параллельная обработка с priority-based пулами                │
 │  - Определение партиции по приоритету команды:                  │
-│    Array.Find(_partitionThresholds, t => cmd.Priority <= t)     │
+│    первый partition threshold >= Priority                       │
 │  - Ожидание слота в своей партиции:                             │
 │    _partitionPools[threshold].WaitAsync()                       │
 │  - Каждая партиция (уровень приоритета) имеет свой лимит       │
@@ -356,15 +356,15 @@ services.AddSingleton<NavisworksProcessTracker>();
 - Перед запуском процесса: `_partitionPools[threshold].WaitAsync(ct)`
 - После завершения (в `finally`): `_partitionPools[threshold].Release()`
 
-**Определение партиции команды (ищем первый threshold, где Priority ≤ threshold):**
-- `Array.Find(_partitionThresholds, t => cmd.Priority <= t)`
+**Определение партиции команды (ищем первый threshold, где threshold >= Priority):**
+- `GetPartitionThreshold(priority)` линейно проходит thresholds по возрастанию
 - Thresholds кешируются по возрастанию: `[1, 2, 3, 4, 5]`
-- По умолчанию: Priority≤1 → pool(3), Priority≤2 → pool(5), Priority≤3 → pool(3), Priority≤4 → pool(1), Priority≤5 → pool(1)
-- Если threshold не найден (Priority > 5) — fallback на последний threshold (5)
+- По умолчанию: Priority 1 → pool(3), Priority 2 → pool(5), Priority 3 → pool(3), Priority 4 → pool(1), Priority 5+ → pool(1)
+- Если threshold не найден — fallback на последний threshold
 
 **Алгоритм захвата слота:**
-1. `threshold = Array.Find(_partitionThresholds, t => cmd.Priority <= t)` (первые threshold в [1,2,3,4,5], где Priority ≤ t)
-2. Если `threshold == 0` (Priority > 5) — fallback: `threshold = _partitionThresholds[^1]` (5)
+1. `threshold = GetPartitionThreshold(cmd.Priority)` выбирает первый threshold в [1,2,3,4,5], где threshold >= Priority
+2. Если подходящего threshold нет — fallback: `threshold = _partitionThresholds[^1]` (5)
 3. `_partitionPools[threshold].WaitAsync()` блокирует поток, пока слот не освободится
 4. При отмене (CancellationToken) выбрасывает `OperationCanceledException`
 
@@ -374,7 +374,9 @@ services.AddSingleton<NavisworksProcessTracker>();
 
 ### 4. Трекинг активных процессов
 
-**Назначение:** Логируние активных процессов при graceful shutdown. Процессы **не завершаются принудительно** — Revit/Navisworks могут выполнять важную работу, и их прерывание может привести к повреждению данных. Worker просто останавливается, а процессы продолжают работу. Команды таких процессов будут подхвачены при следующем запуске через Crash Recovery.
+**Назначение:** мониторинг PID, диагностика зависаний и принудительное завершение процессов только по бизнес-таймауту команды (`ProcessTimeoutSeconds`).
+
+**Graceful Shutdown не нужен.** При остановке Worker не должен ждать активные Revit/Navisworks-процессы и не должен пытаться завершать их отдельным shutdown-сценарием. Корректность обеспечивают обычные механизмы выполнения: timeout, lease/crash recovery и повторный захват команд после перезапуска.
 
 **Реализация:**
 ```csharp
@@ -386,26 +388,8 @@ _activeProcesses[cmd.CommandId] = process;
 // После завершения (в finally)
 _activeProcesses.TryRemove(cmd.CommandId, out _);
 
-// Graceful shutdown — ждёт до 30 сек, затем логирует оставшиеся
-private async Task LogActiveProcessesOnShutdownAsync()
-{
-    logger.LogInformation("Worker shutdown: waiting up to 30s for {Count} active processes",
-        _activeProcesses.Count);
-    
-    // Даём процессам шанс завершиться самостоятельно
-    var deadline = DateTime.UtcNow.AddSeconds(30);
-    while (DateTime.UtcNow < deadline && _activeProcesses.Values.Any(p => !p.HasExited))
-    {
-        await Task.Delay(500);
-    }
-    
-    // Процессы не убиваем — просто логируем
-    foreach (var process in _activeProcesses.Values)
-    {
-        if (!process.HasExited)
-            logger.LogInformation("Process left running: commandId={Id}, pid={Pid}", ...);
-    }
-}
+// При превышении ProcessTimeoutSeconds процесс завершается обычной timeout-логикой
+// Отдельный graceful shutdown-сценарий не реализуется
 ```
 
 `Process` хранится напрямую, без класса-обёртки. `Stopwatch` и `CommandId` — локальные переменные в `ExecuteOneAsync`.
@@ -505,7 +489,7 @@ WHERE Status = 'processing'
 
 ### 3. Трекинг активных процессов
 
-**Проблема:** При graceful shutdown нужно завершить активные процессы корректно.
+**Проблема:** Нужно знать PID активных процессов для мониторинга, диагностики и timeout-логики.
 
 **Решение:** `ConcurrentDictionary<int, Process>` для трекинга:
 
@@ -518,20 +502,8 @@ _activeProcesses[cmd.CommandId] = process;
 // При завершении (в finally)
 _activeProcesses.TryRemove(cmd.CommandId, out _);
 
-// Graceful shutdown — ждёт до 30 сек, затем убивает оставшиеся
-private async Task WaitForActiveProcessesAsync()
-{
-    var timeout = TimeSpan.FromSeconds(30);
-    var start = DateTime.UtcNow;
-    while (_activeProcesses.Count > 0 && (DateTime.UtcNow - start) < timeout)
-    {
-        await Task.Delay(500);
-    }
-    foreach (var process in _activeProcesses.Values)
-    {
-        try { process.Kill(true); } catch { }
-    }
-}
+// Graceful shutdown не нужен:
+// при остановке Worker не выполняет отдельное ожидание/убийство активных процессов
 ```
 
 ### 4. FOR UPDATE SKIP LOCKED
@@ -547,7 +519,7 @@ WITH selected AS (
     JOIN Sessions s ON s.SessionId = c.SessionId
     WHERE c.Status = 'pending'
       AND s.Status != 'Deleted'
-    ORDER BY Priority ASC, CreatedAt ASC
+    ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC
     LIMIT @Limit
     FOR UPDATE SKIP LOCKED  -- ← Пропускает строки, заблокированные другими воркерами
 )
@@ -565,9 +537,9 @@ RETURNING ...;
 
 ### 5. Отмена (CancellationToken)
 
-**Проблема:** Нужно корректно завершить работу при остановке сервиса.
+**Проблема:** Нужно корректно остановить основной цикл Worker при остановке сервиса.
 
-**Решение:** CancellationToken threading + graceful shutdown:
+**Решение:** CancellationToken threading без отдельного graceful shutdown для внешних процессов:
 
 ```csharp
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -581,10 +553,6 @@ protected override async Task ExecuteAsync(CancellationToken stoppingToken)
             await RunListenerLoopAsync(stoppingToken);
         }
     }
-    finally
-    {
-        await LogActiveProcessesOnShutdownAsync(); // Graceful shutdown — не убиваем процессы
-    }
 }
 
 private async Task ExecuteOneAsync(PendingCommand cmd, CancellationToken ct)
@@ -596,11 +564,6 @@ private async Task ExecuteOneAsync(PendingCommand cmd, CancellationToken ct)
     }
     catch (OperationCanceledException) 
     {
-        // Отмена при shutdown — процесс оставляем running, логируем
-        if (process != null && !process.HasExited)
-        {
-            logger.LogInformation("Process left running on Worker shutdown: commandId={Id}", cmd.CommandId);
-        }
         throw; 
     }
 }
@@ -659,7 +622,7 @@ while (!stoppingToken.IsCancellationRequested)
 
 ### 3. Ожидание Worker
 
-- Worker забирает команды при следующем поллинге (до 5 мин)
+- Worker забирает команды при следующем поллинге (до 1 мин)
 - Никаких NOTIFY — Worker просыпается по таймеру
 
 ---
@@ -835,13 +798,13 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 
 | Параметр | Откуда | Значение по умолч. | Описание |
 |----------|--------|-------------------|----------|
-| `Partitions` | `WorkerOptions.Partitions` | `{1→3, 2→5, 3→3, 4→1, 5→1}` | Priority threshold → макс. процессов. Команда с Priority <= threshold попадает в эту партицию. Чем меньше Priority, тем выше приоритет (SortedDictionary) |
+| `Partitions` | `WorkerOptions.Partitions` | `{1→3, 2→5, 3→3, 4→1, 5→1}` | Priority threshold → макс. процессов. Команда попадает в первый threshold >= Priority. Чем меньше Priority, тем выше приоритет (SortedDictionary) |
 | `ProcessTimeoutSeconds` | `WorkerOptions.ProcessTimeoutSeconds` | 10800 (3 часа) | Максимальное время выполнения команды |
 | `MaxRetries` | `WorkerOptions.MaxRetries` | 5 | Максимальное количество попыток retry |
 | `RetryDelayBaseSeconds` | `WorkerOptions.RetryDelayBaseSeconds` | 60 | Базовая задержка для экспоненциального backoff |
 | `CleanupIntervalSec` | константа | 60 | Интервал очистки истёкших Lease |
 | `HealthCheckIntervalSec` | константа | 30 | Интервал мониторинга здоровья процессов |
-| `FallbackTimeoutSec` | константа | 300 (5 мин) | Интервал поллинга очереди |
+| `FallbackTimeoutSec` | константа | 60 (1 мин) | Интервал поллинга очереди |
 | `ReconnectDelayMs` | константа | 5000 | Задержка перед переподключением к БД |
 
 ### Настройка через appsettings.json
@@ -887,7 +850,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 }
 ```
 
-**Примечание:** `ProcessTimeoutSeconds` задаётся в секции `Worker`. Если не указан — по умолчанию 10800 сек (3 часа). Каждая команда настраивается отдельно в словаре `Commands` (без привязки к партиции). Партиции настраиваются в секции `Partitions`: ключ — максимальный Priority (threshold), значение — макс. процессов. **Чем меньше Priority, тем выше приоритет.** Команда с Priority ≤ threshold попадает в соответствующую партицию.
+**Примечание:** `ProcessTimeoutSeconds` задаётся в секции `Worker`. Если не указан — по умолчанию 10800 сек (3 часа). Каждая команда настраивается отдельно в словаре `Commands` (без привязки к партиции). Партиции настраиваются в секции `Partitions`: ключ — максимальный Priority threshold, значение — макс. процессов. **Чем меньше Priority, тем выше приоритет.** Команда попадает в первый threshold >= Priority.
 
 **Приоритеты команд (CommandPriorityMap в `SlashCommandService.cs`):**
 
@@ -993,7 +956,7 @@ UPDATE Commands SET Status = 'Deleted' WHERE ...
 
 Это гораздо быстрее, чем если бы Worker каждые 5 секунд проверял: «Ну что, есть работа? Есть работа?»
 
-**Важно:** Если сигнал потерялся (рация забавкала) — Worker всё равно раз в 5 минут проверяет очередь сам (это называется **fallback poll**).
+**Важно:** Если сигнал потерялся — Worker всё равно раз в 1 минуту проверяет очередь сам (это называется **fallback poll**).
 
 #### FOR UPDATE SKIP LOCKED — очередь в магазине
 
@@ -1154,21 +1117,21 @@ WHERE CommandId = @CommandId
 | **Логическое удаление** | Команды никогда не удаляются физически, только `Status = 'Deleted'` |
 | **Транзакционность** | Захват команд — атомарная операция с `FOR UPDATE SKIP LOCKED` |
 | **Ограничение нагрузки** | Per-partition пулы процессов (SortedDictionary<int, SemaphoreSlim>) — каждая партиция имеет свой лимит |
-| **Приоритизация** | Высокоприоритетные команды (Priority=1) выполняются первыми (`ORDER BY Priority ASC, CreatedAt ASC`) |
+| **Приоритизация** | Высокоприоритетные команды (Priority=1) выполняются первыми (`ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC`) |
 | **Lease-механизм** | Защита от сбоев воркера — команды возвращаются в очередь при истечении TTL |
 | **Таймауты** | Принудительное завершение процессов при превышении лимита времени (`process.Kill(true)`) |
 | **Трекинг PID** | Сохранение ProcessId для мониторинга и принудительного завершения |
 | **Отказоустойчивость** | Переподключение при потере соединения с БД (5 сек задержка) |
 | **Логирование** | Полное контекстное логирование всех операций и ошибок, включая stdout/stderr процессов |
 | **Изоляция компонентов** | Server и Worker независимы, общаются только через БД |
-| **Graceful shutdown** | Корректное завершение активных процессов при остановке сервиса (30 сек таймаут) |
+| **Shutdown Worker** | Graceful shutdown для внешних процессов не нужен: Worker останавливает основной цикл по `CancellationToken`, а выполнение команд страхуется timeout/lease/crash recovery |
 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
 | **Lease (долгий TTL)** | Lease устанавливается на `ProcessTimeoutSeconds + 5 мин`, команда не вернётся в очередь раньше таймаута |
 | **Валидация FilePath** | Проверка существования, расширения (из `AllowedExtensions`) и защита от path traversal перед запуском процесса |
 | **Асинхронное чтение stdout/stderr** | Предотвращает deadlock при заполнении буфера вывода (64KB) |
 | **Уведомления пользователей** | Worker шлёт NOTIFY `command_completed`, Server (`CommandNotificationService`) слушает и отправляет Telegram-сообщение через `ITelegramOutputService` |
 | **Отмена команд** | Пользователь отменяет команду через UI `/status` → кнопку «⛔ Отменить». Server выполняет soft-delete (`Status = 'Deleted'`), а Worker не перезаписывает `Deleted` после завершения процесса |
-| **Fallback poll** | Если NOTIFY потерян — проверка каждые 5 минут (safety net) |
+| **Fallback poll** | Если NOTIFY потерян — проверка каждую минуту (safety net) |
 
 ---
 
@@ -1261,12 +1224,11 @@ private static ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, Comma
 Если команды нет в мапе — по умолчанию Priority=50 (попадёт в Lowest, т.к. 50 > 5).
 
 Значение `Priority` (1 = наивысший) определяет, в какую партицию попадёт команда:
-- `Priority ≤ 1` → Critical (до 3 одновременных)
-- `Priority ≤ 2` → High (до 5)
-- `Priority ≤ 3` → Medium (до 3)
-- `Priority ≤ 4` → Low (до 1)
-- `Priority ≤ 5` → Lowest (до 1)
-- `Priority > 5` → Lowest (fallback, до 1)
+- `Priority 1` → Critical (до 3 одновременных)
+- `Priority 2` → High (до 5)
+- `Priority 3` → Medium (до 3)
+- `Priority 4` → Low (до 1)
+- `Priority 5+` → Lowest (fallback, до 1)
 
 ### Шаг 3 (опционально): Настроить лимиты партиций
 
@@ -1393,14 +1355,14 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 
 | № | Критерий | Описание |
 |---|----------|----------|
-| 1 | **Лимит процессов** | Для каждого уровня приоритета не выполняется более его лимита одновременно (по умолчанию: Critical≤1 → 3, High≤2 → 5, Medium≤3 → 3, Low≤4 → 1, Lowest≤5 → 1) |
+| 1 | **Лимит процессов** | Для каждого уровня приоритета не выполняется более его лимита одновременно (по умолчанию: Critical=1 → 3, High=2 → 5, Medium=3 → 3, Low=4 → 1, Lowest=5+ → 1) |
 | 2 | **Приоритизация** | Высокоприоритетные команды стартуют раньше низкоприоритетных |
 | 3 | **Lease-механизм** | При сбое воркера команда возвращается в очередь после истечения Lease |
 | 4 | **Таймауты** | Процессы, выполняющиеся дольше `ProcessTimeoutSeconds` (по умолчанию 3 часа), принудительно завершаются |
 | 5 | **Трекинг PID** | ProcessId сохраняется для мониторинга и принудительного завершения |
 | 6 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
-| 7 | **Graceful shutdown** | При остановке воркер завершает активные процессы (30 сек таймаут) |
-| 8 | **Fallback poll** | Если NOTIFY потерян — проверка каждые 5 минут |
+| 7 | **Shutdown Worker** | Graceful shutdown для внешних процессов не реализуется; остановка Worker не является отдельным сценарием завершения Revit/Navisworks |
+| 8 | **Fallback poll** | Если NOTIFY потерян — проверка каждую минуту |
 | 9 | **Восстановление** | При перезапуске Worker очищает истёкшие Lease и продолжает обработку |
 | 10 | **Наблюдаемость** | Диагностические запросы показывают актуальное состояние (PID, Lease, длительность) |
 | 11 | **Отмена команд** | Пользователь может отменить команду через `/status`. Server мягко удаляет команду (`Status = 'Deleted'`), а Worker не перезаписывает этот статус после завершения процесса |
@@ -1416,11 +1378,11 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 | DOC-001 | **Lease (5 мин) < ProcessTimeout (1 час)** — не описан механизм продления Lease во время длительного выполнения | Команда может быть ошибочно возвращена в очередь другим воркером во время выполнения | 🔴 HIGH | ✅ Исправлено (v1.1) |
 | DOC-002 | **Не описано чтение stdout/stderr** процессов — указано `RedirectStandardOutput/Error = true`, но нет асинхронного чтения | Риск deadlock при заполнении буфера вывода (64KB) | 🔴 HIGH | ✅ Исправлено (v1.1) |
 | DOC-003 | **Нет валидации FilePath** — отсутствует защита от path traversal атак и проверка существования файлов | Потенциальная уязвимость безопасности | 🔴 HIGH | ✅ Исправлено (v1.1) |
-| DOC-004 | **Партиции (priority-based)** — `SortedDictionary<int, SemaphoreSlim>` с threshold приоритета как ключ. Команды сортируются по `Priority ASC` (1=наивысший). Partition: Critical(≤1, 3 слота), High(≤2, 5), Medium(≤3, 3), Low(≤4, 1), Lowest(≤5, 1) | Высокоприоритетные команды не ждут за низкоприоритетными | 🟠 MEDIUM | ✅ Реализовано (v1.1) |
+| DOC-004 | **Партиции (priority-based)** — `SortedDictionary<int, SemaphoreSlim>` с threshold приоритета как ключ. Команды сортируются по `Priority ASC` (1=наивысший). Partition: Critical(1, 3 слота), High(2, 5), Medium(3, 3), Low(4, 1), Lowest(5+, 1) | Высокоприоритетные команды не ждут за низкоприоритетными | 🟠 MEDIUM | ✅ Реализовано (v1.1) |
 | DOC-005 | **Retry logic** — экспоненциальная задержка (base*2^attempt), лимит попыток (MaxRetries=5). Команда возвращается в `pending` с `NextRetryAt` | Самовосстановление при временных ошибках (файл заблокирован, сеть недоступна) | 🟠 MEDIUM | ✅ Реализовано (v1.2) |
 | DOC-006 | **Нет автоматических метрик** (Prometheus/Grafana) — только ручные SQL-запросы | Ограниченный мониторинг в production, сложность-alerting | 🟠 MEDIUM | В планах (v1.2) |
 | DOC-007 | **Координация очистки Lease** — `pg_try_advisory_lock(1234567)` перед каждой очисткой. Только один воркер выполняет `ReleaseExpiredLeasesAsync`/`ReleaseTimeoutCommandsAsync`, остальные пропускают цикл | Снижение нагрузки на БД при нескольких воркерах | 🟡 LOW | ✅ Реализовано (v1.2) |
-| DOC-008 | **Graceful shutdown deadlock** — если процесс не реагирует на `Kill(true)`, цикл ожидания может заблокироваться | Воркер не завершится корректно при остановке | 🟡 LOW | Улучшение |
+| DOC-008 | **Graceful shutdown не нужен** — отдельный shutdown-сценарий для активных Revit/Navisworks-процессов исключён из требований | Риск deadlock на shutdown отсутствует как класс: Worker не ждёт и не убивает процессы при остановке сервиса | 🟢 NONE | Зафиксировано |
 | DOC-009 | **Нет health checks** для Worker — нет эндпоинтов или механизмов проверки здоровья сервиса | Сложность мониторинга доступности в orchestration-системах | 🟡 LOW | Улучшение |
 | DOC-010 | **Нет ограничения очереди** — не описан лимит на количество pending-команд на пользователя/сессию | Риск разрастания таблицы при аномальной нагрузке | 🟡 LOW | Улучшение |
 | DOC-011 | **Не описаны runbook** для типичных инцидентов (завис процесс, заполнилась очередь, упал Worker) | Увеличенное время восстановления при инцидентах | 🟡 LOW | Улучшение |

@@ -67,7 +67,7 @@ internal static partial class SqlQueries
                 WHERE c.Status = 'pending'
                   AND s.Status != 'Deleted'
                   AND (c.NextRetryAt IS NULL OR c.NextRetryAt <= NOW())
-                ORDER BY c.Priority ASC, c.CreatedAt ASC
+                ORDER BY c.Priority ASC, c.CreatedAt ASC, c.CommandId ASC
                 LIMIT @Limit
                 FOR UPDATE SKIP LOCKED
             )

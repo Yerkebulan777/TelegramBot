@@ -27,7 +27,7 @@ public sealed class CommandExecutionService(
     INavisworksPathResolver navisworksPathResolver,
     DialogDismisser dialogDismisser) : BackgroundService
 {
-    private const int FallbackTimeoutSec = 300; // 5 мин — интервал поллинга очереди
+    private const int FallbackTimeoutSec = 60; // 1 мин — интервал поллинга очереди
     private const int DefaultBatchSize = 5;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
     private const int CleanupIntervalSec = 60; // Интервал очистки истёкших lease
@@ -35,7 +35,8 @@ public sealed class CommandExecutionService(
 
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
-    // Партиции: ID → пул процессов. SortedDictionary гарантирует порядок по возрастанию ID.
+    // Партиции: максимальный Priority threshold -> пул процессов.
+    // SortedDictionary гарантирует порядок по возрастанию threshold.
     private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = [];
 
     // Трекинг активных процессов для возможности принудительного завершения
@@ -54,7 +55,7 @@ public sealed class CommandExecutionService(
     // Фоновая задача мониторинга здоровья активных процессов — await'ится на shutdown
     private Task? _healthTask;
 
-    // Закешированный массив threshold партиций (по убыванию) для быстрого lookup
+    // Закешированный массив threshold партиций (по возрастанию) для линейного lookup.
     private int[] _partitionThresholds = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -156,8 +157,8 @@ public sealed class CommandExecutionService(
 
     /// <summary>
     /// Инициализирует per-partition пулы из конфигурации.
-    /// Ключ словаря — минимальный порог приоритета (threshold).
-    /// Команды с Priority >= threshold попадают в соответствующую партицию.
+    /// Ключ словаря — максимальный Priority threshold.
+    /// Команда попадает в первый threshold >= Priority. Меньшее Priority важнее.
     /// </summary>
     private void InitializePartitionPools()
     {
@@ -172,7 +173,7 @@ public sealed class CommandExecutionService(
             _partitionPools[0] = new SemaphoreSlim(5, 5);
         }
 
-        // Кешируем thresholds по возрастанию для быстрого Array.Find (ищем первый threshold, где Priority <= threshold)
+        // Кешируем thresholds по возрастанию для выбора первого threshold >= Priority.
         _partitionThresholds = _partitionPools.Keys.ToArray();
     }
 
@@ -325,14 +326,7 @@ public sealed class CommandExecutionService(
 
     private async Task ProcessWithPoolAsync(PendingCommand cmd, CancellationToken ct)
     {
-        // Определяем партицию по приоритету команды (ищем первый threshold, где Priority <= threshold)
-        // Чем меньше Priority, тем выше приоритет команды.
-        var threshold = Array.Find(_partitionThresholds, t => cmd.Priority <= t);
-
-        // Fallback: если Priority > max threshold — используем последний (макс) threshold
-        if (threshold == 0 && _partitionThresholds.Length > 0)
-            threshold = _partitionThresholds[^1];
-
+        var threshold = GetPartitionThreshold(cmd.Priority);
         var pool = _partitionPools[threshold];
 
         logger.LogDebug("Command partition: id={Id}, command={Cmd}, priority={Prio}, threshold={Threshold}, slots={Slots}",
@@ -352,6 +346,19 @@ public sealed class CommandExecutionService(
         {
             _=pool.Release();
         }
+    }
+
+    private int GetPartitionThreshold(int priority)
+    {
+        foreach (var threshold in _partitionThresholds)
+        {
+            if (priority <= threshold)
+            {
+                return threshold;
+            }
+        }
+
+        return _partitionThresholds[^1];
     }
 
     private async Task ExecuteOneAsync(PendingCommand cmd, CancellationToken ct)

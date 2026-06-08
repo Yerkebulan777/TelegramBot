@@ -24,13 +24,13 @@ public sealed class SlashCommandService(
 {
     private static readonly Dictionary<string, int> CommandPriorityMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["PDF"] = 1,      // Critical (наивысший)
-        ["DWG"] = 2,      // High
-        ["NWC"] = 3,      // Medium
-        ["IFC"] = 3,      // Medium
-        ["BIMDOC"] = 3,   // Medium
-        ["CLASHREP"] = 3, // Medium
-        ["AUTORES"] = 4,  // Low
+        ["PDF"] = CommandPriorities.Critical,
+        ["DWG"] = CommandPriorities.High,
+        ["NWC"] = CommandPriorities.Medium,
+        ["IFC"] = CommandPriorities.Medium,
+        ["BIMDOC"] = CommandPriorities.Medium,
+        ["CLASHREP"] = CommandPriorities.Medium,
+        ["AUTORES"] = CommandPriorities.Low,
     };
 
     private readonly FileSystemOptions _options = fileSystemOptions.Value;
@@ -284,7 +284,7 @@ public sealed class SlashCommandService(
         var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
 
         var priorities = session.PendingCommand
-            .Select(c => CommandPriorityMap.TryGetValue(c, out var p) ? p : 50);
+            .Select(c => CommandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
 
         var sessionId = await dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities);

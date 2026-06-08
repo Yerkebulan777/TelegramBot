@@ -3,6 +3,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 
@@ -89,7 +90,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         {
             var priority = priorityArray != null && cmdIdx < priorityArray.Length
                 ? priorityArray[cmdIdx]
-                : 50;
+                : CommandPriorities.Default;
 
             foreach (var file in fileList)
             {

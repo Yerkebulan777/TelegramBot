@@ -87,11 +87,12 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<ITelegramOutputService>(sp =>
         {
             var botClient = sp.GetRequiredService<ITelegramBotClient>();
+            var dataService = sp.GetRequiredService<IDataService>();
             var logger = sp.GetRequiredService<ILogger<TelegramOutputService>>();
             var botOptions = sp.GetRequiredService<IOptions<BotOptions>>().Value;
             var adminId = botOptions.AdminUserIds?.FirstOrDefault();
 
-            return new TelegramOutputService(botClient, logger, adminId);
+            return new TelegramOutputService(botClient, dataService, logger, adminId);
         });
         services.AddSingleton<TelegramUpdateMapper>();
         services.AddSingleton<IKeyboardBuilder, KeyboardBuilder>();

@@ -79,8 +79,9 @@ Worker                                              DB
  │                  │   SELECT ... FROM Commands c     │
  │                  │   JOIN Sessions s ...            │
  │                  │   WHERE c.Status = 'pending'     │
- │                  │   ORDER BY Priority DESC,        │
- │                  │            CreatedAt ASC         │
+ │                  │   ORDER BY Priority ASC,         │
+ │                  │            CreatedAt ASC,        │
+ │                  │            CommandId ASC         │
  │                  │   LIMIT 50                       │
  │                  │   FOR UPDATE SKIP LOCKED         │
  │                  │ )                                │
@@ -105,11 +106,11 @@ Worker
  │ ProcessWithPoolAsync(cmd)
  │─── (определение партиции) ──────────────────────────>
  │
- │   Priority ≤ 1  →  Critical →  3 слота (SemaphoreSlim)
- │   Priority ≤ 2  →  High     →  5 слотов (SemaphoreSlim)
- │   Priority ≤ 3  →  Medium   →  3 слота (SemaphoreSlim)
- │   Priority ≤ 4  →  Low      →  1 слот  (SemaphoreSlim)
- │   Priority ≤ 5  →  Lowest   →  1 слот  (SemaphoreSlim)
+ │   Priority 1    →  Critical →  3 слота (SemaphoreSlim)
+ │   Priority 2    →  High     →  5 слотов (SemaphoreSlim)
+ │   Priority 3    →  Medium   →  3 слота (SemaphoreSlim)
+ │   Priority 4    →  Low      →  1 слот  (SemaphoreSlim)
+ │   Priority 5+   →  Lowest   →  1 слот  (SemaphoreSlim)
  │   (Чем меньше Priority, тем выше приоритет)
  │
  │   await pool.WaitAsync(ct)
@@ -371,7 +372,7 @@ User                     Server                    DB                      Worke
 ## Priority-based партиции (схема)
 
 ```
-Очередь команд (Order by Priority ASC, CreatedAt ASC)
+Очередь команд (Order by Priority ASC, CreatedAt ASC, CommandId ASC)
 ┌──────────────────────────────────────────────────┐
 │ [P=1] → [P=1] → [P=2] → [P=3] → [P=4] → [P=5]  │
 │ (Чем меньше Priority, тем выше приоритет)        │
@@ -381,7 +382,7 @@ User                     Server                    DB                      Worke
          ┌──────────────────────────────┐
          │   Маршрутизация по порогам   │
          │ (ищем первый threshold, где  │
-         │  Priority <= threshold)      │
+         │  threshold >= Priority)      │
          └──────────────────────────────┘
 
   P <= 1 ──────► Critical ──► SemaphoreSlim(3)

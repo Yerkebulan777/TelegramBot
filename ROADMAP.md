@@ -1,6 +1,6 @@
 # Дорожная карта (Roadmap) — TelegramBot
 
-> Актуально на: июнь 2026
+> Актуально на: 8 июня 2026
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### Ядро (Core)
 - [x] Модели, DTO, интерфейсы, конфигурация — нулевая зависимость от Telegram SDK
-- [x] Архитектура с 4 проектами: `Core → Data → Server`, `Worker` (BimLib — встроен в Worker как директория)
+- [x] Архитектура с 4 проектами: `Core → Data → Server`, `Worker`
 - [x] DI-регистрация всех сервисов как Singleton
 - [x] PostgreSQL persistence через Dapper + Npgsql
 - [x] Система доступа: регистрация → запрос → подтверждение администратором
@@ -34,12 +34,12 @@
 - [x] Таймаут выполнения процесса
 - [x] Трекинг PID (ConcurrentDictionary + БД)
 - [x] FOR UPDATE SKIP LOCKED — конкурентная обработка несколькими воркерами
-- [x] Graceful shutdown (30 сек на завершение)
-- [x] Fallback poll (5 минут — safety net для потерянных NOTIFY)
+- [x] Graceful shutdown исключён из требований — внешние процессы покрываются timeout/lease/crash recovery
+- [x] Fallback poll (1 минута — safety net для потерянных NOTIFY)
 - [x] Reconnect loop (5 сек задержка)
-- [x] Приоритеты команд (`Priority DESC`)
+- [x] Приоритеты команд (`Priority ASC, CreatedAt ASC, CommandId ASC`)
 - [x] Поля `StartedAt`, `CompletedAt`, `ProcessId`, `ErrorMessage`
-- [x] Персистентность отслеживаемых сообщений в БД
+- [x] Трекинг сообщений бота
 
 ### Data — PostgreSQL
 - [x] SQL-запросы, разбитые по сущностям (5 partial-файлов)
@@ -61,12 +61,12 @@
 - [x] **Валидация FilePath** — проверка существования файла, расширения (из `AllowedExtensions`),
   защита от path traversal (`Path.GetFullPath()`).
 - [x] **Приоритетные партиции (priority-based)** — `SortedDictionary<int, SemaphoreSlim>`:
-  - Critical (Priority ≤ 1) → до 3 одновременных процессов
-  - High (Priority ≤ 2) → до 5
-  - Medium (Priority ≤ 3) → до 3
-  - Low (Priority ≤ 4) → до 1
-  - Lowest (Priority ≤ 5) → до 1
-  - Маршрутизация: `Array.Find(_partitionThresholds, t => cmd.Priority <= t)`
+  - Critical (Priority 1) → до 3 одновременных процессов
+  - High (Priority 2) → до 5
+  - Medium (Priority 3) → до 3
+  - Low (Priority 4) → до 1
+  - Lowest (Priority 5+) → до 1
+  - Маршрутизация: первый partition threshold `>= Priority`, иначе последний threshold
   - Пороги по возрастанию: thresholds `[1, 2, 3, 4, 5]`
   - Чем меньше Priority, тем выше приоритет (1 = Critical, 5 = Lowest)
   - Конфигурация через `WorkerOptions.Partitions` + appsettings.json
@@ -86,29 +86,21 @@
 
 ---
 
-## 🟡 v1.2 — Функциональность, безопасность, операционные улучшения (в планах)
+## 🟢 v1.2 — Функциональность, безопасность, операционные улучшения (частично реализовано)
 
-### Функциональность
+### Реализовано
 - [x] **BimLib (встроен в Worker)** — библиотека для определения версии Revit, резолвинга Revit.exe и мониторинга процессов
   - [x] **Определение версии Revit по .rvt-файлу**: чтение OLE-потока BasicFileInfo через OpenMcdf, поиск строки `Format: YYYY`
   - [x] **Автоматический выбор Revit.exe**: поиск пути через реестр Windows (`HKLM\SOFTWARE\Autodesk\Revit\{version}`) с fallback на WOW6432Node
   - [x] **Мониторинг здоровья процесса**: проверка отклика, автозакрытие диалогов Revit
 - [x] **Поддержка Navisworks**: поиск Navisworks.exe/FileConvert.exe через реестр Windows, мониторинг процессов (Roamer, FileConvert)
-- [x] **Graceful shutdown** — Kill только для зависших процессов (process.Responding),
-  здоровые процессы продолжают работать. Таймаут 5с на WaitForExitAsync после Kill.
-  При остановке Worker не трогает отвечающие процессы (Revit, Navisworks).
+- [x] **Graceful shutdown не нужен** — при остановке Worker не реализует отдельное ожидание или завершение Revit/Navisworks.
+  Корректность обеспечивают timeout, lease/crash recovery и повторный захват команд после перезапуска.
 - [x] **Расширенное логирование Revit-специфичных ошибок** — отдельный файл BimLib.log
   (`~/Documents/TelegramBot/Logs/Worker/BimLib/log-.txt`), фильтрация через BimLibLogFilter
   по SourceContext "TelegramBot.BimLib.*"
-- [ ] Опционально: поддержка Revit Journal-автоматизации
-
-### Безопасность и контроль
 - [x] **Rate limiting** — ограничение на количество команд от одного пользователя в единицу
   времени (sliding window per-user).
-
-### Операционные улучшения
-
-### Функциональные улучшения
 - [x] **ProjectName в БД** — колонка `ProjectName TEXT` в таблице `Sessions`. Имя проекта
   отображается в `/status` и в уведомлениях о завершении.
 - [x] **Список ошибочных файлов в уведомлении** — при наличии ошибок уведомление содержит
@@ -118,15 +110,57 @@
 - [x] **Удалён мёртвый код** — `GetCommandStatusAsync` (interface + implementation + SQL),
   `GetFailedFilesBySession` (не использовался — inline SQL вместо константы).
 
-### Мониторинг и наблюдаемость (самая последняя очередь)
+### В планах
+- [ ] **Опционально: Revit Journal-автоматизация** — запуск сценариев через journal-файлы, если потребуется более глубокая интеграция с Revit.
 - [ ] **Интеграция Prometheus/Grafana** — метрики: количество активных команд, время выполнения,
   количество ошибок по типам, размер очереди. Exporter в `CommandExecutionService` и
   `CommandNotificationService`.
 - [ ] **Статистика выполнения** — среднее время выполнения, процент успеха/ошибок по типам команд,
   по пользователям.
-- [ ] **Health checks** — эндпоинты `/health`, `/healthz`, `/readyz` для Worker (liveness + readiness).
-  HTTP-сервер на TcpListener (порт 5001, настраивается через `HealthCheck:Port`).
-  Readiness проверяет PostgreSQL (SELECT 1) с кешированием 5 сек и таймаутом 3 сек. ❌ Удалено — не используется (нет Docker/K8s).
+
+### Не планируется
+- **Health checks для Worker** — удалено из roadmap: сейчас не используется Docker/K8s, поэтому отдельные `/health`, `/healthz`, `/readyz` не нужны.
+
+---
+
+## 🟡 v1.3 — Упрощение алгоритма и кодовой базы (в планах)
+
+Цель версии — уменьшить количество состояний, переходов и вспомогательных сущностей, чтобы
+исполнение команд было проще читать, сопровождать и отлаживать.
+
+### Упрощение алгоритма выполнения
+- [ ] **Исправить критические ошибки** — устранить утечки ресурсов, баги и другие проблемы,
+  которые могут приводить к зависанию процессов, некорректной обработке команд или потере
+  стабильности Worker/Server.
+- [ ] **Единая модель жизненного цикла команды** — явно описать допустимые переходы статусов
+  (`pending → processing → done/failed/deleted`) и убрать дублирующие проверки там, где статус
+  уже гарантируется SQL-запросом или Worker-пайплайном.
+- [ ] **Свести retry, lease и timeout к одному понятному сценарию** — документировать порядок:
+  claim → execute → retry/fail → release/complete, затем привести код к этой схеме без
+  параллельных "почти одинаковых" веток.
+- [ ] **Упростить уведомления о завершении сессии** — оставить один источник истины для
+  определения финальности сессии и формирования payload, чтобы Worker и Server не дублировали
+  бизнес-логику.
+- [ ] **Пересмотреть in-memory счётчик сессий** — оставить его только как оптимизацию; корректность
+  завершения должна подтверждаться БД, особенно для больших сессий и нескольких Worker-процессов.
+- [ ] **Сократить fallback-поведение** — оставить safety net для потерянных NOTIFY, но сделать его
+  отдельным простым контуром без смешивания с основным LISTEN/NOTIFY-потоком.
+
+### Упрощение кодовой базы
+- [ ] **Разделить `CommandExecutionService` на небольшие компоненты** — отдельно claim/lease,
+  execution, retry/fail handling, notification trigger. Без новых интерфейсов, если у компонента
+  нет нескольких реализаций.
+- [ ] **Свести SQL-операции к сценарным методам** — методы Data-слоя должны отражать бизнес-действия
+  (`ClaimPendingCommandsAsync`, `MarkCommandCompletedAsync`, `ScheduleRetryAsync`), а не размазывать
+  статусные переходы по сервисам.
+- [ ] **Удалить оставшиеся мёртвые и исторические ветки** — проверить TODO/stale-комментарии,
+  неиспользуемые настройки, устаревшие варианты поведения и документацию, которая описывает
+  уже удалённый код.
+- [ ] **Упростить callback-хендлеры статуса и удаления** — выделить общие операции разбора id,
+  формирования сообщений и обновления клавиатур, если повторяется один и тот же 5+ строковый
+  шаблон.
+- [ ] **Синхронизировать документацию с реальным алгоритмом** — обновить
+  `Docs/execution-algorithm.md`, `README.md`, `AGENTS.md` и `CLAUDE.md` после упрощения кода.
 
 ---
 
@@ -142,9 +176,8 @@
 | **Унификация дубликатов** | ✅ Готово |
 |   — `HandlerHelpers.SendActionsReplyKeyboardAsync()` | | Заменяет 3 дублированных метода в `FileNavigationHandler`, `CommandSelectionHandler`, `SlashCommandService` |
 |   — `ProcessHealthHelper.CheckHealth()` | | Общая логика для `RevitProcessTracker` и `NavisworksProcessTracker` |
-|   — `NpgsqlHelper.CreateOpenConnectionAsync()` | | Перенесён из `Worker.Services` (internal) → `TelegramBot.Data` (public). 
-| | | | Используется в 3 сервисах: `HealthCheckServer`, `CommandExecutionService` (Worker) 
-| | | | и `CommandNotificationService` (Server) |
+|   — `NpgsqlHelper.CreateOpenConnectionAsync()` | | Перенесён из `Worker.Services` (internal) → `TelegramBot.Data` (public). |
+| | | | Используется в `CommandExecutionService` (Worker) и `CommandNotificationService` (Server) |
 |   — `TryParseId()` | | Заменяет 5 одинаковых блоков `int.TryParse` в `SessionManagementHandler` |
 | **Упрощение DI** | ✅ Готово | `TelegramOutputService` больше не зависит от `IDataService`; убраны 2 лишних параметра из `TelegramBotHostedService`; мёртвый `IDataService` убран из `CommandAppService` |
 | **PostgresDataService — `CreateConnectionAsync()`** | ✅ Готово | Выделен helper, заменивший ~15 ручных `new NpgsqlConnection + OpenAsync` |
@@ -183,7 +216,8 @@
 |--------|----------|
 | ✅ v1.0 | Реализовано в базовой версии |
 | 🟢 v1.1 | Реализовано (улучшения надёжности) |
-| 🟡 v1.2 | В планах (ближайшие спринты) |
+| 🟢 v1.2 | Частично реализовано, оставшиеся пункты в планах |
+| 🟡 v1.3 | В планах: упрощение алгоритма и кодовой базы |
 | ⚪ v2.0+ | Долгосрочные планы |
 | 🔄 | В работе / текущий спринт |
 

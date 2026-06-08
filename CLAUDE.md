@@ -124,7 +124,7 @@ All queries use Dapper with parameterized SQL. SQL constants are in `TelegramBot
 
 ### Task Queue (PostgreSQL LISTEN/NOTIFY)
 
-Server уведомляет Worker-ов о новых командах через `NOTIFY new_command` после INSERT в Commands. Worker использует `NpgsqlConnection.WaitAsync()` для мгновенного пробуждения. Fallback poll — 5 минут.
+Server уведомляет Worker-ов о новых командах через `NOTIFY new_command` после INSERT в Commands. Worker использует `NpgsqlConnection.WaitAsync()` для мгновенного пробуждения. Fallback poll — 1 минута.
 
 Worker-сервисы (`CommandExecutionService`, `HealthCheckServer`) используют `NpgsqlHelper.CreateOpenConnectionAsync()` для единообразного создания подключений.
 
@@ -144,7 +144,7 @@ Serilog configured via `appsettings.json`. Supports Console and Seq (`http://loc
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1383 symbols, 3461 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1375 symbols, 3470 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

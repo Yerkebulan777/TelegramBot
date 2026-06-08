@@ -184,7 +184,7 @@ Server (создание сессии)
                          PostgreSQL
 ```
 
-Worker автоматически переподключается при потере соединения с PostgreSQL и использует fallback poll (5 мин) на случай, если NOTIFY был потерян.
+Worker автоматически переподключается при потере соединения с PostgreSQL и использует fallback poll (1 мин) на случай, если NOTIFY был потерян.
 
 ### BimLib (BIM Integration) — встроен в Worker
 
@@ -262,7 +262,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 
 | Сервис | Расположение | Ответственность |
 |--------|-------------|-----------------|
-| `CommandExecutionService` | TelegramBot.Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI, in-memory счётчик сессий, мониторинг здоровья процессов (30 сек), graceful shutdown |
+| `CommandExecutionService` | TelegramBot.Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI, in-memory счётчик сессий, мониторинг здоровья процессов, timeout/lease/crash recovery. Graceful shutdown для внешних процессов не нужен |
 | `BimLibLogFilter` | TelegramBot.Worker/Services | Фильтр логов для BimLib-событий (отдельный файл для BIM-специфичных логов) |
 
 ### Обработчики callback-ов (Chain of Responsibility)
@@ -298,7 +298,7 @@ PostgreSQL `LISTEN/NOTIFY` используется для мгновенног�
 1. **Server** после `INSERT` команд в БД выполняет `NOTIFY new_command, '<sessionId>'`
 2. **Worker** при старте выполняет `LISTEN new_command`, ждёт через `NpgsqlConnection.WaitAsync()`
 3. При получении NOTIFY Worker мгновенно просыпается, выбирает pending-команды и выполняет их
-4. Если NOTIFY потерян — fallback poll через 5 минут
+4. Если NOTIFY потерян — fallback poll через 1 минуту
 5. **Отмена команд** — пользователь через `/status` → кнопку «⛔ Отменить»; Server мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`.
 
 Несколько Worker-ов могут работать параллельно (competing consumers) — каждый берёт следующую команду из очереди.

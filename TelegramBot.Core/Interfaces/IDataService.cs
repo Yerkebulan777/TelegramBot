@@ -17,7 +17,7 @@ public interface IDataService
     Task InitializeDatabaseAsync();
 
     /// <summary>Создает новую сессию с командами.</summary>
-    /// <param name="commandPriorities">Приоритеты для каждой команды (в том же порядке, что commandText). Если null — всем 50.</param>
+    /// <param name="commandPriorities">Приоритеты для каждой команды (в том же порядке, что commandText). Если null — всем CommandPriorities.Default.</param>
     Task<long> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,

@@ -63,7 +63,8 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_status_lease ON Commands(Status, Lease)
                 WHERE Status = 'processing';
             CREATE INDEX IF NOT EXISTS idx_sessions_user_created ON Sessions(UserId, CreatedAt DESC);
-            CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority DESC, CreatedAt ASC)
+            DROP INDEX IF EXISTS idx_commands_pending_priority;
+            CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority ASC, CreatedAt ASC, CommandId ASC)
                 WHERE Status = 'pending';
             CREATE INDEX IF NOT EXISTS idx_commands_partition_status ON Commands(Partition, Status);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);
