@@ -7,6 +7,5 @@
   <Project Path="TelegramBot.Core\TelegramBot.Core.csproj" />
   <Project Path="TelegramBot.Data\TelegramBot.Data.csproj" />
   <Project Path="TelegramBot.Server\TelegramBot.Server.csproj" />
-  <Project Path="TelegramBot.BimLib\TelegramBot.BimLib.csproj" />
   <Project Path="TelegramBot.Worker\TelegramBot.Worker.csproj" />
 </Solution>

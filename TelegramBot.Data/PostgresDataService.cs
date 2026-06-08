@@ -392,4 +392,20 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             SqlQueries.Commands.GetById,
             new { CommandId = commandId, UserId = userId });
     }
+
+    public async Task<string?> GetCommandStatusAsync(int commandId)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            return await conn.QuerySingleOrDefaultAsync<string>(
+                SqlQueries.Commands.GetStatus,
+                new { CommandId = commandId });
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to get status for command {CommandId}", commandId);
+            return null;
+        }
+    }
 }

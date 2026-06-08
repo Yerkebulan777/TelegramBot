@@ -1,7 +1,9 @@
 using System.Runtime.Versioning;
 using Serilog;
 using TelegramBot.BimLib.Config;
-using TelegramBot.BimLib.Extensions;
+using TelegramBot.BimLib.Interfaces;
+using TelegramBot.BimLib.Monitor;
+using TelegramBot.BimLib.Services;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Interfaces;
@@ -33,7 +35,13 @@ public static class Program
                     services.Configure<WorkerOptions>(context.Configuration.GetSection(WorkerOptions.SectionName));
                     services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
 
-                    services.AddBimIntegration();
+                    // BIM-интеграция (Revit + Navisworks)
+                    services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>();
+                    services.AddSingleton<RevitPathResolver>();
+                    services.AddSingleton<RevitProcessTracker>();
+                    services.AddSingleton<DialogDismisser>();
+                    services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>();
+                    services.AddSingleton<NavisworksProcessTracker>();
 
                     services.AddHostedService<CommandExecutionService>();
                     services.AddHostedService<HealthCheckServer>();

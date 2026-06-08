@@ -11,7 +11,6 @@ public interface IKeyboardBuilder
     Task<ReplyKeyboardMarkup> GetCommandActionsReplyKeyboardAsync();
     Task<ReplyKeyboardMarkup> GetProjectActionsReplyKeyboardAsync();
     Task<ReplyKeyboardMarkup> GetSectionActionsReplyKeyboardAsync();
-    Task<ReplyKeyboardMarkup> GetStatusActionsReplyKeyboardAsync();
     Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsStatus);
     Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId);
     Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId);

@@ -31,12 +31,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
 
     public Task<ReplyKeyboardMarkup> GetSectionActionsReplyKeyboardAsync()
     {
-        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Back, ButtonTexts.Cancel));
-    }
-
-    public Task<ReplyKeyboardMarkup> GetStatusActionsReplyKeyboardAsync()
-    {
-        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Back));
+        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
     }
 
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(List<SessionsList> sessionsList)
@@ -84,7 +79,6 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
         {
             new()
             {
-                InlineKeyboardButton.WithCallbackData("◀ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
                 InlineKeyboardButton.WithCallbackData("🗑 Удалить всё", $"{CallbackPrefixes.DeleteSession}{sessionId}")
             }
         };

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using TelegramBot.Data;
 
 namespace TelegramBot.Worker.Services;
@@ -13,10 +14,22 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 internal sealed class HealthCheckServer : BackgroundService
 {
+    private const int ReadinessCacheSeconds = 5;
+    private const int ReadTimeoutMs = 5_000;
+    private const int DbCheckTimeoutSeconds = 3;
+
     private readonly int _port;
     private readonly string _connectionString;
     private readonly ILogger<HealthCheckServer> _logger;
     private TcpListener? _listener;
+
+    // Кеш readiness check — не долбим БД на каждый /readyz
+    private readonly object _cacheLock = new();
+    private (int code, string text, string body) _cachedReadiness = (503, "Service Unavailable", "Starting");
+    private DateTime _nextReadinessCheck = DateTime.MinValue;
+
+    // Счётчик активных запросов для graceful shutdown
+    private int _activeRequests;
 
     public HealthCheckServer(IConfiguration configuration, ILogger<HealthCheckServer> logger)
     {
@@ -37,7 +50,8 @@ internal sealed class HealthCheckServer : BackgroundService
             while (!stoppingToken.IsCancellationRequested)
             {
                 var client = await _listener.AcceptTcpClientAsync(stoppingToken);
-                // Fire-and-forget: каждый запрос обрабатывается параллельно
+                Interlocked.Increment(ref _activeRequests);
+                // Каждый запрос обрабатывается параллельно
                 _ = HandleRequestAsync(client, stoppingToken);
             }
         }
@@ -45,6 +59,21 @@ internal sealed class HealthCheckServer : BackgroundService
         finally
         {
             _listener.Stop();
+
+            // Ждём завершения активных запросов (макс 10 сек)
+            _logger.LogInformation("Health check: waiting for {Count} active requests",
+                Volatile.Read(ref _activeRequests));
+
+            for (var i = 0; i < 20 && Volatile.Read(ref _activeRequests) > 0; i++)
+            {
+                await Task.Delay(500, CancellationToken.None);
+            }
+
+            if (Volatile.Read(ref _activeRequests) > 0)
+            {
+                _logger.LogWarning("Health check: {Count} requests still active after shutdown",
+                    Volatile.Read(ref _activeRequests));
+            }
         }
     }
 
@@ -52,6 +81,9 @@ internal sealed class HealthCheckServer : BackgroundService
     {
         try
         {
+            // Таймаут на чтение запроса — защита от медленных/битых клиентов
+            client.ReceiveTimeout = ReadTimeoutMs;
+
             await using var stream = client.GetStream();
 
             // Читаем только первую строку HTTP-запроса (достаточно для path-based routing)
@@ -64,7 +96,7 @@ internal sealed class HealthCheckServer : BackgroundService
             var (statusCode, statusText, body) = path switch
             {
                 "/healthz" => (200, "OK", "Healthy"),
-                "/readyz" => await CheckReadinessAsync(ct),
+                "/readyz" => await GetReadinessCachedAsync(ct),
                 _ => (404, "Not Found", "Not Found")
             };
 
@@ -85,23 +117,48 @@ internal sealed class HealthCheckServer : BackgroundService
         finally
         {
             client.Dispose();
+            Interlocked.Decrement(ref _activeRequests);
         }
     }
 
-    private async Task<(int code, string text, string body)> CheckReadinessAsync(CancellationToken ct)
+    /// <summary>
+    /// Возвращает кешированный результат readiness check.
+    /// Реальный запрос к БД делается не чаще 1 раза в 5 секунд.
+    /// </summary>
+    private async Task<(int code, string text, string body)> GetReadinessCachedAsync(CancellationToken ct)
     {
+        var now = DateTime.UtcNow;
+
+        lock (_cacheLock)
+        {
+            if (now < _nextReadinessCheck)
+            {
+                return _cachedReadiness;
+            }
+            _nextReadinessCheck = now.AddSeconds(ReadinessCacheSeconds);
+        }
+
+        // Реальный check с таймаутом 3 секунды
         try
         {
-            await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, ct);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(DbCheckTimeoutSeconds));
+
+            await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, timeoutCts.Token);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT 1";
-            await cmd.ExecuteNonQueryAsync(ct);
-            return (200, "OK", "Ready");
+            await cmd.ExecuteNonQueryAsync(timeoutCts.Token);
+
+            var result = (200, "OK", "Ready");
+            lock (_cacheLock) { _cachedReadiness = result; }
+            return result;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Readiness check failed: database unreachable");
-            return (503, "Service Unavailable", "Database unreachable");
+            var result = (503, "Service Unavailable", "Database unreachable");
+            lock (_cacheLock) { _cachedReadiness = result; }
+            return result;
         }
     }
 

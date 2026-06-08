@@ -7,7 +7,6 @@ public static class ButtonTexts
 {
     public const string Apply = "✅ Применить";
     public const string Confirm = "✅ Подтвердить";
-    public const string Back = "⬅️ Назад";
     public const string Cancel = "❌ Отмена";
 
 }

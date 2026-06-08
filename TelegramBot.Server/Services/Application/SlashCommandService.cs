@@ -169,21 +169,6 @@ public sealed class SlashCommandService(
             return true;
         }
 
-        if (messageText == ButtonTexts.Back)
-        {
-            if (session.IsFileSelectionActive)
-            {
-                await BackInFileSelectionAsync(userId, username, session);
-                return true;
-            }
-
-            if (session.StatusMessageId.HasValue)
-            {
-                await BackToSessionsListAsync(userId, username, session);
-                return true;
-            }
-        }
-
         if (messageText == ButtonTexts.Cancel && (session.IsFileSelectionActive || session.PendingCommand.Count > 0))
         {
             logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
@@ -291,49 +276,6 @@ public sealed class SlashCommandService(
         session.IsFileSelectionActive = false;
 
         await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
-    }
-
-    private async Task BackInFileSelectionAsync(long userId, string username, UserSession session)
-    {
-        if (!session.FileSelectionMessageId.HasValue)
-        {
-            await SendWarningAndCleanupAsync(userId, session, "Сообщение выбора файлов не найдено.");
-            return;
-        }
-
-        if (_options.IsAtProjectLevel(session.CurrentPath))
-        {
-            await SendWarningAndCleanupAsync(userId, session, "Вы уже в списке проектов.");
-            return;
-        }
-
-        session.ClearSelectedFiles();
-        session.CurrentPath = _options.RootPath;
-
-        logger.LogDebug("User {Username} ({UserId}) returned to project selection", username, userId);
-
-        var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
-        await outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
-        await SendFileActionsReplyKeyboardAsync(userId, session);
-        await CleanupCurrentViewAsync(userId, session);
-    }
-
-    private async Task BackToSessionsListAsync(long userId, string username, UserSession session)
-    {
-        if (!session.StatusMessageId.HasValue)
-        {
-            return;
-        }
-
-        logger.LogDebug("User {Username} ({UserId}) returning to sessions list", username, userId);
-
-        var sessionsStatus = await dataService.GetSessionsListAsync(userId);
-        var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-        await outputService.EditMessageTextWithKeyboardAsync(userId, session.StatusMessageId.Value, "Сессии:", keyboard);
-
-        session.IsInStatusView = true;
-        var clearKeyboardMessage = await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, "Сессии:"), session);
-        await CleanupCurrentViewAsync(userId, session, clearKeyboardMessage?.Id);
     }
 
     private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)

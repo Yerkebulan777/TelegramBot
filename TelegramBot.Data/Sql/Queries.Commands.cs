@@ -52,7 +52,8 @@ internal static partial class SqlQueries
                 END,
                 ProcessId = @ProcessId,
                 ErrorMessage = @ErrorMessage
-            WHERE CommandId = @CommandId;";
+            WHERE CommandId = @CommandId
+              AND Status != 'Cancelled';";
 
 
         internal const string ClaimAndReturn = @"
@@ -133,6 +134,11 @@ internal static partial class SqlQueries
               AND s.UserId = @UserId
               AND c.Status != 'Deleted'
               AND s.Status != 'Deleted';";
+
+        internal const string GetStatus = @"
+            SELECT Status
+            FROM Commands
+            WHERE CommandId = @CommandId;";
 
         internal const string SoftDeleteOldCancelled = @"
             UPDATE Commands

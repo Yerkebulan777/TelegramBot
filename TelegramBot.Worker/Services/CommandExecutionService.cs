@@ -9,6 +9,8 @@ using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.BimLib.Interfaces;
+using TelegramBot.BimLib.Models;
+using TelegramBot.BimLib.Monitor;
 using TelegramBot.Data;
 
 namespace TelegramBot.Worker.Services;
@@ -25,12 +27,14 @@ public sealed class CommandExecutionService(
     IOptions<WorkerOptions> workerOptions,
     ILogger<CommandExecutionService> logger,
     IRevitVersionDetector versionDetector,
-    INavisworksPathResolver navisworksPathResolver) : BackgroundService
+    INavisworksPathResolver navisworksPathResolver,
+    DialogDismisser dialogDismisser) : BackgroundService
 {
     private const int FallbackTimeoutSec = 300; // 5 мин — safety net, если NOTIFY потерян
     private const int DefaultBatchSize = 50;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
     private const int CleanupIntervalSec = 60; // Интервал очистки истёкших lease
+    private const int HealthCheckIntervalSec = 30; // Интервал проверки здоровья процессов
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
@@ -50,6 +54,15 @@ public sealed class CommandExecutionService(
     // CancellationTokenSource для graceful shutdown
     private CancellationTokenSource? _shutdownCts;
 
+    // Фоновая задача очистки истёкших lease — await'ится на shutdown
+    private Task? _cleanupTask;
+
+    // Фоновая задача мониторинга здоровья активных процессов — await'ится на shutdown
+    private Task? _healthTask;
+
+    // Закешированный массив threshold партиций (по убыванию) для быстрого lookup
+    private int[] _partitionThresholds = [];
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         InitializePartitionPools();
@@ -60,22 +73,40 @@ public sealed class CommandExecutionService(
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        // Запускаем фоновую задачу периодической очистки истёкших lease
-        var cleanupTask = Task.Run(async () =>
+        // Фоновая задача периодической очистки истёкших lease (через PeriodicTimer — без дрифта)
+        _cleanupTask = Task.Run(async () =>
         {
-            while (!_shutdownCts.Token.IsCancellationRequested)
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(CleanupIntervalSec));
+
+            while (await timer.WaitForNextTickAsync(_shutdownCts.Token))
             {
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(CleanupIntervalSec), _shutdownCts.Token);
                     await dataService.ReleaseExpiredLeasesAsync();
                     await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
                     await dataService.CleanupOldCancelledCommandsAsync(_workerOptions.CleanupOlderThanDays);
                 }
-                catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Error in lease cleanup cycle");
+                }
+            }
+        });
+
+        // Фоновая задача мониторинга здоровья активных процессов (каждые 30 сек)
+        _healthTask = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(HealthCheckIntervalSec));
+
+            while (await timer.WaitForNextTickAsync(_shutdownCts.Token))
+            {
+                try
+                {
+                    CheckProcessesHealth();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error in process health check cycle");
                 }
             }
         });
@@ -98,9 +129,27 @@ public sealed class CommandExecutionService(
         }
         finally
         {
-            // Graceful shutdown: ждём завершения активных процессов
+            // Graceful shutdown
             logger.LogInformation("Worker stopping: activeProcesses={Count}", _activeProcesses.Count);
-            await WaitForActiveProcessesAsync();
+            await LogActiveProcessesOnShutdownAsync();
+
+            // Отменяем фоновые задачи и ждём их завершения (макс 15 сек)
+            _shutdownCts?.Cancel();
+
+            if (_cleanupTask != null)
+            {
+                var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
+                if (await Task.WhenAny(_cleanupTask, timeout) != _cleanupTask)
+                    logger.LogWarning("Cleanup task did not complete within 15s timeout");
+            }
+
+            if (_healthTask != null)
+            {
+                var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
+                if (await Task.WhenAny(_healthTask, timeout) != _healthTask)
+                    logger.LogWarning("Health monitoring task did not complete within 15s timeout");
+            }
+
             _shutdownCts?.Dispose();
 
             foreach (var pool in _partitionPools.Values)
@@ -129,9 +178,63 @@ public sealed class CommandExecutionService(
         {
             _partitionPools[0] = new SemaphoreSlim(5, 5);
         }
+
+        // Кешируем thresholds по убыванию для быстрого Array.Find в ProcessWithPoolAsync
+        _partitionThresholds = _partitionPools.Keys.Reverse().ToArray();
     }
 
-    private async Task WaitForActiveProcessesAsync()
+    /// <summary>
+    /// Проверяет здоровье всех активных процессов: отклик, диалоги, память.
+    /// </summary>
+    private void CheckProcessesHealth()
+    {
+        foreach (var (commandId, process) in _activeProcesses)
+        {
+            if (process.HasExited)
+                continue;
+
+            try
+            {
+                var health = ProcessHealthHelper.CheckHealth(process, logger, $"Command#{commandId}");
+
+                if (health.Status == RevitProcessStatus.NotResponding)
+                {
+                    logger.LogWarning(
+                        "Process not responding: commandId={Id}, pid={Pid}, memoryMb={MemoryMb}, duration={Duration}",
+                        commandId, process.Id, health.MemoryMb, health.Duration);
+                }
+                else if (health.Status == RevitProcessStatus.Healthy)
+                {
+                    logger.LogDebug(
+                        "Process healthy: commandId={Id}, pid={Pid}, memoryMb={MemoryMb}, duration={Duration}",
+                        commandId, process.Id, health.MemoryMb, health.Duration);
+                }
+
+                // Закрываем модальные диалоги Revit, если вылезли
+                try
+                {
+                    dialogDismisser.DismissDialogsForProcess((uint)process.Id);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to dismiss dialogs for command {CommandId}", commandId);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Health check failed for command {CommandId}", commandId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Логирует активные процессы при остановке Worker.
+    /// Процессы не завершаются принудительно — Revit/Navisworks могут выполнять
+    /// важную работу, и их прерывание может привести к повреждению данных.
+    /// Worker просто отключается от LISTEN/NOTIFY, а процессы продолжают работу.
+    /// Команды таких процессов будут подхвачены при следующем запуске через Crash Recovery.
+    /// </summary>
+    private async Task LogActiveProcessesOnShutdownAsync()
     {
         if (_activeProcesses.Count == 0)
         {
@@ -139,8 +242,22 @@ public sealed class CommandExecutionService(
             return;
         }
 
-        logger.LogInformation("Worker shutdown: leaving {Count} active processes running independently (no cleanup needed)",
+        logger.LogInformation("Worker shutdown: waiting up to 30s for {Count} active processes",
             _activeProcesses.Count);
+
+        // Даём процессам шанс завершиться самостоятельно
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline && _activeProcesses.Values.Any(p => !p.HasExited))
+        {
+            await Task.Delay(500);
+        }
+
+        var stillRunning = _activeProcesses.Values.Count(p => !p.HasExited);
+        if (stillRunning > 0)
+        {
+            logger.LogInformation("Worker shutdown: {Count} processes still running after 30s, leaving them",
+                stillRunning);
+        }
 
         foreach (var kvp in _activeProcesses)
         {
@@ -288,9 +405,7 @@ public sealed class CommandExecutionService(
         // Определяем партицию по приоритету команды (ищем highest threshold <= cmd.Priority)
         // FirstOrDefault возвращает 0 (default int), если ни один threshold не подошёл.
         // Threshold 0 гарантированно существует в _partitionPools (см. InitializePartitionPools).
-        var threshold = _partitionPools.Keys
-            .Reverse()
-            .FirstOrDefault(t => cmd.Priority >= t);
+        var threshold = Array.Find(_partitionThresholds, t => cmd.Priority >= t);
 
         var pool = _partitionPools[threshold];
 
@@ -356,6 +471,17 @@ public sealed class CommandExecutionService(
             var cmdCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _commandCts[cmd.CommandId] = cmdCts;
             var cmdCt = cmdCts.Token;
+
+            // Перепроверяем статус из БД — мог быть отменён пользователем после ClaimPendingCommandsAsync
+            // Ранний return внутри try — finally сам почистит _commandCts и _activeProcesses
+            var currentStatus = await dataService.GetCommandStatusAsync(cmd.CommandId);
+            if (currentStatus == CommandStatuses.Cancelled)
+            {
+                logger.LogInformation(
+                    "Command cancelled before start: id={Id}, command={Cmd}",
+                    cmd.CommandId, cmd.CommandText);
+                return;
+            }
 
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             process.Start();
@@ -603,19 +729,16 @@ public sealed class CommandExecutionService(
         }
     }
 
-    /// <summary>Логирует stdout и stderr процесса.</summary>
+    /// <summary>Логирует stdout и stderr процесса (только если есть вывод).</summary>
     private void LogProcessOutput(PendingCommand cmd, StringBuilder outputBuilder, StringBuilder errorBuilder)
     {
-        var output = outputBuilder.ToString();
-        var error = errorBuilder.ToString();
-
-        if (!string.IsNullOrWhiteSpace(output))
+        if (outputBuilder.Length > 0)
         {
             logger.LogInformation("Output [{Cmd} {Id}]: {Output}",
                 cmd.CommandText, cmd.CommandId, TruncateOutput(outputBuilder));
         }
 
-        if (!string.IsNullOrWhiteSpace(error))
+        if (errorBuilder.Length > 0)
         {
             logger.LogWarning("Stderr [{Cmd} {Id}]: {Error}",
                 cmd.CommandText, cmd.CommandId, TruncateOutput(errorBuilder));
@@ -628,7 +751,7 @@ public sealed class CommandExecutionService(
         const int maxLength = 4096;
         return builder.Length > maxLength
             ? builder.ToString(0, maxLength) + $"\n... (truncated, total {builder.Length} chars)"
-            : builder.ToString();
+            : builder.ToString(0, builder.Length);
     }
 
     /// <summary>Создаёт ProcessStartInfo из конфигурации команды (ExecutablePath + ArgumentsTemplate).</summary>
@@ -647,7 +770,6 @@ public sealed class CommandExecutionService(
 
         return new ProcessStartInfo
         {
-            FileName = cfg.ExecutablePath,
             Arguments = args,
             WorkingDirectory = workingDir,
             RedirectStandardOutput = true,

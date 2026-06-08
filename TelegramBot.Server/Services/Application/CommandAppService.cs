@@ -27,6 +27,18 @@ public sealed class CommandAppService(
         var cleanupCandidates = session.GetTrackedMessages();
 
         session.TrackMessage(message.MessageId);
+
+        // Server restart detection: session has no tracked messages (fresh after restart)
+        // and user sends a non-slash text — redirect to /start for a clean slate
+        if (cleanupCandidates.Count == 0 && !message.Text!.StartsWith('/'))
+        {
+            logger.LogDebug("Post-restart cleanup for {Username} ({UserId}): redirecting to /start",
+                message.Username, message.UserId);
+            await outputService.RemoveReplyKeyboardAsync(message.UserId,
+                "⚡️ Сервер был перезапущен.\nСтарые сообщения больше неактуальны.\n\nИспользуйте /start для начала.");
+            return;
+        }
+
         await slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
         await DeleteOldMessagesAsync(message, session, cleanupCandidates, cancellationToken);
     }

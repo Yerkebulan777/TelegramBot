@@ -83,6 +83,9 @@ public interface IDataService
     /// <summary>Возвращает команду по ID (для проверки принадлежности пользователю).</summary>
     Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId);
 
+    /// <summary>Возвращает текущий статус команды (без проверки владельца).</summary>
+    Task<string?> GetCommandStatusAsync(int commandId);
+
     /// <summary>Уведомляет Worker-ов о новых командах через Postgres LISTEN/NOTIFY.</summary>
     Task NotifyNewCommandsAsync(int sessionId);
 

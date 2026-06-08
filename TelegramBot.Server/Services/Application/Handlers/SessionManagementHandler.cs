@@ -17,7 +17,6 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.SessionDetails,
         CallbackPrefixes.DeleteSession,
         CallbackPrefixes.DeleteCommand,
-        CallbackPrefixes.BackToStatus,
         CallbackPrefixes.CancelCommand,
         CallbackPrefixes.ConfirmCancelCmd
     ];
@@ -45,7 +44,6 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.DeleteCommand => await HandleDeleteCommandAsync(context, cancellationToken),
             CallbackPrefixes.CancelCommand => await HandleCancelCommandAsync(context, cancellationToken),
             CallbackPrefixes.ConfirmCancelCmd => await HandleConfirmCancelAsync(context, cancellationToken),
-            CallbackPrefixes.BackToStatus => await HandleBackToStatusAsync(context, cancellationToken),
             _ => false
         };
     }
@@ -68,7 +66,6 @@ public sealed class SessionManagementHandler(
             var keyboard = await keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
             await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;
-            await SendStatusActionsReplyKeyboardAsync(context);
         }
         else
         {
@@ -78,7 +75,6 @@ public sealed class SessionManagementHandler(
             var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
             await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
             session.StatusMessageId = context.MessageId;
-            await SendStatusActionsReplyKeyboardAsync(context);
         }
 
         return true;
@@ -138,14 +134,6 @@ public sealed class SessionManagementHandler(
             await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, newKeyboard);
         }
 
-        return true;
-    }
-
-    private async Task<bool> HandleBackToStatusAsync(CallbackContext context, CancellationToken cancellationToken)
-    {
-        Logger.LogDebug("User {Username} ({UserId}) returning to sessions list", context.Username, context.UserId);
-        context.Session.IsInStatusView = true;
-        await ShowSessionsListAsync(context);
         return true;
     }
 
@@ -257,16 +245,6 @@ public sealed class SessionManagementHandler(
         if (clearKeyboardMessage != null)
         {
             context.Session.TrackMessage(clearKeyboardMessage.Id);
-        }
-    }
-
-    private async Task SendStatusActionsReplyKeyboardAsync(CallbackContext context)
-    {
-        var replyKeyboard = await keyboardBuilder.GetStatusActionsReplyKeyboardAsync();
-        var message = await outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
-        if (message != null)
-        {
-            context.Session.TrackMessage(message.Id);
         }
     }
 

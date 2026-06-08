@@ -7,7 +7,7 @@ namespace TelegramBot.BimLib.Monitor;
 /// Автоматическое закрытие диалоговых окон Revit (#32770).
 /// Ищет кнопки с известными названиями (ОК, Отмена, Закрыть и т.д.) и кликает их.
 /// </summary>
-internal sealed class DialogDismisser(ILogger<DialogDismisser> logger)
+public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
 {
     private static readonly string[] ButtonNameTexts =
         ["OK", "ОК", "Принять", "Accept", "Закрыть", "Close", "Игнорировать", "Ignore",
