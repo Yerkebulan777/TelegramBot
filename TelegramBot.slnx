@@ -1,4 +1,9 @@
 <Solution>
+  <Folder Name="/Docs/">
+    <File Path="Docs/CommandExecutionAlgorithm.md" />
+    <File Path="Docs/execution-algorithm.md" />
+    <File Path="Docs/qodana-setup.md" />
+  </Folder>
   <Project Path="TelegramBot.Core\TelegramBot.Core.csproj" />
   <Project Path="TelegramBot.Data\TelegramBot.Data.csproj" />
   <Project Path="TelegramBot.Server\TelegramBot.Server.csproj" />
