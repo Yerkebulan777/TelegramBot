@@ -79,6 +79,7 @@ public sealed class CommandExecutionService(
                 {
                     await dataService.ReleaseExpiredLeasesAsync();
                     await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
+                    await CleanupInactiveSessionsAsync();
                 }
                 catch (Exception ex)
                 {
@@ -153,6 +154,23 @@ public sealed class CommandExecutionService(
         }
 
         logger.LogInformation("Worker stopped");
+    }
+
+    private async Task CleanupInactiveSessionsAsync()
+    {
+        if (_workerOptions.CompletedSessionRetentionDays <= 0)
+        {
+            return;
+        }
+
+        var cutoffUtc = DateTime.UtcNow.AddDays(-_workerOptions.CompletedSessionRetentionDays);
+        var deletedCount = await dataService.SoftDeleteInactiveSessionsOlderThanAsync(cutoffUtc);
+        if (deletedCount > 0)
+        {
+            logger.LogInformation(
+                "Inactive session cleanup completed: deleted={Count}, retentionDays={RetentionDays}",
+                deletedCount, _workerOptions.CompletedSessionRetentionDays);
+        }
     }
 
     /// <summary>
@@ -373,6 +391,7 @@ public sealed class CommandExecutionService(
                 logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
                 await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"Unknown command type: {cmd.CommandText}");
+                await CompleteClaimedCommandAsync(cmd);
                 return;
             }
 
@@ -381,6 +400,7 @@ public sealed class CommandExecutionService(
                 logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
                 await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: $"File validation failed for path: {cmd.FilePath}");
+                await CompleteClaimedCommandAsync(cmd);
                 return;
             }
 
@@ -391,7 +411,7 @@ public sealed class CommandExecutionService(
                     cmd.CommandId, cmd.CommandText, resolutionError);
                 await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: resolutionError);
-                await TryNotifySessionCompletedAsync(cmd);
+                await CompleteClaimedCommandAsync(cmd);
                 return;
             }
 
@@ -452,7 +472,7 @@ public sealed class CommandExecutionService(
                 await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
                 logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
                     cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
-                await TryNotifySessionCompletedAsync(cmd);
+                await CompleteClaimedCommandAsync(cmd);
             }
             else if (errorMessage != null)
             {
@@ -621,23 +641,23 @@ public sealed class CommandExecutionService(
             logger.LogWarning(ex, "Command {Cmd} ({Id}) failed (attempt {Attempt}/{Max}), retry at {Next}. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt.ToString("O"), errorMessage);
+            await CompleteClaimedCommandAsync(cmd);
         }
         else
         {
             await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
-            await TryNotifySessionCompletedAsync(cmd);
+            await CompleteClaimedCommandAsync(cmd);
         }
     }
 
     /// <summary>
-    /// Декрементирует in-memory счётчик сессии.
-    /// Когда счётчик достигает 0 — проверяет в БД, не осталось ли ещё pending/processing команд.
-    /// Если в БД ничего не осталось — сессия действительно завершена, отправляет уведомление.
-    /// Если в БД ещё есть команды — убирает ключ (следующий batch установит новый счётчик).
+    /// Декрементирует in-memory счётчик сессии после выхода захваченной команды из processing.
+    /// Если текущий batch по сессии закончился, БД остаётся источником истины: retry-команды
+    /// снова pending, поэтому уведомление отправляется только когда pending/processing уже нет.
     /// </summary>
-    private async Task TryNotifySessionCompletedAsync(PendingCommand cmd)
+    private async Task CompleteClaimedCommandAsync(PendingCommand cmd)
     {
         // AddOrUpdate атомарен: каждая команда видит уникальное значение счетчика.
         // Только поток, получивший 0, проверяет БД на предмет окончания сессии.

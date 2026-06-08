@@ -34,7 +34,7 @@ There are no automated tests in this project.
 | `TelegramBot.Core` | Models, DTOs, interfaces, config, constants (`net10.0`) | None (no Telegram SDK) |
 | `TelegramBot.Data` | PostgreSQL persistence (Dapper + Npgsql, `net10.0`) | Core |
 | `TelegramBot.Server` | Telegram bot, handlers, hosting, helpers (`net10.0`) | Core + Data |
-| `TelegramBot.Worker` | Async task execution (Revit/Navisworks/AI), LISTEN/NOTIFY + BimLib (`net10.0`) | Core + Data |
+| `TelegramBot.Worker` | Async task execution (Revit/Navisworks/AI), PostgreSQL polling queue + BimLib (`net10.0`) | Core + Data |
 
 ## Configuration
 
@@ -81,7 +81,7 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 
 **`FileSystemBrowser`** — Filesystem navigation keyboard builder. Concrete class (interface `IFileSystemBrowser` was removed — no testability need).
 
-**`SlashCommandService`** — Handles text commands (`/start`, `/help`, `/export`, `/automation`, `/status`), reply keyboard actions (Apply, Confirm, Back, Cancel), and file selection flow. `/status` now shows all users' sessions globally with `[username]` label.
+**`SlashCommandService`** — Handles text commands (`/start`, `/help`, `/export`, `/automation`, `/status`), reply keyboard actions (Apply, Confirm, Back, Cancel), and file selection flow. `/status` now shows all users' sessions globally with `[username]` label. File submission enforces `RateLimit:MaxFilesPerUserPerDay` before creating a session.
 
 **`CallbackDispatcher`** — Chain of Responsibility dispatcher implementing `ICallbackDispatcher`. Routes callback queries to the first `ICallbackHandler` that `CanHandle()` the prefix. Handlers sorted by `Priority` (lower = first):
 
@@ -91,7 +91,7 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 | `FileNavigationHandler` | 10 | `GOTOPARENT:` |
 | `FileSelectionHandler` | 20 | `FILE:` |
 | `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` |
-| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:` |
+| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:` |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
 
 All handlers extend `CallbackHandlerBase` and use `CommandCatalog.TryGetByPrefix()` for prefix matching.
@@ -113,7 +113,7 @@ Use `CallbackDataParser.Parse(callbackData)` (from `ParsedCallback.cs`) to get a
 | `TelegramUpdateMapper` | Server/Services/Infrastructure/Telegram | Maps Update to MessageDto/CallbackQueryDto |
 | `TelegramBotHostedService` | Server/Services/Infrastructure/Telegram | Polling loop, cleanup, bot commands setup |
 | `PostgresDataService` | Data | All DB persistence via Dapper + Npgsql |
-| `CommandExecutionService` | Worker/Services | LISTEN/NOTIFY queue, command execution (Revit/Navisworks/AI) |
+| `CommandExecutionService` | Worker/Services | PostgreSQL polling queue, command execution (Revit/Navisworks/AI), retry/lease cleanup, inactive session auto-cleanup |
 | `MarkdownHelper` | Server/Helpers | Unified Markdown escaping (MarkdownV2 + Markdown) |
 
 ### Database (PostgreSQL)
@@ -122,9 +122,9 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking 
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
 All queries use Dapper with parameterized SQL. SQL constants are in `TelegramBot.Data/Sql/` (4 partial files). Connection creation is unified via `CreateConnectionAsync()` in `PostgresDataService`.
 
-### Task Queue (PostgreSQL LISTEN/NOTIFY)
+### Task Queue
 
-Server уведомляет Worker-ов о новых командах через `NOTIFY new_command` после INSERT в Commands. Worker использует `NpgsqlConnection.WaitAsync()` для мгновенного пробуждения. Fallback poll — 1 минута.
+Server creates pending commands in PostgreSQL. Worker polls the queue once per minute and claims work with `FOR UPDATE SKIP LOCKED`. Session completion notifications use PostgreSQL `NOTIFY command_completed`; messages include duration (`MIN(StartedAt)` to `MAX(CompletedAt)`) and failed file names. Worker auto-cleanup soft-deletes inactive sessions older than `Worker:CompletedSessionRetentionDays`.
 
 Worker-сервисы (`CommandExecutionService`, `HealthCheckServer`) используют `NpgsqlHelper.CreateOpenConnectionAsync()` для единообразного создания подключений.
 
@@ -144,7 +144,7 @@ Serilog configured via `appsettings.json`. Supports Console and Seq (`http://loc
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1375 symbols, 3470 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1380 symbols, 3479 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

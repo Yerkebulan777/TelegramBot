@@ -18,7 +18,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
 - **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (4 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
-- **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
+- **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Polls PostgreSQL for pending commands. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
 
 > **Note:** BimLib is **not a separate project** — it lives as a directory inside Worker (`TelegramBot.Worker/BimLib/`). Namespaces remain `TelegramBot.BimLib.*`. OpenMcdf dependency is in Worker's `.csproj`.
 
@@ -59,6 +59,8 @@ dotnet format TelegramBot.slnx
   - `TelegramBot:AdminUserIds` — long[] of admin Telegram IDs (also settable via `TelegramBot__AdminUserIds__0`, `__1`, etc.)
   - `FileSystem:RootPath` — filesystem browser root (validated on startup via `FileSystemOptions`)
   - `ConnectionStrings:Postgres` — PostgreSQL connection string (defaults to `"Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"`)
+  - `RateLimit:MaxFilesPerUserPerDay` — daily per-user file quota; `0` disables it
+  - `Worker:CompletedSessionRetentionDays` — auto-cleanup retention for inactive sessions; `0` disables it
 
 ---
 
@@ -147,16 +149,14 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 SlashCommandService.ConfirmFileSelectionAsync()
     │
     ├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Commands (ProjectName)
-    └── dataService.NotifyNewCommandsAsync() ---------- NOTIFY new_command
-                                                              │
-                   ┌──────────────────────────────────────────┘
-                   ▼
+    │
+    ▼
     CommandExecutionService (Worker)
-        conn.WaitAsync() -- просыпается мгновенно
+        periodic poll (1 мин)
         dataService.ClaimPendingCommandsAsync() -- FOR UPDATE SKIP LOCKED
         ExecuteOneAsync(cmd) -- запуск Revit/Navisworks/AI
         dataService.UpdateCommandStatusAsync() -- UPDATE Status='Done'/'Failed'
-        TryNotifySessionCompletedAsync() -- только для последней команды сессии
+        CompleteClaimedCommandAsync() -- декремент batch-счётчика + проверка финальности по БД
             └── dataService.NotifyCommandCompletedAsync() -- NOTIFY command_completed
                                                               │
                    ┌──────────────────────────────────────────┘
@@ -168,10 +168,11 @@ SlashCommandService.ConfirmFileSelectionAsync()
 ```
 
 **In-memory счётчик сессий:** вместо per-command SQL запроса `GetSessionProgressAsync`
-Worker использует `ConcurrentDictionary<int, int> _sessionRemaining`.
+Worker использует `ConcurrentDictionary<int, int> _sessionRemaining` как batch-local оптимизацию.
 При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`,
-при завершении каждой команды атомарно декрементится через `AddOrUpdate`.
-Уведомление отправляется только когда `remaining == 0`.
+при каждом выходе захваченной команды из `processing` (Done/Failed/retry) атомарно декрементится через `AddOrUpdate`.
+Уведомление отправляется только когда `remaining == 0` и БД подтверждает, что в сессии больше нет `pending`/`processing`.
+Сводка `command_completed` включает длительность сессии (`MIN(StartedAt)` → `MAX(CompletedAt)`) и список ошибочных файлов.
 
 DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker uses `PostgresDataService` registered directly in `Program.cs`.
 
@@ -187,13 +188,13 @@ Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler`
 
 Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. 
 
-> **SessionManagementHandler** manages `/status` actions via `SESSIONDETAILS:`, `DELETESESSION:`, and `DELETECOMMAND:`. The «⛔ Отменить» button for a running command uses the same soft-delete path as command deletion: `Status = 'Deleted'`.
+> **SessionManagementHandler** manages `/status` actions via `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, and `CONFIRMDELETECOMMAND:`. Delete buttons first show a confirmation dialog; the «⛔ Отменить» button for a running command uses the same soft-delete path as command deletion: `Status = 'Deleted'`.
 
 For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 
-Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking is fully DB-backed — no in-memory state. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
+Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking is fully DB-backed — no in-memory state. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`. Worker auto-cleanup also uses soft-delete for inactive sessions older than `Worker:CompletedSessionRetentionDays`.
 
 **`Sessions` table now includes `ProjectName TEXT`** — имя проекта записывается при создании сессии,
 отображается в `/status` и в уведомлениях о завершении.
@@ -201,7 +202,7 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking 
 **`GetCommandStatusAsync` removed** — was dead code. Deleted commands never appear as `'pending'`
 in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant.
 
-**`CountPendingProcessingBySessionAsync` added** — используется в `TryNotifySessionCompletedAsync`
+**`CountPendingProcessingBySessionAsync` added** — используется в `CompleteClaimedCommandAsync`
 для проверки, не осталось ли ещё pending/processing команд в БД (корректно обрабатывает случай,
 когда команд в сессии > DefaultBatchSize).
 
@@ -343,7 +344,7 @@ Namespaces must match folder structure:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1375 symbols, 3470 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1380 symbols, 3479 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

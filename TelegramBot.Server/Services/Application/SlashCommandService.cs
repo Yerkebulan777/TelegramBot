@@ -20,6 +20,7 @@ public sealed class SlashCommandService(
     ITelegramOutputService outputService,
     IKeyboardBuilder keyboardBuilder,
     IOptions<FileSystemOptions> fileSystemOptions,
+    IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger) : ISlashCommandService
 {
     private static readonly Dictionary<string, int> CommandPriorityMap = new(StringComparer.OrdinalIgnoreCase)
@@ -34,6 +35,7 @@ public sealed class SlashCommandService(
     };
 
     private readonly FileSystemOptions _options = fileSystemOptions.Value;
+    private readonly RateLimitOptions _rateLimitOptions = rateLimitOptions.Value;
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
@@ -272,6 +274,11 @@ public sealed class SlashCommandService(
             return;
         }
 
+        if (!await CheckDailyFileLimitAsync(userId, session, filesToProcess.Count))
+        {
+            return;
+        }
+
         // Проверяем, нет ли уже таких же (команда + файл) в очереди
         if (await dataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
         {
@@ -297,6 +304,34 @@ public sealed class SlashCommandService(
         session.IsFileSelectionActive = false;
 
         await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
+    }
+
+    private async Task<bool> CheckDailyFileLimitAsync(long userId, UserSession session, int newFileCount)
+    {
+        if (_rateLimitOptions.MaxFilesPerUserPerDay <= 0)
+        {
+            return true;
+        }
+
+        var sinceUtc = DateTime.UtcNow.AddDays(-1);
+        var queuedToday = await dataService.CountQueuedFilesByUserSinceAsync(userId, sinceUtc);
+        var remaining = _rateLimitOptions.MaxFilesPerUserPerDay - queuedToday;
+
+        if (newFileCount <= remaining)
+        {
+            return true;
+        }
+
+        logger.LogWarning(
+            "Job submit blocked: user={UserId}, reason=daily_file_limit, queued={Queued}, requested={Requested}, limit={Limit}",
+            userId, queuedToday, newFileCount, _rateLimitOptions.MaxFilesPerUserPerDay);
+
+        var message = remaining > 0
+            ? $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. Уже в очереди за 24 часа: {queuedToday}. Можно добавить ещё {remaining}."
+            : $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. За последние 24 часа лимит уже исчерпан.";
+
+        await SendWarningAndCleanupAsync(userId, session, message);
+        return false;
     }
 
     private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)

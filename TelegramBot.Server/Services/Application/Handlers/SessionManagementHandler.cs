@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
@@ -15,7 +16,9 @@ public sealed class SessionManagementHandler(
     [
         CallbackPrefixes.SessionDetails,
         CallbackPrefixes.DeleteSession,
-        CallbackPrefixes.DeleteCommand
+        CallbackPrefixes.DeleteCommand,
+        CallbackPrefixes.ConfirmDeleteSession,
+        CallbackPrefixes.ConfirmDeleteCommand
     ];
 
     /// <summary>Проверяет, имеет ли пользователь доступ (все одобренные могут управлять любыми сессиями).</summary>
@@ -44,8 +47,10 @@ public sealed class SessionManagementHandler(
         return context.ParsedCallback.Prefix switch
         {
             CallbackPrefixes.SessionDetails => await HandleSessionDetailsAsync(context, cancellationToken),
-            CallbackPrefixes.DeleteSession => await HandleDeleteSessionAsync(context, cancellationToken),
-            CallbackPrefixes.DeleteCommand => await HandleDeleteCommandAsync(context, cancellationToken),
+            CallbackPrefixes.DeleteSession => await HandleDeleteSessionConfirmationAsync(context, cancellationToken),
+            CallbackPrefixes.DeleteCommand => await HandleDeleteCommandConfirmationAsync(context, cancellationToken),
+            CallbackPrefixes.ConfirmDeleteSession => await HandleDeleteSessionAsync(context, cancellationToken),
+            CallbackPrefixes.ConfirmDeleteCommand => await HandleDeleteCommandAsync(context, cancellationToken),
             _ => false
         };
     }
@@ -73,11 +78,37 @@ public sealed class SessionManagementHandler(
             Logger.LogInformation("{Username} view cmds {SessionId}", context.Username, sessionId);
             session.IsInStatusView = true;
 
+            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId);
             var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId);
             var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
-            await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;
         }
+
+        return true;
+    }
+
+    private async Task<bool> HandleDeleteSessionConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
+    {
+        if (!TryParseId(context, out var sessionId))
+            return true;
+
+        Logger.LogInformation("{Username} requested delete confirmation for session {SessionId}", context.Username, sessionId);
+        context.Session.IsInStatusView = true;
+
+        var keyboard = new InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{CallbackPrefixes.ConfirmDeleteSession}{sessionId}"),
+                InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId}")
+            ]
+        ]);
+
+        await outputService.EditMessageTextWithKeyboardAsync(
+            context.UserId,
+            context.MessageId,
+            $"Удалить сессию #{sessionId} и все её команды?",
+            keyboard);
 
         return true;
     }
@@ -100,6 +131,39 @@ public sealed class SessionManagementHandler(
 
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
+
+        return true;
+    }
+
+    private async Task<bool> HandleDeleteCommandConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
+    {
+        if (!TryParseId(context, out var commandId))
+            return true;
+
+        var isAdmin = await CanManageAsync(context.UserId);
+        var sessionId = await dataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
+        if (!sessionId.HasValue)
+        {
+            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
+            return true;
+        }
+
+        Logger.LogInformation("{Username} requested delete confirmation for command {CommandId}", context.Username, commandId);
+        context.Session.IsInStatusView = false;
+
+        var keyboard = new InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{CallbackPrefixes.ConfirmDeleteCommand}{commandId}"),
+                InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId.Value}")
+            ]
+        ]);
+
+        await outputService.EditMessageTextWithKeyboardAsync(
+            context.UserId,
+            context.MessageId,
+            $"Удалить команду #{commandId}?",
+            keyboard);
 
         return true;
     }
@@ -138,9 +202,10 @@ public sealed class SessionManagementHandler(
         }
         else
         {
+            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId.Value);
             var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId.Value);
             var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId.Value);
-            await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, newKeyboard);
+            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), newKeyboard);
         }
 
         return true;

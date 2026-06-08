@@ -22,6 +22,12 @@ public sealed class WorkerOptions
     public int RetryDelayBaseSeconds { get; set; } = 60;
 
     /// <summary>
+    /// Через сколько дней автоматически скрывать сессии без pending/processing команд.
+    /// Значение 0 или меньше отключает автоочистку.
+    /// </summary>
+    public int CompletedSessionRetentionDays { get; set; } = 30;
+
+    /// <summary>
     /// Партиции: ключ — максимальный Priority threshold (чем меньше Priority, тем выше приоритет),
     /// значение — максимальное количество одновременных процессов.
     /// Команда попадает в первый threshold >= Priority.

@@ -35,7 +35,7 @@
 | **Competing Consumers** | Параллельная обработка (FOR UPDATE SKIP LOCKED) | Несколько Worker-ов конкурируют за команды, каждая выполняется ровно одним |
 | **Polling** | Очередь задач (Task.Delay) | Worker просыпается каждую минуту для проверки новых команд. Server получает уведомления через `command_completed` |
 | **Bulkhead (изоляция)** | Priority-based партиции (`SemaphoreSlim`) | Каждый уровень приоритета имеет изолированный пул слотов |
-| **Circuit Breaker** | Reconnect loop + fallback poll | При потере соединения — пауза 5 сек, затем восстановление |
+| **Recovery loop** | Polling + обработка ошибок batch-а | При временной ошибке Worker логирует сбой и продолжает следующий цикл |
 | **Retry with Exponential Backoff** | Повторные попытки (`MaxRetries=5`) | Задержка растёт экспоненциально: 60s → 120s → 240s → 480s → 960s |
 | **Lease (аренда)** | Защита от сбоев воркеров (`Lease` + `StartedAt`) | Команда «арендуется» на время выполнения; при сбое воркера возвращается в очередь |
 | **Soft Delete** | Логическое удаление (`Status = 'Deleted'`) | Строки никогда не удаляются физически |
@@ -732,16 +732,15 @@ Worker ведёт in-memory счётчик вместо per-command SQL запр
 ```csharp
 private readonly ConcurrentDictionary<int, int> _sessionRemaining = new();
 
-// При ClaimPendingCommandsAsync — заполняем
-_sessionRemaining.Clear();
+// При ClaimPendingCommandsAsync — добавляем claimed-команды текущего batch-а
 foreach (var group in claimed.GroupBy(c => c.SessionId))
-    _sessionRemaining.TryAdd(group.Key, group.Count());
+    _sessionRemaining.AddOrUpdate(group.Key, group.Count(), (_, existing) => existing + group.Count());
 
-// При завершении каждой команды — TryNotifySessionCompletedAsync
+// При выходе каждой захваченной команды из processing — CompleteClaimedCommandAsync
 var newRemaining = _sessionRemaining.AddOrUpdate(
     cmd.SessionId, _ => 0, (_, current) => current - 1);
 
-if (newRemaining == 0) // последняя команда → шлём уведомление
+if (newRemaining == 0) // batch по сессии закончился → проверяем БД
 {
     // Проверяем БД на предмет оставшихся pending/processing команд
     var remainingInDb = await dataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
@@ -757,12 +756,24 @@ if (newRemaining == 0) // последняя команда → шлём уве�
 **Преимущества:**
 - Нет per-command SQL запросов (удалён `GetSessionProgressAsync`)
 - Атомарный `AddOrUpdate` — только один поток отправляет уведомление
-- `CountPendingProcessingBySessionAsync` корректно обрабатывает случай, когда команд в сессии > DefaultBatchSize
+- Retry тоже декрементит счётчик текущего claim-а; сама команда снова становится `pending`, поэтому уведомление не уйдёт до следующей проверки БД
+- `CountPendingProcessingBySessionAsync` корректно обрабатывает случай, когда команд в сессии > DefaultBatchSize, retry и несколько Worker-процессов
 - Lock-free, не требует блокировок
 
-### Запрос списка Failed-файлов (Server side)
+### Запрос длительности и списка Failed-файлов (Server side)
 
 При получении NOTIFY `CommandNotificationService` проверяет `failed = total - done`.
+Сначала запрашивается длительность сессии:
+
+```sql
+SELECT EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))::int
+FROM Commands
+WHERE SessionId = @SessionId
+  AND Status != 'Deleted'
+  AND StartedAt IS NOT NULL
+  AND CompletedAt IS NOT NULL;
+```
+
 Если есть ошибки — открывает отдельное подключение и запрашивает имена файлов:
 
 ```sql
@@ -777,15 +788,17 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 
 ### Отправка
 
-**Сторона Worker** (`CommandExecutionService.TryNotifySessionCompletedAsync`):
-- Вызывается после `UpdateCommandStatusAsync(Done)` и после exhaustion retry (`Failed`)
-- Декрементит in-memory счётчик `_sessionRemaining`
-- Если `newRemaining == 0` — запрашивает `GetSessionsStatusAsync` и шлёт `NotifyCommandCompletedAsync`
-- Промежуточные команды и retry не отправляют уведомлений
+**Сторона Worker** (`CommandExecutionService.CompleteClaimedCommandAsync`):
+- Вызывается после `Done`, `Failed`, unknown/invalid command и после планирования retry
+- Декрементит in-memory счётчик `_sessionRemaining` для текущего claim-а
+- Если `newRemaining == 0` — проверяет `CountPendingProcessingBySessionAsync`
+- Если в БД нет `pending`/`processing` — запрашивает `GetSessionsStatusAsync` и шлёт `NotifyCommandCompletedAsync`
+- Промежуточные команды и retry не отправляют пользовательских уведомлений
 
 **Сторона Server** (`CommandNotificationService`):
 - `BackgroundService`, подписан на `LISTEN command_completed`
-- При получении NOTIFY парсит payload через `Split('|', 10)`
+- При получении NOTIFY парсит payload через `Split('|', 5)`
+- Запрашивает длительность сессии по `MIN(StartedAt)` / `MAX(CompletedAt)`
 - Если `failed > 0` — запрашивает Failed-файлы из БД
 - Отправляет сводку через `ITelegramOutputService.SendMessageAsync()`
 - Markdown-форматирование не используется (plain text)
@@ -802,6 +815,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 | `ProcessTimeoutSeconds` | `WorkerOptions.ProcessTimeoutSeconds` | 10800 (3 часа) | Максимальное время выполнения команды |
 | `MaxRetries` | `WorkerOptions.MaxRetries` | 5 | Максимальное количество попыток retry |
 | `RetryDelayBaseSeconds` | `WorkerOptions.RetryDelayBaseSeconds` | 60 | Базовая задержка для экспоненциального backoff |
+| `CompletedSessionRetentionDays` | `WorkerOptions.CompletedSessionRetentionDays` | 30 | Через сколько дней мягко удалять старые сессии без `pending`/`processing`; `0` отключает автоочистку |
 | `CleanupIntervalSec` | константа | 60 | Интервал очистки истёкших Lease |
 | `HealthCheckIntervalSec` | константа | 30 | Интервал мониторинга здоровья процессов |
 | `FallbackTimeoutSec` | константа | 60 (1 мин) | Интервал поллинга очереди |
@@ -816,6 +830,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
   },
   "Worker": {
     "ProcessTimeoutSeconds": 10800,
+    "CompletedSessionRetentionDays": 30,
     "Partitions": {
       "1": 3,
       "2": 5,
@@ -918,11 +933,10 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
         │     внутри неё — несколько Команд (Commands)
         │     Статус каждой команды: 'pending' (ждёт очереди)
         ▼
-Шаг 3: Server шлёт сигнал «NOTIFY new_command»
-        │     (как крикнуть «Эй, есть работа!»)
+Шаг 3: Worker просыпается по таймеру
+        │     (раз в минуту проверяет очередь)
         ▼
-Шаг 4: Worker слышит сигнал, просыпается и
-        │     забирает pending-команды себе
+Шаг 4: Worker забирает pending-команды себе
         │     Статус: 'processing' (выполняется)
         ▼
 Шаг 5: Worker запускает Revit (или другую программу)
@@ -948,15 +962,19 @@ UPDATE Commands SET Status = 'Deleted' WHERE ...
 - Можно посмотреть историю: кто, когда и что делал
 - Данные остаются для статистики и отладки
 
-#### LISTEN/NOTIFY — как рация
+#### Polling — простая проверка очереди
 
-Представьте, что Server и Worker — это два человека с рациями:
-- **NOTIFY** = Server нажимает кнопку на рации и кричит: «Новая работа!»
-- **LISTEN** = Worker держит рацию включённой и ждёт сигнала
+Worker не ждёт отдельный `new_command` сигнал. Он раз в минуту проверяет PostgreSQL:
 
-Это гораздо быстрее, чем если бы Worker каждые 5 секунд проверял: «Ну что, есть работа? Есть работа?»
+```sql
+SELECT ...
+FROM Commands
+WHERE Status = 'pending'
+ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC
+FOR UPDATE SKIP LOCKED;
+```
 
-**Важно:** Если сигнал потерялся — Worker всё равно раз в 1 минуту проверяет очередь сам (это называется **fallback poll**).
+Это проще текущих требований: нет отдельной подписки Worker-а на `new_command`, а конкурентность обеспечивается SQL-блокировками.
 
 #### FOR UPDATE SKIP LOCKED — очередь в магазине
 
@@ -1129,9 +1147,10 @@ WHERE CommandId = @CommandId
 | **Lease (долгий TTL)** | Lease устанавливается на `ProcessTimeoutSeconds + 5 мин`, команда не вернётся в очередь раньше таймаута |
 | **Валидация FilePath** | Проверка существования, расширения (из `AllowedExtensions`) и защита от path traversal перед запуском процесса |
 | **Асинхронное чтение stdout/stderr** | Предотвращает deadlock при заполнении буфера вывода (64KB) |
-| **Уведомления пользователей** | Worker шлёт NOTIFY `command_completed`, Server (`CommandNotificationService`) слушает и отправляет Telegram-сообщение через `ITelegramOutputService` |
-| **Отмена команд** | Пользователь отменяет команду через UI `/status` → кнопку «⛔ Отменить». Server выполняет soft-delete (`Status = 'Deleted'`), а Worker не перезаписывает `Deleted` после завершения процесса |
-| **Fallback poll** | Если NOTIFY потерян — проверка каждую минуту (safety net) |
+| **Уведомления пользователей** | Worker шлёт NOTIFY `command_completed`, Server (`CommandNotificationService`) слушает и отправляет Telegram-сообщение через `ITelegramOutputService` с длительностью сессии и списком ошибочных файлов |
+| **Отмена команд** | Пользователь отменяет команду через UI `/status` → кнопку «⛔ Отменить». Server показывает подтверждение и выполняет soft-delete (`Status = 'Deleted'`), а Worker не перезаписывает `Deleted` после завершения процесса |
+| **Автоочистка сессий** | Worker мягко удаляет старые сессии без `pending`/`processing` старше `CompletedSessionRetentionDays` |
+| **Polling queue** | Worker проверяет очередь каждую минуту без `new_command LISTEN/NOTIFY` |
 
 ---
 
@@ -1326,10 +1345,10 @@ ORDER BY "CreatedAt" DESC
 LIMIT 20;
 ```
 
-**Проверка подписки на уведомления:**
+**Проверка подписки Server на уведомления о завершении:**
 ```sql
 SELECT * FROM pg_listening_channels();
--- Должен вернуть 'new_command' (Worker) и 'command_completed' (Server)
+-- Для Server должен вернуть 'command_completed'
 ```
 
 **Мониторинг процессов (активные PID):**
@@ -1362,7 +1381,7 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 | 5 | **Трекинг PID** | ProcessId сохраняется для мониторинга и принудительного завершения |
 | 6 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
 | 7 | **Shutdown Worker** | Graceful shutdown для внешних процессов не реализуется; остановка Worker не является отдельным сценарием завершения Revit/Navisworks |
-| 8 | **Fallback poll** | Если NOTIFY потерян — проверка каждую минуту |
+| 8 | **Polling queue** | Worker проверяет очередь каждую минуту без `new_command LISTEN/NOTIFY` |
 | 9 | **Восстановление** | При перезапуске Worker очищает истёкшие Lease и продолжает обработку |
 | 10 | **Наблюдаемость** | Диагностические запросы показывают актуальное состояние (PID, Lease, длительность) |
 | 11 | **Отмена команд** | Пользователь может отменить команду через `/status`. Server мягко удаляет команду (`Status = 'Deleted'`), а Worker не перезаписывает этот статус после завершения процесса |

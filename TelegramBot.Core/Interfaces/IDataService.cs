@@ -30,6 +30,9 @@ public interface IDataService
     /// <summary>Возвращает список всех сессий (глобальный статус).</summary>
     Task<List<SessionsList>> GetSessionsListAsync();
 
+    /// <summary>Считает количество файлов, поставленных пользователем в очередь начиная с указанного времени.</summary>
+    Task<int> CountQueuedFilesByUserSinceAsync(long userId, DateTime sinceUtc);
+
     /// <summary>Возвращает статус сессии.</summary>
     Task<SessionStatus> GetSessionsStatusAsync(int sessionId);
 
@@ -76,6 +79,9 @@ public interface IDataService
 
     /// <summary>Освобождает команды с истёкшим таймаутом выполнения.</summary>
     Task ReleaseTimeoutCommandsAsync(int timeoutSeconds);
+
+    /// <summary>Мягко удаляет старые сессии без pending/processing команд и возвращает их количество.</summary>
+    Task<int> SoftDeleteInactiveSessionsOlderThanAsync(DateTime cutoffUtc);
 
     /// <summary>Возвращает команду по ID. Любой одобренный пользователь может запрашивать любую команду.</summary>
     Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId, bool isAdmin = false);

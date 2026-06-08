@@ -28,6 +28,13 @@ internal static partial class SqlQueries
             ORDER BY s.CreatedAt DESC
             LIMIT 20;";
 
+        internal const string CountQueuedFilesByUserSince = @"
+            SELECT COALESCE(SUM(FilesAmount), 0)::int
+            FROM Sessions
+            WHERE UserId = @UserId
+              AND Status != 'Deleted'
+              AND CreatedAt >= @SinceUtc;";
+
         internal const string GetStatus = @"
             SELECT
                 s.Status,
@@ -46,5 +53,30 @@ internal static partial class SqlQueries
             UPDATE Sessions SET Status = 'Deleted'
             WHERE SessionId = @SessionId
               AND (UserId = @UserId OR @IsAdmin = true);";
+
+        internal const string SoftDeleteInactiveOlderThan = @"
+            WITH deleted_sessions AS (
+                UPDATE Sessions s
+                SET Status = 'Deleted',
+                    UpdatedAt = NOW()
+                WHERE s.Status != 'Deleted'
+                  AND s.CreatedAt < @CutoffUtc
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM Commands c
+                      WHERE c.SessionId = s.SessionId
+                        AND c.Status IN ('pending', 'processing')
+                  )
+                RETURNING s.SessionId
+            ),
+            deleted_commands AS (
+                UPDATE Commands c
+                SET Status = 'Deleted'
+                FROM deleted_sessions ds
+                WHERE c.SessionId = ds.SessionId
+                  AND c.Status != 'Deleted'
+                RETURNING c.CommandId
+            )
+            SELECT COUNT(*)::int FROM deleted_sessions;";
     }
 }

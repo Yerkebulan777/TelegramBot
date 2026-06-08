@@ -94,6 +94,12 @@ public sealed class CommandNotificationService(
                 return;
             }
 
+            if (!int.TryParse(parts[1], out var sessionId))
+            {
+                logger.LogWarning("Completion notify ignored: reason=invalid_session");
+                return;
+            }
+
             if (!int.TryParse(parts[2], out var done) || !int.TryParse(parts[3], out var total) || total == 0)
             {
                 return;
@@ -102,24 +108,25 @@ public sealed class CommandNotificationService(
             var projectName = parts.Length > 4 ? parts[4] : null;
             var prefix = string.IsNullOrEmpty(projectName) ? "" : $"{projectName} — ";
             var failed = total - done;
+            var durationPrefix = await GetDurationPrefixAsync(sessionId);
 
             var summary = new StringBuilder();
 
             if (failed == 0)
             {
-                summary.Append($"✅ {prefix}сессия завершена — все {done} файлов обработано");
+                summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {done} файлов обработано");
             }
             else if (done == 0)
             {
-                summary.Append($"❌ {prefix}сессия завершена — все {failed} файлов с ошибками");
+                summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {failed} файлов с ошибками");
             }
             else
             {
-                summary.Append($"⚠️ {prefix}сессия завершена: {done} ✅, {failed} ❌ из {total}");
+                summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {done} ✅, {failed} ❌ из {total}");
             }
 
             // Если есть ошибки — запрашиваем список файлов с ошибками
-            if (failed > 0 && int.TryParse(parts[1], out var sessionId))
+            if (failed > 0)
             {
                 try
                 {
@@ -149,5 +156,47 @@ public sealed class CommandNotificationService(
         {
             logger.LogError(ex, "Failed to process command_completed notification");
         }
+    }
+
+    private async Task<string> GetDurationPrefixAsync(int sessionId)
+    {
+        try
+        {
+            await using var queryConn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString);
+            var durationSeconds = await queryConn.QuerySingleOrDefaultAsync<int?>(@"
+                SELECT EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))::int
+                FROM Commands
+                WHERE SessionId = @SessionId
+                  AND Status != 'Deleted'
+                  AND StartedAt IS NOT NULL
+                  AND CompletedAt IS NOT NULL;",
+                new { SessionId = sessionId });
+
+            return durationSeconds is > 0
+                ? $"{FormatDuration(durationSeconds.Value)} — "
+                : "";
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to query duration for session {SessionId}", sessionId);
+            return "";
+        }
+    }
+
+    private static string FormatDuration(int totalSeconds)
+    {
+        var duration = TimeSpan.FromSeconds(totalSeconds);
+
+        if (duration.TotalHours >= 1)
+        {
+            return $"{(int)duration.TotalHours} ч {duration.Minutes:D2} мин";
+        }
+
+        if (duration.TotalMinutes >= 1)
+        {
+            return $"{duration.Minutes} мин {duration.Seconds:D2} с";
+        }
+
+        return $"{duration.Seconds} с";
     }
 }

@@ -119,6 +119,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return result.ToList();
     }
 
+    public async Task<int> CountQueuedFilesByUserSinceAsync(long userId, DateTime sinceUtc)
+    {
+        await using var conn = await CreateConnectionAsync();
+        return await conn.QuerySingleAsync<int>(
+            SqlQueries.Sessions.CountQueuedFilesByUserSince,
+            new { UserId = userId, SinceUtc = sinceUtc });
+    }
+
     public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
@@ -328,6 +336,30 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             conn => conn.ExecuteAsync(
                 SqlQueries.Commands.ReleaseTimeoutCommands,
                 new { TimeoutSeconds = timeoutSeconds }));
+    }
+
+    public async Task<int> SoftDeleteInactiveSessionsOlderThanAsync(DateTime cutoffUtc)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            var deletedCount = await conn.QuerySingleAsync<int>(
+                SqlQueries.Sessions.SoftDeleteInactiveOlderThan,
+                new { CutoffUtc = cutoffUtc });
+
+            if (deletedCount > 0)
+            {
+                logger.LogInformation("Auto-cleaned inactive sessions: count={Count}, cutoff={CutoffUtc}",
+                    deletedCount, cutoffUtc);
+            }
+
+            return deletedCount;
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to auto-clean inactive sessions older than {CutoffUtc}", cutoffUtc);
+            return 0;
+        }
     }
 
     public async Task NotifyCommandCompletedAsync(long userId, int sessionId, int doneCount, int totalCount, string? projectName = null)

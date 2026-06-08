@@ -1,6 +1,6 @@
 # Telegram Bot Server
 
-Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin). Задачи выполняются асинхронно через отдельный Worker-процесс с использованием PostgreSQL LISTEN/NOTIFY.
+Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin). Задачи выполняются асинхронно через отдельный Worker-процесс с PostgreSQL-очередью и минутным polling.
 
 ## Документация
 
@@ -25,13 +25,14 @@ Telegram-бот для навигации по файловой системе �
 - Автоматизация: BIM-документирование, Clash Reports, AutoResolve
 - Запрос доступа и подтверждение администратором
 - Асинхронное выполнение задач в отдельном Worker-процессе (Revit, Navisworks, AI)
+- Дневной лимит файлов на пользователя и подтверждение перед удалением сессий/команд
 
 ## Технологии
 
 - **.NET 10** — целевая платформа (`net10.0`)
 - **Telegram.Bot 22.10.0.1** — клиент Telegram Bot API
 - **PostgreSQL** — хранение данных (Npgsql + Dapper 2.1.79)
-- **PostgreSQL LISTEN/NOTIFY** — очереди задач для Worker (мгновенная реакция)
+- **PostgreSQL queue + polling** — Worker забирает pending-команды из БД раз в минуту
 - **Serilog** — структурированное логирование (Console + Seq)
 - **OpenMcdf** — чтение OLE-потоков .rvt/.rfa-файлов (определение версии Revit)
 - **Windows Registry (Microsoft.Win32)** — поиск установленных Revit/Navisworks
@@ -120,7 +121,7 @@ TelegramBot/
 │   │   ├── Native/       # P/Invoke WinAPI (User32, Win32Consts)
 │   │   └── Services/     # RevitVersionDetector, RevitPathResolver, NavisworksPathResolver
 │   ├── Services/
-│   │   ├── CommandExecutionService.cs  # LISTEN/NOTIFY + выполнение задач
+│   │   ├── CommandExecutionService.cs  # polling очереди + выполнение задач
 │   │   └── BimLibLogFilter.cs          # Фильтр логов для BimLib
 │   ├── Program.cs
 │   └── appsettings.json
@@ -160,14 +161,11 @@ Server (создание сессии)
      │
      ├── INSERT INTO Commands (Status='pending') ──► PostgreSQL
      │
-     └── NOTIFY new_command ──► PostgreSQL
                                      │
                           ┌──────────┴──────────┐
                           ▼                     ▼
                     Worker №1              Worker №N
-                    (LISTEN new_command)   (LISTEN new_command)
-                          │
-                    conn.WaitAsync() — мгновенное пробуждение
+                    (poll 1 мин)       (poll 1 мин)
                           │
                     SELECT ... WHERE Status='pending'
                           │
@@ -184,7 +182,7 @@ Server (создание сессии)
                          PostgreSQL
 ```
 
-Worker автоматически переподключается при потере соединения с PostgreSQL и использует fallback poll (1 мин) на случай, если NOTIFY был потерян.
+Worker автоматически продолжает обработку через polling раз в минуту и скрывает старые неактивные сессии по `Worker:CompletedSessionRetentionDays`.
 
 ### BimLib (BIM Integration) — встроен в Worker
 
@@ -262,7 +260,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 
 | Сервис | Расположение | Ответственность |
 |--------|-------------|-----------------|
-| `CommandExecutionService` | TelegramBot.Worker/Services | LISTEN/NOTIFY, выборка pending-команд, выполнение Revit/Navisworks/AI, in-memory счётчик сессий, мониторинг здоровья процессов, timeout/lease/crash recovery. Graceful shutdown для внешних процессов не нужен |
+| `CommandExecutionService` | TelegramBot.Worker/Services | Polling pending-команд, выполнение Revit/Navisworks/AI, in-memory счётчик batch-а с проверкой финальности по БД, мониторинг здоровья процессов, timeout/lease/crash recovery, автоочистка старых неактивных сессий. Graceful shutdown для внешних процессов не нужен |
 | `BimLibLogFilter` | TelegramBot.Worker/Services | Фильтр логов для BimLib-событий (отдельный файл для BIM-специфичных логов) |
 
 ### Обработчики callback-ов (Chain of Responsibility)
@@ -275,7 +273,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 | `FileNavigationHandler` | 10 | `GOTOPARENT:` | Навигация по файловой системе |
 | `FileSelectionHandler` | 20 | `FILE:` | Выбор файлов/проектов/секций (toggle) |
 | `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` | Переключение команд экспорта и автоматизации |
-| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:` | Управление сессиями и soft-delete команд |
+| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:` | Управление сессиями, подтверждение удаления и soft-delete команд |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` | Подтверждение/отмена выбора команд |
 
 ## База данных (PostgreSQL)
@@ -291,15 +289,15 @@ PostgreSQL-сервер, доступный по сети. Инициализа�
 | `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Deleted), `GUID`, `Lease`, `Priority`, `RetryCount`, `NextRetryAt` |
 Soft-delete — строки никогда не удаляются физически (статус `Deleted`).
 
-### Механизм очереди задач (LISTEN/NOTIFY)
+### Механизм очереди задач
 
-PostgreSQL `LISTEN/NOTIFY` используется для мгновенного уведомления Worker-ов о новых командах:
+Worker забирает pending-команды из PostgreSQL через polling:
 
-1. **Server** после `INSERT` команд в БД выполняет `NOTIFY new_command, '<sessionId>'`
-2. **Worker** при старте выполняет `LISTEN new_command`, ждёт через `NpgsqlConnection.WaitAsync()`
-3. При получении NOTIFY Worker мгновенно просыпается, выбирает pending-команды и выполняет их
-4. Если NOTIFY потерян — fallback poll через 1 минуту
-5. **Отмена команд** — пользователь через `/status` → кнопку «⛔ Отменить»; Server мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`.
+1. **Server** после подтверждения выбора создаёт `Sessions` и `Commands` со статусом `pending`
+2. **Worker** раз в минуту вызывает `ClaimPendingCommandsAsync`
+3. `FOR UPDATE SKIP LOCKED` позволяет нескольким Worker-ам безопасно конкурировать за команды
+4. **Отмена/удаление команд** — пользователь через `/status` → кнопку «⛔ Отменить» или «🗑»; Server сначала показывает подтверждение, затем мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`.
+5. **Уведомление о завершении** — после завершения всей сессии Worker шлёт `command_completed` через PostgreSQL `NOTIFY`, а Server отправляет пользователю сводку с длительностью сессии и списком ошибочных файлов.
 
 Несколько Worker-ов могут работать параллельно (competing consumers) — каждый берёт следующую команду из очереди.
 
@@ -324,9 +322,9 @@ PostgreSQL `LISTEN/NOTIFY` используется для мгновенног�
      ↓
 навигация по папкам (проект → секция) → выбор .rvt-файлов
      ↓
-APPLYFILES → создание сессии + команд в БД → NOTIFY → Worker выполняет
+APPLYFILES → дневной лимит файлов → создание сессии + команд в БД → Worker выполняет при следующем poll
      ↓
-/status → глобальный просмотр всех сессий (с `[username]`) → SESSIONDETAILS → DELETECOMMAND / DELETESESSION
+/status → глобальный просмотр всех сессий (с `[username]`) → SESSIONDETAILS → DELETECOMMAND / DELETESESSION → подтверждение
      ↓
 ⛔ Отменить → DELETECOMMAND → soft-delete в БД (`Status = 'Deleted'`)
 ```
@@ -349,6 +347,11 @@ Server:
   "ConnectionStrings": {
     "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
   },
+  "RateLimit": {
+    "MaxRequests": 30,
+    "WindowSeconds": 60,
+    "MaxFilesPerUserPerDay": 100
+  },
   "FileSystem": {
     "RvtDirectoryName": "01_RVT",
     "ProjectDirectoryName": "01_PROJECT",
@@ -368,6 +371,10 @@ Worker:
     "MinSupportedVersion": 2018,
     "MaxSupportedVersion": 2026,
     "RevitInstallRoot": "C:\\Program Files\\Autodesk"
+  },
+  "Worker": {
+    "ProcessTimeoutSeconds": 10800,
+    "CompletedSessionRetentionDays": 30
   }
 }
 ```
@@ -396,6 +403,11 @@ Worker:
 | `FileSystem:RevitFileExtension` | — | Расширение Revit-файлов (по умолчанию `.rvt`) |
 | `FileSystem:SectionFolderPattern` | — | Regex паттерн для папок секций |
 | `ConnectionStrings:Postgres` | `ConnectionStrings__Postgres` | PostgreSQL connection string (по умолч. `Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres`) |
+| `RateLimit:MaxRequests` | — | Максимум текстовых команд в sliding window |
+| `RateLimit:WindowSeconds` | — | Размер окна rate limit в секундах |
+| `RateLimit:MaxFilesPerUserPerDay` | — | Максимум файлов, которые один пользователь может поставить в очередь за 24 часа; `0` отключает лимит |
+| `Worker:ProcessTimeoutSeconds` | — | Максимальное время выполнения одной команды |
+| `Worker:CompletedSessionRetentionDays` | — | Через сколько дней Worker мягко удаляет старые сессии без `pending`/`processing`; `0` отключает автоочистку |
 | `BimIntegration:MinSupportedVersion` | — | Минимальная версия Revit для поиска в реестре (по умолчанию `2018`) |
 | `BimIntegration:MaxSupportedVersion` | — | Максимальная версия Revit для поиска в реестре (по умолчанию `2026`) |
 | `BimIntegration:RevitInstallRoot` | — | Корневая папка установки Autodesk Revit (по умолч. `C:\Program Files\Autodesk`) |
