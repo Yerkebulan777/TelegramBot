@@ -108,8 +108,9 @@
   `CommandNotificationService`.
 - [ ] **Статистика выполнения** — среднее время выполнения, процент успеха/ошибок по типам команд,
   по пользователям.
-- [ ] **Health checks** — эндпоинт `/health` для Worker (liveness + readiness). Необходимо для
-  Kubernetes/orchestration.
+- [ ] **Health checks** — эндпоинты `/health`, `/healthz`, `/readyz` для Worker (liveness + readiness).
+  HTTP-сервер на TcpListener (порт 5001, настраивается через `HealthCheck:Port`).
+  Readiness проверяет PostgreSQL (SELECT 1) с кешированием 5 сек и таймаутом 3 сек. ❌ Удалено — не используется (нет Docker/K8s).
 
 ---
 

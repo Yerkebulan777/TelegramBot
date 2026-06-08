@@ -4,23 +4,23 @@ Guidance for agentic coding agents working in this repository.
 
 ## Project Overview
 
-Telegram bot using long-polling, split into **5 projects**. No webhooks, no MVC controllers. All services are **Singletons**.
+Telegram bot using long-polling, split into **4 projects** (`.slnx`). No webhooks, no MVC controllers. All services are **Singletons**.
 
 ```
 TelegramBot.Core   ←──  TelegramBot.Data
        ↑                       ↑
        ├──── TelegramBot.Server ──┘
        │
-       ├──── TelegramBot.Worker (LISTEN/NOTIFY)
-       │
-       └──── TelegramBot.BimLib  (BIM-интеграция)
+       └──── TelegramBot.Worker
+                └── BimLib/ (BIM-интеграция)
 ```
 
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
 - **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (4 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
-- **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data + BimLib.
-- **TelegramBot.BimLib** — BIM integration library: Revit version detection, registry-based path resolution, process monitoring & dialog dismissal. Windows-only (P/Invoke). No project references (only NuGet).
+- **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
+
+> **Note:** BimLib was previously a separate project (`TelegramBot.BimLib`). During v1.2 refactoring it was moved into `TelegramBot.Worker/BimLib/` as a directory. Namespaces remain `TelegramBot.BimLib.*`. OpenMcdf dependency is in Worker's `.csproj`.
 
 ---
 
@@ -75,16 +75,15 @@ Telegram API -> TelegramBotHostedService (polling)
                 └── all other callbacks → user must be Approved
 ```
 
-### TelegramBot.BimLib — BIM Integration
+### BimLib (BIM Integration) — embedded in Worker
 
-BimLib is a **Windows-only** library that provides BIM-related infrastructure used by the Worker.
+BimLib is a **Windows-only** set of modules located inside the Worker project (`TelegramBot.Worker/BimLib/`). It provides BIM-related infrastructure used by `CommandExecutionService`.
 
 **Structure:**
 
 | Folder | Contents |
 |--------|----------|
 | `Config/` | `BimIntegrationOptions` — min/max supported Revit version, install root path |
-| `Extensions/` | `DependencyInjectionExtensions.AddBimIntegration()` — DI registration |
 | `Interfaces/` | `IRevitVersionDetector`, `INavisworksPathResolver` |
 | `Models/` | `RevitDetectedVersion`, `RevitProcessHealth` (status: Healthy/NotResponding/Error) |
 | `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `ProcessHealthHelper`, `DialogDismisser`, `WindowUtil`, `WindowInfo` |
@@ -103,15 +102,19 @@ BimLib is a **Windows-only** library that provides BIM-related infrastructure us
 | `ProcessHealthHelper` | Static helper for `CheckHealth()` — shared between both process trackers |
 | `DialogDismisser` | Auto-closes modal Revit dialogs (#32770) by finding and clicking known buttons |
 
-**DI registration:** In Worker's `Program.cs`, BimLib services are registered via:
+**DI registration:** BimLib services are registered directly in `Worker/Program.cs` (no separate `AddBimIntegration()` extension method):
 ```csharp
-services.AddBimIntegration();
+services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>();
+services.AddSingleton<RevitPathResolver>();
+services.AddSingleton<RevitProcessTracker>();
+services.AddSingleton<DialogDismisser>();
+services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>();
+services.AddSingleton<NavisworksProcessTracker>();
 ```
 Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 
 **Namespaces:**
 - `TelegramBot.BimLib.Config`
-- `TelegramBot.BimLib.Extensions`
 - `TelegramBot.BimLib.Interfaces`
 - `TelegramBot.BimLib.Models`
 - `TelegramBot.BimLib.Monitor`
@@ -126,6 +129,7 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 - `RevitProcessStatus` enum has only 3 values: `Healthy`, `NotResponding`, `Error`.
 - Removed interfaces (concrete classes only): `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` — they had no consumers outside BimLib.
 - `ProcessHealthHelper.CheckHealth()` provides shared health-check logic for both `RevitProcessTracker` and `NavisworksProcessTracker`.
+- BimLib is **not a separate project** — it lives as a directory inside Worker. No `TelegramBot.BimLib.csproj` exists.
 
 ### Shared Static Helpers
 
@@ -133,7 +137,7 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 |--------|----------|---------|
 | `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — универсальный метод для отправки reply-клавиатуры с трекингом сообщения, заменяет 3 дублированных метода |
 | `ProcessHealthHelper` | `BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общая логика проверки здоровья процесса для Revit и Navisworks |
-| `NpgsqlHelper` | `Worker/Services/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` — устраняет дублирование `new NpgsqlConnection + OpenAsync` в Worker-сервисах |
+| `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` — устраняет дублирование `new NpgsqlConnection + OpenAsync` |
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 

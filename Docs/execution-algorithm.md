@@ -127,9 +127,10 @@
 
 ---
 
-## TelegramBot.BimLib — библиотека BIM-интеграции
+## BimLib (BIM Integration) — встроен в Worker
 
-BimLib — **Windows-only** библиотека, используемая Worker-ом при выполнении Revit/Navisworks-команд.
+BimLib — **Windows-only** набор модулей, расположенный внутри Worker-проекта (`TelegramBot.Worker/BimLib/`).
+Используется `CommandExecutionService` при выполнении Revit/Navisworks-команд.
 
 ### Назначение
 
@@ -144,7 +145,7 @@ BimLib — **Windows-only** библиотека, используемая Worke
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    TelegramBot.BimLib                        │
+│           TelegramBot.Worker/BimLib/                        │
 ├──────────────────────────────────────────────────────────────┤
 │  Services/                                                    │
 │  ├── RevitVersionDetector  — OLE BasicFileInfo → "Format: YYYY"│
@@ -155,15 +156,22 @@ BimLib — **Windows-only** библиотека, используемая Worke
 │  ├── RevitProcessTracker     — отклик, диалоги, PID          │
 │  ├── NavisworksProcessTracker — трекинг Roamer/FileConvert    │
 │  ├── DialogDismisser         — автозакрытие #32770           │
+│  ├── ProcessHealthHelper     — общий хелпер CheckHealth()   │
 │  ├── WindowUtil              — Win32-утилиты (HWND, клики)    │
 │  └── WindowInfo              — информация об окне            │
 ├──────────────────────────────────────────────────────────────┤
 │  Native/ — P/Invoke WinAPI (User32, Win32Consts)             │
-│  Interfaces/ — 5 интерфейсов для слабой связанности         │
+│  Interfaces/ — 2 интерфейса: IRevitVersionDetector,         │
+│                INavisworksPathResolver                       │
 │  Models/ — RevitDetectedVersion, RevitProcessHealth          │
 │  Config/ — BimIntegrationOptions                             │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+> **Примечание:** BimLib — не отдельный проект. Это директория внутри Worker.
+> Ранее существовавшие интерфейсы `IRevitPathResolver`, `IRevitProcessTracker`,
+> `INavisworksProcessTracker` удалены — у них не было потребителей вне BimLib.
+> DI-регистрация выполняется напрямую в `Worker/Program.cs` (без `AddBimIntegration()`).
 
 ### Поток использования в Worker
 
@@ -187,16 +195,18 @@ CommandExecutionService (Worker)
 | Интерфейс | Методы | Назначение |
 |-----------|--------|------------|
 | `IRevitVersionDetector` | `DetectVersionAsync(filePath)` | Определить версию Revit по .rvt-файлу |
-| `IRevitPathResolver` | `GetInstalledVersions()`, `ResolveExecutablePath(year)` | Найти Revit.exe установленной версии |
 | `INavisworksPathResolver` | `GetInstalledVersions()`, `ResolveNavisworksPath(year)`, `ResolveFileConvertPath(year)` | Найти Navisworks.exe / FileConvert.exe |
-| `IRevitProcessTracker` | `GetAllRevitProcesses()`, `CheckHealth(process)`, `DismissDialogs(processId)` | Мониторинг Revit-процессов |
-| `INavisworksProcessTracker` | `GetAllProcesses()`, `CheckHealth(process)` | Мониторинг Navisworks-процессов |
 
 ### DI-регистрация
 
-В `Worker/Program.cs`:
+Сервисы BimLib регистрируются напрямую в `Worker/Program.cs`:
 ```csharp
-services.AddBimIntegration();
+services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>();
+services.AddSingleton<RevitPathResolver>();
+services.AddSingleton<RevitProcessTracker>();
+services.AddSingleton<DialogDismisser>();
+services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>();
+services.AddSingleton<NavisworksProcessTracker>();
 ```
 Требуется секция `BimIntegration` в `appsettings.json`:
 ```json
@@ -725,10 +735,8 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
    ```sql
    NOTIFY command_cancel, 'CommandId';
    ```
-4. Уведомление пользователя через Telegram: `⛔ Команда #{commandId} ({commandText}) отменена.`
-5. Обновление отображения сессии:
-   - Если остались активные команды — обновляется InlineKeyboard списка команд
-   - Если активных команд не осталось — показывается статус сессии с прогресс-баром
+4. Сброс состояния сессии и удаление всех отслеживаемых сообщений (silent cleanup,
+   никаких новых сообщений пользователю не выводится)
 
 ### Этап 3: Обработка отмены на стороне Worker
 
@@ -770,7 +778,7 @@ if (cmdCt.IsCancellationRequested)
 
 | Ситуация | Действие |
 |----------|----------|
-| Команда уже завершена (Done/Failed) | `CancelCommandAsync` возвращает false, пользователь видит сообщение «Не удалось отменить» |
+| Команда уже завершена (Done/Failed) | `CancelCommandAsync` возвращает false, пользователю ничего не выводится, все сообщения удаляются |
 | Команда принадлежит другому пользователю | `GetCommandByIdAsync` возвращает null, запрос игнорируется с предупреждением в лог |
 | NOTIFY не дошёл до Worker | Fallback poll каждые 5 мин + очистка истёкших Lease |
 | Worker не успел отменить CTS до завершения процесса | Проверка `cmdCt.IsCancellationRequested` после `WaitForExit` защищает от перезаписи статуса |

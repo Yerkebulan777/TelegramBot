@@ -187,6 +187,7 @@ public sealed class SessionManagementHandler(
         {
             Logger.LogWarning("User {Username} ({UserId}) attempted to cancel foreign/missing command {CommandId}",
                 context.Username, context.UserId, commandId);
+            await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
             return true;
         }
 
@@ -195,8 +196,8 @@ public sealed class SessionManagementHandler(
         if (!cancelled)
         {
             Logger.LogWarning("Cancel failed or command already finished: commandId={CommandId}", commandId);
-            await outputService.SendMessageAsync(context.UserId,
-                "⛔ Не удалось отменить команду (возможно, она уже завершена).");
+            // Даже при неудаче — удаляем все сообщения и ничего не выводим
+            await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
             return true;
         }
 
@@ -206,30 +207,13 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("Command cancelled: commandId={CommandId}, userId={UserId}",
             commandId, context.UserId);
 
-        // Уведомляем пользователя
-        await outputService.SendMessageAsync(context.UserId,
-            $"⛔ Команда #{commandId} ({command.CommandText}) отменена.");
+        // Сбрасываем состояние сессии
+        context.Session.IsInStatusView = true;
+        context.Session.SessionId = 0;
+        context.Session.StatusMessageId = null;
 
-        // Обновляем отображение сессии
-        context.Session.SessionId = command.SessionId;
-        var sessionCommands = await dataService.GetSessionsCommandsAsync(command.SessionId, context.UserId);
-        var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, command.SessionId);
-
-        // Проверяем, остались ли ещё активные команды в сессии
-        var hasActive = sessionCommands.Any(c =>
-            c.Status == "pending" || c.Status == "processing");
-
-        if (!hasActive)
-        {
-            // Если активных команд не осталось — показываем статус сессии
-            var sessionStatus = await dataService.GetSessionsStatusAsync(command.SessionId, context.UserId);
-            await outputService.EditMessageTextWithKeyboardAsync(
-                context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
-        }
-        else
-        {
-            await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        }
+        // Удаляем все отслеживаемые сообщения (включая диалог подтверждения), ничего не выводим
+        await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
 
         return true;
     }

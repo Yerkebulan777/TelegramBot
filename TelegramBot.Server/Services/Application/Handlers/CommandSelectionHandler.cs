@@ -60,17 +60,14 @@ public sealed class CommandSelectionHandler(
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         Logger.LogDebug("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
-        await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
 
+        // Сбрасываем состояние сессии
         context.Session.ClearPendingCommands();
         context.Session.IsFileSelectionActive = false;
         context.Session.LastActionsMessageId = null;
 
-        var cancelMsg = await outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
-        if (cancelMsg != null)
-        {
-            context.Session.TrackMessage(cancelMsg.Id);
-        }
+        // Удаляем все отслеживаемые сообщения, ничего не выводим
+        await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
 
         return true;
     }

@@ -44,7 +44,6 @@ public static class Program
                     services.AddSingleton<NavisworksProcessTracker>();
 
                     services.AddHostedService<CommandExecutionService>();
-                    services.AddHostedService<HealthCheckServer>();
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>
                     {
