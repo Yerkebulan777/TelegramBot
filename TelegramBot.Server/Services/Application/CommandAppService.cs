@@ -25,15 +25,21 @@ public sealed class CommandAppService(
 
         var session = sessionManager.GetOrCreateSession(message.UserId);
 
-        // Server restart detection: session has no tracked messages (fresh after restart)
+        // Server restart detection: session is fresh after restart (not yet initialized)
         // and user sends a non-slash text — redirect to /start for a clean slate
-        if (session.SessionId <= 0 && !message.Text!.StartsWith('/'))
+        if (!session.Initialized && !message.Text!.StartsWith('/'))
         {
             logger.LogDebug("Post-restart cleanup for {Username} ({UserId}): redirecting to /start",
                 message.Username, message.UserId);
             await outputService.RemoveReplyKeyboardAsync(message.UserId,
                 "⚡️ Сервер был перезапущен.\nСтарые сообщения больше неактуальны.\n\nИспользуйте /start для начала.");
             return;
+        }
+
+        // Any slash command marks the session as initialized (after restart or fresh start)
+        if (message.Text!.StartsWith('/'))
+        {
+            session.Initialized = true;
         }
 
         await slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);

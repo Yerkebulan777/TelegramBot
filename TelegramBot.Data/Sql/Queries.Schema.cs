@@ -49,6 +49,7 @@ internal static partial class SqlQueries
             );";
 
         internal const string CreateTrackedMessagesTable = @"
+            DROP TABLE IF EXISTS TrackedMessages CASCADE;
             CREATE TABLE IF NOT EXISTS TrackedMessages (
                 MessageId SERIAL PRIMARY KEY,
                 SessionId INTEGER NOT NULL REFERENCES Sessions(SessionId),

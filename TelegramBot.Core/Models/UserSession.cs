@@ -51,6 +51,8 @@ public class UserSession
 
     /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
     public bool IsInStatusView { get; set; }
+    /// <summary>False after server restart — set to true on first slash command to suppress stale-message detection.</summary>
+    public bool Initialized { get; set; }
     public int SessionId { get; set; }
     public int? CommandSelectionMessageId { get; set; }
     public bool IsFileSelectionActive { get; set; }
