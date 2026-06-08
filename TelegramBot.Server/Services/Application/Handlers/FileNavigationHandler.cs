@@ -28,7 +28,11 @@ public sealed class FileNavigationHandler(
         var newPath = context.ParsedCallback.Argument;
         if (string.IsNullOrEmpty(newPath))
         {
-            var errorMessage = await _outputService.SendErrorAsync(context.UserId, "Path not found.");
+            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
+                ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+                : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+            var errorMessage = await _outputService.SendMessageWithReplyKeyboardAsync(
+                context.UserId, "⚠ Error: Path not found.", replyKeyboard);
             if (errorMessage != null)
             {
                 session.TrackMessage(errorMessage.Id);
@@ -41,7 +45,11 @@ public sealed class FileNavigationHandler(
         {
             Logger.LogWarning("Rejected navigation outside root. User={Username} ({UserId}), Path={Path}",
                 context.Username, context.UserId, newPath);
-            var errorMessage = await _outputService.SendErrorAsync(context.UserId, "Недопустимый путь.");
+            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
+                ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+                : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+            var errorMessage = await _outputService.SendMessageWithReplyKeyboardAsync(
+                context.UserId, "⚠ Error: Недопустимый путь.", replyKeyboard);
             if (errorMessage != null)
             {
                 session.TrackMessage(errorMessage.Id);

@@ -410,7 +410,25 @@ public sealed class SlashCommandService(
 
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
     {
-        var warning = await TrackMessageAsync(_outputService.SendMessageAsync(userId, message), session);
+        Message? warning;
+
+        if (session.IsFileSelectionActive)
+        {
+            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
+                ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+                : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+            warning = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard), session);
+        }
+        else if (session.CommandSelectionMessageId.HasValue || session.PendingCommand.Count > 0)
+        {
+            var replyKeyboard = await _keyboardBuilder.GetCommandActionsReplyKeyboardAsync();
+            warning = await TrackMessageAsync(_outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard), session);
+        }
+        else
+        {
+            warning = await TrackMessageAsync(_outputService.SendMessageAsync(userId, message), session);
+        }
+
         await CleanupCurrentViewAsync(userId, session, warning?.Id);
     }
 

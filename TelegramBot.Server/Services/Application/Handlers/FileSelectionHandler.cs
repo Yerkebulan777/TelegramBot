@@ -40,7 +40,11 @@ public sealed class FileSelectionHandler(
         var filePath = context.ParsedCallback.Argument;
         if (string.IsNullOrEmpty(filePath))
         {
-            var errorMessage = await _outputService.SendErrorAsync(context.UserId, "File not found.");
+            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
+                ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+                : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+            var errorMessage = await _outputService.SendMessageWithReplyKeyboardAsync(
+                context.UserId, "⚠ Error: File not found.", replyKeyboard);
             if (errorMessage != null)
             {
                 session.TrackMessage(errorMessage.Id);
