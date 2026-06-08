@@ -26,6 +26,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
+        await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled);
     }
 
     public async Task<BotUser?> GetUserAsync(long userId)
@@ -55,7 +56,8 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         long userId,
         string username,
         int filesAmount,
-        string? projectName = null)
+        string? projectName = null,
+        IEnumerable<int>? commandPriorities = null)
     {
         var commands = commandText.ToArray();
         var fileList = files.ToArray();
@@ -77,21 +79,31 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         var commandTexts = new string[totalRows];
         var filePaths = new string[totalRows];
         var orders = new int[totalRows];
+        var priorities = new int[totalRows];
+        var priorityArray = commandPriorities?.ToArray();
 
         var index = 0;
+        var cmdIdx = 0;
         foreach (var cmd in commands)
         {
+            var priority = priorityArray != null && cmdIdx < priorityArray.Length
+                ? priorityArray[cmdIdx]
+                : 50;
+
             foreach (var file in fileList)
             {
                 commandTexts[index] = cmd;
                 filePaths[index] = file;
                 orders[index] = index + 1;
+                priorities[index] = priority;
                 index++;
             }
+
+            cmdIdx++;
         }
 
         await conn.ExecuteAsync(SqlQueries.Commands.InsertBatch,
-            new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders },
+            new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
             tx);
 
         await tx.CommitAsync();
@@ -210,6 +222,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return count > 0;
     }
 
+    public async Task<int> CountPendingProcessingBySessionAsync(int sessionId)
+    {
+        await using var conn = await CreateConnectionAsync();
+        return await conn.ExecuteScalarAsync<int>(
+            SqlQueries.Commands.CountPendingProcessingBySession,
+            new { SessionId = sessionId });
+    }
+
     public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
         await using var conn = await CreateConnectionAsync();
@@ -308,26 +328,17 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 new { TimeoutSeconds = timeoutSeconds }));
     }
 
-    public async Task CleanupOldCancelledCommandsAsync(int olderThanDays)
-    {
-        await TryExecuteWithAdvisoryLockAsync(
-            "cleanup old cancelled commands",
-            conn => conn.ExecuteAsync(
-                SqlQueries.Commands.SoftDeleteOldCancelled,
-                new { OlderThanDays = olderThanDays }));
-    }
-
-    public async Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? filePath, string? errorMessage, int? doneCount = null, int? totalCount = null)
+    public async Task NotifyCommandCompletedAsync(long userId, int sessionId, int doneCount, int totalCount, string? projectName = null)
     {
         try
         {
-            var payload = $"{userId}|{commandId}|{commandText}|{status}|{filePath ?? ""}|{errorMessage ?? ""}|{doneCount}|{totalCount}";
+            var payload = $"{userId}|{sessionId}|{doneCount}|{totalCount}|{projectName ?? ""}";
             await using var conn = await CreateConnectionAsync();
             await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
         }
         catch (Exception e)
         {
-            logger.LogWarning(e, "Failed to send command_completed NOTIFY for command {CommandId}", commandId);
+            logger.LogWarning(e, "Failed to send command_completed NOTIFY for session {SessionId}", sessionId);
         }
     }
 
@@ -340,74 +351,12 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return retryCount;
     }
 
-    public async Task NotifyNewCommandsAsync(int sessionId)
-    {
-        try
-        {
-            await using var conn = await CreateConnectionAsync();
-            await conn.ExecuteAsync("SELECT pg_notify('new_command', CAST(@SessionId AS text))", new { SessionId = sessionId });
-        }
-        catch (Exception e)
-        {
-            logger.LogWarning(e, "Failed to send NOTIFY for session {SessionId}", sessionId);
-        }
-    }
-
-    public async Task<bool> CancelCommandAsync(int commandId, long userId, bool isAdmin = false)
-    {
-        try
-        {
-            await using var conn = await CreateConnectionAsync();
-            var affected = await conn.QuerySingleOrDefaultAsync<int?>(
-                SqlQueries.Commands.CancelCommand,
-                new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
-            return affected.HasValue;
-        }
-        catch (Exception e)
-        {
-            logger.LogError(e, "Failed to cancel command {CommandId}", commandId);
-            return false;
-        }
-    }
-
-    public async Task NotifyCommandCancelAsync(int commandId)
-    {
-        try
-        {
-            await using var conn = await CreateConnectionAsync();
-            await conn.ExecuteAsync(
-                "SELECT pg_notify('command_cancel', CAST(@CommandId AS text))",
-                new { CommandId = commandId });
-            logger.LogDebug("Sent command_cancel NOTIFY for command {CommandId}", commandId);
-        }
-        catch (Exception e)
-        {
-            logger.LogWarning(e, "Failed to send command_cancel NOTIFY for command {CommandId}", commandId);
-        }
-    }
-
     public async Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId, bool isAdmin = false)
     {
         await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<PendingCommand>(
             SqlQueries.Commands.GetById,
             new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
-    }
-
-    public async Task<string?> GetCommandStatusAsync(int commandId)
-    {
-        try
-        {
-            await using var conn = await CreateConnectionAsync();
-            return await conn.QuerySingleOrDefaultAsync<string>(
-                SqlQueries.Commands.GetStatus,
-                new { CommandId = commandId });
-        }
-        catch (Exception e)
-        {
-            logger.LogError(e, "Failed to get status for command {CommandId}", commandId);
-            return null;
-        }
     }
 
     public async Task<bool> HasDuplicateCommandsAsync(

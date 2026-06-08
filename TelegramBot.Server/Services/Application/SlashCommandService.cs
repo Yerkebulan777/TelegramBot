@@ -22,6 +22,17 @@ public sealed class SlashCommandService(
     IOptions<FileSystemOptions> fileSystemOptions,
     ILogger<SlashCommandService> logger) : ISlashCommandService
 {
+    private static readonly Dictionary<string, int> CommandPriorityMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["PDF"] = 1,      // Critical (наивысший)
+        ["DWG"] = 2,      // High
+        ["NWC"] = 3,      // Medium
+        ["IFC"] = 3,      // Medium
+        ["BIMDOC"] = 3,   // Medium
+        ["CLASHREP"] = 3, // Medium
+        ["AUTORES"] = 4,  // Low
+    };
+
     private readonly FileSystemOptions _options = fileSystemOptions.Value;
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
@@ -272,13 +283,14 @@ public sealed class SlashCommandService(
 
         var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
 
+        var priorities = session.PendingCommand
+            .Select(c => CommandPriorityMap.TryGetValue(c, out var p) ? p : 50);
+
         var sessionId = await dataService.CreateSessionWithCommandsAsync(
-            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName);
+            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities);
         logger.LogInformation(
             "Job queued: session={SessionId}, user={UserId}, commands={CommandCount}, files={FileCount}",
             sessionId, userId, session.PendingCommand.Count, filesToProcess.Count);
-
-        await dataService.NotifyNewCommandsAsync((int)sessionId);
 
         session.ResetNavigation(_options.RootPath);
         session.ClearPendingCommands();

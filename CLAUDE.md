@@ -92,7 +92,7 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 | `FileNavigationHandler` | 10 | `GOTOPARENT:` |
 | `FileSelectionHandler` | 20 | `FILE:` |
 | `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` |
-| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:`, `CANCELCMD:`, `CONFIRM_CANCEL:` |
+| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:` |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
 
 All handlers extend `CallbackHandlerBase` and use `CommandCatalog.TryGetByPrefix()` for prefix matching.
@@ -145,7 +145,7 @@ Serilog configured via `appsettings.json`. Supports Console and Seq (`http://loc
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1437 symbols, 3706 relationships, 121 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1383 symbols, 3461 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

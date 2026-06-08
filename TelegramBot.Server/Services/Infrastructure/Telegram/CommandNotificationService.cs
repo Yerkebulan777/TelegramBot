@@ -1,5 +1,6 @@
 using Dapper;
 using Npgsql;
+using System.Text;
 using TelegramBot.Data;
 using TelegramBot.Server.Interfaces;
 
@@ -79,8 +80,8 @@ public sealed class CommandNotificationService(
                 return;
             }
 
-            // Payload: UserId|CommandId|CommandText|Status|FilePath|ErrorMessage|Done|Total
-            var parts = e.Payload.Split('|', 8);
+            // Payload: UserId|SessionId|Done|Total|ProjectName
+            var parts = e.Payload.Split('|', 5);
             if (parts.Length < 4)
             {
                 logger.LogWarning("Completion notify ignored: reason=invalid_payload");
@@ -93,24 +94,56 @@ public sealed class CommandNotificationService(
                 return;
             }
 
-            // Payload: UserId|CommandId|CommandText|Status|FilePath|ErrorMessage|Done|Total
-            // Приходит только когда вся сессия завершена (remaining == 0 на стороне Worker)
-            if (!int.TryParse(parts[6], out var done) || !int.TryParse(parts[7], out var total) || total == 0)
+            if (!int.TryParse(parts[2], out var done) || !int.TryParse(parts[3], out var total) || total == 0)
             {
                 return;
             }
 
+            var projectName = parts.Length > 4 ? parts[4] : null;
+            var prefix = string.IsNullOrEmpty(projectName) ? "" : $"{projectName} — ";
             var failed = total - done;
 
-            var summary = failed == 0
-                ? $"✅ Сессия завершена — все {done} файлов обработано"
-                : done == 0
-                    ? $"❌ Сессия завершена — все {failed} файлов с ошибками"
-                    : $"⚠️ Сессия завершена: {done} ✅, {failed} ❌ из {total}";
+            var summary = new StringBuilder();
 
-            await telegramOutput.SendMessageAsync(userId, summary);
-            logger.LogInformation("Session completed: user={UserId}, done={Done}, failed={Failed}, total={Total}",
-                userId, done, failed, total);
+            if (failed == 0)
+            {
+                summary.Append($"✅ {prefix}сессия завершена — все {done} файлов обработано");
+            }
+            else if (done == 0)
+            {
+                summary.Append($"❌ {prefix}сессия завершена — все {failed} файлов с ошибками");
+            }
+            else
+            {
+                summary.Append($"⚠️ {prefix}сессия завершена: {done} ✅, {failed} ❌ из {total}");
+            }
+
+            // Если есть ошибки — запрашиваем список файлов с ошибками
+            if (failed > 0 && int.TryParse(parts[1], out var sessionId))
+            {
+                try
+                {
+                    await using var queryConn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString);
+                    var failedFiles = await queryConn.QueryAsync<string>(
+                        "SELECT FilePath FROM Commands WHERE SessionId = @SessionId AND Status = 'Failed'",
+                        new { SessionId = sessionId });
+
+                    var failedList = failedFiles.Select(f => $"- {Path.GetFileName(f)}").ToList();
+                    if (failedList.Count > 0)
+                    {
+                        summary.Append("\n\nОшибки:\n");
+                        summary.AppendJoin('\n', failedList);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to query failed files for session {SessionId}", sessionId);
+                }
+            }
+
+            await telegramOutput.SendMessageAsync(userId, summary.ToString());
+            logger.LogInformation("Session completed: user={UserId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+                userId, projectName, done, failed, total);
         }
         catch (Exception ex)
         {

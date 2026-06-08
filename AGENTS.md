@@ -146,17 +146,32 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 ```
 SlashCommandService.ConfirmFileSelectionAsync()
     │
-    ├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Commands
+    ├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Commands (ProjectName)
     └── dataService.NotifyNewCommandsAsync() ---------- NOTIFY new_command
                                                               │
                    ┌──────────────────────────────────────────┘
                    ▼
     CommandExecutionService (Worker)
         conn.WaitAsync() -- просыпается мгновенно
-        dataService.GetPendingCommandsAsync() -- SELECT ... WHERE Status='pending'
+        dataService.ClaimPendingCommandsAsync() -- FOR UPDATE SKIP LOCKED
         ExecuteOneAsync(cmd) -- запуск Revit/Navisworks/AI
         dataService.UpdateCommandStatusAsync() -- UPDATE Status='Done'/'Failed'
+        TryNotifySessionCompletedAsync() -- только для последней команды сессии
+            └── dataService.NotifyCommandCompletedAsync() -- NOTIFY command_completed
+                                                              │
+                   ┌──────────────────────────────────────────┘
+                   ▼
+    CommandNotificationService (Server)
+        Получает NOTIFY → парсит payload (Done/Total/ProjectName)
+        При наличии ошибок → запрашивает список Failed-файлов из БД
+        → telegramOutput.SendMessageAsync() со сводкой по сессии
 ```
+
+**In-memory счётчик сессий:** вместо per-command SQL запроса `GetSessionProgressAsync`
+Worker использует `ConcurrentDictionary<int, int> _sessionRemaining`.
+При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`,
+при завершении каждой команды атомарно декрементится через `AddOrUpdate`.
+Уведомление отправляется только когда `remaining == 0`.
 
 DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker uses `PostgresDataService` registered directly in `Program.cs`.
 
@@ -172,13 +187,20 @@ Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler`
 
 Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. 
 
-> **SessionManagementHandler** supports command cancel with confirmation: `CANCELCMD:{commandId}` → dialog → `CONFIRM_CANCEL:{commandId}`. Uses shared `TryParseId()` helper to validate IDs.
+> **SessionManagementHandler** manages `/status` actions via `SESSIONDETAILS:`, `DELETESESSION:`, and `DELETECOMMAND:`. The «⛔ Отменить» button for a running command uses the same soft-delete path as command deletion: `Status = 'Deleted'`.
 
 For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 
 Tables: `BotUsers`, `Sessions`, `Commands`. **`TrackedMessages` was removed** — message tracking is now purely in-memory via `UserSession._trackedMessageIds`. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
+
+**`Sessions` table now includes `ProjectName TEXT`** — имя проекта записывается при создании сессии,
+отображается в `/status` и в уведомлениях о завершении.
+
+**`GetCommandStatusAsync` removed** — was dead code. Deleted commands never appear as `'pending'`
+in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant.
+
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
 All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). SQL constants in `TelegramBot.Data/Sql/` (4 partial files total).
 
@@ -317,7 +339,7 @@ Namespaces must match folder structure:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1 437 nodes, 3 706 edges, 60 clusters, 121 flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1383 symbols, 3461 relationships, 115 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

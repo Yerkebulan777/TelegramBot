@@ -274,7 +274,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 | `FileNavigationHandler` | 10 | `GOTOPARENT:` | Навигация по файловой системе |
 | `FileSelectionHandler` | 20 | `FILE:` | Выбор файлов/проектов/секций (toggle) |
 | `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` | Переключение команд экспорта и автоматизации |
-| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `BACKTOSTATUS:`, `CANCELCMD:`, `CONFIRM_CANCEL:` | Управление сессиями (включая отмену команд с диалогом подтверждения) |
+| `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:` | Управление сессиями и soft-delete команд |
 | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` | Подтверждение/отмена выбора команд |
 
 ## База данных (PostgreSQL)
@@ -287,18 +287,18 @@ PostgreSQL-сервер, доступный по сети. Инициализа�
 |---------|-----------|---------------|
 | `BotUsers` | Пользователи бота | `UserId` (PK), `Username`, `Role` (User/Admin), `Status` (Pending/Approved/Rejected/Blocked), `CreatedAt`, `UpdatedAt` |
 | `Sessions` | Сессии пользователей | `SessionId` (PK, SERIAL), `UserId`, `Username`, `Status` (pending/done/Deleted), `FilesAmount`, `CreatedAt`, `UpdatedAt` |
-| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Cancelled/Deleted), `GUID`, `Lease`, `Priority` |
+| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Deleted), `GUID`, `Lease`, `Priority` |
 Soft-delete — строки никогда не удаляются физически (статус `Deleted`).
 
 ### Механизм очереди задач (LISTEN/NOTIFY)
 
-PostgreSQL `LISTEN/NOTIFY` используется для мгновенного уведомления Worker-ов о новых командах и отменах:
+PostgreSQL `LISTEN/NOTIFY` используется для мгновенного уведомления Worker-ов о новых командах:
 
 1. **Server** после `INSERT` команд в БД выполняет `NOTIFY new_command, '<sessionId>'`
-2. **Worker** при старте выполняет `LISTEN new_command` и `LISTEN command_cancel`, ждёт через `NpgsqlConnection.WaitAsync()`
+2. **Worker** при старте выполняет `LISTEN new_command`, ждёт через `NpgsqlConnection.WaitAsync()`
 3. При получении NOTIFY Worker мгновенно просыпается, выбирает pending-команды и выполняет их
 4. Если NOTIFY потерян — fallback poll через 5 минут
-5. **Отмена команд** — пользователь через `/status` → кнопку «⛔ Отменить» → диалог подтверждения → Server меняет статус на `Cancelled` и шлёт `NOTIFY command_cancel`. Worker при получении уведомления отменяет CancellationToken, убивает процесс и не перезаписывает статус
+5. **Отмена команд** — пользователь через `/status` → кнопку «⛔ Отменить»; Server мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`.
 
 Несколько Worker-ов могут работать параллельно (competing consumers) — каждый берёт следующую команду из очереди.
 
@@ -311,7 +311,7 @@ PostgreSQL `LISTEN/NOTIFY` используется для мгновенног�
 | `/start` | Начало работы, регистрация, запрос доступа |
 | `/export` | Меню выбора команд экспорта |
 | `/automation` | Меню команд автоматизации |
-| `/status` | Глобальный просмотр всех сессий (с `[username]`), управление командами (удаление/отмена с подтверждением) |
+| `/status` | Глобальный просмотр всех сессий (с `[username]`), управление командами и сессиями |
 | `/help` | Справка по командам |
 
 ### Базовый флоу работы
@@ -327,7 +327,7 @@ APPLYFILES → создание сессии + команд в БД → NOTIFY �
      ↓
 /status → глобальный просмотр всех сессий (с `[username]`) → SESSIONDETAILS → DELETECOMMAND / DELETESESSION
      ↓
-⛔ Отменить → CANCELCMD → диалог подтверждения → CONFIRM_CANCEL → отмена (БД + NOTIFY)
+⛔ Отменить → DELETECOMMAND → soft-delete в БД (`Status = 'Deleted'`)
 ```
 
 Аналогичный флоу для `/automation` (BIMDOC/CLASHREP/AUTORES).

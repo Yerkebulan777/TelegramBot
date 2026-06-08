@@ -20,7 +20,5 @@ public static class CallbackPrefixes
     public const string RequestAccess = "REQACCESS:";
     public const string ApproveUser = "APPROVEUSER:";
     public const string RejectUser = "REJECTUSER:";
-    public const string CancelCommand = "CANCELCMD:";
-    public const string ConfirmCancelCmd = "CONFIRM_CANCEL:";
 }
 

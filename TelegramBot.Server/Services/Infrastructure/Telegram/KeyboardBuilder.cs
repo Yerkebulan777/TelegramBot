@@ -41,6 +41,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
         foreach (var session in sessionsList)
         {
             var statusIcon = GetSessionStatusIcon(session.Status, session.ActiveCommands);
+            var projectName = string.IsNullOrEmpty(session.ProjectName) ? "" : $" {session.ProjectName}";
             var summary = session.DoneCommands + session.FailedCommands == session.TotalCommands
                 ? $"{session.DoneCommands}/{session.TotalCommands} ✅"
                 : $"{session.DoneCommands}/{session.TotalCommands} ({session.ActiveCommands} актив.)";
@@ -53,7 +54,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
             buttons.Add(
             [
                 InlineKeyboardButton.WithCallbackData(
-                    $"{statusIcon} [{session.Username}] {session.Date:dd.MM.yy HH:mm} — {summary}",
+                    $"{statusIcon}{projectName} [{session.Username}] {session.Date:dd.MM.yy HH:mm} — {summary}",
                     $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
             ]);
         }
@@ -104,11 +105,10 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
                     $"{sessionCommand.CommandId}")
             };
 
-            // Allow cancel only if command is in progress
             if (sessionCommand.Status == "processing")
             {
                 actionButtons.Add(
-                    InlineKeyboardButton.WithCallbackData("⛔ Отменить", $"{CallbackPrefixes.CancelCommand}{sessionCommand.CommandId}"));
+                    InlineKeyboardButton.WithCallbackData("⛔ Отменить", $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}"));
             }
 
             if (sessionCommand.Status != "processing")
@@ -131,7 +131,6 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
             "processing" => "🔄",
             "Done" => "✅",
             "Failed" => "❌",
-            "Cancelled" => "🚫",
             "Deleted" => "🗑",
             _ => "❓"
         };
@@ -144,7 +143,6 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
         {
             "Done" => "✅",
             "Failed" => "❌",
-            "Cancelled" => "🚫",
             "Deleted" => "🗑",
             _ => "📋"
         };

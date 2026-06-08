@@ -57,7 +57,6 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority DESC, CreatedAt ASC)
                 WHERE Status = 'pending';
             CREATE INDEX IF NOT EXISTS idx_commands_partition_status ON Commands(Partition, Status);
-            CREATE INDEX IF NOT EXISTS idx_commands_cancelled ON Commands(Status) WHERE Status = 'Cancelled';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);";
     }
 }

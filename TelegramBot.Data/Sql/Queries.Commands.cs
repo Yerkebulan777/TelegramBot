@@ -5,8 +5,8 @@ internal static partial class SqlQueries
     internal static class Commands
     {
         internal const string InsertBatch = @"
-            INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder)
-            SELECT @SessionId, unnest(@CommandTexts::text[]), unnest(@FilePaths::text[]), unnest(@Orders::int[])";
+            INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder, Priority)
+            SELECT @SessionId, unnest(@CommandTexts::text[]), unnest(@FilePaths::text[]), unnest(@Orders::int[]), unnest(@Priorities::int[])";
 
         internal const string GetBySession = @"
             SELECT c.ExecutionOrder AS ExecOrder, c.CommandText AS Command,
@@ -32,6 +32,9 @@ internal static partial class SqlQueries
         internal const string SoftDeleteBySession =
             "UPDATE Commands SET Status = 'Deleted' WHERE SessionId = @SessionId;";
 
+        internal const string SoftDeleteLegacyCancelled =
+            "UPDATE Commands SET Status = 'Deleted' WHERE Status = 'Cancelled';";
+
         internal const string GetSessionIdByCommandId = @"
             SELECT c.SessionId
             FROM Commands c
@@ -52,7 +55,7 @@ internal static partial class SqlQueries
                 ProcessId = @ProcessId,
                 ErrorMessage = @ErrorMessage
             WHERE CommandId = @CommandId
-              AND Status != 'Cancelled';";
+              AND Status != 'Deleted';";
 
 
         internal const string ClaimAndReturn = @"
@@ -64,7 +67,7 @@ internal static partial class SqlQueries
                 WHERE c.Status = 'pending'
                   AND s.Status != 'Deleted'
                   AND (c.NextRetryAt IS NULL OR c.NextRetryAt <= NOW())
-                ORDER BY c.Priority DESC, c.CreatedAt ASC
+                ORDER BY c.Priority ASC, c.CreatedAt ASC
                 LIMIT @Limit
                 FOR UPDATE SKIP LOCKED
             )
@@ -114,17 +117,6 @@ internal static partial class SqlQueries
             WHERE Status = 'processing'
               AND StartedAt < NOW() - (@TimeoutSeconds || ' seconds')::INTERVAL;";
 
-        internal const string CancelCommand = @"
-            UPDATE Commands
-            SET Status = 'Cancelled',
-                CompletedAt = NOW(),
-                ErrorMessage = 'Cancelled by user'
-            WHERE CommandId = @CommandId
-              AND Status IN ('pending', 'processing')
-              AND (SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId)
-                   OR @IsAdmin = true)
-            RETURNING CommandId;";
-
         internal const string GetById = @"
             SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath,
                    c.ExecutionOrder, s.UserId, s.Username, c.Partition, c.Priority, c.RetryCount
@@ -135,17 +127,11 @@ internal static partial class SqlQueries
               AND s.Status != 'Deleted'
               AND (s.UserId = @UserId OR @IsAdmin = true);";
 
-        internal const string GetStatus = @"
-            SELECT Status
+        internal const string CountPendingProcessingBySession = @"
+            SELECT COUNT(*)
             FROM Commands
-            WHERE CommandId = @CommandId;";
-
-        internal const string SoftDeleteOldCancelled = @"
-            UPDATE Commands
-            SET Status = 'Deleted'
-            WHERE Status = 'Cancelled'
-              AND CompletedAt IS NOT NULL
-              AND CompletedAt < NOW() - (@OlderThanDays || ' days')::INTERVAL;";
+            WHERE SessionId = @SessionId
+              AND Status IN ('pending', 'processing')";
 
         internal const string CountDuplicatePairs = @"
             SELECT COUNT(*) FROM (

@@ -1,8 +1,7 @@
-using Telegram.Bot.Types.ReplyMarkups;
+using System.Diagnostics.CodeAnalysis;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
-using System.Diagnostics.CodeAnalysis;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
@@ -16,9 +15,7 @@ public sealed class SessionManagementHandler(
     [
         CallbackPrefixes.SessionDetails,
         CallbackPrefixes.DeleteSession,
-        CallbackPrefixes.DeleteCommand,
-        CallbackPrefixes.CancelCommand,
-        CallbackPrefixes.ConfirmCancelCmd
+        CallbackPrefixes.DeleteCommand
     ];
 
     /// <summary>Проверяет, имеет ли пользователь доступ (все одобренные могут управлять любыми сессиями).</summary>
@@ -49,8 +46,6 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.SessionDetails => await HandleSessionDetailsAsync(context, cancellationToken),
             CallbackPrefixes.DeleteSession => await HandleDeleteSessionAsync(context, cancellationToken),
             CallbackPrefixes.DeleteCommand => await HandleDeleteCommandAsync(context, cancellationToken),
-            CallbackPrefixes.CancelCommand => await HandleCancelCommandAsync(context, cancellationToken),
-            CallbackPrefixes.ConfirmCancelCmd => await HandleConfirmCancelAsync(context, cancellationToken),
             _ => false
         };
     }
@@ -146,84 +141,6 @@ public sealed class SessionManagementHandler(
         return true;
     }
 
-    private async Task<bool> HandleCancelCommandAsync(CallbackContext context, CancellationToken cancellationToken)
-    {
-        if (!TryParseId(context, out var commandId))
-            return true;
-
-        // Проверяем, принадлежит ли команда пользователю (админ может отменять любые)
-        var isAdmin = await CanManageAsync(context.UserId);
-        var command = await dataService.GetCommandByIdAsync(commandId, context.UserId, isAdmin);
-        if (command == null)
-        {
-            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
-            return true;
-        }
-
-        Logger.LogInformation("{Username} cancel dialog {CommandId}", context.Username, commandId);
-
-        // Переключаем IsInStatusView = false, чтобы "Нет" (SESSIONDETAILS) попало в ветку показа команд
-        context.Session.IsInStatusView = false;
-
-        // Показываем диалог подтверждения
-        var confirmKeyboard = new InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton.WithCallbackData("✅ Да, отменить", $"{CallbackPrefixes.ConfirmCancelCmd}{commandId}"),
-                InlineKeyboardButton.WithCallbackData("❌ Нет", $"{CallbackPrefixes.SessionDetails}{command.SessionId}")
-            ]
-        ]);
-
-        await outputService.EditMessageTextWithKeyboardAsync(
-            context.UserId,
-            context.MessageId,
-            $"❓ Вы уверены, что хотите отменить команду *#{command.CommandId} ({command.CommandText})*?",
-            confirmKeyboard);
-
-        return true;
-    }
-
-    private async Task<bool> HandleConfirmCancelAsync(CallbackContext context, CancellationToken cancellationToken)
-    {
-        if (!TryParseId(context, out var commandId))
-            return true;
-
-        // Проверяем, принадлежит ли команда пользователю (админ может отменять любые)
-        var isAdmin = await CanManageAsync(context.UserId);
-        var command = await dataService.GetCommandByIdAsync(commandId, context.UserId, isAdmin);
-        if (command == null)
-        {
-            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
-            await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
-            return true;
-        }
-
-        // Обновляем статус в БД на Cancelled
-        var cancelled = await dataService.CancelCommandAsync(commandId, context.UserId, isAdmin);
-        if (!cancelled)
-        {
-            Logger.LogWarning("{Username} cancel fail {CommandId}", context.Username, commandId);
-            // Даже при неудаче — удаляем все сообщения и ничего не выводим
-            await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
-            return true;
-        }
-
-        // Уведомляем Worker о необходимости принудительно завершить процесс
-        await dataService.NotifyCommandCancelAsync(commandId);
-
-        Logger.LogInformation("{Username} cancelled {CommandId}", context.Username, commandId);
-
-        // Сбрасываем состояние сессии
-        context.Session.IsInStatusView = true;
-        context.Session.SessionId = 0;
-        context.Session.StatusMessageId = null;
-
-        // Удаляем все отслеживаемые сообщения (включая диалог подтверждения), ничего не выводим
-        await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
-
-        return true;
-    }
-
     private async Task ShowSessionsListAsync(CallbackContext context)
     {
         Logger.LogInformation("{Username} view sessions", context.Username);
@@ -250,22 +167,21 @@ public sealed class SessionManagementHandler(
         {
             "Done" => "✅",
             "Failed" => "❌",
-            "Cancelled" => "🚫",
             "Deleted" => "🗑",
             _ => "🔄"
         };
 
         var progressBar = BuildProgressBar(percentage, 10);
+        var projectName = string.IsNullOrEmpty(sessionStatus.ProjectName) ? "" : $" — {sessionStatus.ProjectName}";
 
-        return $"{statusIcon} *Статус сессии*\n" +
+        return $"{statusIcon} *Статус сессии{projectName}*\n" +
                $"{progressBar} {percentage}%" +
                $"\n\n📊 *Сводка:*" +
                $"\n📄 Всего: {sessionStatus.TotalFiles}" +
                $"\n✅ Готово: {sessionStatus.DoneFiles}" +
                $"\n🔄 Выполняется: {sessionStatus.ProcessingFiles}" +
                $"\n⏳ В очереди: {sessionStatus.PendingFiles}" +
-               $"\n❌ Ошибок: {sessionStatus.FailedFiles}" +
-               $"\n🚫 Отменено: {sessionStatus.CancelledFiles}";
+               $"\n❌ Ошибок: {sessionStatus.FailedFiles}";
     }
 
     private static string BuildProgressBar(int percentage, int segments)

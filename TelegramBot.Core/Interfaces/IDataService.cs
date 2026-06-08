@@ -17,13 +17,15 @@ public interface IDataService
     Task InitializeDatabaseAsync();
 
     /// <summary>Создает новую сессию с командами.</summary>
+    /// <param name="commandPriorities">Приоритеты для каждой команды (в том же порядке, что commandText). Если null — всем 50.</param>
     Task<long> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
         long userId,
         string username,
         int filesAmount,
-        string? projectName = null);
+        string? projectName = null,
+        IEnumerable<int>? commandPriorities = null);
 
     /// <summary>Возвращает список всех сессий (глобальный статус).</summary>
     Task<List<SessionsList>> GetSessionsListAsync();
@@ -42,6 +44,9 @@ public interface IDataService
 
     /// <summary>Проверяет наличие активных команд в сессии.</summary>
     Task<bool> CheckCommandsStatusAsync(int sessionId);
+
+    /// <summary>Считает команды сессии, которые ещё не завершены (pending или processing).</summary>
+    Task<int> CountPendingProcessingBySessionAsync(int sessionId);
 
     /// <summary>Возвращает ID сессии по ID команды. Любой одобренный пользователь может запрашивать любую команду.</summary>
     Task<int?> GetSessionIdByCommandAsync(int commandId, long userId, bool isAdmin = false);
@@ -72,29 +77,14 @@ public interface IDataService
     /// <summary>Освобождает команды с истёкшим таймаутом выполнения.</summary>
     Task ReleaseTimeoutCommandsAsync(int timeoutSeconds);
 
-    /// <summary>Soft-delete отменённых команд, завершённых более указанного количества дней назад.</summary>
-    Task CleanupOldCancelledCommandsAsync(int olderThanDays);
-
-    /// <summary>Отменяет команду: обновляет статус на 'Cancelled'. Любой одобренный пользователь может отменить любую команду.</summary>
-    Task<bool> CancelCommandAsync(int commandId, long userId, bool isAdmin = false);
-
-    /// <summary>Уведомляет Worker о необходимости отменить команду через NOTIFY command_cancel.</summary>
-    Task NotifyCommandCancelAsync(int commandId);
-
     /// <summary>Возвращает команду по ID. Любой одобренный пользователь может запрашивать любую команду.</summary>
     Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId, bool isAdmin = false);
 
-    /// <summary>Возвращает текущий статус команды (без проверки владельца).</summary>
-    Task<string?> GetCommandStatusAsync(int commandId);
-
-    /// <summary>Уведомляет Worker-ов о новых командах через Postgres LISTEN/NOTIFY.</summary>
-    Task NotifyNewCommandsAsync(int sessionId);
-
     /// <summary>
     /// Уведомляет Server о завершении сессии через Postgres LISTEN/NOTIFY.
-    /// Payload: UserId|CommandId|CommandText|Status|FilePath|ErrorMessage|Done|Total
+    /// Payload: UserId|SessionId|Done|Total|ProjectName
     /// </summary>
-    Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? filePath, string? errorMessage, int? doneCount = null, int? totalCount = null);
+    Task NotifyCommandCompletedAsync(long userId, int sessionId, int doneCount, int totalCount, string? projectName = null);
 
     /// <summary>Массовый upsert пользователей (batch через UNNEST).</summary>
     Task UpsertUsersBatchAsync(long[] userIds, int role, int status);

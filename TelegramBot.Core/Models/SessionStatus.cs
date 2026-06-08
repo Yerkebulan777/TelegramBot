@@ -4,10 +4,10 @@ namespace TelegramBot.Core.Models;
 public class SessionStatus
 {
     public string Status { get; set; } = string.Empty;
+    public string? ProjectName { get; set; }
     public int TotalFiles { get; set; }
     public int DoneFiles { get; set; }
     public int FailedFiles { get; set; }
-    public int CancelledFiles { get; set; }
     public int ProcessingFiles { get; set; }
     public int PendingFiles { get; set; }
 }

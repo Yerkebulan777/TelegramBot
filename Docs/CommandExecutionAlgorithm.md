@@ -36,7 +36,7 @@ User                          Server                    App                     
  │                              │                        │     │ Batch INSERT:       │
  │                              │                        │     │ Session + Commands  │
  │                              │                        │     │ Status = 'pending'  │
- │                              │                        │     │ Priority = 50       │
+ ││                              │     │ Priority из CommandPriorityMap │
  │                              │                        │     └─────────────────────┤
  │                              │                        │<──────────────────────────│ sessionId
  │                              │                        │                           │
@@ -103,20 +103,29 @@ Worker
  │ ProcessWithPoolAsync(cmd)
  │─── (определение партиции) ──────────────────────────>
  │
- │   Priority >= 80  →  High   →  5 слотов (SemaphoreSlim)
- │   Priority >= 40  →  Medium →  3 слота (SemaphoreSlim)
- │   Priority < 40   →  Low    →  1 слот  (SemaphoreSlim)
+ │   Priority ≤ 1  →  Critical →  3 слота (SemaphoreSlim)
+ │   Priority ≤ 2  →  High     →  5 слотов (SemaphoreSlim)
+ │   Priority ≤ 3  →  Medium   →  3 слота (SemaphoreSlim)
+ │   Priority ≤ 4  →  Low      →  1 слот  (SemaphoreSlim)
+ │   Priority ≤ 5  →  Lowest   →  1 слот  (SemaphoreSlim)
+ │   (Чем меньше Priority, тем выше приоритет)
  │
  │   await pool.WaitAsync(ct)
  │   — ждёт свободный слот в своей партиции
  │
- │   ┌───┐  ┌───┐  ┌───┐  ┌───┐  ┌───┐    High (≥80)
- │   │ P │  │ P │  │ P │  │ P │  │ P │
- │   └───┘  └───┘  └───┘  └───┘  └───┘
- │   ┌───┐  ┌───┐  ┌───┐                    Medium (≥40)
+ │   ┌───┐  ┌───┐  ┌───┐                    Critical (≤1)
  │   │ P │  │ P │  │ P │
  │   └───┘  └───┘  └───┘
- │   ┌───┐                                   Low (<40)
+ │   ┌───┐  ┌───┐  ┌───┐  ┌───┐  ┌───┐      High (≤2)
+ │   │ P │  │ P │  │ P │  │ P │  │ P │
+ │   └───┘  └───┘  └───┘  └───┘  └───┘
+ │   ┌───┐  ┌───┐  ┌───┐                    Medium (≤3)
+ │   │ P │  │ P │  │ P │
+ │   └───┘  └───┘  └───┘
+ │   ┌───┐                                   Low (≤4)
+ │   │ P │
+ │   └───┘
+ │   ┌───┐                                   Lowest (≤5)
  │   │ P │
  │   └───┘
 ```
@@ -252,7 +261,6 @@ DB                        Server                        User
 Worker
  │
  │ _activeProcesses.TryRemove(commandId)
- │ _commandCts.TryRemove(commandId) + Dispose()
  │ pool.Release()
  │
  │   ┌──────────────────────────────────────┐
@@ -290,11 +298,6 @@ Worker                                              DB
  │   WHERE Status='processing'                        │
  │     AND StartedAt < NOW() - INTERVAL               │
  │                                                    │
- │ CleanupOldCancelledCommandsAsync()                 │
- │───────────────────────────────────────────────────>│
- │   UPDATE Commands SET Status='Deleted'             │
- │   WHERE Status='Cancelled'                         │
- │     AND CompletedAt < NOW() - N days               │
 ```
 
 ---
@@ -307,54 +310,23 @@ User                     Server                    DB                      Worke
  │ /status → кнопка        │                        │                        │                    │
  │ "⛔ Отменить"            │                        │                        │                    │
  │────────────────────────>│                        │                        │                    │
- │                         │ Диалог подтверждения   │                        │                    │
- │<────────────────────────│                        │                        │                    │
- │                         │                        │                        │                    │
- │ "✅ Да, отменить"        │                        │                        │                    │
- │ (CONFIRM_CANCEL)        │                        │                        │                    │
- │────────────────────────>│                        │                        │                    │
- │                         │ CancelCommandAsync()   │                        │                    │
+ │                         │ DeleteCommandAsync()   │                        │                    │
  │                         │───────────────────────>│                        │                    │
  │                         │  ┌─────────────────────┤                        │                    │
  │                         │  │ UPDATE Commands     │                        │                    │
- │                         │  │ SET Status='Cancelled'                       │                    │
+ │                         │  │ SET Status='Deleted' │                        │                    │
  │                         │  │ WHERE CommandId=@Id │                        │                    │
- │                         │  │ AND Status IN       │                        │                    │
- │                         │  │   ('pending','processing')                   │                    │
- │                         │  │ RETURNING CommandId │                        │                    │
  │                         │  └─────────────────────┤                        │                    │
  │                         │                        │                        │                    │
- │                         │ NotifyCommandCancelAsync()                      │                    │
- │                         │───────────────────────>│                        │                    │
- │                         │  ┌─────────────────────┤                        │                    │
- │                         │  │ NOTIFY              │                        │                    │
- │                         │  │ command_cancel, '123'                       │                    │
- │                         │  └─────────────────────┤                        │                    │
- │                         │                        │ NOTIFY command_cancel  │                    │
- │                         │                        │═══════════════════════>│                    │
- │ "⛔ Команда отменена"   │                        │                        │                    │
- │<────────────────────────│                        │                        │                    │
+ │                         │                        │                        │ Если процесс уже   │
+ │                         │                        │                        │ выполняется, он    │
+ │                         │                        │                        │ завершится штатно  │
  │                         │                        │                        │                    │
- │                         │                        │ HandleCancelNotificationAsync()           │
- │                         │                        │─── (обработка) ──────>│                    │
- │                         │                        │  1. Парсинг commandId │                    │
- │                         │                        │  2. Cancel per-command│                    │
- │                         │                        │     CTS               │                    │
- │                         │                        │  3. process.Kill(true)│                    │
- │                         │                        │  4. Очистка           │                    │
- │                         │                        │     _commandCts +     │                    │
- │                         │                        │     _activeProcesses  │                    │
- │                         │                        │                        │                    │
- │                         │                        │ process.Kill(true)     │                    │
- │                         │                        │──────────────────────────────────────────>│
  │                         │                        │  ┌─────────────────────┤                    │
  │                         │                        │  │ Проверка            │                    │
- │                         │                        │  │ cmdCt.IsCancellation│                    │
- │                         │                        │  │ Requested после     │                    │
- │                         │                        │  │ WaitForExit         │                    │
- │                         │                        │  │ предотвращает       │                    │
- │                         │                        │  │ перезапись статуса  │                    │
- │                         │                        │  │ Cancelled → Failed  │                    │
+ │                         │                        │  │ UpdateStatus        │                    │
+ │                         │                        │  │ не перезаписывает   │                    │
+ │                         │                        │  │ Deleted             │                    │
  │                         │                        │  └─────────────────────┤                    │
 ```
 
@@ -372,12 +344,12 @@ User                     Server                    DB                      Worke
                       │  processing   │ ◄────── Захвачена Worker-ом
                       └───────┬───────┘
                               │
-              ┌───────────┬───┴───┬───────────┐
-              │           │       │           │
-              ▼           ▼       ▼           ▼
-         ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────┐
-         │  Done  │ │ Failed │ │Cancelled│ │ Deleted  │
-         └────────┘ └────────┘ └────────┘ └──────────┘
+              ┌───────────┬───┴───────────┐
+              │           │               │
+              ▼           ▼               ▼
+         ┌────────┐ ┌────────┐      ┌──────────┐
+         │  Done  │ │ Failed │      │ Deleted  │
+         └────────┘ └────────┘      └──────────┘
               │           │
               │           ▼
               │     ┌──────────────┐
@@ -397,19 +369,24 @@ User                     Server                    DB                      Worke
 ## Priority-based партиции (схема)
 
 ```
-Очередь команд (Order by Priority DESC, CreatedAt ASC)
+Очередь команд (Order by Priority ASC, CreatedAt ASC)
 ┌──────────────────────────────────────────────────┐
-│ [P=90] → [P=85] → [P=70] → [P=50] → [P=30] ... │
+│ [P=1] → [P=1] → [P=2] → [P=3] → [P=4] → [P=5]  │
+│ (Чем меньше Priority, тем выше приоритет)        │
 └──────────────────────────────────────────────────┘
                         │
                         ▼
          ┌──────────────────────────────┐
          │   Маршрутизация по порогам   │
+         │ (ищем первый threshold, где  │
+         │  Priority <= threshold)      │
          └──────────────────────────────┘
 
-  P >= 80 ──────► High    ──► SemaphoreSlim(5)
-  40 <= P < 80 ──► Medium  ──► SemaphoreSlim(3)
-  P < 40 ───────► Low     ──► SemaphoreSlim(1)
+  P <= 1 ──────► Critical ──► SemaphoreSlim(3)
+  P <= 2 ──────► High     ──► SemaphoreSlim(5)
+  P <= 3 ──────► Medium   ──► SemaphoreSlim(3)
+  P <= 4 ──────► Low      ──► SemaphoreSlim(1)
+  P <= 5 ──────► Lowest   ──► SemaphoreSlim(1)
 ```
 
 ---

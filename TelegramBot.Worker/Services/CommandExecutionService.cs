@@ -1,6 +1,4 @@
-using Dapper;
 using Microsoft.Extensions.Options;
-using Npgsql;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
@@ -16,28 +14,24 @@ using TelegramBot.Data;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
-/// Background service: ожидает уведомления через Postgres LISTEN/NOTIFY,
-/// при получении сигнала проверяет БД на наличие новых команд и выполняет их.
-/// Реализует per-partition пул процессов с лимитами для защиты от перегрузки.
+/// Background service: поллинг очереди команд через Postgres, выполняет их
+/// с per-partition пулом процессов и лимитами для защиты от перегрузки.
+/// Просыпается каждые {FallbackTimeoutSec} секунд для проверки новых команд.
 /// Автоматически переподключается при потере соединения.
 /// </summary>
 public sealed class CommandExecutionService(
     IDataService dataService,
-    IConfiguration configuration,
     IOptions<WorkerOptions> workerOptions,
     ILogger<CommandExecutionService> logger,
     IRevitVersionDetector versionDetector,
     INavisworksPathResolver navisworksPathResolver,
     DialogDismisser dialogDismisser) : BackgroundService
 {
-    private const int FallbackTimeoutSec = 300; // 5 мин — safety net, если NOTIFY потерян
-    private const int DefaultBatchSize = 50;
+    private const int FallbackTimeoutSec = 300; // 5 мин — интервал поллинга очереди
+    private const int DefaultBatchSize = 5;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
     private const int CleanupIntervalSec = 60; // Интервал очистки истёкших lease
     private const int HealthCheckIntervalSec = 30; // Интервал проверки здоровья процессов
-
-    private readonly string _connectionString = configuration.GetConnectionString("Postgres")
-        ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
 
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
@@ -46,10 +40,6 @@ public sealed class CommandExecutionService(
 
     // Трекинг активных процессов для возможности принудительного завершения
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
-
-    // Per-command CancellationTokenSource для отмены команды пользователем
-    // Ключ: CommandId, значение: CTS, который отменяется при получении NOTIFY command_cancel
-    private readonly ConcurrentDictionary<int, CancellationTokenSource> _commandCts = new();
 
     // Счётчик оставшихся команд по сессиям — избегает лишних SQL запросов
     // Устанавливается при ClaimPendingCommandsAsync, декрементится при завершении каждой команды
@@ -88,7 +78,6 @@ public sealed class CommandExecutionService(
                 {
                     await dataService.ReleaseExpiredLeasesAsync();
                     await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
-                    await dataService.CleanupOldCancelledCommandsAsync(_workerOptions.CleanupOlderThanDays);
                 }
                 catch (Exception ex)
                 {
@@ -183,8 +172,8 @@ public sealed class CommandExecutionService(
             _partitionPools[0] = new SemaphoreSlim(5, 5);
         }
 
-        // Кешируем thresholds по убыванию для быстрого Array.Find в ProcessWithPoolAsync
-        _partitionThresholds = _partitionPools.Keys.Reverse().ToArray();
+        // Кешируем thresholds по возрастанию для быстрого Array.Find (ищем первый threshold, где Priority <= threshold)
+        _partitionThresholds = _partitionPools.Keys.ToArray();
     }
 
     /// <summary>
@@ -235,7 +224,7 @@ public sealed class CommandExecutionService(
     /// Логирует активные процессы при остановке Worker.
     /// Процессы не завершаются принудительно — Revit/Navisworks могут выполнять
     /// важную работу, и их прерывание может привести к повреждению данных.
-    /// Worker просто отключается от LISTEN/NOTIFY, а процессы продолжают работу.
+    /// Worker просто останавливается, а процессы продолжают работу.
     /// Команды таких процессов будут подхвачены при следующем запуске через Crash Recovery.
     /// </summary>
     private async Task LogActiveProcessesOnShutdownAsync()
@@ -276,15 +265,6 @@ public sealed class CommandExecutionService(
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
-        await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, stoppingToken);
-
-        await conn.ExecuteAsync("LISTEN new_command;");
-        await conn.ExecuteAsync("LISTEN command_cancel;");
-
-        conn.Notification += OnNotificationReceived;
-
-        logger.LogInformation("Worker listening: channels=new_command, command_cancel");
-
         // Освобождаем истёкшие Lease (crash recovery упавших воркеров)
         await dataService.ReleaseExpiredLeasesAsync();
 
@@ -293,114 +273,46 @@ public sealed class CommandExecutionService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Поллинг: просыпаемся каждые {FallbackTimeoutSec} секунд
             try
             {
-                // Блокирующее ожидание NOTIFY или таймаут (5 мин)
-                // При NOTIFY — просыпается мгновенно
-                // При таймауте — fallback poll (safety net)
-                await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
             }
-            catch (TimeoutException)
+            catch (OperationCanceledException)
             {
-                // Fallback poll — если NOTIFY был потерян
-                logger.LogDebug("Worker poll: reason=timeout");
-            }
-            catch (NpgsqlException ex) when (!stoppingToken.IsCancellationRequested)
-            {
-                logger.LogError(ex, "Worker listener error: source=postgres");
-                // Выходим из цикла → outer reconnect
+                break;
             }
 
+            // Захватываем до {DefaultBatchSize} команд и выполняем их
             await ProcessBatchAsync(stoppingToken);
         }
     }
 
-    private void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
-    {
-        if (e.Channel == "command_cancel")
-        {
-            _ = HandleCancelNotificationAsync(e.Payload);
-        }
-        else
-        {
-            logger.LogDebug("Worker notify: channel={Channel}, payload={Payload}",
-                e.Channel, e.Payload);
-        }
-    }
-
-    private async Task HandleCancelNotificationAsync(string? payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload) || !int.TryParse(payload, out var commandId))
-        {
-            logger.LogWarning("Cancel notify ignored: reason=invalid_payload");
-            return;
-        }
-
-        logger.LogInformation("Cancel requested: commandId={CommandId}", commandId);
-
-        // Отменяем per-command CTS, чтобы ExecuteOneAsync не перезаписал статус
-        if (_commandCts.TryRemove(commandId, out var cts))
-        {
-            try
-            {
-                cts.Cancel();
-            }
-            catch (ObjectDisposedException) { }
-            finally
-            {
-                cts.Dispose();
-            }
-        }
-
-        if (_activeProcesses.TryRemove(commandId, out var process))
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(true);
-                    logger.LogInformation("Cancel executed: commandId={CommandId}, processId={ProcessId}",
-                        commandId, process.Id);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Cancel failed to kill process: commandId={CommandId}", commandId);
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
-        else
-        {
-            logger.LogDebug("Cancel skipped: commandId={CommandId}, reason=process_not_found_or_already_completed",
-                commandId);
-        }
-    }
-
+    /// <summary>
+    /// Захватывает до {DefaultBatchSize} команд из очереди и выполняет их параллельно.
+    /// Каждая команда проходит через ограничение своей партиции (SemaphoreSlim).
+    /// </summary>
     private async Task ProcessBatchAsync(CancellationToken ct)
     {
         try
         {
-            var claimed = await dataService.ClaimPendingCommandsAsync(DefaultBatchSize, (_workerOptions.ProcessTimeoutSeconds + 300) / 60);
+            var leaseTimeoutMinutes = (_workerOptions.ProcessTimeoutSeconds + 300) / 60;
+            var claimed = await dataService.ClaimPendingCommandsAsync(DefaultBatchSize, leaseTimeoutMinutes);
 
             if (claimed.Count == 0)
             {
                 return;
             }
 
-            logger.LogInformation("Worker batch claimed: count={Count}, ids={CommandIds}",
-                claimed.Count, string.Join(",", claimed.Select(c => c.CommandId)));
+            logger.LogInformation("Worker batch claimed: count={Count}", claimed.Count);
 
             // Устанавливаем счётчик оставшихся команд по сессиям
-            _sessionRemaining.Clear();
             foreach (var group in claimed.GroupBy(c => c.SessionId))
             {
-                _ = _sessionRemaining.TryAdd(group.Key, group.Count());
+                _sessionRemaining.AddOrUpdate(group.Key, group.Count(), (_, existing) => existing + group.Count());
             }
 
-            // Запускаем все команды параллельно, но каждая ждёт свободный слот своей партиции
+            // Запускаем все команды параллельно, каждая ждёт свободный слот своей партиции
             var tasks = claimed.Select(cmd => ProcessWithPoolAsync(cmd, ct));
             await Task.WhenAll(tasks);
         }
@@ -413,10 +325,13 @@ public sealed class CommandExecutionService(
 
     private async Task ProcessWithPoolAsync(PendingCommand cmd, CancellationToken ct)
     {
-        // Определяем партицию по приоритету команды (ищем highest threshold <= cmd.Priority)
-        // FirstOrDefault возвращает 0 (default int), если ни один threshold не подошёл.
-        // Threshold 0 гарантированно существует в _partitionPools (см. InitializePartitionPools).
-        var threshold = Array.Find(_partitionThresholds, t => cmd.Priority >= t);
+        // Определяем партицию по приоритету команды (ищем первый threshold, где Priority <= threshold)
+        // Чем меньше Priority, тем выше приоритет команды.
+        var threshold = Array.Find(_partitionThresholds, t => cmd.Priority <= t);
+
+        // Fallback: если Priority > max threshold — используем последний (макс) threshold
+        if (threshold == 0 && _partitionThresholds.Length > 0)
+            threshold = _partitionThresholds[^1];
 
         var pool = _partitionPools[threshold];
 
@@ -478,11 +393,6 @@ public sealed class CommandExecutionService(
             logger.LogInformation("Command start: id={Id}, command={Cmd}, attempt={Attempt}",
                 cmd.CommandId, cmd.CommandText, cmd.RetryCount + 1);
 
-            // Создаём linked CTS для возможности отмены команды пользователем
-            var cmdCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _commandCts[cmd.CommandId] = cmdCts;
-            var cmdCt = cmdCts.Token;
-
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             process.Start();
             _activeProcesses[cmd.CommandId] = process;
@@ -502,16 +412,6 @@ public sealed class CommandExecutionService(
             LogProcessOutput(cmd, outputBuilder, errorBuilder);
 
             var errorMessage = (string?)null;
-
-            // Проверяем, не была ли команда отменена пользователем через NOTIFY command_cancel
-            if (cmdCt.IsCancellationRequested)
-            {
-                logger.LogInformation("Command cancelled by user: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
-                    cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
-                sw.Stop();
-                // Статус уже обновлён на 'Cancelled' сервером, ничего не делаем
-                return;
-            }
 
             if (!completed)
             {
@@ -570,10 +470,6 @@ public sealed class CommandExecutionService(
         finally
         {
             _=_activeProcesses.TryRemove(cmd.CommandId, out _);
-            if (_commandCts.TryRemove(cmd.CommandId, out var cmdCts))
-            {
-                cmdCts.Dispose();
-            }
         }
     }
 
@@ -718,7 +614,6 @@ public sealed class CommandExecutionService(
             logger.LogWarning(ex, "Command {Cmd} ({Id}) failed (attempt {Attempt}/{Max}), retry at {Next}. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt.ToString("O"), errorMessage);
-            await dataService.NotifyNewCommandsAsync(cmd.SessionId);
         }
         else
         {
@@ -731,12 +626,14 @@ public sealed class CommandExecutionService(
 
     /// <summary>
     /// Декрементирует in-memory счётчик сессии.
-    /// Если это была последняя команда — запрашивает итоговую статистику из БД и отправляет уведомление.
+    /// Когда счётчик достигает 0 — проверяет в БД, не осталось ли ещё pending/processing команд.
+    /// Если в БД ничего не осталось — сессия действительно завершена, отправляет уведомление.
+    /// Если в БД ещё есть команды — убирает ключ (следующий batch установит новый счётчик).
     /// </summary>
     private async Task TryNotifySessionCompletedAsync(PendingCommand cmd)
     {
         // AddOrUpdate атомарен: каждая команда видит уникальное значение счетчика.
-        // Только поток, получивший 0, отправляет уведомление.
+        // Только поток, получивший 0, проверяет БД на предмет окончания сессии.
         var newRemaining = _sessionRemaining.AddOrUpdate(
             cmd.SessionId,
             _ => 0, // fallback — не должен сработать, т.к. ключ уже есть
@@ -751,11 +648,19 @@ public sealed class CommandExecutionService(
 
         try
         {
+            // Проверяем БД: если ещё есть pending или processing команды — сессия не завершена.
+            // Это корректно обрабатывает случай, когда команд в сессии > DefaultBatchSize.
+            var remainingInDb = await dataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
+            if (remainingInDb > 0)
+            {
+                logger.LogDebug("Session {SessionId}: counter zero but {Remaining} commands still pending/processing in DB, skipping notification",
+                    cmd.SessionId, remainingInDb);
+                return;
+            }
+
             var status = await dataService.GetSessionsStatusAsync(cmd.SessionId);
             await dataService.NotifyCommandCompletedAsync(
-                cmd.UserId, cmd.CommandId, cmd.CommandText,
-                status.DoneFiles == status.TotalFiles ? CommandStatuses.Done : CommandStatuses.Failed,
-                cmd.FilePath, null, status.DoneFiles, status.TotalFiles);
+                cmd.UserId, cmd.SessionId, status.DoneFiles, status.TotalFiles, status.ProjectName);
         }
         catch (Exception ex)
         {
