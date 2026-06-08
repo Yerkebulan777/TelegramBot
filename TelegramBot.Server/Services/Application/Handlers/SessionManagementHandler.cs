@@ -21,6 +21,13 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.ConfirmCancelCmd
     ];
 
+    /// <summary>Проверяет, имеет ли пользователь доступ (все одобренные могут управлять любыми сессиями).</summary>
+    private async Task<bool> CanManageAsync(long userId)
+    {
+        var user = await dataService.GetUserAsync(userId);
+        return user?.Status == UserAccessStatus.Approved;
+    }
+
     /// <summary>
     /// Пытается распарсить положительный int из callback-аргумента.
     /// При неудаче логирует через LogInvalidInput и возвращает false.
@@ -55,23 +62,23 @@ public sealed class SessionManagementHandler(
 
         var session = context.Session;
 
-        Logger.LogDebug("User {Username} ({UserId}) viewing session details for session {SessionId}", context.Username, context.UserId, sessionId);
-
         if (session.IsInStatusView)
         {
+            Logger.LogInformation("{Username} view session {SessionId}", context.Username, sessionId);
             session.IsInStatusView = false;
             session.SessionId = sessionId;
 
-            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId, context.UserId);
+            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId);
             var keyboard = await keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
             await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;
         }
         else
         {
+            Logger.LogInformation("{Username} view cmds {SessionId}", context.Username, sessionId);
             session.IsInStatusView = true;
 
-            var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId, context.UserId);
+            var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId);
             var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
             await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
             session.StatusMessageId = context.MessageId;
@@ -85,9 +92,10 @@ public sealed class SessionManagementHandler(
         if (!TryParseId(context, out var sessionId))
             return true;
 
-        Logger.LogDebug("User {Username} ({UserId}) deleting session {SessionId}", context.Username, context.UserId, sessionId);
+        Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
-        if (!await dataService.DeleteSessionAsync(sessionId, context.UserId))
+        var isAdmin = await CanManageAsync(context.UserId);
+        if (!await dataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
         {
             return true;
         }
@@ -103,25 +111,26 @@ public sealed class SessionManagementHandler(
         if (!TryParseId(context, out var commandId))
             return true;
 
-        Logger.LogDebug("User {Username} ({UserId}) deleting command {CommandId}", context.Username, context.UserId, commandId);
+        Logger.LogInformation("{Username} delete cmd {CommandId}", context.Username, commandId);
 
-        var sessionId = await dataService.GetSessionIdByCommandAsync(commandId, context.UserId);
+        var isAdmin = await CanManageAsync(context.UserId);
+        var sessionId = await dataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
         if (!sessionId.HasValue)
         {
-            Logger.LogWarning("User {Username} ({UserId}) attempted to access foreign or missing command {CommandId}", context.Username, context.UserId, commandId);
+            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
             return true;
         }
 
-        if (!await dataService.DeleteCommandAsync(commandId, context.UserId))
+        if (!await dataService.DeleteCommandAsync(commandId, context.UserId, isAdmin))
         {
             return true;
         }
 
         context.Session.SessionId = sessionId.Value;
 
-        if (!await dataService.CheckCommandsStatusAsync(sessionId.Value, context.UserId))
+        if (!await dataService.CheckCommandsStatusAsync(sessionId.Value))
         {
-            if (await dataService.DeleteSessionAsync(sessionId.Value, context.UserId))
+            if (await dataService.DeleteSessionAsync(sessionId.Value, context.UserId, isAdmin))
             {
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
@@ -129,7 +138,7 @@ public sealed class SessionManagementHandler(
         }
         else
         {
-            var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId.Value, context.UserId);
+            var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId.Value);
             var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId.Value);
             await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, newKeyboard);
         }
@@ -142,16 +151,16 @@ public sealed class SessionManagementHandler(
         if (!TryParseId(context, out var commandId))
             return true;
 
-        Logger.LogDebug("User {Username} ({UserId}) initiating cancel for command {CommandId}", context.Username, context.UserId, commandId);
-
-        // Проверяем, принадлежит ли команда пользователю
-        var command = await dataService.GetCommandByIdAsync(commandId, context.UserId);
+        // Проверяем, принадлежит ли команда пользователю (админ может отменять любые)
+        var isAdmin = await CanManageAsync(context.UserId);
+        var command = await dataService.GetCommandByIdAsync(commandId, context.UserId, isAdmin);
         if (command == null)
         {
-            Logger.LogWarning("User {Username} ({UserId}) attempted to cancel foreign/missing command {CommandId}",
-                context.Username, context.UserId, commandId);
+            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
             return true;
         }
+
+        Logger.LogInformation("{Username} cancel dialog {CommandId}", context.Username, commandId);
 
         // Переключаем IsInStatusView = false, чтобы "Нет" (SESSIONDETAILS) попало в ветку показа команд
         context.Session.IsInStatusView = false;
@@ -179,23 +188,21 @@ public sealed class SessionManagementHandler(
         if (!TryParseId(context, out var commandId))
             return true;
 
-        Logger.LogDebug("User {Username} ({UserId}) confirmed cancel for command {CommandId}", context.Username, context.UserId, commandId);
-
-        // Проверяем, принадлежит ли команда пользователю
-        var command = await dataService.GetCommandByIdAsync(commandId, context.UserId);
+        // Проверяем, принадлежит ли команда пользователю (админ может отменять любые)
+        var isAdmin = await CanManageAsync(context.UserId);
+        var command = await dataService.GetCommandByIdAsync(commandId, context.UserId, isAdmin);
         if (command == null)
         {
-            Logger.LogWarning("User {Username} ({UserId}) attempted to cancel foreign/missing command {CommandId}",
-                context.Username, context.UserId, commandId);
+            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
             await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
             return true;
         }
 
         // Обновляем статус в БД на Cancelled
-        var cancelled = await dataService.CancelCommandAsync(commandId, context.UserId);
+        var cancelled = await dataService.CancelCommandAsync(commandId, context.UserId, isAdmin);
         if (!cancelled)
         {
-            Logger.LogWarning("Cancel failed or command already finished: commandId={CommandId}", commandId);
+            Logger.LogWarning("{Username} cancel fail {CommandId}", context.Username, commandId);
             // Даже при неудаче — удаляем все сообщения и ничего не выводим
             await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
             return true;
@@ -204,8 +211,7 @@ public sealed class SessionManagementHandler(
         // Уведомляем Worker о необходимости принудительно завершить процесс
         await dataService.NotifyCommandCancelAsync(commandId);
 
-        Logger.LogInformation("Command cancelled: commandId={CommandId}, userId={UserId}",
-            commandId, context.UserId);
+        Logger.LogInformation("{Username} cancelled {CommandId}", context.Username, commandId);
 
         // Сбрасываем состояние сессии
         context.Session.IsInStatusView = true;
@@ -220,7 +226,9 @@ public sealed class SessionManagementHandler(
 
     private async Task ShowSessionsListAsync(CallbackContext context)
     {
-        var sessionsStatus = await dataService.GetSessionsListAsync(context.UserId);
+        Logger.LogInformation("{Username} view sessions", context.Username);
+
+        var sessionsStatus = await dataService.GetSessionsListAsync();
         var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
         await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
         context.Session.StatusMessageId = context.MessageId;

@@ -12,6 +12,8 @@ internal static partial class SqlQueries
         internal const string GetList = @"
             SELECT
                 s.SessionId,
+                s.UserId,
+                s.Username,
                 s.CreatedAt AS Date,
                 s.Status,
                 COUNT(c.CommandId) AS TotalCommands,
@@ -20,8 +22,8 @@ internal static partial class SqlQueries
                 COUNT(CASE WHEN c.Status IN ('pending', 'processing') THEN 1 END) AS ActiveCommands
             FROM Sessions s
             LEFT JOIN Commands c ON c.SessionId = s.SessionId AND c.Status != 'Deleted'
-            WHERE s.UserId = @UserId AND s.Status != 'Deleted'
-            GROUP BY s.SessionId, s.CreatedAt, s.Status
+            WHERE s.Status != 'Deleted'
+            GROUP BY s.SessionId, s.UserId, s.Username, s.CreatedAt, s.Status
             ORDER BY s.CreatedAt DESC
             LIMIT 20;";
 
@@ -37,11 +39,11 @@ internal static partial class SqlQueries
             FROM Sessions s
             LEFT JOIN Commands c ON c.SessionId = s.SessionId
             WHERE s.SessionId = @SessionId
-              AND s.UserId = @UserId
             GROUP BY s.Status;";
 
         internal const string SoftDelete = @"
             UPDATE Sessions SET Status = 'Deleted'
-            WHERE SessionId = @SessionId AND UserId = @UserId;";
+            WHERE SessionId = @SessionId
+              AND (UserId = @UserId OR @IsAdmin = true);";
     }
 }

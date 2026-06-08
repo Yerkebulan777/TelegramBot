@@ -97,30 +97,30 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return sessionId;
     }
 
-    public async Task<List<SessionsList>> GetSessionsListAsync(long userId)
+    public async Task<List<SessionsList>> GetSessionsListAsync()
     {
         await using var conn = await CreateConnectionAsync();
-        var result = await conn.QueryAsync<SessionsList>(SqlQueries.Sessions.GetList, new { UserId = userId });
+        var result = await conn.QueryAsync<SessionsList>(SqlQueries.Sessions.GetList);
         return result.ToList();
     }
 
-    public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId)
+    public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
         var result = await conn.QuerySingleOrDefaultAsync<SessionStatus>(
-            SqlQueries.Sessions.GetStatus, new { SessionId = sessionId, UserId = userId });
+            SqlQueries.Sessions.GetStatus, new { SessionId = sessionId });
         return result ?? throw new KeyNotFoundException($"Session {sessionId} not found");
     }
 
-    public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId)
+    public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
         var result = await conn.QueryAsync<SessionCommands>(
-            SqlQueries.Commands.GetBySession, new { SessionId = sessionId, UserId = userId });
+            SqlQueries.Commands.GetBySession, new { SessionId = sessionId });
         return result.ToList();
     }
 
-    public async Task<bool> DeleteSessionAsync(int sessionId, long userId)
+    public async Task<bool> DeleteSessionAsync(int sessionId, long userId, bool isAdmin = false)
     {
         try
         {
@@ -130,7 +130,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             {
                 var affected = await conn.ExecuteAsync(
                     SqlQueries.Sessions.SoftDelete,
-                    new { SessionId = sessionId, UserId = userId },
+                    new { SessionId = sessionId, UserId = userId, IsAdmin = isAdmin },
                     tx);
 
                 if (affected == 0)
@@ -159,13 +159,13 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
-    public async Task<bool> DeleteCommandAsync(int commandId, long userId)
+    public async Task<bool> DeleteCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
         try
         {
             await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(
-                SqlQueries.Commands.SoftDelete, new { CommandId = commandId, UserId = userId });
+                SqlQueries.Commands.SoftDelete, new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
 
             if (affected == 0)
             {
@@ -201,19 +201,19 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         });
     }
 
-    public async Task<bool> CheckCommandsStatusAsync(int sessionId, long userId)
+    public async Task<bool> CheckCommandsStatusAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
         var count = await conn.ExecuteScalarAsync<int>(
-            SqlQueries.Commands.CountActive, new { SessionId = sessionId, UserId = userId });
+            SqlQueries.Commands.CountActive, new { SessionId = sessionId });
         return count > 0;
     }
 
-    public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId)
+    public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
         await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<int?>(
-            SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId });
+            SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
     }
 
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
@@ -352,14 +352,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
-    public async Task<bool> CancelCommandAsync(int commandId, long userId)
+    public async Task<bool> CancelCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
         try
         {
             await using var conn = await CreateConnectionAsync();
             var affected = await conn.QuerySingleOrDefaultAsync<int?>(
                 SqlQueries.Commands.CancelCommand,
-                new { CommandId = commandId, UserId = userId });
+                new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
             return affected.HasValue;
         }
         catch (Exception e)
@@ -385,12 +385,12 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
-    public async Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId)
+    public async Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId, bool isAdmin = false)
     {
         await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<PendingCommand>(
             SqlQueries.Commands.GetById,
-            new { CommandId = commandId, UserId = userId });
+            new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
     }
 
     public async Task<string?> GetCommandStatusAsync(int commandId)

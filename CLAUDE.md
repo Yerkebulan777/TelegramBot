@@ -82,7 +82,7 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 
 **`FileSystemBrowser`** — Filesystem navigation keyboard builder. Concrete class (interface `IFileSystemBrowser` was removed — no testability need).
 
-**`SlashCommandService`** — Handles text commands (`/start`, `/help`, `/export`, `/automation`, `/status`), reply keyboard actions (Apply, Confirm, Back, Cancel), and file selection flow.
+**`SlashCommandService`** — Handles text commands (`/start`, `/help`, `/export`, `/automation`, `/status`), reply keyboard actions (Apply, Confirm, Back, Cancel), and file selection flow. `/status` now shows all users' sessions globally with `[username]` label.
 
 **`CallbackDispatcher`** — Chain of Responsibility dispatcher implementing `ICallbackDispatcher`. Routes callback queries to the first `ICallbackHandler` that `CanHandle()` the prefix. Handlers sorted by `Priority` (lower = first):
 
@@ -106,7 +106,7 @@ Use `CallbackDataParser.Parse(callbackData)` (from `ParsedCallback.cs`) to get a
 
 | Class | Location | Responsibility |
 |---|---|---|
-| `SlashCommandService` | Server/Services/Application | /start, /help, /export, /automation, /status + reply actions |
+| `SlashCommandService` | Server/Services/Application | /start, /help, /export, /automation, /status (global view with `[username]`) + reply actions |
 | `SessionManager` | Server/Services/Application | In-memory sessions (`ConcurrentDictionary`, 5-min timeout, auto-cleanup) |
 | `FileSystemBrowser` | Server/Services/Infrastructure/FileSystem | Builds inline keyboards for filesystem navigation |
 | `KeyboardBuilder` | Server/Services/Infrastructure/Telegram | Context-aware keyboards with selection state |

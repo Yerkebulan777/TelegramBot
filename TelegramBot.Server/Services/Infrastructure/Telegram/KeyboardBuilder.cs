@@ -53,7 +53,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
             buttons.Add(
             [
                 InlineKeyboardButton.WithCallbackData(
-                    $"{statusIcon} {session.Date:dd.MM.yy HH:mm} — {summary}",
+                    $"{statusIcon} [{session.Username}] {session.Date:dd.MM.yy HH:mm} — {summary}",
                     $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
             ]);
         }
@@ -104,8 +104,8 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
                     $"{sessionCommand.CommandId}")
             };
 
-            // Allow cancel only if command is pending or processing
-            if (sessionCommand.Status == "pending" || sessionCommand.Status == "processing")
+            // Allow cancel only if command is in progress
+            if (sessionCommand.Status == "processing")
             {
                 actionButtons.Add(
                     InlineKeyboardButton.WithCallbackData("⛔ Отменить", $"{CallbackPrefixes.CancelCommand}{sessionCommand.CommandId}"));

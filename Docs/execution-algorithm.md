@@ -54,7 +54,7 @@
 - **Таймауты** — принудительное завершение процессов при превышении лимита времени
 - **Приоритеты** — команды с более высоким приоритетом выполняются первыми
 - **Партиции** — приоритетные уровни: команды с высоким приоритетом имеют выделенные слоты выполнения
-- **Отмена команд** — пользователь может отменить команду через `/status` → кнопка «⛔ Отменить»; Server меняет статус на `Cancelled` и отправляет NOTIFY `command_cancel`; Worker убивает процесс
+- **Отмена команд** — любой одобренный пользователь может отменить команду через `/status` → кнопка «⛔ Отменить»; Server меняет статус на `Cancelled` и отправляет NOTIFY `command_cancel`; Worker убивает процесс. Все одобренные пользователи могут отменять/удалять чужие сессии и команды
 
 ---
 
@@ -237,7 +237,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 | `processing` | Команда захвачена воркером и выполняется (Lease установлен) |
 | `Done` | Команда успешно завершена |
 | `Failed` | Команда завершена с ошибкой |
-| `Cancelled` | Команда отменена пользователем (через `/status` → кнопка «⛔ Отменить»). Статус устанавливается Server-ом, Worker при получении NOTIFY `command_cancel` убивает процесс |
+| `Cancelled` | Команда отменена пользователем (через `/status` → кнопка «⛔ Отменить»). Статус устанавливается Server-ом, Worker при получении NOTIFY `command_cancel` убивает процесс. Любой одобренный пользователь может отменить чужую команду |
 | `Deleted` | Команда удалена (логическое удаление, soft-delete) |
 
 **Примечание:** Статус `processing` устанавливается атомарно при захвате команды с использованием `SELECT ... FOR UPDATE SKIP LOCKED`.
@@ -664,7 +664,7 @@ await conn.WaitAsync(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
 
 ## Отмена команды пользователем
 
-Пользователь может отменить команду через интерфейс `/status`. Отмена проходит в два этапа:
+Любой одобренный пользователь может отменить команду через интерфейс `/status`. В `/status` отображаются **все сессии всех пользователей** (глобальный статус), с указанием `[username]` рядом с каждой сессией. Отмена проходит в два этапа:
 сначала **диалог подтверждения** на стороне Server, затем — принудительное завершение процесса
 на стороне Worker.
 
@@ -779,7 +779,7 @@ if (cmdCt.IsCancellationRequested)
 | Ситуация | Действие |
 |----------|----------|
 | Команда уже завершена (Done/Failed) | `CancelCommandAsync` возвращает false, пользователю ничего не выводится, все сообщения удаляются |
-| Команда принадлежит другому пользователю | `GetCommandByIdAsync` возвращает null, запрос игнорируется с предупреждением в лог |
+| Команда принадлежит другому пользователю | `GetCommandByIdAsync` возвращает null, запрос игнорируется с предупреждением в лог. Любой одобренный пользователь может управлять чужими командами — `@IsAdmin = true` в SQL bypass |
 | NOTIFY не дошёл до Worker | Fallback poll каждые 5 мин + очистка истёкших Lease |
 | Worker не успел отменить CTS до завершения процесса | Проверка `cmdCt.IsCancellationRequested` после `WaitForExit` защищает от перезаписи статуса |
 
@@ -1151,13 +1151,15 @@ WHERE "Status" = 'processing'
 
 ```sql
 -- Server: обновляет статус на Cancelled (только если pending или processing)
+-- Любой одобренный пользователь может отменить чужую команду (@IsAdmin = true)
 UPDATE Commands
 SET Status = 'Cancelled',
     CompletedAt = NOW(),
     ErrorMessage = 'Cancelled by user'
 WHERE CommandId = @CommandId
-  AND SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId)
   AND Status IN ('pending', 'processing')
+  AND (SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId)
+       OR @IsAdmin = true)
 RETURNING CommandId;
 ```
 

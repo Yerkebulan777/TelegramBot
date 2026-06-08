@@ -122,7 +122,7 @@ public sealed class SlashCommandService(
                 logger.LogDebug("Executing /status for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 session.IsInStatusView = true;
-                var sessionsStatus = await dataService.GetSessionsListAsync(userId);
+                var sessionsStatus = await dataService.GetSessionsListAsync();
                 var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
                 var statusMessage = await TrackMessageAsync(outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
                 session.StatusMessageId = statusMessage?.Id;

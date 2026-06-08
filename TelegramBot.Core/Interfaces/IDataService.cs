@@ -24,26 +24,26 @@ public interface IDataService
         string username,
         int filesAmount);
 
-    /// <summary>Возвращает список сессий пользователя.</summary>
-    Task<List<SessionsList>> GetSessionsListAsync(long userId);
+    /// <summary>Возвращает список всех сессий (глобальный статус).</summary>
+    Task<List<SessionsList>> GetSessionsListAsync();
 
     /// <summary>Возвращает статус сессии.</summary>
-    Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId);
+    Task<SessionStatus> GetSessionsStatusAsync(int sessionId);
 
     /// <summary>Возвращает список команд в сессии.</summary>
-    Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId);
+    Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId);
 
-    /// <summary>Удаляет сессию (мягкое удаление).</summary>
-    Task<bool> DeleteSessionAsync(int sessionId, long userId);
+    /// <summary>Удаляет сессию (мягкое удаление). Любой одобренный пользователь может удалить любую сессию.</summary>
+    Task<bool> DeleteSessionAsync(int sessionId, long userId, bool isAdmin = false);
 
-    /// <summary>Удаляет команду (мягкое удаление).</summary>
-    Task<bool> DeleteCommandAsync(int commandId, long userId);
+    /// <summary>Удаляет команду (мягкое удаление). Любой одобренный пользователь может удалить любую команду.</summary>
+    Task<bool> DeleteCommandAsync(int commandId, long userId, bool isAdmin = false);
 
-    /// <summary>Проверяет наличие команд в сессии.</summary>
-    Task<bool> CheckCommandsStatusAsync(int sessionId, long userId);
+    /// <summary>Проверяет наличие активных команд в сессии.</summary>
+    Task<bool> CheckCommandsStatusAsync(int sessionId);
 
-    /// <summary>Возвращает ID сессии по ID команды.</summary>
-    Task<int?> GetSessionIdByCommandAsync(int commandId, long userId);
+    /// <summary>Возвращает ID сессии по ID команды. Любой одобренный пользователь может запрашивать любую команду.</summary>
+    Task<int?> GetSessionIdByCommandAsync(int commandId, long userId, bool isAdmin = false);
 
     /// <summary>
     /// Атомарно захватывает команды со статусом 'pending' для выполнения воркером.
@@ -74,14 +74,14 @@ public interface IDataService
     /// <summary>Soft-delete отменённых команд, завершённых более указанного количества дней назад.</summary>
     Task CleanupOldCancelledCommandsAsync(int olderThanDays);
 
-    /// <summary>Отменяет команду: обновляет статус на 'Cancelled'.</summary>
-    Task<bool> CancelCommandAsync(int commandId, long userId);
+    /// <summary>Отменяет команду: обновляет статус на 'Cancelled'. Любой одобренный пользователь может отменить любую команду.</summary>
+    Task<bool> CancelCommandAsync(int commandId, long userId, bool isAdmin = false);
 
     /// <summary>Уведомляет Worker о необходимости отменить команду через NOTIFY command_cancel.</summary>
     Task NotifyCommandCancelAsync(int commandId);
 
-    /// <summary>Возвращает команду по ID (для проверки принадлежности пользователю).</summary>
-    Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId);
+    /// <summary>Возвращает команду по ID. Любой одобренный пользователь может запрашивать любую команду.</summary>
+    Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId, bool isAdmin = false);
 
     /// <summary>Возвращает текущий статус команды (без проверки владельца).</summary>
     Task<string?> GetCommandStatusAsync(int commandId);
