@@ -127,6 +127,98 @@
 
 ---
 
+## TelegramBot.BimLib — библиотека BIM-интеграции
+
+BimLib — **Windows-only** библиотека, используемая Worker-ом при выполнении Revit/Navisworks-команд.
+
+### Назначение
+
+При запуске внешнего BIM-приложения (Revit, Navisworks) Worker должен:
+1. **Определить версию Revit** по .rvt-файлу — чтобы запустить правильный Revit.exe
+2. **Найти исполняемый файл** — Revit.exe или Navisworks.exe/FileConvert.exe в системе
+3. **Мониторить процесс** — проверять отклик, автоматически закрывать диалоговые окна
+
+Эти задачи решает BimLib.
+
+### Состав и архитектура
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    TelegramBot.BimLib                        │
+├──────────────────────────────────────────────────────────────┤
+│  Services/                                                    │
+│  ├── RevitVersionDetector  — OLE BasicFileInfo → "Format: YYYY"│
+│  ├── RevitPathResolver     — Registry → путь к Revit.exe     │
+│  └── NavisworksPathResolver — Registry → Navisworks/FileConvert│
+├──────────────────────────────────────────────────────────────┤
+│  Monitor/                                                     │
+│  ├── RevitProcessTracker     — отклик, диалоги, PID          │
+│  ├── NavisworksProcessTracker — трекинг Roamer/FileConvert    │
+│  ├── DialogDismisser         — автозакрытие #32770           │
+│  ├── WindowUtil              — Win32-утилиты (HWND, клики)    │
+│  └── WindowInfo              — информация об окне            │
+├──────────────────────────────────────────────────────────────┤
+│  Native/ — P/Invoke WinAPI (User32, Win32Consts)             │
+│  Interfaces/ — 5 интерфейсов для слабой связанности         │
+│  Models/ — RevitDetectedVersion, RevitProcessHealth          │
+│  Config/ — BimIntegrationOptions                             │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Поток использования в Worker
+
+```
+CommandExecutionService (Worker)
+    │
+    ├── RevitVersionDetector.DetectVersionAsync(.rvt)
+    │       └── RootStorage.OpenRead() → OpenStream("BasicFileInfo") → извлечение "Format: YYYY"
+    │
+    ├── RevitPathResolver.ResolveExecutablePath(year)
+    │       └── HKLM\SOFTWARE\Autodesk\Revit\{version} → Revit.exe
+    │
+    ├── Запуск Revit.exe с аргументами команды
+    │
+    └── RevitProcessTracker.CheckHealth(process)
+            └── Проверка Responding + автозакрытие диалогов через DialogDismisser
+```
+
+### Ключевые интерфейсы
+
+| Интерфейс | Методы | Назначение |
+|-----------|--------|------------|
+| `IRevitVersionDetector` | `DetectVersionAsync(filePath)` | Определить версию Revit по .rvt-файлу |
+| `IRevitPathResolver` | `GetInstalledVersions()`, `ResolveExecutablePath(year)` | Найти Revit.exe установленной версии |
+| `INavisworksPathResolver` | `GetInstalledVersions()`, `ResolveNavisworksPath(year)`, `ResolveFileConvertPath(year)` | Найти Navisworks.exe / FileConvert.exe |
+| `IRevitProcessTracker` | `GetAllRevitProcesses()`, `CheckHealth(process)`, `DismissDialogs(processId)` | Мониторинг Revit-процессов |
+| `INavisworksProcessTracker` | `GetAllProcesses()`, `CheckHealth(process)` | Мониторинг Navisworks-процессов |
+
+### DI-регистрация
+
+В `Worker/Program.cs`:
+```csharp
+services.AddBimIntegration();
+```
+Требуется секция `BimIntegration` в `appsettings.json`:
+```json
+{
+  "BimIntegration": {
+    "MinSupportedVersion": 2018,
+    "MaxSupportedVersion": 2026,
+    "RevitInstallRoot": "C:\\Program Files\\Autodesk"
+  }
+}
+```
+
+### Важные замечания для разработчика
+
+- BimLib помечена `[SupportedOSPlatform("windows")]` — работает только на Windows
+- OpenMcdf 3.x парсит OLE Structured Storage (.rvt). API: `RootStorage.OpenRead()` → `OpenStream()` → `stream.Read()`
+- Доступ к реестру Windows через `Microsoft.Win32.Registry`
+- P/Invoke — в `Native/User32.cs` (поиск окон, клики, закрытие диалогов)
+- `RevitProcessStatus` содержит 3 значения: `Healthy`, `NotResponding`, `Error`
+
+---
+
 ## Жизненный цикл команды
 
 | Статус | Описание |

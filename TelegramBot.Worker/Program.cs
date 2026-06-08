@@ -1,9 +1,14 @@
+using System.Runtime.Versioning;
 using Serilog;
+using TelegramBot.BimLib.Config;
+using TelegramBot.BimLib.Extensions;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Data;
 using TelegramBot.Worker.Services;
+
+[assembly: SupportedOSPlatform("windows")]
 
 namespace TelegramBot.Worker;
 
@@ -26,6 +31,9 @@ public static class Program
                     _ = services.AddSingleton<IDataService, PostgresDataService>();
 
                     _ = services.Configure<WorkerOptions>(context.Configuration.GetSection(WorkerOptions.SectionName));
+                    _ = services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
+
+                    _ = services.AddBimIntegration();
 
                     _ = services.AddHostedService<CommandExecutionService>();
                 })

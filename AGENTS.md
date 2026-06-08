@@ -4,20 +4,23 @@ Guidance for agentic coding agents working in this repository.
 
 ## Project Overview
 
-Telegram bot using long-polling, split into **4 projects**. No webhooks, no MVC controllers. All services are **Singletons**.
+Telegram bot using long-polling, split into **5 projects**. No webhooks, no MVC controllers. All services are **Singletons**.
 
 ```
 TelegramBot.Core   ←──  TelegramBot.Data
        ↑                       ↑
        ├──── TelegramBot.Server ──┘
        │
-       └──── TelegramBot.Worker (LISTEN/NOTIFY)
+       ├──── TelegramBot.Worker (LISTEN/NOTIFY)
+       │
+       └──── TelegramBot.BimLib  (BIM-интеграция)
 ```
 
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
 - **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
-- **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data.
+- **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data + BimLib.
+- **TelegramBot.BimLib** — BIM integration library: Revit version detection, registry-based path resolution, process monitoring & dialog dismissal. Windows-only (P/Invoke). No project references (only NuGet).
 
 ---
 
@@ -71,6 +74,55 @@ Telegram API -> TelegramBotHostedService (polling)
                 ├── REQACCESS/APPROVEUSER/REJECTUSER bypass access check
                 └── all other callbacks → user must be Approved
 ```
+
+### TelegramBot.BimLib — BIM Integration
+
+BimLib is a **Windows-only** library that provides BIM-related infrastructure used by the Worker.
+
+**Structure:**
+
+| Folder | Contents |
+|--------|----------|
+| `Config/` | `BimIntegrationOptions` — min/max supported Revit version, install root path |
+| `Extensions/` | `DependencyInjectionExtensions.AddBimIntegration()` — DI registration |
+| `Interfaces/` | `IRevitVersionDetector`, `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksPathResolver`, `INavisworksProcessTracker` |
+| `Models/` | `RevitDetectedVersion`, `RevitProcessHealth` (status: Healthy/NotResponding/Error) |
+| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `DialogDismisser`, `WindowUtil`, `WindowInfo` |
+| `Native/` | P/Invoke WinAPI declarations: `User32`, `Win32Consts` |
+| `Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver` |
+
+**Key services:**
+
+| Service | Role |
+|---------|------|
+| `RevitVersionDetector` | Reads OLE stream `BasicFileInfo` from .rvt/.rfa via OpenMcdf to extract `Format: YYYY` |
+| `RevitPathResolver` | Finds `Revit.exe` path via Windows Registry (`HKLM\SOFTWARE\Autodesk\Revit\{version}`) |
+| `NavisworksPathResolver` | Finds `Navisworks.exe`/`FileConvert.exe` via Windows Registry |
+| `RevitProcessTracker` | Monitors Revit processes: responsiveness, dialog dismissal, PID tracking |
+| `NavisworksProcessTracker` | Monitors Navisworks processes (Roamer, FileConvert) |
+| `DialogDismisser` | Auto-closes modal Revit dialogs (#32770) by finding and clicking known buttons |
+
+**DI registration:** In Worker's `Program.cs`, BimLib services are registered via:
+```csharp
+services.AddBimIntegration();
+```
+Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
+
+**Namespaces:**
+- `TelegramBot.BimLib.Config`
+- `TelegramBot.BimLib.Extensions`
+- `TelegramBot.BimLib.Interfaces`
+- `TelegramBot.BimLib.Models`
+- `TelegramBot.BimLib.Monitor`
+- `TelegramBot.BimLib.Native`
+- `TelegramBot.BimLib.Services`
+
+**Important notes for AI agents:**
+- BimLib is `[SupportedOSPlatform("windows")]` — never run or test on non-Windows.
+- OpenMcdf 3.x is used to parse OLE Structured Storage (.rvt files). API: `RootStorage.OpenRead()` → `root.OpenStream()` → `stream.Read()`.
+- Registry access uses `Microsoft.Win32.Registry` — only works on Windows.
+- All P/Invoke is in `Native/` (User32 for window operations).
+- `RevitProcessStatus` enum has only 3 values: `Healthy`, `NotResponding`, `Error` (memory thresholds removed as excessive).
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 

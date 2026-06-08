@@ -33,6 +33,8 @@ Telegram-бот для навигации по файловой системе �
 - **PostgreSQL** — хранение данных (Npgsql + Dapper 2.1.79)
 - **PostgreSQL LISTEN/NOTIFY** — очереди задач для Worker (мгновенная реакция)
 - **Serilog** — структурированное логирование (Console + Seq)
+- **OpenMcdf** — чтение OLE-потоков .rvt/.rfa-файлов (определение версии Revit)
+- **Windows Registry (Microsoft.Win32)** — поиск установленных Revit/Navisworks
 
 ## Качество кода
 
@@ -41,7 +43,11 @@ Telegram-бот для навигации по файловой системе �
 
 ## Требования к платформе
 
-⚠️ **Windows only** — проект использует Windows-specific API для навигации по файловой системе. Запуск на Linux/macOS не поддерживается (проверка `RuntimeInformation.IsOSPlatform` в `Program.cs`).
+⚠️ **Windows only** — проект использует Windows-specific API:
+- Навигация по файловой системе (локальные пути, проверка `RuntimeInformation.IsOSPlatform` в `Program.cs`)
+- **BimLib**: Windows Registry (`Microsoft.Win32`) для поиска Revit.exe/Navisworks.exe; P/Invoke WinAPI (`User32`) для мониторинга процессов и закрытия диалогов
+
+Запуск на Linux/macOS не поддерживается.
 
 ## Требования к инфраструктуре
 
@@ -51,14 +57,16 @@ Telegram-бот для навигации по файловой системе �
 
 ## Структура решения
 
-Решение состоит из 4 проектов (solution file: `TelegramBot.slnx`):
+Решение состоит из 5 проектов (solution file: `TelegramBot.slnx`):
 
 ```
 TelegramBot.Core   ←──  TelegramBot.Data
        ↑                       ↑
        ├──── TelegramBot.Server ──┘
        │
-       └──── TelegramBot.Worker (отдельный процесс)
+       ├──── TelegramBot.Worker (отдельный процесс)
+       │
+       └──── TelegramBot.BimLib (BIM-интеграция)
 ```
 
 | Проект | Назначение | Зависимости |
@@ -67,6 +75,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 | `TelegramBot.Data` | PostgreSQL persistence через Dapper + Npgsql | Core |
 | `TelegramBot.Server` | Telegram инфраструктура, сервисы, хендлеры, хостинг, helpers | Core + Data |
 | `TelegramBot.Worker` | Фоновое выполнение задач (Revit, Navisworks, AI) | Core + Data |
+| `TelegramBot.BimLib` | Библиотека BIM-интеграции: определение версии Revit, поиск Revit.exe/Navisworks.exe, мониторинг процессов | Нет (только NuGet) |
 
 ### Дерево проекта
 
@@ -109,6 +118,14 @@ TelegramBot/
 │   │   └── CommandExecutionService.cs    # LISTEN/NOTIFY + выполнение задач
 │   ├── Program.cs
 │   └── appsettings.json
+├── TelegramBot.BimLib/
+│   ├── Config/                           # BimIntegrationOptions
+│   ├── Extensions/                       # DI-регистрация сервисов
+│   ├── Interfaces/                       # IRevitVersionDetector, IRevitPathResolver, IRevitProcessTracker, INavisworksPathResolver, INavisworksProcessTracker
+│   ├── Models/                           # RevitDetectedVersion, RevitProcessHealth
+│   ├── Monitor/                          # DialogDismisser, RevitProcessTracker, NavisworksProcessTracker, WindowInfo, WindowUtil
+│   ├── Native/                           # P/Invoke WinAPI (User32, Win32Consts)
+│   └── Services/                         # RevitVersionDetector, RevitPathResolver, NavisworksPathResolver
 ├── Docs/
 ├── scripts/
 ├── Dockerfile
@@ -171,6 +188,44 @@ Server (создание сессии)
 
 Worker автоматически переподключается при потере соединения с PostgreSQL и использует fallback poll (5 мин) на случай, если NOTIFY был потерян.
 
+### TelegramBot.BimLib — BIM Integration
+
+BimLib — **Windows-only** библиотека для BIM-интеграции, используемая Worker-ом при выполнении Revit/Navisworks-команд.
+
+**Структура:**
+
+| Папка | Содержимое |
+|-------|-----------|
+| `Config/` | `BimIntegrationOptions` — минимальная/максимальная версия Revit, путь установки |
+| `Extensions/` | `DependencyInjectionExtensions.AddBimIntegration()` — DI-регистрация |
+| `Interfaces/` | `IRevitVersionDetector`, `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksPathResolver`, `INavisworksProcessTracker` |
+| `Models/` | `RevitDetectedVersion`, `RevitProcessHealth` (статусы: Healthy/NotResponding/Error) |
+| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `DialogDismisser`, `WindowUtil`, `WindowInfo` |
+| `Native/` | P/Invoke WinAPI: `User32`, `Win32Consts` |
+| `Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver` |
+
+**DI-регистрация:** В `Worker/Program.cs` сервисы BimLib подключаются через:
+```csharp
+services.AddBimIntegration();
+```
+Для работы требуется секция `BimIntegration` в `appsettings.json` Worker-а (см. [Конфигурация](#конфигурация)).
+
+**Пространства имён:**
+- `TelegramBot.BimLib.Config`
+- `TelegramBot.BimLib.Extensions`
+- `TelegramBot.BimLib.Interfaces`
+- `TelegramBot.BimLib.Models`
+- `TelegramBot.BimLib.Monitor`
+- `TelegramBot.BimLib.Native`
+- `TelegramBot.BimLib.Services`
+
+**Важные замечания:**
+- BimLib помечена `[SupportedOSPlatform("windows")]` — работает только на Windows.
+- OpenMcdf 3.x используется для парсинга OLE Structured Storage (.rvt). API: `RootStorage.OpenRead()` → `root.OpenStream()` → `stream.Read()`.
+- Доступ к реестру Windows через `Microsoft.Win32.Registry`.
+- Весь P/Invoke находится в `Native/` (User32 для операций с окнами).
+- `RevitProcessStatus` содержит только 3 значения: `Healthy`, `NotResponding`, `Error` (пороги памяти удалены как избыточные).
+
 ### DI-регистрация
 
 Все сервисы регистрируются как **Singleton** в `DependencyInjectionExtensions.cs`.
@@ -189,6 +244,17 @@ Worker автоматически переподключается при пот
 | `TelegramOutputService` | Server/Services/Infrastructure/Telegram | Отправка/редактирование сообщений с retry (429) |
 | `TelegramUpdateMapper` | Server/Services/Infrastructure/Telegram | Маппинг `Update` → `MessageDto` / `CallbackQueryDto` |
 | `PostgresDataService` | TelegramBot.Data | Вся работа с БД через Dapper + Npgsql |
+
+### Ключевые сервисы (BimLib)
+
+| Сервис | Расположение | Ответственность |
+|--------|-------------|-----------------|
+| `RevitVersionDetector` | BimLib/Services | Определение версии Revit по .rvt-файлу (OLE BasicFileInfo через OpenMcdf) |
+| `RevitPathResolver` | BimLib/Services | Поиск Revit.exe через реестр Windows (HKLM\SOFTWARE\Autodesk\Revit) |
+| `NavisworksPathResolver` | BimLib/Services | Поиск Navisworks.exe/FileConvert.exe через реестр Windows |
+| `RevitProcessTracker` | BimLib/Monitor | Мониторинг здоровья процессов Revit, автозакрытие диалогов |
+| `NavisworksProcessTracker` | BimLib/Monitor | Мониторинг процессов Navisworks (Roamer, FileConvert) |
+| `DialogDismisser` | BimLib/Monitor | Автоматическое закрытие модальных диалогов Revit (#32770) |
 
 ### Ключевые сервисы (Worker)
 
@@ -296,6 +362,11 @@ Worker:
 {
   "ConnectionStrings": {
     "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
+  },
+  "BimIntegration": {
+    "MinSupportedVersion": 2018,
+    "MaxSupportedVersion": 2026,
+    "RevitInstallRoot": "C:\\Program Files\\Autodesk"
   }
 }
 ```
@@ -324,6 +395,9 @@ Worker:
 | `FileSystem:RevitFileExtension` | — | Расширение Revit-файлов (по умолчанию `.rvt`) |
 | `FileSystem:SectionFolderPattern` | — | Regex паттерн для папок секций |
 | `ConnectionStrings:Postgres` | `ConnectionStrings__Postgres` | PostgreSQL connection string (по умолч. `Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres`) |
+| `BimIntegration:MinSupportedVersion` | — | Минимальная версия Revit для поиска в реестре (по умолчанию `2018`) |
+| `BimIntegration:MaxSupportedVersion` | — | Максимальная версия Revit для поиска в реестре (по умолчанию `2026`) |
+| `BimIntegration:RevitInstallRoot` | — | Корневая папка установки Autodesk Revit (по умолч. `C:\Program Files\Autodesk`) |
 
 Поддерживаются переменные окружения (синтаксис с `__` как разделителем секций).
 
