@@ -94,23 +94,4 @@ public interface IDataService
 
     /// <summary>Массовый upsert пользователей (batch через UNNEST).</summary>
     Task UpsertUsersBatchAsync(long[] userIds, int role, int status);
-
-    /// <summary>Сохраняет ID сообщений для отложенной очистки (прерванный диалог).</summary>
-    Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds);
-    Task SaveTrackedMessageAsync(long userId, int messageId);
-
-    /// <summary>Возвращает все сохранённые ID сообщений, сгруппированные по userId.</summary>
-    Task<ILookup<long, int>> GetAllTrackedMessagesAsync();
-
-    /// <summary>Возвращает сохранённые ID сообщений пользователя для очистки.</summary>
-    Task<IReadOnlyList<int>> GetTrackedMessagesAsync(long userId);
-
-    /// <summary>Удаляет конкретное сохранённое сообщение.</summary>
-    Task DeleteTrackedMessageAsync(long userId, int messageId);
-
-    /// <summary>Удаляет несколько сообщений за один batch-запрос.</summary>
-    Task DeleteTrackedMessagesBatchAsync(long userId, int[] messageIds);
-
-    /// <summary>Удаляет все сохранённые ID сообщений для пользователя.</summary>
-    Task DeleteTrackedMessagesAsync(long userId);
 }

@@ -3,8 +3,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 using TelegramBot.BimLib.Config;
-using TelegramBot.BimLib.Interfaces;
-
 namespace TelegramBot.BimLib.Services;
 
 /// <summary>
@@ -14,11 +12,11 @@ namespace TelegramBot.BimLib.Services;
 [SupportedOSPlatform("windows")]
 public sealed class RevitPathResolver(
     IOptions<BimIntegrationOptions> options,
-    ILogger<RevitPathResolver> logger) : IRevitPathResolver
+    ILogger<RevitPathResolver> logger)
 {
     private readonly BimIntegrationOptions _options = options.Value;
 
-    /// <inheritdoc/>
+    /// <summary>Возвращает список установленных версий Revit (по убыванию), найденных через реестр Windows.</summary>
     public IReadOnlyList<int> GetInstalledVersions()
     {
         var versions = new List<int>();
@@ -38,7 +36,7 @@ public sealed class RevitPathResolver(
         return result;
     }
 
-    /// <inheritdoc/>
+    /// <summary>Находит полный путь к Revit.exe для указанной версии через реестр Windows.</summary>
     public string? ResolveExecutablePath(int versionYear)
     {
         if (versionYear < _options.MinSupportedVersion || versionYear > _options.MaxSupportedVersion)

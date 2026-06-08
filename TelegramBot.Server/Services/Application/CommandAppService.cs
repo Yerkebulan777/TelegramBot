@@ -1,6 +1,7 @@
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
+using TelegramBot.Core.Services;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Application;
@@ -10,26 +11,23 @@ public sealed class CommandAppService(
     ICallbackDispatcher callbackDispatcher,
     ISlashCommandService slashCommandService,
     ITelegramOutputService outputService,
-    IDataService dataService,
+    RateLimiter rateLimiter,
     ILogger<CommandAppService> logger) : ICommandAppService
 {
-    private readonly ISessionManager _sessionManager = sessionManager;
-    private readonly ICallbackDispatcher _callbackDispatcher = callbackDispatcher;
-    private readonly ISlashCommandService _slashCommandService = slashCommandService;
-    private readonly ITelegramOutputService _outputService = outputService;
-    private readonly IDataService _dataService = dataService;
-
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
-        var session = _sessionManager.GetOrCreateSession(message.UserId);
-        var cleanupCandidates = session.GetTrackedMessages()
-            .Concat(await _dataService.GetTrackedMessagesAsync(message.UserId))
-            .Distinct()
-            .ToArray();
+        if (!rateLimiter.IsAllowed(message.UserId))
+        {
+            await outputService.SendMessageAsync(message.UserId,
+                "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
+            return;
+        }
+
+        var session = sessionManager.GetOrCreateSession(message.UserId);
+        var cleanupCandidates = session.GetTrackedMessages();
 
         session.TrackMessage(message.MessageId);
-        await _dataService.SaveTrackedMessageAsync(message.UserId, message.MessageId);
-        await _slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
+        await slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
         await DeleteOldMessagesAsync(message, session, cleanupCandidates, cancellationToken);
     }
 
@@ -41,7 +39,7 @@ public sealed class CommandAppService(
             return;
         }
 
-        var session = _sessionManager.GetOrCreateSession(callback.UserId);
+        var session = sessionManager.GetOrCreateSession(callback.UserId);
         session.TrackMessage(callback.MessageId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
@@ -50,7 +48,7 @@ public sealed class CommandAppService(
             CallbackPrefixes.ApproveUser or
             CallbackPrefixes.RejectUser;
 
-        if (!isRegistrationCallback && !await _slashCommandService.CheckAndNotifyAccessAsync(callback.UserId, session))
+        if (!isRegistrationCallback && !await slashCommandService.CheckAndNotifyAccessAsync(callback.UserId, session))
         {
             logger.LogWarning("Callback rejected: prefix={Prefix}, user={UserId}, reason=access_denied", parsed.Prefix, callback.UserId);
             return;
@@ -64,11 +62,10 @@ public sealed class CommandAppService(
             Username = callback.Username,
             CallbackQueryId = callback.CallbackQueryId,
             ParsedCallback = parsed,
-            Session = session,
-            Buttons = callback.Buttons
+            Session = session
         };
 
-        await _callbackDispatcher.DispatchAsync(context, cancellationToken);
+        await callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
     private async Task DeleteOldMessagesAsync(
@@ -94,12 +91,11 @@ public sealed class CommandAppService(
 
         try
         {
-            await _outputService.DeleteMessagesAsync(message.UserId, messageIds, cancellationToken);
+            await outputService.DeleteMessagesAsync(message.UserId, messageIds, cancellationToken);
         }
         finally
         {
             session.UntrackMessages(messageIds);
-            await _dataService.DeleteTrackedMessagesBatchAsync(message.UserId, messageIds);
         }
     }
 

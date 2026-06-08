@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
-using TelegramBot.BimLib.Interfaces;
 using TelegramBot.BimLib.Models;
 
 namespace TelegramBot.BimLib.Monitor;
@@ -11,9 +10,9 @@ namespace TelegramBot.BimLib.Monitor;
 /// </summary>
 internal sealed class RevitProcessTracker(
     DialogDismisser dialogDismisser,
-    ILogger<RevitProcessTracker> logger) : IRevitProcessTracker
+    ILogger<RevitProcessTracker> logger)
 {
-    /// <inheritdoc/>
+    /// <summary>Возвращает список всех активных (не завершённых) процессов Revit.</summary>
     public IReadOnlyList<Process> GetAllRevitProcesses()
     {
         return Process.GetProcessesByName("Revit")
@@ -25,35 +24,10 @@ internal sealed class RevitProcessTracker(
             .ToList();
     }
 
-    /// <inheritdoc/>
     public RevitProcessHealth CheckHealth(Process process)
-    {
-        try
-        {
-            var responding = process.Responding;
-            var memoryMb = process.WorkingSet64 / (1024 * 1024);
-            var startTime = process.StartTime;
-            var duration = DateTime.UtcNow - startTime.ToUniversalTime();
+        => ProcessHealthHelper.CheckHealth(process, logger, "Revit");
 
-            var status = responding
-                ? RevitProcessStatus.Healthy
-                : RevitProcessStatus.NotResponding;
-
-            return new RevitProcessHealth(
-                process.Id,
-                status,
-                memoryMb,
-                duration,
-                responding);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to check health for process {ProcessId}", process.Id);
-            return new RevitProcessHealth(process.Id, RevitProcessStatus.Error, 0, TimeSpan.Zero, false);
-        }
-    }
-
-    /// <inheritdoc/>
+    /// <summary>Закрывает модальные диалоги Revit для указанного процесса. Возвращает 1, если диалоги были закрыты.</summary>
     public int DismissDialogs(int processId)
     {
         var dismissed = dialogDismisser.DismissDialogsForProcess((uint)processId);

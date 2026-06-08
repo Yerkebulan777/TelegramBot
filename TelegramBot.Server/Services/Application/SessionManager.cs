@@ -10,7 +10,6 @@ public class SessionManager : ISessionManager, IDisposable
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();
     private readonly TimeSpan _sessionTimeout;
     private readonly Timer _cleanupTimer;
-    private bool _disposed;
 
     public SessionManager(TimeSpan sessionTimeout)
     {
@@ -38,76 +37,48 @@ public class SessionManager : ISessionManager, IDisposable
 
     public void RemoveSession(long userId)
     {
-        _=_sessions.TryRemove(userId, out _);
+        _sessions.TryRemove(userId, out _);
     }
 
     private void CleanUpExpiredSessions()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
         var now = DateTime.UtcNow;
 
-        foreach (var key in _sessions.Keys.ToList())
+        foreach (var (key, session) in _sessions)
         {
-            if (!_sessions.TryGetValue(key, out var session) || now - session.LastActivity <= _sessionTimeout)
+            if (now - session.LastActivity <= _sessionTimeout)
             {
                 continue;
             }
 
-            if (!_sessionLocks.TryGetValue(key, out var sessionLock))
+            if (!_sessionLocks.TryGetValue(key, out var sessionLock) || !sessionLock.Wait(0))
             {
-                _=_sessions.TryRemove(key, out _);
-                continue;
-            }
-
-            if (!sessionLock.Wait(0))
-            {
+                _sessions.TryRemove(key, out _);
                 continue;
             }
 
             try
             {
-                if (_disposed)
-                {
-                    _=sessionLock.Release();
-                    return;
-                }
-
                 if (_sessions.TryGetValue(key, out var candidate) && now - candidate.LastActivity > _sessionTimeout)
                 {
-                    _=_sessions.TryRemove(key, out _);
+                    _sessions.TryRemove(key, out _);
                 }
             }
             finally
             {
-                if (!_disposed)
-                {
-                    _=sessionLock.Release();
-                }
+                sessionLock.Release();
             }
         }
     }
 
     public void Dispose()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
         _cleanupTimer.Dispose();
         _sessionLocks.Clear();
     }
 
     private sealed class SessionLockReleaser(SemaphoreSlim sessionLock) : IDisposable
     {
-        public void Dispose()
-        {
-            _=sessionLock.Release();
-        }
+        public void Dispose() => sessionLock.Release();
     }
 }

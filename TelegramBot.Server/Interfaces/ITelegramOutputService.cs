@@ -13,7 +13,6 @@ public interface ITelegramOutputService
     Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard);
     Task<Message?> RemoveReplyKeyboardAsync(long userId, string message);
     Task DeleteMessageAsync(long chatId, int messageId);
-    Task DeleteMessageAsync(long chatId, int messageId, UserSession session);
     Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default);
     Task ClearChatHistoryAsync(long chatId, UserSession session, IEnumerable<int>? exceptMessageIds = null);
     Task CleanupTrackedMessagesAsync(long chatId, UserSession session, IEnumerable<int> keepMessageIds, CancellationToken cancellationToken = default);

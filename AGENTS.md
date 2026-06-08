@@ -17,7 +17,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 ```
 
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
-- **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
+- **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (4 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
 - **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Uses PostgreSQL LISTEN/NOTIFY. References Core + Data + BimLib.
 - **TelegramBot.BimLib** — BIM integration library: Revit version detection, registry-based path resolution, process monitoring & dialog dismissal. Windows-only (P/Invoke). No project references (only NuGet).
@@ -85,9 +85,9 @@ BimLib is a **Windows-only** library that provides BIM-related infrastructure us
 |--------|----------|
 | `Config/` | `BimIntegrationOptions` — min/max supported Revit version, install root path |
 | `Extensions/` | `DependencyInjectionExtensions.AddBimIntegration()` — DI registration |
-| `Interfaces/` | `IRevitVersionDetector`, `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksPathResolver`, `INavisworksProcessTracker` |
+| `Interfaces/` | `IRevitVersionDetector`, `INavisworksPathResolver` |
 | `Models/` | `RevitDetectedVersion`, `RevitProcessHealth` (status: Healthy/NotResponding/Error) |
-| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `DialogDismisser`, `WindowUtil`, `WindowInfo` |
+| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `ProcessHealthHelper`, `DialogDismisser`, `WindowUtil`, `WindowInfo` |
 | `Native/` | P/Invoke WinAPI declarations: `User32`, `Win32Consts` |
 | `Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver` |
 
@@ -98,8 +98,9 @@ BimLib is a **Windows-only** library that provides BIM-related infrastructure us
 | `RevitVersionDetector` | Reads OLE stream `BasicFileInfo` from .rvt/.rfa via OpenMcdf to extract `Format: YYYY` |
 | `RevitPathResolver` | Finds `Revit.exe` path via Windows Registry (`HKLM\SOFTWARE\Autodesk\Revit\{version}`) |
 | `NavisworksPathResolver` | Finds `Navisworks.exe`/`FileConvert.exe` via Windows Registry |
-| `RevitProcessTracker` | Monitors Revit processes: responsiveness, dialog dismissal, PID tracking |
-| `NavisworksProcessTracker` | Monitors Navisworks processes (Roamer, FileConvert) |
+| `RevitProcessTracker` | Monitors Revit processes: responsiveness, dialog dismissal, PID tracking (uses `ProcessHealthHelper`) |
+| `NavisworksProcessTracker` | Monitors Navisworks processes (Roamer, FileConvert) (uses `ProcessHealthHelper`) |
+| `ProcessHealthHelper` | Static helper for `CheckHealth()` — shared between both process trackers |
 | `DialogDismisser` | Auto-closes modal Revit dialogs (#32770) by finding and clicking known buttons |
 
 **DI registration:** In Worker's `Program.cs`, BimLib services are registered via:
@@ -122,7 +123,17 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 - OpenMcdf 3.x is used to parse OLE Structured Storage (.rvt files). API: `RootStorage.OpenRead()` → `root.OpenStream()` → `stream.Read()`.
 - Registry access uses `Microsoft.Win32.Registry` — only works on Windows.
 - All P/Invoke is in `Native/` (User32 for window operations).
-- `RevitProcessStatus` enum has only 3 values: `Healthy`, `NotResponding`, `Error` (memory thresholds removed as excessive).
+- `RevitProcessStatus` enum has only 3 values: `Healthy`, `NotResponding`, `Error`.
+- Removed interfaces (concrete classes only): `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` — they had no consumers outside BimLib.
+- `ProcessHealthHelper.CheckHealth()` provides shared health-check logic for both `RevitProcessTracker` and `NavisworksProcessTracker`.
+
+### Shared Static Helpers
+
+| Helper | Location | Purpose |
+|--------|----------|---------|
+| `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — универсальный метод для отправки reply-клавиатуры с трекингом сообщения, заменяет 3 дублированных метода |
+| `ProcessHealthHelper` | `BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общая логика проверки здоровья процесса для Revit и Navisworks |
+| `NpgsqlHelper` | `Worker/Services/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` — устраняет дублирование `new NpgsqlConnection + OpenAsync` в Worker-сервисах |
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 
@@ -145,23 +156,27 @@ SlashCommandService.ConfirmFileSelectionAsync()
 
 DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker uses `PostgresDataService` registered directly in `Program.cs`.
 
+**Key DI simplification:** `IFileSystemBrowser` and `ITelegramUpdateMapper` interfaces were removed — their consumers now depend on concrete types `FileSystemBrowser` and `TelegramUpdateMapper` directly (no testability requirement for these internal services).
+
 ### Callback Handling — Chain of Responsibility
 
 `CallbackDispatcher` (implements `ICallbackDispatcher`) routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (sorted by `Priority`, lower = first). All handlers extend `CallbackHandlerBase`.
 
 Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `CommandToggleHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
 
+**Error handling:** `CallbackHandlerBase.HandleAsync()` does NOT catch exceptions — they propagate to `CallbackDispatcher.DispatchAsync()`, which catches `Exception`, logs it, and continues to the next handler. This eliminates double logging.
+
 Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. 
 
-> **SessionManagementHandler** поддерживает отмену команд с подтверждением: `CANCELCMD:{commandId}` → диалог → `CONFIRM_CANCEL:{commandId}`. `CONFIRM_CANCEL` срабатывает только после явного подтверждения пользователем (кнопка «Да, отменить»).
+> **SessionManagementHandler** supports command cancel with confirmation: `CANCELCMD:{commandId}` → dialog → `CONFIRM_CANCEL:{commandId}`. Uses shared `TryParseId()` helper to validate IDs.
 
 For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 
-Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages` (composite PK). Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
+Tables: `BotUsers`, `Sessions`, `Commands`. **`TrackedMessages` was removed** — message tracking is now purely in-memory via `UserSession._trackedMessageIds`. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
-All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). SQL constants in `TelegramBot.Data/Sql/` (5 partial files per entity).
+All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). SQL constants in `TelegramBot.Data/Sql/` (4 partial files total).
 
 ---
 
@@ -206,7 +221,23 @@ Namespaces must match folder structure:
 
 - Register all new services as **Singletons** in `DependencyInjectionExtensions.cs`
 - Use `_ = services.AddSingleton<IFoo, Foo>()` (discard the fluent return value)
-- Inject dependencies via constructor; store in `readonly` private `_camelCase` fields
+- Inject dependencies via **primary constructors** (C# 12). Parameters are captured automatically — do NOT add redundant `private readonly` fields for direct copies:
+  ```csharp
+  // ✅ CORRECT — no redundant fields
+  public sealed class Foo(IBar bar, ILogger<Foo> logger) : IFoo
+  {
+      public void DoWork() => bar.DoSomething();
+  }
+  
+  // ❌ WRONG — fields are redundant
+  public sealed class Foo(IBar bar, ILogger<Foo> logger) : IFoo
+  {
+      private readonly IBar _bar = bar;  // DELETE this
+  }
+  ```
+- Fields that **transform** parameters are fine: `private readonly FileSystemOptions _options = options.Value;`
+- Fields that create **new instances** are fine: `private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();`
+- Protected fields exposed to subclasses are fine: `protected readonly ILogger Logger = logger;`
 - New callback handlers: implement `ICallbackHandler`, extend `CallbackHandlerBase`, register in `AddCallbackHandlers()`
 
 ### Async / Await
@@ -223,7 +254,7 @@ Namespaces must match folder structure:
 - `TelegramOutputService` has retry logic for HTTP 429 (rate limiting) via `ExecuteWithRetryAsync`
 - Do not swallow unknown exceptions — log at `LogError` or rethrow
 - Avoid empty `catch` blocks
-- Handler base class catches `OperationCanceledException` (logs + rethrows) and general `Exception` (logs at Error + rethrows)
+- Callback exceptions: `CallbackDispatcher` catches + logs; **`CallbackHandlerBase` does not** (no double logging)
 - Worker: outer retry loop reconnects on PostgreSQL connection loss (5 sec delay)
 
 ### Logging
@@ -243,7 +274,7 @@ Namespaces must match folder structure:
 
 ### SQL / Data Access (TelegramBot.Data)
 
-- Use `await using var conn = new NpgsqlConnection(...)` — open a fresh connection per method
+- Use `await using var conn = await CreateConnectionAsync()` — connection creation is unified via a private helper in `PostgresDataService`
 - Use **Dapper** for all queries (no raw `NpgsqlCommand`/`NpgsqlDataReader`)
 - SQL statements go in verbatim string literals (`@"..."`)
 - Use parameterized queries — never string-concatenate user input into SQL
@@ -266,6 +297,8 @@ Namespaces must match folder structure:
 - Use `required` keyword on model properties that must always be set
 - Prefer `??` and `?? throw new InvalidOperationException(...)` over unchecked null dereferences
 - Maintain good code readability and unify methods for easier editing
+- Extract shared static helpers (`HandlerHelpers`, `NpgsqlHelper`) when the same 5+ line pattern appears in multiple files
+- Use `dotnet format --diagnostics IDE0005` to remove unused `using` directives
 
 ---
 
@@ -275,6 +308,7 @@ Namespaces must match folder structure:
 - No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`
 - Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
 - PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`
+- `/// <inheritdoc/>` comments on methods that no longer implement interfaces (e.g., `RevitPathResolver`, `RevitProcessTracker`) are stale but harmless — replace with proper `<summary>` when editing nearby
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

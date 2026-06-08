@@ -47,13 +47,6 @@ internal static partial class SqlQueries
                 NextRetryAt TIMESTAMPTZ
             );";
 
-        internal const string CreateTrackedMessagesTable = @"
-            CREATE TABLE IF NOT EXISTS TrackedMessages (
-                UserId    BIGINT NOT NULL,
-                MessageId INTEGER NOT NULL,
-                PRIMARY KEY (UserId, MessageId)
-            );";
-
         internal const string CreateIndexes = @"
             CREATE INDEX IF NOT EXISTS idx_commands_status ON Commands(Status);
             CREATE INDEX IF NOT EXISTS idx_commands_session ON Commands(SessionId);

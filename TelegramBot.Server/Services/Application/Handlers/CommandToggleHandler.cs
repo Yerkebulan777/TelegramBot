@@ -9,9 +9,6 @@ public sealed class CommandToggleHandler(
     ITelegramOutputService outputService,
     ILogger<CommandToggleHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
-    private readonly ITelegramOutputService _outputService = outputService;
-
     public override bool CanHandle(string prefix)
     {
         return CommandCatalog.TryGetByPrefix(prefix, out _);
@@ -33,8 +30,8 @@ public sealed class CommandToggleHandler(
             context.Session.AddPendingCommand(command.Code, command.Name);
         }
 
-        var keyboard = await _keyboardBuilder.GetCommandKeyboardAsync(command.Group, context.Session);
-        await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        var keyboard = await keyboardBuilder.GetCommandKeyboardAsync(command.Group, context.Session);
+        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         return true;
     }

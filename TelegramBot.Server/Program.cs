@@ -30,10 +30,10 @@ public static class Program
             var host = Host.CreateDefaultBuilder(args)
                 .ConfigureAppConfiguration((context, config) =>
                 {
-                    _=config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
-                    _=config.AddEnvironmentVariables();
+                    config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+                    config.AddEnvironmentVariables();
                 })
-                .ConfigureServices((context, services) => _ = services.AddTelegramBotServer(context.Configuration))
+                .ConfigureServices((context, services) => services.AddTelegramBotServer(context.Configuration))
                 .UseSerilog((context, services, loggerConfiguration) =>
                     SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Server"))
                 .Build();

@@ -11,8 +11,6 @@ public sealed class CommandSelectionHandler(
     IOptions<FileSystemOptions> options,
     ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
-    private readonly ITelegramOutputService _outputService = outputService;
     private readonly FileSystemOptions _options = options.Value;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
@@ -47,43 +45,28 @@ public sealed class CommandSelectionHandler(
         session.IsFileSelectionActive = true;
         session.FileSelectionMessageId = context.MessageId;
 
-        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
-        await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
+        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         await SendActionsReplyKeyboardAsync(context);
 
         return true;
     }
 
-    private async Task SendActionsReplyKeyboardAsync(CallbackContext context)
-    {
-        var session = context.Session;
-
-        if (session.LastActionsMessageId.HasValue)
-        {
-            await _outputService.DeleteMessageAsync(context.UserId, session.LastActionsMessageId.Value, session);
-            session.LastActionsMessageId = null;
-        }
-
-        var replyKeyboard = await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync();
-        var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
-        if (message != null)
-        {
-            session.TrackMessage(message.Id);
-            session.LastActionsMessageId = message.Id;
-        }
-    }
+    private Task SendActionsReplyKeyboardAsync(CallbackContext context)
+        => HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, context,
+            keyboardBuilder.GetProjectActionsReplyKeyboardAsync);
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         Logger.LogDebug("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
-        await _outputService.ClearChatHistoryAsync(context.UserId, context.Session);
+        await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
 
         context.Session.ClearPendingCommands();
         context.Session.IsFileSelectionActive = false;
         context.Session.LastActionsMessageId = null;
 
-        var cancelMsg = await _outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
+        var cancelMsg = await outputService.RemoveReplyKeyboardAsync(context.UserId, "Выбор команд отменен.");
         if (cancelMsg != null)
         {
             context.Session.TrackMessage(cancelMsg.Id);

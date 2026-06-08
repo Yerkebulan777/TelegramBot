@@ -17,23 +17,9 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
         return SupportedPrefixes.Count > 0 && SupportedPrefixes.Contains(prefix);
     }
 
-    public async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            return await HandleAsyncInternal(context, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            Logger.LogInformation("Callback handling was cancelled for prefix '{Prefix}'", GetPrefix(context));
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error handling callback with prefix '{Prefix}' for user {Username} ({UserId})",
-                GetPrefix(context), context.Username, context.UserId);
-            throw;
-        }
+        return HandleAsyncInternal(context, cancellationToken);
     }
 
     protected abstract Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default);
@@ -43,8 +29,5 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
         Logger.LogWarning("Invalid {FieldName} '{Value}' from user {Username} ({UserId})", fieldName, value, username, userId);
     }
 
-    private static string GetPrefix(CallbackContext context)
-    {
-        return context.ParsedCallback.Prefix;
-    }
+
 }

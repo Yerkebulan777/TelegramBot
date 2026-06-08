@@ -3,16 +3,15 @@ using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Models;
+using TelegramBot.Server.Services.Infrastructure.FileSystem;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
-public class KeyboardBuilder(IFileSystemBrowser fileNavigationService) : IKeyboardBuilder
+public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboardBuilder
 {
-    private readonly IFileSystemBrowser _navigationService = fileNavigationService;
-
     public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
     {
-        return _navigationService.GetSectionsViewAsync(userId, session.CurrentPath);
+        return fileNavigationService.GetSectionsViewAsync(userId, session.CurrentPath);
     }
 
     public Task<InlineKeyboardMarkup> GetCommandKeyboardAsync(CommandGroup group, UserSession session)

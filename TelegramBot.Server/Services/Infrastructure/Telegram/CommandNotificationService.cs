@@ -1,5 +1,6 @@
 using Dapper;
 using Npgsql;
+using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 
@@ -42,8 +43,7 @@ public sealed class CommandNotificationService(
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(stoppingToken);
+        await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, stoppingToken);
 
         await conn.ExecuteAsync("LISTEN command_completed;");
         conn.Notification += OnNotificationReceived;

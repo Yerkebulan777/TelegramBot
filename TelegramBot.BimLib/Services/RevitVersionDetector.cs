@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using OpenMcdf;
@@ -15,8 +16,9 @@ namespace TelegramBot.BimLib.Services;
 ///   3. Извлечь текст между маркерами (первый маркер \r\n, fallback \x04\r\x00\n\x00)
 ///   4. Найти строку "Format:" и извлечь числовое значение года
 /// </summary>
+[SupportedOSPlatform("windows")]
 public sealed class RevitVersionDetector(
-    IRevitPathResolver pathResolver,
+    RevitPathResolver pathResolver,
     ILogger<RevitVersionDetector> logger) : IRevitVersionDetector
 {
     /// <inheritdoc/>

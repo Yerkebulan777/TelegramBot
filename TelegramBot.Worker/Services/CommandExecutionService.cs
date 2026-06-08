@@ -8,6 +8,8 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
+using TelegramBot.BimLib.Interfaces;
+using TelegramBot.Data;
 
 namespace TelegramBot.Worker.Services;
 
@@ -21,7 +23,9 @@ public sealed class CommandExecutionService(
     IDataService dataService,
     IConfiguration configuration,
     IOptions<WorkerOptions> workerOptions,
-    ILogger<CommandExecutionService> logger) : BackgroundService
+    ILogger<CommandExecutionService> logger,
+    IRevitVersionDetector versionDetector,
+    INavisworksPathResolver navisworksPathResolver) : BackgroundService
 {
     private const int FallbackTimeoutSec = 300; // 5 мин — safety net, если NOTIFY потерян
     private const int DefaultBatchSize = 50;
@@ -129,30 +133,29 @@ public sealed class CommandExecutionService(
 
     private async Task WaitForActiveProcessesAsync()
     {
-        var timeout = TimeSpan.FromSeconds(30);
-        var start = DateTime.UtcNow;
-
-        while (_activeProcesses.Count > 0 && (DateTime.UtcNow - start) < timeout)
+        if (_activeProcesses.Count == 0)
         {
-            logger.LogDebug("Waiting for {Count} active processes to complete...", _activeProcesses.Count);
-            await Task.Delay(500);
+            logger.LogInformation("Worker shutdown: no active processes to handle");
+            return;
         }
 
-        if (_activeProcesses.Count > 0)
+        logger.LogInformation("Worker shutdown: leaving {Count} active processes running independently (no cleanup needed)",
+            _activeProcesses.Count);
+
+        foreach (var kvp in _activeProcesses)
         {
-            logger.LogWarning("Forcing termination of {Count} active processes", _activeProcesses.Count);
-            foreach (var process in _activeProcesses.Values)
-            {
-                try { process.Kill(true); }
-                catch { }
-            }
+            var process = kvp.Value;
+            if (process.HasExited)
+                continue;
+
+            logger.LogInformation("Process left running: commandId={Id}, pid={Pid}",
+                kvp.Key, process.Id);
         }
     }
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(stoppingToken);
+        await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, stoppingToken);
 
         await conn.ExecuteAsync("LISTEN new_command;");
         await conn.ExecuteAsync("LISTEN command_cancel;");
@@ -333,7 +336,19 @@ public sealed class CommandExecutionService(
                 return;
             }
 
+            var (resolvedPath, resolutionError) = await ResolveExecutablePathAsync(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
+            if (resolvedPath == null)
+            {
+                logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=executable_not_found, error={Error}",
+                    cmd.CommandId, cmd.CommandText, resolutionError);
+                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                    errorMessage: resolutionError);
+                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, resolutionError);
+                return;
+            }
+
             var startInfo = CreateProcessStartInfo(cmd, commandCfg);
+            startInfo.FileName = resolvedPath;
             logger.LogInformation("Command start: id={Id}, command={Cmd}, attempt={Attempt}",
                 cmd.CommandId, cmd.CommandText, cmd.RetryCount + 1);
 
@@ -350,8 +365,8 @@ public sealed class CommandExecutionService(
             var outputBuilder = new StringBuilder();
             var errorBuilder = new StringBuilder();
 
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) { _=outputBuilder.AppendLine(e.Data); } };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) { _=errorBuilder.AppendLine(e.Data); } };
+            process.OutputDataReceived += (_, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) errorBuilder.AppendLine(e.Data); };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
@@ -375,7 +390,17 @@ public sealed class CommandExecutionService(
             if (!completed)
             {
                 process.Kill(true);
-                await process.WaitForExitAsync(ct);
+                try
+                {
+                    using var killTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await process.WaitForExitAsync(killTimeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    logger.LogWarning(
+                        "Kill timeout after process timeout: commandId={Id}, pid={Pid}",
+                        cmd.CommandId, process.Id);
+                }
                 errorMessage = $"Timeout: process exceeded {_workerOptions.ProcessTimeoutSeconds}s limit";
                 logger.LogWarning("Command timeout: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
                     cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
@@ -396,58 +421,25 @@ public sealed class CommandExecutionService(
                     cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
                 await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Done, null);
             }
-            else if (errorMessage != null && cmd.RetryCount < _workerOptions.MaxRetries)
+            else if (errorMessage != null)
             {
-                var nextRetryAt = DateTime.UtcNow.AddSeconds(
-                    _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
-                var newRetryCount = await dataService.ScheduleRetryAsync(
-                    cmd.CommandId, nextRetryAt, errorMessage);
-                logger.LogWarning("Command {Cmd} ({Id}) failed (attempt {Attempt}/{Max}), retry at {Next}. Error: {Msg}",
-                    cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
-                    nextRetryAt.ToString("O"), errorMessage);
-                // Будим воркер, чтобы он проверил очередь (команда подхватится после NextRetryAt)
-                await dataService.NotifyNewCommandsAsync(cmd.SessionId);
-            }
-            else
-            {
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
-                    errorMessage: errorMessage ?? "Unknown error");
-                logger.LogError("Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
-                    cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
-                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, errorMessage);
+                await HandleCommandFailureAsync(cmd, errorMessage, null, sw);
             }
         }
         catch (OperationCanceledException)
         {
             if (process != null && !process.HasExited)
             {
-                process.Kill(true);
+                logger.LogInformation(
+                    "Process left running on Worker shutdown: commandId={Id}, cmd={Cmd}, pid={Pid}",
+                    cmd.CommandId, cmd.CommandText, process.Id);
             }
 
             throw;
         }
         catch (Exception ex)
         {
-            sw.Stop();
-            if (cmd.RetryCount < _workerOptions.MaxRetries)
-            {
-                var nextRetryAt = DateTime.UtcNow.AddSeconds(
-                    _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
-                var newRetryCount = await dataService.ScheduleRetryAsync(
-                    cmd.CommandId, nextRetryAt, ex.Message);
-                logger.LogWarning(ex, "Command {Cmd} ({Id}) failed with exception (attempt {Attempt}/{Max}), retry at {Next}",
-                    cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
-                    nextRetryAt.ToString("O"));
-                // Будим воркер, чтобы он проверил очередь
-                await dataService.NotifyNewCommandsAsync(cmd.SessionId);
-            }
-            else
-            {
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: ex.Message);
-                logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts",
-                    cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1);
-                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, ex.Message);
-            }
+            await HandleCommandFailureAsync(cmd, ex.Message, ex, sw);
         }
         finally
         {
@@ -507,6 +499,108 @@ public sealed class CommandExecutionService(
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Пытается определить версию Revit/Navisworks через BimLib и вернуть полный путь к исполняемому файлу.
+    /// Если определить не удалось или нужная версия не установлена — возвращает (null, сообщение об ошибке).
+    /// <c>resolvedPath</c> не null только когда путь успешно определён.
+    /// </summary>
+    /// <remarks>
+    /// <b>Revit:</b> версия определяется из содержимого файла (OLE-поток BasicFileInfo → "Format: YYYY"),
+    /// затем путь резолвится через реестр Windows. Это гарантирует запуск правильной версии Revit.exe
+    /// для каждого .rvt-файла.
+    /// <br/>
+    /// <b>Navisworks:</b> в отличие от Revit, файлы .nwc/.nwd/.nwf не хранят версию в OLE-структуре.
+    /// BasicFileInfo отсутствует. Поэтому версия не детектится — вместо этого выбирается первая
+    /// установленная версия Navisworks (любой версии FileConvert.exe подходит для конвертации NWC).
+    /// </remarks>
+    private async Task<(string? resolvedPath, string? errorMessage)> ResolveExecutablePathAsync(
+        PendingCommand cmd, string configuredPath, string commandText, CancellationToken ct)
+    {
+        if (commandText is "PDF" or "DWG" or "IFC" or "BIMDOC")
+        {
+            try
+            {
+                var version = await versionDetector.DetectVersionAsync(cmd.FilePath!, ct);
+                if (version?.ExecutablePath != null)
+                {
+                    logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Revit {Year})",
+                        commandText, version.ExecutablePath, version.Year);
+                    return (version.ExecutablePath, null);
+                }
+
+                // Версия определена, но Revit не установлен — понятная ошибка пользователю
+                if (version != null && version.ExecutablePath == null)
+                {
+                    var msg = $"Revit {version.Year} не установлен на сервере. Пожалуйста, установите Revit {version.Year} или обратитесь к администратору.";
+                    logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
+                    return (null, msg);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "BimLib version detection failed for {Cmd}, falling back to configured path",
+                    commandText);
+            }
+        }
+
+        if (commandText is "NWC" or "CLASHREP")
+        {
+            try
+            {
+                var versions = navisworksPathResolver.GetInstalledVersions();
+                if (versions.Count > 0)
+                {
+                    var nwPath = navisworksPathResolver.ResolveFileConvertPath(versions[0])
+                                  ?? navisworksPathResolver.ResolveNavisworksPath(versions[0]);
+                    if (nwPath != null)
+                    {
+                        logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Navisworks {Year})",
+                            commandText, nwPath, versions[0]);
+                        return (nwPath, null);
+                    }
+                }
+
+                // Navisworks не установлен — понятная ошибка пользователю
+                var msg = "Navisworks не установлен на сервере. Пожалуйста, установите Navisworks или обратитесь к администратору.";
+                logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
+                return (null, msg);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "BimLib Navisworks resolution failed for {Cmd}, falling back to configured path",
+                    commandText);
+            }
+        }
+
+        return (configuredPath, null);
+    }
+
+    /// <summary>
+    /// Планирует retry или помечает команду как Failed, уведомляет пользователя.
+    /// </summary>
+    private async Task HandleCommandFailureAsync(PendingCommand cmd, string errorMessage, Exception? ex, Stopwatch sw)
+    {
+        sw.Stop();
+        if (cmd.RetryCount < _workerOptions.MaxRetries)
+        {
+            var nextRetryAt = DateTime.UtcNow.AddSeconds(
+                _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
+            var newRetryCount = await dataService.ScheduleRetryAsync(
+                cmd.CommandId, nextRetryAt, errorMessage);
+            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed (attempt {Attempt}/{Max}), retry at {Next}. Error: {Msg}",
+                cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
+                nextRetryAt.ToString("O"), errorMessage);
+            await dataService.NotifyNewCommandsAsync(cmd.SessionId);
+        }
+        else
+        {
+            await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
+            logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
+                cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
+            await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, errorMessage);
+        }
     }
 
     /// <summary>Логирует stdout и stderr процесса.</summary>

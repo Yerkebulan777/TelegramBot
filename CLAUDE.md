@@ -33,6 +33,7 @@ There are no automated tests in this project.
 |---|---|---|
 | `TelegramBot.Core` | Models, DTOs, interfaces, config, constants (`net10.0`) | None (no Telegram SDK) |
 | `TelegramBot.Data` | PostgreSQL persistence (Dapper + Npgsql, `net10.0`) | Core |
+| `TelegramBot.BimLib` | BIM integration (Revit/Navisworks), `net10.0`, Windows-only | None (NuGet only) |
 | `TelegramBot.Server` | Telegram bot, handlers, hosting, helpers (`net10.0`) | Core + Data |
 | `TelegramBot.Worker` | Async task execution (Revit/Navisworks/AI), LISTEN/NOTIFY (`net10.0`) | Core + Data |
 
@@ -75,9 +76,11 @@ Telegram API -> TelegramBotHostedService (polling, BackgroundService)
 
 All services are registered as **Singletons** via `DependencyInjectionExtensions.cs`.
 
-**`TelegramBotHostedService`** — Entry point. Registers bot commands, starts polling, routes incoming updates. Uses `ISessionManager.AcquireUserLockAsync()` for per-user concurrency control. Cleans up stale messages on startup.
+**`TelegramBotHostedService`** — Entry point. Registers bot commands, starts polling, routes incoming updates. Uses `ISessionManager.AcquireUserLockAsync()` for per-user concurrency control. Uses `TelegramUpdateMapper` (concrete class — `ITelegramUpdateMapper` interface was removed).
 
-**`CommandAppService`** — Manages access control, creates sessions, dispatches text commands to `SlashCommandService` and inline keyboard callbacks to `ICallbackDispatcher`.
+**`CommandAppService`** — Manages access control (rate limiting via `RateLimiter`), creates sessions, dispatches text commands to `SlashCommandService` and inline keyboard callbacks to `ICallbackDispatcher`.
+
+**`FileSystemBrowser`** — Filesystem navigation keyboard builder. Concrete class (interface `IFileSystemBrowser` was removed — no testability need).
 
 **`SlashCommandService`** — Handles text commands (`/start`, `/help`, `/export`, `/automation`, `/status`), reply keyboard actions (Apply, Confirm, Back, Cancel), and file selection flow.
 
@@ -94,6 +97,10 @@ All services are registered as **Singletons** via `DependencyInjectionExtensions
 
 All handlers extend `CallbackHandlerBase` and use `CommandCatalog.TryGetByPrefix()` for prefix matching.
 Use `CallbackDataParser.Parse(callbackData)` (from `ParsedCallback.cs`) to get a `ParsedCallback` struct, then match with `parsed.Is(CallbackPrefixes.GoToParent)`.
+
+**Error handling:** `CallbackHandlerBase.HandleAsync()` does NOT catch exceptions — they propagate to `CallbackDispatcher` which catches, logs, and continues. No double logging.
+
+**Shared helper:** `HandlerHelpers.SendActionsReplyKeyboardAsync()` is a static method used by `FileNavigationHandler`, `CommandSelectionHandler`, and `SlashCommandService` to avoid duplicating the "delete last actions message → send new keyboard → track" pattern.
 
 ### Key Services
 
@@ -112,13 +119,15 @@ Use `CallbackDataParser.Parse(callbackData)` (from `ParsedCallback.cs`) to get a
 
 ### Database (PostgreSQL)
 
-Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Soft-delete only — rows are never physically removed (`Status = 'Deleted'`).
+Tables: `BotUsers`, `Sessions`, `Commands`. **`TrackedMessages` was removed** — message tracking is purely in-memory via `UserSession._trackedMessageIds`. Soft-delete only — rows are never physically removed (`Status = 'Deleted'`).
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
-All queries use Dapper with parameterized SQL. SQL constants are in `TelegramBot.Data/Sql/` (5 partial files).
+All queries use Dapper with parameterized SQL. SQL constants are in `TelegramBot.Data/Sql/` (4 partial files). Connection creation is unified via `CreateConnectionAsync()` in `PostgresDataService`.
 
 ### Task Queue (PostgreSQL LISTEN/NOTIFY)
 
 Server уведомляет Worker-ов о новых командах через `NOTIFY new_command` после INSERT в Commands. Worker использует `NpgsqlConnection.WaitAsync()` для мгновенного пробуждения. Fallback poll — 5 минут.
+
+Worker-сервисы (`CommandExecutionService`, `HealthCheckServer`) используют `NpgsqlHelper.CreateOpenConnectionAsync()` для единообразного создания подключений.
 
 ### Logging
 
@@ -130,13 +139,13 @@ Serilog configured via `appsettings.json`. Supports Console and Seq (`http://loc
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | Project roadmap (v1.0–v2.0+) |
 | [Docs/execution-algorithm.md](Docs/execution-algorithm.md) | Command execution algorithm specification |
-| [AGENTS.md](AGENTS.md) | Guidance for AI agents |
+| [AGENTS.md](AGENTS.md) | Guidance for AI agents (detailed, Russian) |
 | [README.md](README.md) | Project overview (Russian) |
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1098 symbols, 2900 relationships, 92 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1437 symbols, 3706 relationships, 121 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

@@ -12,8 +12,6 @@ public sealed class FileSelectionHandler(
     IOptions<FileSystemOptions> options,
     ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
-    private readonly ITelegramOutputService _outputService = outputService;
     private readonly FileSystemOptions _options = options.Value;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
@@ -41,9 +39,9 @@ public sealed class FileSelectionHandler(
         if (string.IsNullOrEmpty(filePath))
         {
             var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
-                ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
-                : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
-            var errorMessage = await _outputService.SendMessageWithReplyKeyboardAsync(
+                ? await keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+                : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+            var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
                 context.UserId, "⚠ Error: File not found.", replyKeyboard);
             if (errorMessage != null)
             {
@@ -65,9 +63,9 @@ public sealed class FileSelectionHandler(
             _=session.ToggleSelectedFile(filePath);
         }
 
-        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
-        await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        await _outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+        var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
+        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
 
         return true;
     }

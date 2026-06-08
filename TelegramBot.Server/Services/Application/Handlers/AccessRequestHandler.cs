@@ -14,8 +14,6 @@ public sealed class AccessRequestHandler(
     IOptions<BotOptions> botOptions,
     ILogger<AccessRequestHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IDataService _dataService = dataService;
-    private readonly ITelegramOutputService _outputService = outputService;
     private readonly long[] _adminIds = botOptions.Value.AdminUserIds;
 
     public override int Priority => HandlerPriorities.AccessRequest;
@@ -40,24 +38,24 @@ public sealed class AccessRequestHandler(
 
     private async Task<bool> HandleRequestAccessAsync(CallbackContext context)
     {
-        var existing = await _dataService.GetUserAsync(context.UserId);
+        var existing = await dataService.GetUserAsync(context.UserId);
 
         if (existing?.Status == UserAccessStatus.Approved)
         {
-            await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
+            await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
                 "У вас уже есть доступ. Введите /help для просмотра команд.");
             return true;
         }
 
         if (existing?.Status == UserAccessStatus.Pending)
         {
-            await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
+            await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
                 "Ваш запрос уже отправлен. Ожидайте подтверждения администратора.");
             return true;
         }
 
         var now = DateTime.UtcNow;
-        await _dataService.UpsertUserAsync(new BotUser
+        await dataService.UpsertUserAsync(new BotUser
         {
             UserId = context.UserId,
             Username = context.Username,
@@ -67,7 +65,7 @@ public sealed class AccessRequestHandler(
             UpdatedAt = now
         });
 
-        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
+        await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
             "Ваш запрос отправлен. Ожидайте подтверждения администратора.");
 
         var keyboard = new InlineKeyboardMarkup([[
@@ -81,7 +79,7 @@ public sealed class AccessRequestHandler(
 
         foreach (var adminId in _adminIds)
         {
-            await _outputService.SendMessageWithKeyboardAsync(adminId,
+            await outputService.SendMessageWithKeyboardAsync(adminId,
                 $"Запрос доступа от {displayName} (ID: {context.UserId})",
                 keyboard);
         }
@@ -113,20 +111,20 @@ public sealed class AccessRequestHandler(
             return true;
         }
 
-        var user = await _dataService.GetUserAsync(targetUserId);
+        var user = await dataService.GetUserAsync(targetUserId);
         if (user == null)
         {
-            await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Пользователь не найден.");
+            await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Пользователь не найден.");
             return true;
         }
 
         user.Status = newStatus;
         user.UpdatedAt = DateTime.UtcNow;
-        await _dataService.UpsertUserAsync(user);
+        await dataService.UpsertUserAsync(user);
 
         var displayName = string.IsNullOrEmpty(user.Username) ? targetUserId.ToString() : $"@{user.Username}";
-        await _outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));
-        await _outputService.SendMessageAsync(targetUserId, userMessage);
+        await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));
+        await outputService.SendMessageAsync(targetUserId, userMessage);
 
         return true;
     }

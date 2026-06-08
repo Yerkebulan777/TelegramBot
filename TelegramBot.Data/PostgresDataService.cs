@@ -13,30 +13,33 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
 
+    private async Task<NpgsqlConnection> CreateConnectionAsync()
+    {
+        var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        return conn;
+    }
+
     public async Task InitializeDatabaseAsync()
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
 
         await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
     }
 
     public async Task<BotUser?> GetUserAsync(long userId)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<BotUser>(SqlQueries.Users.GetById, new { UserId = userId });
     }
 
     public async Task UpsertUserAsync(BotUser user)
     {
         var now = DateTime.UtcNow;
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
         {
             user.UserId,
@@ -63,8 +66,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             throw new ArgumentException("Commands and files must not be empty");
         }
 
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
         var sessionId = await conn.QuerySingleAsync<long>(
@@ -99,16 +101,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<List<SessionsList>> GetSessionsListAsync(long userId)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         var result = await conn.QueryAsync<SessionsList>(SqlQueries.Sessions.GetList, new { UserId = userId });
         return result.ToList();
     }
 
     public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId, long userId)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         var result = await conn.QuerySingleOrDefaultAsync<SessionStatus>(
             SqlQueries.Sessions.GetStatus, new { SessionId = sessionId, UserId = userId });
         return result ?? throw new KeyNotFoundException($"Session {sessionId} not found");
@@ -116,8 +116,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         var result = await conn.QueryAsync<SessionCommands>(
             SqlQueries.Commands.GetBySession, new { SessionId = sessionId, UserId = userId });
         return result.ToList();
@@ -127,8 +126,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
             await using var tx = await conn.BeginTransactionAsync();
             try
             {
@@ -167,8 +165,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(
                 SqlQueries.Commands.SoftDelete, new { CommandId = commandId, UserId = userId });
 
@@ -195,8 +192,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
 
         var now = DateTime.UtcNow;
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         await conn.ExecuteAsync(SqlQueries.Users.UpsertBatch, new
         {
             UserIds = userIds,
@@ -209,8 +205,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<bool> CheckCommandsStatusAsync(int sessionId, long userId)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         var count = await conn.ExecuteScalarAsync<int>(
             SqlQueries.Commands.CountActive, new { SessionId = sessionId, UserId = userId });
         return count > 0;
@@ -218,78 +213,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<int?>(
             SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId });
     }
 
-    public async Task SaveTrackedMessagesAsync(long userId, IEnumerable<int> messageIds)
-    {
-        var ids = messageIds.ToArray();
-        if (ids.Length == 0)
-        {
-            return;
-        }
-
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.TrackedMessages.InsertBatch, new { UserId = userId, MessageIds = ids });
-    }
-
-    public async Task SaveTrackedMessageAsync(long userId, int messageId)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert, new { UserId = userId, MessageId = messageId });
-    }
-
-    public async Task<ILookup<long, int>> GetAllTrackedMessagesAsync()
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        var rows = await conn.QueryAsync<(long UserId, int MessageId)>(SqlQueries.TrackedMessages.GetAll);
-        return rows.ToLookup(r => r.UserId, r => r.MessageId);
-    }
-
-    public async Task<IReadOnlyList<int>> GetTrackedMessagesAsync(long userId)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        var rows = await conn.QueryAsync<int>(SqlQueries.TrackedMessages.GetByUser, new { UserId = userId });
-        return rows.ToList();
-    }
-
-    public async Task DeleteTrackedMessagesAsync(long userId)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByUser, new { UserId = userId });
-    }
-
-    public async Task DeleteTrackedMessageAsync(long userId, int messageId)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteSingle, new { UserId = userId, MessageId = messageId });
-    }
-
-    public async Task DeleteTrackedMessagesBatchAsync(long userId, int[] messageIds)
-    {
-        if (messageIds.Length == 0)
-        {
-            return;
-        }
-
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
-        await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteBatch, new { UserId = userId, MessageIds = messageIds });
-    }
-
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
         var leaseExpiry = DateTimeOffset.UtcNow.AddMinutes(leaseTimeoutMinutes).ToUnixTimeSeconds();
@@ -312,8 +243,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
 
             var locked = await conn.QuerySingleAsync<bool>(
                 SqlQueries.Commands.TryAdvisoryLock, new { LockId = AdvisoryLockId });
@@ -358,8 +288,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateStatus,
                 new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage });
             return affected > 0;
@@ -394,8 +323,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         try
         {
             var payload = $"{userId}|{commandId}|{commandText}|{status}|{errorMessage ?? ""}";
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
             await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
         }
         catch (Exception e)
@@ -406,8 +334,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         var retryCount = await conn.QuerySingleAsync<int>(
             SqlQueries.Commands.ScheduleRetry,
             new { CommandId = commandId, NextRetryAt = nextRetryAt, ErrorMessage = errorMessage });
@@ -418,8 +345,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
             await conn.ExecuteAsync("SELECT pg_notify('new_command', CAST(@SessionId AS text))", new { SessionId = sessionId });
         }
         catch (Exception e)
@@ -432,8 +358,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
             var affected = await conn.QuerySingleOrDefaultAsync<int?>(
                 SqlQueries.Commands.CancelCommand,
                 new { CommandId = commandId, UserId = userId });
@@ -450,8 +375,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
+            await using var conn = await CreateConnectionAsync();
             await conn.ExecuteAsync(
                 "SELECT pg_notify('command_cancel', CAST(@CommandId AS text))",
                 new { CommandId = commandId });
@@ -465,8 +389,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId)
     {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync();
+        await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<PendingCommand>(
             SqlQueries.Commands.GetById,
             new { CommandId = commandId, UserId = userId });

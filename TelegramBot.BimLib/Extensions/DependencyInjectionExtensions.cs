@@ -13,15 +13,13 @@ public static class DependencyInjectionExtensions
     [SupportedOSPlatform("windows")]
     public static IServiceCollection AddBimIntegration(this IServiceCollection services)
     {
-        // Revit
-        _ = services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>();
-        _ = services.AddSingleton<IRevitPathResolver, RevitPathResolver>();
-        _ = services.AddSingleton<IRevitProcessTracker, RevitProcessTracker>();
-        _ = services.AddSingleton<DialogDismisser>();
+        services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>();
+        services.AddSingleton<RevitPathResolver>();
+        services.AddSingleton<RevitProcessTracker>();
+        services.AddSingleton<DialogDismisser>();
 
-        // Navisworks
-        _ = services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>();
-        _ = services.AddSingleton<INavisworksProcessTracker, NavisworksProcessTracker>();
+        services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>();
+        services.AddSingleton<NavisworksProcessTracker>();
 
         return services;
     }

@@ -1,5 +1,3 @@
-using TelegramBot.Core.DTOs;
-
 namespace TelegramBot.Core.Models;
 
 /// <summary>
@@ -14,5 +12,4 @@ public sealed class CallbackContext
     public required string CallbackQueryId { get; init; }
     public required ParsedCallback ParsedCallback { get; init; }
     public required UserSession Session { get; init; }
-    public List<List<ButtonDto>>? Buttons { get; init; }
 }

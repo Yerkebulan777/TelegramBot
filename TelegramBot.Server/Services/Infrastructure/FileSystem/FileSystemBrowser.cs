@@ -4,13 +4,11 @@ using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
-using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.FileSystem;
 
-public class FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOptions> options) : IFileSystemBrowser
+public class FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOptions> options)
 {
-    private readonly ISessionManager _sessions = sessions;
     private readonly FileSystemOptions _options = options.Value;
     private readonly Regex _folderRegex = new(options.Value.SectionFolderPattern, RegexOptions.IgnoreCase);
 
@@ -23,7 +21,7 @@ public class FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOpti
 
     public Task<InlineKeyboardMarkup> GetSectionsViewAsync(long userId, string path)
     {
-        var session = _sessions.GetOrCreateSession(userId);
+        var session = sessions.GetOrCreateSession(userId);
 
         var atSectionLevel = string.Equals(
             Path.GetFileName(path), _options.ProjectDirectoryName,

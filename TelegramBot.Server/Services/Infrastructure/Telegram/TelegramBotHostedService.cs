@@ -5,7 +5,6 @@ using Telegram.Bot.Types.Enums;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Server.Config;
-using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
@@ -13,16 +12,13 @@ public class TelegramBotHostedService(
     ITelegramBotClient botClient,
     ICommandAppService commandAppService,
     ILogger<TelegramBotHostedService> logger,
-    ITelegramUpdateMapper inputService,
-    ISessionManager sessionManager,
-    IDataService dataService,
-    ITelegramOutputService outputService) : BackgroundService
+    TelegramUpdateMapper inputService,
+    ISessionManager sessionManager) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("Telegram polling starting");
 
-        await CleanupStaleMessagesAsync(stoppingToken);
         await BotCommandsSetup.ConfigureAsync(botClient, logger);
 
         var receiverOptions = new ReceiverOptions
@@ -95,44 +91,6 @@ public class TelegramBotHostedService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Unhandled exception processing update {UpdateId}", update.Id);
-        }
-    }
-
-    private async Task CleanupStaleMessagesAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var staleMessages = await dataService.GetAllTrackedMessagesAsync();
-            var totalMessages = staleMessages.Sum(g => g.Count());
-            if (totalMessages > 0)
-            {
-                logger.LogInformation("Startup cleanup: chats={ChatCount}, messages={MessageCount}",
-                    staleMessages.Count, totalMessages);
-            }
-
-            foreach (var group in staleMessages)
-            {
-                var chatId = group.Key;
-                var messageIds = group.ToArray();
-
-                foreach (var messageId in messageIds)
-                {
-                    try
-                    {
-                        await outputService.DeleteMessageAsync(chatId, messageId);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Failed to delete stale message {MessageId} in chat {ChatId}", messageId, chatId);
-                    }
-                }
-
-                await dataService.DeleteTrackedMessagesBatchAsync(chatId, messageIds);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to cleanup stale messages on startup");
         }
     }
 

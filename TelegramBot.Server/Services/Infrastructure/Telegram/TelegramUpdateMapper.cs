@@ -1,10 +1,9 @@
 using Telegram.Bot.Types;
 using TelegramBot.Core.DTOs;
-using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
-public class TelegramUpdateMapper : ITelegramUpdateMapper
+public class TelegramUpdateMapper
 {
     public MessageDto MapMessage(Message message)
     {
@@ -26,9 +25,6 @@ public class TelegramUpdateMapper : ITelegramUpdateMapper
         var msg = callback.Message
             ?? throw new InvalidOperationException("CallbackQuery.Message is null.");
 
-        var currentKeyboard = msg.ReplyMarkup
-            ?? throw new InvalidOperationException("CallbackQuery.Message.ReplyMarkup is null.");
-
         return new CallbackQueryDto
         {
             UserId = callback.From.Id,
@@ -37,14 +33,7 @@ public class TelegramUpdateMapper : ITelegramUpdateMapper
             MessageText = msg.Text,
             MessageId = msg.MessageId,
             CallbackData = callback.Data,
-            CallbackQueryId = callback.Id,
-            Buttons = currentKeyboard.InlineKeyboard.Select(row => row
-                .Select(btn => new ButtonDto
-                {
-                    Text = btn.Text,
-                    CallbackData = btn.CallbackData
-                }).ToList())
-                .ToList()
+            CallbackQueryId = callback.Id
         };
     }
 

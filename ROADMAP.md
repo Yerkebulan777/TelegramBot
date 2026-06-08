@@ -88,22 +88,19 @@
   - [x] **Автоматический выбор Revit.exe**: поиск пути через реестр Windows (`HKLM\SOFTWARE\Autodesk\Revit\{version}`) с fallback на WOW6432Node
   - [x] **Мониторинг здоровья процесса**: проверка отклика, автозакрытие диалогов Revit
 - [x] **Поддержка Navisworks**: поиск Navisworks.exe/FileConvert.exe через реестр Windows, мониторинг процессов (Roamer, FileConvert)
-- [ ] Graceful shutdown отдельных команд с таймаутом на Kill
-- [ ] Расширенное логирование Revit-специфичных ошибок
+- [x] **Graceful shutdown** — Kill только для зависших процессов (process.Responding),
+  здоровые процессы продолжают работать. Таймаут 5с на WaitForExitAsync после Kill.
+  При остановке Worker не трогает отвечающие процессы (Revit, Navisworks).
+- [x] **Расширенное логирование Revit-специфичных ошибок** — отдельный файл BimLib.log
+  (`~/Documents/TelegramBot/Logs/Worker/BimLib/log-.txt`), фильтрация через BimLibLogFilter
+  по SourceContext "TelegramBot.BimLib.*"
 - [ ] Опционально: поддержка Revit Journal-автоматизации
 
 ### Безопасность и контроль
-- [ ] **Лимиты очереди (per-user)** — максимальное количество pending-команд на пользователя.
-  Защита от аномальной нагрузки и разрастания таблицы `Commands`.
-- [ ] **Лимиты очереди (per-session)** — максимальное количество команд в одной сессии.
-- [ ] **Rate limiting** — ограничение на количество команд от одного пользователя в единицу
-  времени (sliding window или token bucket).
+- [x] **Rate limiting** — ограничение на количество команд от одного пользователя в единицу
+  времени (sliding window per-user).
 
 ### Операционные улучшения
-- [ ] **Graceful shutdown** — таймаут на каждый отдельный цикл ожидания активных процессов.
-  Если процесс не реагирует на `Kill(true)`, цикл не должен блокироваться бесконечно.
-- [ ] **Runbook** — документация для operational team: типичные инциденты, диагностика,
-  восстановление.
 
 ### Мониторинг и наблюдаемость (самая последняя очередь)
 - [ ] **Интеграция Prometheus/Grafana** — метрики: количество активных команд, время выполнения,
@@ -116,20 +113,25 @@
 
 ---
 
-## 🔄 Текущий спринт (активные изменения)
-
-На основе последних изменений в git:
+## 🔄 v1.2 — Рефакторинг и упрощение кода (завершено)
 
 | Изменение | Статус | Описание |
 |-----------|--------|----------|
-| Рефакторинг FileSystemBrowser | ✅ Готово | Удалён PathMap/TryResolvePath, пути передаются напрямую |
-| Primary constructors | ✅ Готово | Миграция сервисов на C# 12 |
-| CommandNotificationService | ✅ Готово | Fire-and-forget исправлен на корректную асинхронную обработку |
-| TelegramBotHostedService | ✅ Готово | Рефакторинг на primary constructor |
-| UserSession.Reset() | ✅ Готово | Порядок сброса полей унифицирован |
-| **Отмена команд через NOTIFY `command_cancel`** | ✅ Готово | Полноценный механизм отмены команд: кнопка «⛔ Отменить» в /status → Server меняет статус на `Cancelled` → NOTIFY command_cancel → Worker отменяет CTS + убивает процесс |
-| **Улучшенный статус сессий** | ✅ Готово | Детальная разбивка (Pending, Processing, Done, Failed, Cancelled), прогресс-бар, иконки статусов, информативные списки сессий |
-| **TelegramBot.BimLib** | ✅ Готово | Новый проект: определение версии Revit (OpenMcdf + BasicFileInfo), поиск Revit.exe (реестр Windows), мониторинг процессов (отклик, диалоги) |
+| **Удалён DB-трекинг сообщений** | ✅ Готово | Удалена таблица `TrackedMessages`, 7 методов из `IDataService`, SQL-файл. Трекинг сообщений только in-memory через `UserSession._trackedMessageIds` |
+| **Удалены лишние интерфейсы** | ✅ Готово | Удалены `IFileSystemBrowser`, `ITelegramUpdateMapper`, `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` — прямые зависимости без потери тестируемости |
+| **Primary constructors — удалены redundant поля** | ✅ Готово | Из 8 классов удалены ~23 redundant `private readonly` поля, дублирующих параметры primary constructor |
+| **CallbackHandlerBase — убрано двойное логирование** | ✅ Готово | `HandleAsync()` больше не ловит исключения — только `CallbackDispatcher`. Устранено двойное логирование каждой ошибки |
+| **Unused usings** | ✅ Готово | `dotnet format --diagnostics IDE0005` удалил все неиспользуемые `using` directives по всему проекту |
+| **Унификация дубликатов** | ✅ Готово |
+|   — `HandlerHelpers.SendActionsReplyKeyboardAsync()` | | Заменяет 3 дублированных метода в `FileNavigationHandler`, `CommandSelectionHandler`, `SlashCommandService` |
+|   — `ProcessHealthHelper.CheckHealth()` | | Общая логика для `RevitProcessTracker` и `NavisworksProcessTracker` |
+|   — `NpgsqlHelper.CreateOpenConnectionAsync()` | | Перенесён из `Worker.Services` (internal) → `TelegramBot.Data` (public). 
+| | | | Используется в 3 сервисах: `HealthCheckServer`, `CommandExecutionService` (Worker) 
+| | | | и `CommandNotificationService` (Server) |
+|   — `TryParseId()` | | Заменяет 5 одинаковых блоков `int.TryParse` в `SessionManagementHandler` |
+| **Упрощение DI** | ✅ Готово | `TelegramOutputService` больше не зависит от `IDataService`; убраны 2 лишних параметра из `TelegramBotHostedService`; мёртвый `IDataService` убран из `CommandAppService` |
+| **PostgresDataService — `CreateConnectionAsync()`** | ✅ Готово | Выделен helper, заменивший ~15 ручных `new NpgsqlConnection + OpenAsync` |
+| **Документация** | ✅ Готово | `AGENTS.md`, `CLAUDE.md`, `ROADMAP.md` обновлены под все изменения |
 
 ---
 

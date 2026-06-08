@@ -12,8 +12,6 @@ public sealed class FileNavigationHandler(
     IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly IKeyboardBuilder _keyboardBuilder = keyboardBuilder;
-    private readonly ITelegramOutputService _outputService = outputService;
     private readonly FileSystemOptions _options = options.Value;
 
     protected override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.GoToParent];
@@ -28,16 +26,7 @@ public sealed class FileNavigationHandler(
         var newPath = context.ParsedCallback.Argument;
         if (string.IsNullOrEmpty(newPath))
         {
-            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
-                ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
-                : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
-            var errorMessage = await _outputService.SendMessageWithReplyKeyboardAsync(
-                context.UserId, "⚠ Error: Path not found.", replyKeyboard);
-            if (errorMessage != null)
-            {
-                session.TrackMessage(errorMessage.Id);
-            }
-
+            await SendErrorWithKeyboardAsync(context, "⚠ Error: Path not found.");
             return true;
         }
 
@@ -45,51 +34,37 @@ public sealed class FileNavigationHandler(
         {
             Logger.LogWarning("Rejected navigation outside root. User={Username} ({UserId}), Path={Path}",
                 context.Username, context.UserId, newPath);
-            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
-                ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
-                : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
-            var errorMessage = await _outputService.SendMessageWithReplyKeyboardAsync(
-                context.UserId, "⚠ Error: Недопустимый путь.", replyKeyboard);
-            if (errorMessage != null)
-            {
-                session.TrackMessage(errorMessage.Id);
-            }
-
+            await SendErrorWithKeyboardAsync(context, "⚠ Error: Недопустимый путь.");
             session.CurrentPath = _options.RootPath;
             return true;
         }
 
         session.ClearSelectedFiles();
         session.CurrentPath = newPath;
-        await _outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 
-        var keyboard = await _keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
-        await _outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
+        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        await SendActionsReplyKeyboardAsync(context);
+        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, context,
+            _options.IsAtProjectLevel(context.Session.CurrentPath)
+                ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
+                : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
 
         return true;
     }
 
-    private async Task SendActionsReplyKeyboardAsync(CallbackContext context)
+    private async Task SendErrorWithKeyboardAsync(CallbackContext context, string message)
     {
         var session = context.Session;
-
-        if (session.LastActionsMessageId.HasValue)
-        {
-            await _outputService.DeleteMessageAsync(context.UserId, session.LastActionsMessageId.Value, session);
-            session.LastActionsMessageId = null;
-        }
-
         var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
-            ? await _keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
-            : await _keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
-
-        var message = await _outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard);
-        if (message != null)
+            ? await keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
+            : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
+        var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
+            context.UserId, message, replyKeyboard);
+        if (errorMessage != null)
         {
-            session.TrackMessage(message.Id);
-            session.LastActionsMessageId = message.Id;
+            session.TrackMessage(errorMessage.Id);
         }
     }
 }

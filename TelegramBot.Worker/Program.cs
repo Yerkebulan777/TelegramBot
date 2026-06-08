@@ -23,22 +23,34 @@ public static class Program
             var host = Host.CreateDefaultBuilder(args)
                 .ConfigureAppConfiguration((context, config) =>
                 {
-                    _=config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
-                    _=config.AddEnvironmentVariables();
+                    config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+                    config.AddEnvironmentVariables();
                 })
                 .ConfigureServices((context, services) =>
                 {
-                    _ = services.AddSingleton<IDataService, PostgresDataService>();
+                    services.AddSingleton<IDataService, PostgresDataService>();
 
-                    _ = services.Configure<WorkerOptions>(context.Configuration.GetSection(WorkerOptions.SectionName));
-                    _ = services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
+                    services.Configure<WorkerOptions>(context.Configuration.GetSection(WorkerOptions.SectionName));
+                    services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
 
-                    _ = services.AddBimIntegration();
+                    services.AddBimIntegration();
 
-                    _ = services.AddHostedService<CommandExecutionService>();
+                    services.AddHostedService<CommandExecutionService>();
+                    services.AddHostedService<HealthCheckServer>();
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>
-                    SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker"))
+                    {
+                        SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker");
+
+                        // Отдельный файл для BIM-специфичных логов (Revit, Navisworks — TelegramBot.BimLib.*)
+                        loggerConfiguration.WriteTo.Logger(lc => lc
+                            .MinimumLevel.Information()
+                            .Enrich.FromLogContext()
+                            .Filter.ByIncludingOnly(BimLibLogFilter.IsBimLibEvent)
+                            .WriteTo.File(
+                                SerilogSetup.GetLogPath(Path.Combine("Worker", "BimLib")),
+                                rollingInterval: RollingInterval.Day));
+                    })
                 .Build();
 
             await host.InitializeDatabaseAsync();
