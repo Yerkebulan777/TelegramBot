@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
+using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
@@ -9,6 +10,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileNavigationHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
+    IDataService dataService,
     IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -46,7 +48,7 @@ public sealed class FileNavigationHandler(
         var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, context,
+        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, context,
             _options.IsAtProjectLevel(context.Session.CurrentPath)
                 ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
                 : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
@@ -62,9 +64,9 @@ public sealed class FileNavigationHandler(
             : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
         var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
             context.UserId, message, replyKeyboard);
-        if (errorMessage != null)
+        if (errorMessage != null && session.SessionId > 0)
         {
-            session.TrackMessage(errorMessage.Id);
+            await dataService.TrackMessageAsync(session.SessionId, context.UserId, errorMessage.Id);
         }
     }
 }

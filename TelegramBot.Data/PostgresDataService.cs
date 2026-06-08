@@ -25,6 +25,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
+        await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
         await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled);
     }
@@ -368,5 +369,63 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             SqlQueries.Commands.CountDuplicatePairs,
             new { CommandTexts = commandTexts.ToArray(), FilePaths = filePaths.ToArray() });
         return count > 0;
+    }
+
+    public async Task TrackMessageAsync(int sessionId, long chatId, int messageId)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert,
+                new { SessionId = sessionId, ChatId = chatId, MessageIdPg = messageId });
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to track message {MessageId} for session {SessionId}", messageId, sessionId);
+        }
+    }
+
+    public async Task DeleteTrackedMessagesAsync(int sessionId, IEnumerable<int> messageIds)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByIds,
+                new { SessionId = sessionId, MessageIds = messageIds.ToArray() });
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to delete tracked messages for session {SessionId}", sessionId);
+        }
+    }
+
+    public async Task DeleteTrackedMessagesBySessionAsync(int sessionId)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteBySession,
+                new { SessionId = sessionId });
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to delete all tracked messages for session {SessionId}", sessionId);
+        }
+    }
+
+    public async Task<IReadOnlyList<int>> GetTrackedMessagesBySessionAsync(int sessionId)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            var result = await conn.QueryAsync<int>(SqlQueries.TrackedMessages.GetBySession,
+                new { SessionId = sessionId });
+            return result.ToList().AsReadOnly();
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to get tracked messages for session {SessionId}", sessionId);
+            return [];
+        }
     }
 }

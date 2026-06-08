@@ -300,7 +300,7 @@ public sealed class SlashCommandService(
     }
 
     private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
-        => HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, userId, session,
+        => HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, userId, session,
             _options.IsAtProjectLevel(session.CurrentPath)
                 ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
                 : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
@@ -349,9 +349,9 @@ public sealed class SlashCommandService(
     private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
     {
         var msg = await task;
-        if (msg != null)
+        if (msg != null && session.SessionId > 0)
         {
-            session.TrackMessage(msg.Id);
+            await dataService.TrackMessageAsync(session.SessionId, msg.Chat.Id, msg.MessageId);
         }
         return msg;
     }

@@ -118,7 +118,7 @@ Use `CallbackDataParser.Parse(callbackData)` (from `ParsedCallback.cs`) to get a
 
 ### Database (PostgreSQL)
 
-Tables: `BotUsers`, `Sessions`, `Commands`. **`TrackedMessages` was removed** — message tracking is purely in-memory via `UserSession._trackedMessageIds`. Soft-delete only — rows are never physically removed (`Status = 'Deleted'`).
+Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking is fully DB-backed — no in-memory state. Soft-delete only — rows are never physically removed (`Status = 'Deleted'`).
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
 All queries use Dapper with parameterized SQL. SQL constants are in `TelegramBot.Data/Sql/` (4 partial files). Connection creation is unified via `CreateConnectionAsync()` in `PostgresDataService`.
 

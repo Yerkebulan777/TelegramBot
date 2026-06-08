@@ -1,7 +1,7 @@
 namespace TelegramBot.Core.Models;
 
 /// <summary>
-/// Represents a user session with thread-safe collections and clear state management.
+/// Represents a user session with thread-safe collections and DB-backed message tracking.
 /// </summary>
 public class UserSession
 {
@@ -17,9 +17,6 @@ public class UserSession
 
     private readonly object _selectionLock = new();
     private readonly HashSet<string> _selectedFiles = [];
-
-    private readonly object _messageLock = new();
-    private readonly HashSet<int> _trackedMessageIds = [];
 
     // Public read-only wrappers with thread-safe access
     public IReadOnlyList<string> PendingCommand
@@ -123,42 +120,6 @@ public class UserSession
         lock (_selectionLock)
         {
             _selectedFiles.Clear();
-        }
-    }
-
-    // Message tracking (user commands + bot responses)
-    public void TrackMessage(int messageId)
-    {
-        lock (_messageLock)
-        {
-            _ = _trackedMessageIds.Add(messageId);
-        }
-    }
-
-    public IReadOnlyList<int> GetTrackedMessages()
-    {
-        lock (_messageLock)
-        {
-            return [.. _trackedMessageIds];
-        }
-    }
-
-    public void UntrackMessages(IEnumerable<int> messageIds)
-    {
-        lock (_messageLock)
-        {
-            foreach (var messageId in messageIds)
-            {
-                _ = _trackedMessageIds.Remove(messageId);
-            }
-        }
-    }
-
-    public void ClearTrackedMessages()
-    {
-        lock (_messageLock)
-        {
-            _trackedMessageIds.Clear();
         }
     }
 

@@ -24,13 +24,10 @@ public sealed class CommandAppService(
         }
 
         var session = sessionManager.GetOrCreateSession(message.UserId);
-        var cleanupCandidates = session.GetTrackedMessages();
-
-        session.TrackMessage(message.MessageId);
 
         // Server restart detection: session has no tracked messages (fresh after restart)
         // and user sends a non-slash text — redirect to /start for a clean slate
-        if (cleanupCandidates.Count == 0 && !message.Text!.StartsWith('/'))
+        if (session.SessionId <= 0 && !message.Text!.StartsWith('/'))
         {
             logger.LogDebug("Post-restart cleanup for {Username} ({UserId}): redirecting to /start",
                 message.Username, message.UserId);
@@ -40,7 +37,6 @@ public sealed class CommandAppService(
         }
 
         await slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
-        await DeleteOldMessagesAsync(message, session, cleanupCandidates, cancellationToken);
     }
 
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
@@ -52,7 +48,6 @@ public sealed class CommandAppService(
         }
 
         var session = sessionManager.GetOrCreateSession(callback.UserId);
-        session.TrackMessage(callback.MessageId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
         var isRegistrationCallback = parsed.Prefix is
@@ -78,37 +73,6 @@ public sealed class CommandAppService(
         };
 
         await callbackDispatcher.DispatchAsync(context, cancellationToken);
-    }
-
-    private async Task DeleteOldMessagesAsync(
-        MessageDto message,
-        UserSession session,
-        IReadOnlyCollection<int> cleanupCandidates,
-        CancellationToken cancellationToken)
-    {
-        if (cleanupCandidates.Count == 0)
-        {
-            return;
-        }
-
-        var protectedMessageIds = GetProtectedMessageIds(message, session);
-        var messageIds = cleanupCandidates
-            .Where(messageId => !protectedMessageIds.Contains(messageId))
-            .ToArray();
-
-        if (messageIds.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            await outputService.DeleteMessagesAsync(message.UserId, messageIds, cancellationToken);
-        }
-        finally
-        {
-            session.UntrackMessages(messageIds);
-        }
     }
 
     private static HashSet<int> GetProtectedMessageIds(MessageDto message, UserSession session)

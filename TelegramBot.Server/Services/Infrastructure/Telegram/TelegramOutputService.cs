@@ -3,6 +3,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
@@ -11,6 +12,7 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public class TelegramOutputService(
     ITelegramBotClient botClient,
+    IDataService dataService,
     ILogger<TelegramOutputService> logger,
     long? adminChatId = null) : ITelegramOutputService
 {
@@ -109,7 +111,12 @@ public class TelegramOutputService(
         IEnumerable<int> keepMessageIds,
         CancellationToken cancellationToken = default)
     {
-        var allMessageIds = session.GetTrackedMessages();
+        if (session.SessionId <= 0)
+        {
+            return;
+        }
+
+        var allMessageIds = await dataService.GetTrackedMessagesBySessionAsync(session.SessionId);
         if (allMessageIds.Count == 0)
         {
             return;
@@ -120,35 +127,30 @@ public class TelegramOutputService(
             .Where(messageId => !keepIds.Contains(messageId))
             .ToArray();
 
-        try
+        if (staleIds.Length == 0)
         {
-            await DeleteMessagesAsync(chatId, staleIds, cancellationToken);
+            return;
         }
-        finally
-        {
-            session.ClearTrackedMessages();
-            foreach (var messageId in allMessageIds.Where(keepIds.Contains))
-            {
-                session.TrackMessage(messageId);
-            }
-        }
+
+        await DeleteMessagesAsync(chatId, staleIds, cancellationToken);
+        await dataService.DeleteTrackedMessagesAsync(session.SessionId, staleIds);
     }
 
-    public Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
+    public async Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
     {
-        return ExecuteWithRetryAsync(() => botClient.SendMessage(
+        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
     }
 
-    public Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
+    public async Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
     {
-        return ExecuteWithRetryAsync(() => botClient.SendMessage(
+        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown), userId);
     }
 
-    public Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
+    public async Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
-        return ExecuteWithRetryAsync(() => botClient.SendMessage(
+        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
     }
 

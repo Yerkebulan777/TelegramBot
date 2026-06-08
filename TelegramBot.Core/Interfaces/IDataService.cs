@@ -91,4 +91,16 @@ public interface IDataService
 
     /// <summary>Проверяет, есть ли среди переданных пар (команда + файл) уже существующие в очереди.</summary>
     Task<bool> HasDuplicateCommandsAsync(IEnumerable<string> commandTexts, IEnumerable<string> filePaths);
+
+    /// <summary>Записывает отслеживаемое сообщение в БД.</summary>
+    Task TrackMessageAsync(int sessionId, long chatId, int messageId);
+
+    /// <summary>Удаляет сообщения по списку ID для сессии.</summary>
+    Task DeleteTrackedMessagesAsync(int sessionId, IEnumerable<int> messageIds);
+
+    /// <summary>Удаляет все сообщения для сессии.</summary>
+    Task DeleteTrackedMessagesBySessionAsync(int sessionId);
+
+    /// <summary>Получает все ID сообщений для сессии.</summary>
+    Task<IReadOnlyList<int>> GetTrackedMessagesBySessionAsync(int sessionId);
 }

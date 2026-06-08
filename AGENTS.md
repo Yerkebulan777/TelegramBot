@@ -193,7 +193,7 @@ For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 
-Tables: `BotUsers`, `Sessions`, `Commands`. **`TrackedMessages` was removed** — message tracking is now purely in-memory via `UserSession._trackedMessageIds`. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
+Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking is fully DB-backed — no in-memory state. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.
 
 **`Sessions` table now includes `ProjectName TEXT`** — имя проекта записывается при создании сессии,
 отображается в `/status` и в уведомлениях о завершении.
@@ -298,7 +298,7 @@ Namespaces must match folder structure:
 
 ### Collections & Thread Safety
 
-- `UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`, `_navigationLock`, `_messageLock`) — follow this pattern for new mutable state
+- `UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`) — follow this pattern for new mutable state
 - Paths in callback data are passed directly (no `PathMap`/tokens) since v1.1 refactoring
 - For new shared dictionaries, prefer `ConcurrentDictionary<,>`
 

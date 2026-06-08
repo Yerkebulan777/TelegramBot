@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
+using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 
@@ -8,6 +9,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class CommandSelectionHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
+    IDataService dataService,
     IOptions<FileSystemOptions> options,
     ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -54,7 +56,7 @@ public sealed class CommandSelectionHandler(
     }
 
     private Task SendActionsReplyKeyboardAsync(CallbackContext context)
-        => HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, context,
+        => HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, context,
             keyboardBuilder.GetProjectActionsReplyKeyboardAsync);
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)

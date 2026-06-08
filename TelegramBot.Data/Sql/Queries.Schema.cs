@@ -48,6 +48,15 @@ internal static partial class SqlQueries
                 NextRetryAt TIMESTAMPTZ
             );";
 
+        internal const string CreateTrackedMessagesTable = @"
+            CREATE TABLE IF NOT EXISTS TrackedMessages (
+                MessageId SERIAL PRIMARY KEY,
+                SessionId INTEGER NOT NULL REFERENCES Sessions(SessionId),
+                ChatId BIGINT NOT NULL,
+                MessageIdPg INTEGER NOT NULL,
+                CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );";
+
         internal const string CreateIndexes = @"
             CREATE INDEX IF NOT EXISTS idx_commands_status ON Commands(Status);
             CREATE INDEX IF NOT EXISTS idx_commands_session ON Commands(SessionId);
@@ -57,6 +66,8 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority DESC, CreatedAt ASC)
                 WHERE Status = 'pending';
             CREATE INDEX IF NOT EXISTS idx_commands_partition_status ON Commands(Partition, Status);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);";
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);
+            CREATE INDEX IF NOT EXISTS idx_tracked_messages_session ON TrackedMessages(SessionId);
+            CREATE INDEX IF NOT EXISTS idx_tracked_messages_chat ON TrackedMessages(ChatId);";
     }
 }

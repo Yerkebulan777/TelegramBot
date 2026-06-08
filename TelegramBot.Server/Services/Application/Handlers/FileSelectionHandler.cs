@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
+using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
@@ -9,6 +10,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileSelectionHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
+    IDataService dataService,
     IOptions<FileSystemOptions> options,
     ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -43,9 +45,9 @@ public sealed class FileSelectionHandler(
                 : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
             var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
                 context.UserId, "⚠ Error: File not found.", replyKeyboard);
-            if (errorMessage != null)
+            if (errorMessage != null && session.SessionId > 0)
             {
-                session.TrackMessage(errorMessage.Id);
+                await dataService.TrackMessageAsync(session.SessionId, context.UserId, errorMessage.Id);
             }
 
             return true;

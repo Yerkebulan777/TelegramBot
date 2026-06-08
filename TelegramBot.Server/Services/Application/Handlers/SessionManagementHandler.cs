@@ -95,6 +95,9 @@ public sealed class SessionManagementHandler(
             return true;
         }
 
+        // Очищаем tracked messages из БД
+        await dataService.DeleteTrackedMessagesBySessionAsync(sessionId);
+
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
 
@@ -125,8 +128,10 @@ public sealed class SessionManagementHandler(
 
         if (!await dataService.CheckCommandsStatusAsync(sessionId.Value))
         {
+            // Последняя команда — удаляем сессию и tracked messages
             if (await dataService.DeleteSessionAsync(sessionId.Value, context.UserId, isAdmin))
             {
+                await dataService.DeleteTrackedMessagesBySessionAsync(sessionId.Value);
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
@@ -149,12 +154,6 @@ public sealed class SessionManagementHandler(
         var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
         await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
         context.Session.StatusMessageId = context.MessageId;
-
-        var clearKeyboardMessage = await outputService.RemoveReplyKeyboardAsync(context.UserId, "Сессии:");
-        if (clearKeyboardMessage != null)
-        {
-            context.Session.TrackMessage(clearKeyboardMessage.Id);
-        }
     }
 
     private static string BuildStatusReply(SessionStatus sessionStatus)

@@ -1,4 +1,5 @@
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 
@@ -17,6 +18,7 @@ internal static class HandlerHelpers
     /// </summary>
     public static async Task SendActionsReplyKeyboardAsync(
         ITelegramOutputService outputService,
+        IDataService dataService,
         long userId,
         UserSession session,
         Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
@@ -29,17 +31,18 @@ internal static class HandlerHelpers
 
         var replyKeyboard = await keyboardFactory();
         var message = await outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard);
-        if (message != null)
+        if (message != null && session.SessionId > 0)
         {
-            session.TrackMessage(message.Id);
             session.LastActionsMessageId = message.Id;
+            await dataService.TrackMessageAsync(session.SessionId, userId, message.Id);
         }
     }
 
-    /// <inheritdoc cref="SendActionsReplyKeyboardAsync(ITelegramOutputService, long, UserSession, Func{Task{ReplyKeyboardMarkup?}})"/>
+    /// <inheritdoc cref="SendActionsReplyKeyboardAsync(ITelegramOutputService, IDataService, long, UserSession, Func{Task{ReplyKeyboardMarkup}})"/>
     public static Task SendActionsReplyKeyboardAsync(
         ITelegramOutputService outputService,
+        IDataService dataService,
         CallbackContext context,
         Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
-        => SendActionsReplyKeyboardAsync(outputService, context.UserId, context.Session, keyboardFactory);
+        => SendActionsReplyKeyboardAsync(outputService, dataService, context.UserId, context.Session, keyboardFactory);
 }
