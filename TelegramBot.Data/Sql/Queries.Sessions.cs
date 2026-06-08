@@ -5,8 +5,8 @@ internal static partial class SqlQueries
     internal static class Sessions
     {
         internal const string Insert = @"
-            INSERT INTO Sessions (UserId, Username, FilesAmount)
-            VALUES (@UserId, @Username, @FilesAmount)
+            INSERT INTO Sessions (UserId, Username, ProjectName, FilesAmount)
+            VALUES (@UserId, @Username, @ProjectName, @FilesAmount)
             RETURNING SessionId;";
 
         internal const string GetList = @"

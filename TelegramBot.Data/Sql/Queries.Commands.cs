@@ -146,5 +146,18 @@ internal static partial class SqlQueries
             WHERE Status = 'Cancelled'
               AND CompletedAt IS NOT NULL
               AND CompletedAt < NOW() - (@OlderThanDays || ' days')::INTERVAL;";
+
+        internal const string CountDuplicatePairs = @"
+            SELECT COUNT(*) FROM (
+                SELECT unnest(@CommandTexts::text[]) AS cmd, unnest(@FilePaths::text[]) AS fpath
+            ) input
+            WHERE EXISTS (
+                SELECT 1 FROM Commands c
+                JOIN Sessions s ON s.SessionId = c.SessionId
+                WHERE c.Status IN ('pending', 'processing')
+                  AND s.Status != 'Deleted'
+                  AND c.CommandText = input.cmd
+                  AND c.FilePath = input.fpath
+            )";
     }
 }

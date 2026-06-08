@@ -22,7 +22,8 @@ public interface IDataService
         IEnumerable<string> files,
         long userId,
         string username,
-        int filesAmount);
+        int filesAmount,
+        string? projectName = null);
 
     /// <summary>Возвращает список всех сессий (глобальный статус).</summary>
     Task<List<SessionsList>> GetSessionsListAsync();
@@ -90,11 +91,14 @@ public interface IDataService
     Task NotifyNewCommandsAsync(int sessionId);
 
     /// <summary>
-    /// Уведомляет Server о завершении/ошибке команды через Postgres LISTEN/NOTIFY.
-    /// Payload: UserId|CommandId|CommandText|Status|ErrorMessage
+    /// Уведомляет Server о завершении сессии через Postgres LISTEN/NOTIFY.
+    /// Payload: UserId|CommandId|CommandText|Status|FilePath|ErrorMessage|Done|Total
     /// </summary>
-    Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? errorMessage);
+    Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? filePath, string? errorMessage, int? doneCount = null, int? totalCount = null);
 
     /// <summary>Массовый upsert пользователей (batch через UNNEST).</summary>
     Task UpsertUsersBatchAsync(long[] userIds, int role, int status);
+
+    /// <summary>Проверяет, есть ли среди переданных пар (команда + файл) уже существующие в очереди.</summary>
+    Task<bool> HasDuplicateCommandsAsync(IEnumerable<string> commandTexts, IEnumerable<string> filePaths);
 }

@@ -261,10 +261,19 @@ public sealed class SlashCommandService(
             return;
         }
 
+        // Проверяем, нет ли уже таких же (команда + файл) в очереди
+        if (await dataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
+        {
+            logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
+            await SendWarningAndCleanupAsync(userId, session,
+                "⚠️ Одно или несколько заданий уже находятся в очереди. Дождитесь их выполнения и повторите попытку.");
+            return;
+        }
+
         var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
 
         var sessionId = await dataService.CreateSessionWithCommandsAsync(
-            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count);
+            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName);
         logger.LogInformation(
             "Job queued: session={SessionId}, user={UserId}, commands={CommandCount}, files={FileCount}",
             sessionId, userId, session.PendingCommand.Count, filesToProcess.Count);
@@ -315,7 +324,7 @@ public sealed class SlashCommandService(
     private async Task SendHelpMessageAsync(long userId, UserSession session)
     {
         var helpText = new StringBuilder()
-            .AppendLine("*Доступные команды:*\n")
+            .AppendLine("Доступные команды:\n")
             .AppendLine("/export — экспорт файлов в PDF, DWG, NWC, IFC")
             .AppendLine("/automation — автоматизация задач связанными с BIM")
             .AppendLine("/status — статус выполнения задач и управление сессиями")
@@ -442,7 +451,7 @@ public sealed class SlashCommandService(
 
     private List<string> CollectRvtFiles(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
     {
-        var files = new List<string>();
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var sectionPath in sectionPaths)
         {
@@ -464,6 +473,6 @@ public sealed class SlashCommandService(
             }
         }
 
-        return files;
+        return [.. files];
     }
 }

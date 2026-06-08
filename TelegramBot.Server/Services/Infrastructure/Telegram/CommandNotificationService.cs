@@ -1,14 +1,13 @@
 using Dapper;
 using Npgsql;
 using TelegramBot.Data;
-using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 /// <summary>
 /// Background service: слушает PostgreSQL LISTEN/NOTIFY на канале 'command_completed'.
-/// При получении уведомления отправляет пользователю Telegram-сообщение о завершении/ошибке команды.
+/// При получении уведомления отправляет пользователю сводку по завершённой сессии.
 /// </summary>
 public sealed class CommandNotificationService(
     IConfiguration configuration,
@@ -80,8 +79,8 @@ public sealed class CommandNotificationService(
                 return;
             }
 
-            // Payload: UserId|CommandId|CommandText|Status|ErrorMessage
-            var parts = e.Payload.Split('|', 5);
+            // Payload: UserId|CommandId|CommandText|Status|FilePath|ErrorMessage|Done|Total
+            var parts = e.Payload.Split('|', 8);
             if (parts.Length < 4)
             {
                 logger.LogWarning("Completion notify ignored: reason=invalid_payload");
@@ -94,20 +93,24 @@ public sealed class CommandNotificationService(
                 return;
             }
 
-            _ = int.TryParse(parts[1], out var commandId);
-            var commandText = parts[2];
-            var status = parts[3];
-            var errorMessage = parts.Length > 4 ? parts[4] : "";
+            // Payload: UserId|CommandId|CommandText|Status|FilePath|ErrorMessage|Done|Total
+            // Приходит только когда вся сессия завершена (remaining == 0 на стороне Worker)
+            if (!int.TryParse(parts[6], out var done) || !int.TryParse(parts[7], out var total) || total == 0)
+            {
+                return;
+            }
 
-            var isSuccess = status == "Done";
+            var failed = total - done;
 
-            var message = isSuccess
-                ? $"✅ *{MarkdownHelper.EscapeMarkdownV2(commandText)}* завершена"
-                : $"❌ *{MarkdownHelper.EscapeMarkdownV2(commandText)}* — ошибка:\n{MarkdownHelper.EscapeMarkdownV2(errorMessage)}";
+            var summary = failed == 0
+                ? $"✅ Сессия завершена — все {done} файлов обработано"
+                : done == 0
+                    ? $"❌ Сессия завершена — все {failed} файлов с ошибками"
+                    : $"⚠️ Сессия завершена: {done} ✅, {failed} ❌ из {total}";
 
-            await telegramOutput.SendMessageAsync(userId, message);
-            logger.LogInformation("Completion notified: command={CommandId}, user={UserId}, status={Status}",
-                commandId, userId, status);
+            await telegramOutput.SendMessageAsync(userId, summary);
+            logger.LogInformation("Session completed: user={UserId}, done={Done}, failed={Failed}, total={Total}",
+                userId, done, failed, total);
         }
         catch (Exception ex)
         {

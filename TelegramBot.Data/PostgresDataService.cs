@@ -54,7 +54,8 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         IEnumerable<string> files,
         long userId,
         string username,
-        int filesAmount)
+        int filesAmount,
+        string? projectName = null)
     {
         var commands = commandText.ToArray();
         var fileList = files.ToArray();
@@ -69,7 +70,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
         var sessionId = await conn.QuerySingleAsync<long>(
             SqlQueries.Sessions.Insert,
-            new { UserId = userId, Username = username, FilesAmount = filesAmount },
+            new { UserId = userId, Username = username, ProjectName = projectName, FilesAmount = filesAmount },
             tx);
 
         var totalRows = commands.Length * fileList.Length;
@@ -316,11 +317,11 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 new { OlderThanDays = olderThanDays }));
     }
 
-    public async Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? errorMessage)
+    public async Task NotifyCommandCompletedAsync(long userId, int commandId, string commandText, string status, string? filePath, string? errorMessage, int? doneCount = null, int? totalCount = null)
     {
         try
         {
-            var payload = $"{userId}|{commandId}|{commandText}|{status}|{errorMessage ?? ""}";
+            var payload = $"{userId}|{commandId}|{commandText}|{status}|{filePath ?? ""}|{errorMessage ?? ""}|{doneCount}|{totalCount}";
             await using var conn = await CreateConnectionAsync();
             await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
         }
@@ -407,5 +408,16 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             logger.LogError(e, "Failed to get status for command {CommandId}", commandId);
             return null;
         }
+    }
+
+    public async Task<bool> HasDuplicateCommandsAsync(
+        IEnumerable<string> commandTexts,
+        IEnumerable<string> filePaths)
+    {
+        await using var conn = await CreateConnectionAsync();
+        var count = await conn.QuerySingleAsync<int>(
+            SqlQueries.Commands.CountDuplicatePairs,
+            new { CommandTexts = commandTexts.ToArray(), FilePaths = filePaths.ToArray() });
+        return count > 0;
     }
 }

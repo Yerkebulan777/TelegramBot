@@ -51,6 +51,10 @@ public sealed class CommandExecutionService(
     // Ключ: CommandId, значение: CTS, который отменяется при получении NOTIFY command_cancel
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _commandCts = new();
 
+    // Счётчик оставшихся команд по сессиям — избегает лишних SQL запросов
+    // Устанавливается при ClaimPendingCommandsAsync, декрементится при завершении каждой команды
+    private readonly ConcurrentDictionary<int, int> _sessionRemaining = new();
+
     // CancellationTokenSource для graceful shutdown
     private CancellationTokenSource? _shutdownCts;
 
@@ -389,6 +393,13 @@ public sealed class CommandExecutionService(
             logger.LogInformation("Worker batch claimed: count={Count}, ids={CommandIds}",
                 claimed.Count, string.Join(",", claimed.Select(c => c.CommandId)));
 
+            // Устанавливаем счётчик оставшихся команд по сессиям
+            _sessionRemaining.Clear();
+            foreach (var group in claimed.GroupBy(c => c.SessionId))
+            {
+                _ = _sessionRemaining.TryAdd(group.Key, group.Count());
+            }
+
             // Запускаем все команды параллельно, но каждая ждёт свободный слот своей партиции
             var tasks = claimed.Select(cmd => ProcessWithPoolAsync(cmd, ct));
             await Task.WhenAll(tasks);
@@ -458,7 +469,7 @@ public sealed class CommandExecutionService(
                     cmd.CommandId, cmd.CommandText, resolutionError);
                 await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                     errorMessage: resolutionError);
-                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, resolutionError);
+                await TryNotifySessionCompletedAsync(cmd);
                 return;
             }
 
@@ -471,17 +482,6 @@ public sealed class CommandExecutionService(
             var cmdCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _commandCts[cmd.CommandId] = cmdCts;
             var cmdCt = cmdCts.Token;
-
-            // Перепроверяем статус из БД — мог быть отменён пользователем после ClaimPendingCommandsAsync
-            // Ранний return внутри try — finally сам почистит _commandCts и _activeProcesses
-            var currentStatus = await dataService.GetCommandStatusAsync(cmd.CommandId);
-            if (currentStatus == CommandStatuses.Cancelled)
-            {
-                logger.LogInformation(
-                    "Command cancelled before start: id={Id}, command={Cmd}",
-                    cmd.CommandId, cmd.CommandText);
-                return;
-            }
 
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             process.Start();
@@ -545,7 +545,7 @@ public sealed class CommandExecutionService(
                 await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
                 logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
                     cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
-                await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Done, null);
+                await TryNotifySessionCompletedAsync(cmd);
             }
             else if (errorMessage != null)
             {
@@ -725,7 +725,41 @@ public sealed class CommandExecutionService(
             await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
-            await dataService.NotifyCommandCompletedAsync(cmd.UserId, cmd.CommandId, cmd.CommandText, CommandStatuses.Failed, errorMessage);
+            await TryNotifySessionCompletedAsync(cmd);
+        }
+    }
+
+    /// <summary>
+    /// Декрементирует in-memory счётчик сессии.
+    /// Если это была последняя команда — запрашивает итоговую статистику из БД и отправляет уведомление.
+    /// </summary>
+    private async Task TryNotifySessionCompletedAsync(PendingCommand cmd)
+    {
+        // AddOrUpdate атомарен: каждая команда видит уникальное значение счетчика.
+        // Только поток, получивший 0, отправляет уведомление.
+        var newRemaining = _sessionRemaining.AddOrUpdate(
+            cmd.SessionId,
+            _ => 0, // fallback — не должен сработать, т.к. ключ уже есть
+            (_, current) => current - 1);
+
+        if (newRemaining != 0)
+        {
+            return;
+        }
+
+        _ = _sessionRemaining.TryRemove(cmd.SessionId, out _);
+
+        try
+        {
+            var status = await dataService.GetSessionsStatusAsync(cmd.SessionId);
+            await dataService.NotifyCommandCompletedAsync(
+                cmd.UserId, cmd.CommandId, cmd.CommandText,
+                status.DoneFiles == status.TotalFiles ? CommandStatuses.Done : CommandStatuses.Failed,
+                cmd.FilePath, null, status.DoneFiles, status.TotalFiles);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to notify session completion: session={SessionId}", cmd.SessionId);
         }
     }
 
