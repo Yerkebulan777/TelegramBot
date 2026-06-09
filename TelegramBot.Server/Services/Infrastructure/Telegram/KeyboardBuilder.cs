@@ -1,6 +1,5 @@
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
-using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Models;
@@ -41,7 +40,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
 
         foreach (var session in sessionsList)
         {
-            var statusIcon = StatusUIHelper.GetSessionStatusIcon(session.Status, session.ActiveCommands);
+            var statusIcon = GetSessionStatusIcon(session.Status, session.ActiveCommands);
             var projectName = string.IsNullOrEmpty(session.ProjectName) ? "" : $" {session.ProjectName}";
 
             var progressBar = session.DoneCommands + session.FailedCommands == session.TotalCommands
@@ -127,7 +126,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
 
         foreach (var sessionCommand in visibleCommands)
         {
-            var statusIcon = StatusUIHelper.GetCommandStatusIcon(sessionCommand.Status);
+            var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
             var fileName = Path.GetFileName(sessionCommand.FileName);
 
             if (sessionCommand.Status == "pending")
@@ -153,6 +152,31 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
+    private static string GetCommandStatusIcon(string status)
+    {
+        return status switch
+        {
+            "pending" => "⏳",
+            "processing" => "🔄",
+            "Done" => "✅",
+            "Failed" => "❌",
+            "Deleted" => "🗑",
+            _ => "❓"
+        };
+    }
+
+    private static string GetSessionStatusIcon(string status, int activeCommands)
+    {
+        return activeCommands > 0
+            ? "🔄"
+            : status switch
+            {
+                "Done" => "✅",
+                "Failed" => "❌",
+                "Deleted" => "🗑",
+                _ => "📋"
+            };
+    }
 
     private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(
         UserSession session, IEnumerable<CommandDefinition> commandOptions)

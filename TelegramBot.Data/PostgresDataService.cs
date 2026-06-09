@@ -151,8 +151,9 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<bool> DeleteSessionAsync(int sessionId, long userId, bool isAdmin = false)
     {
-        return await ExecuteWithLoggingAsync($"delete session {sessionId}", async conn =>
+        try
         {
+            await using var conn = await CreateConnectionAsync();
             await using var tx = await conn.BeginTransactionAsync();
             try
             {
@@ -171,20 +172,27 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 _=await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
                     new { SessionId = sessionId }, tx);
                 await tx.CommitAsync();
-                return true;
             }
             catch
             {
                 await tx.RollbackAsync();
                 throw;
             }
-        });
+
+            return true;
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to delete session {SessionId}", sessionId);
+            return false;
+        }
     }
 
     public async Task<bool> DeleteCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
-        return await ExecuteWithLoggingAsync($"delete command {commandId}", async conn =>
+        try
         {
+            await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(
                 SqlQueries.Commands.SoftDelete, new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
 
@@ -195,14 +203,27 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             }
 
             return true;
-        });
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to delete command {CommandId}", commandId);
+            return false;
+        }
     }
 
     public async Task<int> DeleteCommandsByTypeAsync(int sessionId, string commandType)
     {
-        return await ExecuteWithLoggingAsync($"delete commands of type {commandType} in session {sessionId}",
-            conn => conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySessionAndType, new { SessionId = sessionId, CommandType = commandType }),
-            0);
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            return await conn.ExecuteAsync(
+                SqlQueries.Commands.SoftDeleteBySessionAndType, new { SessionId = sessionId, CommandType = commandType });
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to delete commands of type {CommandType} in session {SessionId}", commandType, sessionId);
+            return 0;
+        }
     }
 
     public async Task UpsertUsersBatchAsync(long[] userIds, int role, int status)
@@ -245,20 +266,6 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<int?>(
             SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
-    }
-
-    private async Task<T> ExecuteWithLoggingAsync<T>(string operationName, Func<NpgsqlConnection, Task<T>> operation, T defaultValue = default!)
-    {
-        try
-        {
-            await using var conn = await CreateConnectionAsync();
-            return await operation(conn);
-        }
-        catch (Exception e)
-        {
-            logger.LogError(e, "Failed to {OperationName}", operationName);
-            return defaultValue;
-        }
     }
 
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
@@ -329,12 +336,18 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null)
     {
-        return await ExecuteWithLoggingAsync($"update status for command {commandId}", async conn =>
+        try
         {
+            await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateStatus,
                 new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage, Progress = progress, Result = result });
             return affected > 0;
-        });
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to update status for command {CommandId}", commandId);
+            return false;
+        }
     }
 
     public async Task ReleaseTimeoutCommandsAsync(int timeoutSeconds)
@@ -348,22 +361,34 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task<bool> UpdateCommandProgressAsync(int commandId, int progress)
     {
-        return await ExecuteWithLoggingAsync($"update progress for command {commandId}", async conn =>
+        try
         {
+            await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateProgress,
                 new { CommandId = commandId, Progress = progress });
             return affected > 0;
-        });
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to update progress for command {CommandId}", commandId);
+            return false;
+        }
     }
 
     public async Task<bool> UpdateCommandResultAsync(int commandId, string result)
     {
-        return await ExecuteWithLoggingAsync($"update result for command {commandId}", async conn =>
+        try
         {
+            await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateResult,
                 new { CommandId = commandId, Result = result });
             return affected > 0;
-        });
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to update result for command {CommandId}", commandId);
+            return false;
+        }
     }
 
     public async Task<int> SoftDeleteInactiveSessionsOlderThanAsync(DateTime cutoffUtc)
