@@ -1,0 +1,206 @@
+version: 1
+plan:
+  name: 'Сверка документации TelegramBot с кодовой базой'
+  max_concurrency: 3
+  max_consecutive_failures: 2
+  max_cycles: 8
+  auto_reject_retries: 1
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  - id: code-audit
+    title: 'Сбор фактического состояния кодовой базы'
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      Проверь `audit/code-facts.md`:
+      1. Каждое утверждение в файле должно быть проверяемо через код. Возьми 7 случайных утверждений (имена файлов, namespace'ов, DI-регистраций, SQL-таблиц, callback-префиксов) и сверь с реальным кодом через Read/grep.
+      2. Нет ли откровенных фантазий — файл, который «есть», но в реальности отсутствует.
+      3. Все 10 секций из промпта покрыты (или явно помечено «отсутствует»).
+      4. Вердикт PASS/FAIL + перечень несоответствий (если есть).
+    max_retries: 2
+    prompt: |
+      Ты работаешь в репозитории C:\Users\y.zhumabayev\Repository\TelegramBot. Это .NET 10 solution из 4 проектов (TelegramBot.Core, TelegramBot.Data, TelegramBot.Server, TelegramBot.Worker) + TelegramBot.slnx.
+
+      Твоя задача — собрать ФАКТИЧЕСКОЕ состояние кодовой базы в файл `audit/code-facts.md`. Это будет «правда о коде», с которой потом сверят документацию. Ничего не исправляй, только фиксируй факты.
+
+      Минимальный набор секций (добавляй, если найдёшь ещё что-то важное):
+
+      1. **Структура проектов** — реальные папки верхнего уровня в каждом из 4 проектов (TelegramBot.Core/*, TelegramBot.Data/*, TelegramBot.Server/*, TelegramBot.Worker/*). Не рекурсивно — только дерево глубиной 2-3 от корня проекта. Файлы `.cs` и `.csproj` помечай явно.
+
+      2. **Имена проектов и зависимости** — прочитай все 4 `.csproj` и выпиши: TargetFramework, PackageReference, ProjectReference. Особенно отметь: есть ли OpenMcdf, какой Dapper, какой Npgsql, есть ли Serilog, Telegram.Bot.
+
+      3. **BimLib — фактическое местоположение** — где лежит BimLib. Это папка в Worker? Или отдельный проект? Какие у неё подпапки? Какие `.cs` файлы внутри? Какие у неё зависимости (Microsoft.Win32, OpenMcdf)? `SupportedOSPlatform("windows")` присутствует? Какие namespace'ы используются (`TelegramBot.BimLib.*`)?
+
+      4. **Реальные namespaces и публичные классы/интерфейсы** — пройдись по всем 4 проектам и собери список namespace'ов верхнего уровня + ключевые публичные типы (классы, интерфейсы, enum'ы). Особенно отметь:
+         - какие именно callback-хендлеры есть (имена классов, файлы)
+         - какие именно сервисы зарегистрированы в DI (прочитай `DependencyInjectionExtensions.cs` и `Worker/Program.cs`)
+         - какие именно таблицы в БД (прочитай SQL-файлы в `TelegramBot.Data/Sql/`)
+
+      5. **SQL-схема** — какие таблицы реально создаются (BotUsers, Sessions, Commands, TrackedMessages и т.д.)? Какие у них колонки? Какие есть специальные поля вроде `ProjectName` в Sessions? Какие `NOTIFY` каналы используются (`command_completed` или другие)?
+
+      6. **Callback-префиксы и хендлеры** — прочитай `TelegramBot.Core/Models/CallbackPrefixes.cs` и выпиши все префиксы. Сопоставь с реальными хендлерами в `TelegramBot.Server/Services/Application/Handlers/`. Какие префиксы описаны, но не реализованы? Какие реализованы, но не описаны? Какие у каждого хендлера `Priority`?
+
+      7. **Config-ключи** — какие реально секции/ключи читаются из `appsettings.json` в Server и Worker? Особенно отметь: `TelegramBot:Token`, `TelegramBot:AdminUserIds`, `FileSystem:RootPath`, `ConnectionStrings:Postgres`, `RateLimit:MaxFilesPerUserPerDay`, `Worker:CompletedSessionRetentionDays`, `BimIntegration` (если есть), что-нибудь ещё?
+
+      8. **Appsettings-файлы** — какие файлы appsettings реально есть в Server и Worker? Что в них лежит (на верхнем уровне — секции и ключи)?
+
+      9. **Build & Run команды** — проверь, что файл `TelegramBot.slnx` существует, и что указанные в `AGENTS.md` команды `dotnet build TelegramBot.slnx`, `dotnet run --project .../TelegramBot.Server.csproj` и `dotnet run --project .../TelegramBot.Worker.csproj` синтаксически корректны (имена `.csproj` совпадают с реальными файлами).
+
+      10. **Документы на диске** — какие `.md` файлы лежат в корне и в `Docs/`? Перечисли все (кроме `.claude/`, `.omo/`, `.github/`). Особенно проверь: есть ли в `Docs/` оба файла `execution-algorithm.md` И `CommandExecutionAlgorithm.md`? Это похоже на дубль — зафиксируй.
+
+      Формат файла: Markdown, секции как пронумеровано выше, конкретные имена файлов, namespace'ов, классов. Без воды. Если чего-то нет — пиши «отсутствует». Если есть расхождение с твоими ожиданиями — фиксируй как факт.
+
+      Сохрани в `audit/code-facts.md` (создай папку `audit/` в корне репо, она не в .gitignore). По завершении — напиши одну строку-итог: «Готово. Файл: audit/code-facts.md, N секций, M фактов».
+    output:
+      path: audit/code-facts.md
+      min_size: 3000
+
+  - id: doc-claims
+    title: 'Сбор утверждений из документации'
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      Проверь `audit/doc-claims.md`:
+      1. Все 6 заявленных файлов (AGENTS.md, README.md, ROADMAP.md, Docs/execution-algorithm.md, Docs/CommandExecutionAlgorithm.md, Docs/qodana-setup.md) покрыты — у каждого есть хотя бы несколько утверждений с file:line.
+      2. Возьми 5 случайных цитат — каждая должна быть VERBATIM совпадением с оригиналом (открой файл по координатам и сверь).
+      3. Секция «ДУБЛИ И ПРОТИВОРЕЧИЯ» присутствует и не пуста.
+      4. Вердикт PASS/FAIL.
+    max_retries: 2
+    prompt: |
+      Ты работаешь в репозитории C:\Users\y.zhumabayev\Repository\TelegramBot.
+
+      Твоя задача — собрать ВСЕ проверяемые утверждения из документации в файл `audit/doc-claims.md`. Цитаты должны быть ТОЧНЫЕ (verbatim, с указанием файла и строки). Позже эти утверждения будут сверять с фактическим кодом.
+
+      Прочитай ПОЛНОСТЬЮ эти файлы (все лежат в репо):
+      - AGENTS.md
+      - README.md
+      - ROADMAP.md
+      - Docs/execution-algorithm.md
+      - Docs/CommandExecutionAlgorithm.md
+      - Docs/qodana-setup.md
+      - .github/copilot-instructions.md (на всякий случай)
+
+      Для каждого утверждения фиксируй:
+      - файл:строка (или диапазон строк)
+      - точная цитата (одна-две строки, не пересказ)
+      - категория: [architecture | class-name | namespace | config-key | sql-table | callback-prefix | command-code | dependency | build-cmd | run-cmd | other]
+      - короткий ID вида `AGENTS-001`, `README-003`, `ROADMAP-012`, `DOCS-EXEC-002`, `DOCS-CEA-001`, `QODANA-001`, `COPILOT-001`
+
+      Группируй по файлам. Не пропускай «очевидные» факты — записывай всё, что выглядит как проверяемое утверждение о структуре/именах/поведении кода. Например:
+      - «BimLib lives inside the Worker project» — это проверяемое
+      - «Use MarkdownV2 for plain messages» — это конвенция, не код, но всё равно зафиксируй
+      - «ConnectionStrings:Postgres defaults to postgres/postgres» — проверяемое
+      - «проект 4 .slnx» — проверяемое
+      - «таблица Sessions содержит колонку ProjectName» — проверяемое
+
+      Особое внимание удели:
+      - разделам «BimLib» во всех документах — там часто дрейфует местоположение
+      - спискам хендлеров / callback-префиксов / команд
+      - упоминаниям удалённых/добавленных интерфейсов (IFileSystemBrowser, ITelegramUpdateMapper, IRevitPathResolver и т.п.)
+      - упомянутым SQL-таблицам и полям
+      - разделам про build/test/format
+      - «Known Issues» и любым оговоркам про stale-документацию
+
+      Также в конце файла добавь секцию «ДУБЛИ И ПРОТИВОРЕЧИЯ МЕЖДУ ДОКУМЕНТАМИ»:
+      - есть ли в `Docs/` файлы `execution-algorithm.md` и `CommandExecutionAlgorithm.md` с одинаковым или разным содержимым
+      - упоминается ли в ROADMAP.md что-то, что напрямую противоречит AGENTS.md (например, статус фичи)
+      - есть ли в README.md утверждения, которых нет в AGENTS.md и наоборот
+
+      Сохрани в `audit/doc-claims.md`. По завершении — одна строка-итог: «Готово. Файл: audit/doc-claims.md, N утверждений из M файлов».
+    output:
+      path: audit/doc-claims.md
+      min_size: 3000
+
+  - id: fix-docs
+    title: 'Сверка и исправление документации'
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      Проверь `audit/discrepancies.md` и внесённые правки:
+      1. Для 5 случайных пунктов списка «было → стало» — открой исправленный документ и убедись, что:
+         a) новая формулировка действительно отражает фактическое состояние кода (а не просто перефразирована);
+         b) старая формулировка действительно была в файле ДО правки (проверь через git diff).
+      2. Итоговая секция «ИТОГ» присутствует с числами N/M/K и списком файлов.
+      3. Если заявлено удаление дубля — проверь, что файл отсутствует, а канонический документ цел.
+      4. Ни один production `.cs` файл не изменён (проверь через `git status` или `git diff --stat`).
+      5. Вердикт PASS/FAIL.
+    max_retries: 2
+    depends_on: [code-audit, doc-claims]
+    prompt: |
+      Ты работаешь в репозитории C:\Users\y.zhumabayev\Repository\TelegramBot. У тебя на руках два файла:
+      - `audit/code-facts.md` — фактическое состояние кода
+      - `audit/doc-claims.md` — проверяемые утверждения из документов
+
+      Твоя задача:
+      1. Сопоставить утверждения с фактами и составить `audit/discrepancies.md` со списком расхождений. Для каждого расхождения:
+         - ID утверждения (из doc-claims)
+         - файл:строка в документе
+         - точная цитата
+         - фактическое состояние (из code-facts)
+         - вердикт: «документ врёт» или «документ неточен» или «дубль» или «устарело»
+         - что именно нужно исправить
+      2. Исправить документы, чтобы они отражали фактическое состояние кода. Цель — НЕ переписать с нуля, а точечно поправить места расхождений. Сохрани стиль и структуру каждого документа.
+      3. Если найдены дубли документов (например, `Docs/execution-algorithm.md` vs `Docs/CommandExecutionAlgorithm.md`) — выбери канонический и либо удали дубль (через mavis-trash), либо сделай второй явной ссылкой на первый с пометкой «см. X». Решение зафиксируй в `audit/discrepancies.md`.
+
+      Какие документы трогать (только эти):
+      - AGENTS.md
+      - README.md
+      - ROADMAP.md
+      - Docs/execution-algorithm.md
+      - Docs/CommandExecutionAlgorithm.md
+      - Docs/qodana-setup.md
+
+      Какие НЕ трогать (помечены как out of scope):
+      - .claude/** (skills GitNexus — не наши)
+      - .omo/** (заметки агентов)
+      - .github/copilot-instructions.md (если не входит в заявленный пользователем список документации)
+      - LICENSE.txt, qodana.yaml, .editorconfig
+
+      Правила правки:
+      - Минимально-инвазивно. Если в документе написано «X лежит в Y» а на деле в Z — поправь путь, не переписывай абзац.
+      - Сохраняй Markdown-форматирование, заголовки, эмодзи (если были).
+      - Не удаляй «Known Issues» и «Roadmap» разделы, даже если они кажутся устаревшими — отметь их как требующие ревью пользователем, если не можешь сам решить.
+      - Все правки отражай в `audit/discrepancies.md` в формате «было → стало».
+      - Сборку не запускай — документация на сборку не влияет.
+      - Код не трогай вообще. Только документы.
+      - Если что-то неоднозначно (например, документ говорит про функцию, которой нет ни в коде, ни в планах) — оставь как есть и пометь в discrepancies.md как «требует решения пользователя».
+
+      По завершении:
+      - Запиши в `audit/discrepancies.md` финальную секцию «ИТОГ»:
+        - всего расхождений: N
+        - исправлено автоматически: M
+        - требует решения пользователя: K
+        - список файлов, в которые внесены правки (с количеством правок в каждом)
+      - Вернись в финальный отчёт одной строкой: «Готово. Расхождений: N, исправлено: M, к решению: K. Правки в файлах: [список]».
+    output:
+      path: audit/discrepancies.md
+      min_size: 2000
+
+  - id: final-gate
+    title: 'Финальная проверка: документация соответствует коду'
+    role: verify-as-task
+    assigned_to: verifier
+    depends_on: [fix-docs]
+    max_retries: 1
+    prompt: |
+      Ты работаешь в репозитории C:\Users\y.zhumabayev\Repository\TelegramBot. Твоя задача — независимо проверить, что после правок документация действительно соответствует кодовой базе, а правки не исказили смысл.
+
+      Шаги проверки:
+      1. Прочитай `audit/discrepancies.md` — там список «было → стало». Это претензии правок.
+      2. Прочитай `audit/code-facts.md` — это эталон фактов.
+      3. Для КАЖДОГО исправленного утверждения выборочно (не менее 5 случайных) — открой соответствующий файл документа и проверь, что новая формулировка действительно соответствует коду (а не просто грамматически поправлена).
+      4. Прочитай каждый изменённый документ ЦЕЛИКОМ и проверь:
+         - нет ли мест, где документ по-прежнему противоречит коду
+         - не сломана ли структура/нумерация/перекрёстные ссылки
+         - сохранена ли стилистика
+      5. Если заявлено «удалён дубль Docs/CommandExecutionAlgorithm.md» — проверь, что файл действительно отсутствует, а канонический документ на месте.
+      6. Если заявлено «N расхождений исправлено» — пересчитай, действительно ли в документах нет оставшихся грубых ошибок (имена файлов, namespace'ов, таблиц, callback-префиксов, имён классов).
+
+      Формат отчёта:
+      - PASS / FAIL
+      - Список оставшихся проблем (если есть) с file:line и рекомендацией
+      - Подтверждение по каждому проверенному утверждению
+
+      НЕ редактируй файлы. Только проверяй и пиши verdict.
