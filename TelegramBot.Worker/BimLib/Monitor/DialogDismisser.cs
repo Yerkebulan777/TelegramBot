@@ -1,3 +1,5 @@
+using TelegramBot.Worker.BimLib.Native;
+
 namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>

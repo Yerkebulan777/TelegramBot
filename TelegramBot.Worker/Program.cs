@@ -4,6 +4,10 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Data;
+using TelegramBot.Worker.BimLib.Config;
+using TelegramBot.Worker.BimLib.Interfaces;
+using TelegramBot.Worker.BimLib.Monitor;
+using TelegramBot.Worker.BimLib.Services;
 using TelegramBot.Worker.Services;
 
 [assembly: SupportedOSPlatform("windows")]
