@@ -57,16 +57,20 @@ public sealed class SessionManagementHandler(
 
     private async Task<bool> HandleSessionDetailsAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        if (!TryParseId(context, out var sessionId))
+        var arg = context.ParsedCallback.Argument;
+        var parts = arg.Split(':');
+        if (!int.TryParse(parts[0], out var sessionId) || sessionId <= 0)
         {
+            LogInvalidInput("ID", arg, context.Username, context.UserId);
             return true;
         }
 
+        var filter = parts.Length > 1 ? parts[1] : "ALL";
         var session = context.Session;
 
-        if (session.IsInStatusView)
+        if (string.Equals(filter, "SUMMARY", StringComparison.OrdinalIgnoreCase))
         {
-            Logger.LogInformation("{Username} view session {SessionId}", context.Username, sessionId);
+            Logger.LogInformation("{Username} view session summary {SessionId}", context.Username, sessionId);
             session.IsInStatusView = false;
             session.SessionId = sessionId;
 
@@ -77,13 +81,14 @@ public sealed class SessionManagementHandler(
         }
         else
         {
-            Logger.LogInformation("{Username} view cmds {SessionId}", context.Username, sessionId);
+            Logger.LogInformation("{Username} view cmds {SessionId} with filter {Filter}", context.Username, sessionId, filter);
             session.IsInStatusView = true;
+            session.SessionId = sessionId;
 
             var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId);
             var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId);
-            var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
+            var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter);
+            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands, filter), keyboard);
             session.StatusMessageId = context.MessageId;
         }
 
@@ -143,10 +148,14 @@ public sealed class SessionManagementHandler(
 
     private async Task<bool> HandleDeleteCommandConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        if (!TryParseId(context, out var commandId))
+        var arg = context.ParsedCallback.Argument;
+        var parts = arg.Split(':');
+        if (!int.TryParse(parts[0], out var commandId) || commandId <= 0)
         {
+            LogInvalidInput("ID", arg, context.Username, context.UserId);
             return true;
         }
+        var filter = parts.Length > 1 ? parts[1] : "ALL";
 
         var isAdmin = await CanManageAsync(context.UserId);
         var sessionId = await dataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
@@ -162,8 +171,8 @@ public sealed class SessionManagementHandler(
         var keyboard = new InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{CallbackPrefixes.ConfirmDeleteCommand}{commandId}"),
-                InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId.Value}")
+                InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{CallbackPrefixes.ConfirmDeleteCommand}{commandId}:{filter}"),
+                InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId.Value}:{filter}")
             ]
         ]);
 
@@ -178,10 +187,14 @@ public sealed class SessionManagementHandler(
 
     private async Task<bool> HandleDeleteCommandAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        if (!TryParseId(context, out var commandId))
+        var arg = context.ParsedCallback.Argument;
+        var parts = arg.Split(':');
+        if (!int.TryParse(parts[0], out var commandId) || commandId <= 0)
         {
+            LogInvalidInput("ID", arg, context.Username, context.UserId);
             return true;
         }
+        var filter = parts.Length > 1 ? parts[1] : "ALL";
 
         Logger.LogInformation("{Username} delete cmd {CommandId}", context.Username, commandId);
 
@@ -214,8 +227,8 @@ public sealed class SessionManagementHandler(
         {
             var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId.Value);
             var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId.Value);
-            var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId.Value);
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
+            var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId.Value, filter);
+            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands, filter), newKeyboard);
         }
 
         return true;
@@ -231,7 +244,7 @@ public sealed class SessionManagementHandler(
         context.Session.StatusMessageId = context.MessageId;
     }
 
-    private static string BuildStatusReply(SessionStatus sessionStatus, List<SessionCommands>? sessionCommands = null)
+    private static string BuildStatusReply(SessionStatus sessionStatus, List<SessionCommands>? sessionCommands = null, string selectedFilter = "ALL")
     {
         var percentage = sessionStatus.TotalFiles > 0
             ? 100 * sessionStatus.DoneFiles / sessionStatus.TotalFiles
@@ -261,24 +274,68 @@ public sealed class SessionManagementHandler(
                    $"\n❌ Ошибок: {sessionStatus.FailedFiles}";
         }
 
-        // Detailed commands view
-        var commandLines = new List<string>();
-        foreach (var cmd in sessionCommands)
-        {
-            var statusIconCmd = cmd.Status switch
-            {
-                "Done" => "✅",
-                "Failed" => "❌",
-                "processing" => "🔄",
-                "pending" => "⏳",
-                "Deleted" => "🗑",
-                _ => "❓"
-            };
+        // Detailed commands view grouped by Command Type
+        var isAllSelected = string.IsNullOrEmpty(selectedFilter) || selectedFilter == "ALL";
+        var groupedCommands = sessionCommands
+            .GroupBy(c => c.Command)
+            .OrderBy(g => g.Key)
+            .ToList();
 
-            var fileName = Path.GetFileName(cmd.FileName);
-            var timeStr = cmd.Date != default ? cmd.Date.ToString("HH:mm:ss") : "";
-            
-            commandLines.Add($"{cmd.ExecOrder}. {statusIconCmd} {cmd.Command} — {fileName} {timeStr}".Trim());
+        var commandLines = new List<string>();
+
+        foreach (var group in groupedCommands)
+        {
+            var groupKey = group.Key;
+
+            // If a specific filter is selected, skip other groups
+            if (!isAllSelected && !string.Equals(groupKey, selectedFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var totalInGroup = group.Count();
+            var doneInGroup = group.Count(c => c.Status == "Done");
+            var failedInGroup = group.Count(c => c.Status == "Failed");
+            var processingInGroup = group.Count(c => c.Status == "processing");
+
+            var groupStatusIcon = "⏳";
+            if (doneInGroup == totalInGroup) groupStatusIcon = "✅";
+            else if (failedInGroup > 0) groupStatusIcon = "❌";
+            else if (processingInGroup > 0) groupStatusIcon = "🔄";
+
+            commandLines.Add($"📦 *{groupKey}* ({doneInGroup}/{totalInGroup}) {groupStatusIcon}");
+
+            var groupList = group.OrderBy(c => c.ExecOrder).ToList();
+            for (int i = 0; i < groupList.Count; i++)
+            {
+                var cmd = groupList[i];
+                var isLast = i == groupList.Count - 1;
+                var treeIcon = isLast ? "└─" : "├─";
+
+                var statusIconCmd = cmd.Status switch
+                {
+                    "Done" => "✅",
+                    "Failed" => "❌",
+                    "processing" => "🔄",
+                    "pending" => "⏳",
+                    "Deleted" => "🗑",
+                    _ => "❓"
+                };
+
+                var fileName = Path.GetFileName(cmd.FileName);
+                var timeStr = cmd.Date != default ? $" ({cmd.Date:HH:mm:ss})" : "";
+
+                commandLines.Add($"{treeIcon} {cmd.ExecOrder}. {statusIconCmd} {fileName}{timeStr}");
+            }
+
+            // Add an empty line between groups for readability
+            commandLines.Add(string.Empty);
+        }
+
+        // Remove the last empty line if any
+        if (commandLines.Count > 0 && string.IsNullOrEmpty(commandLines[^1]))
+        {
+            commandLines.RemoveAt(commandLines.Count - 1);
         }
 
         var commandsText = string.Join("\n", commandLines);

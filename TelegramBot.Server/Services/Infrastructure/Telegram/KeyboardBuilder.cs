@@ -74,50 +74,65 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
-    public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId)
+    public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId, string selectedFilter)
     {
-        var buttons = new List<List<InlineKeyboardButton>>
-        {
-            new()
-            {
-                InlineKeyboardButton.WithCallbackData("🗑 Удалить всё", $"{CallbackPrefixes.DeleteSession}{sessionId}")
-            }
-        };
+        var buttons = new List<List<InlineKeyboardButton>>();
 
-        foreach (var sessionCommand in sessionCommands)
+        // Row 1: Tabs/Filters
+        var tabRow = new List<InlineKeyboardButton>();
+        var isAllSelected = string.IsNullOrEmpty(selectedFilter) || selectedFilter == "ALL";
+
+        tabRow.Add(InlineKeyboardButton.WithCallbackData(
+            "📋 Сводка",
+            $"{CallbackPrefixes.SessionDetails}{sessionId}:SUMMARY"));
+
+        tabRow.Add(InlineKeyboardButton.WithCallbackData(
+            isAllSelected ? "🔹 Все" : "Все",
+            $"{CallbackPrefixes.SessionDetails}{sessionId}:ALL"));
+
+        var uniqueCommands = sessionCommands
+            .Select(c => c.Command)
+            .Distinct()
+            .OrderBy(c => c)
+            .ToList();
+
+        foreach (var cmdType in uniqueCommands)
+        {
+            var count = sessionCommands.Count(c => c.Command == cmdType);
+            var isSelected = string.Equals(selectedFilter, cmdType, StringComparison.OrdinalIgnoreCase);
+            var label = isSelected ? $"🔹 {cmdType} ({count})" : $"{cmdType} ({count})";
+            tabRow.Add(InlineKeyboardButton.WithCallbackData(
+                label,
+                $"{CallbackPrefixes.SessionDetails}{sessionId}:{cmdType}"));
+        }
+        buttons.Add(tabRow);
+
+        // Row 2: Delete All
+        buttons.Add(
+        [
+            InlineKeyboardButton.WithCallbackData("🗑 Удалить всё", $"{CallbackPrefixes.DeleteSession}{sessionId}")
+        ]);
+
+        // Rows 3+: Filtered commands (1 row per command)
+        var filteredCommands = isAllSelected
+            ? sessionCommands
+            : sessionCommands.Where(c => string.Equals(c.Command, selectedFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        foreach (var sessionCommand in filteredCommands)
         {
             var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
             var fileName = Path.GetFileName(sessionCommand.FileName);
+            var actionText = sessionCommand.Status == "processing" || sessionCommand.Status == "pending"
+                ? "⛔ Отменить"
+                : "🗑 Скрыть";
 
-            // Row 1: order + command type + status
+            var buttonText = $"{statusIcon} {sessionCommand.Command}: {fileName} ({actionText})";
+            var callbackData = $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}:{selectedFilter}";
+
             buttons.Add(
             [
-                InlineKeyboardButton.WithCallbackData(
-                    $"{sessionCommand.ExecOrder}. {sessionCommand.Command} {statusIcon}",
-                    $"{sessionCommand.CommandId}"),
+                InlineKeyboardButton.WithCallbackData(buttonText, callbackData)
             ]);
-
-            // Row 2: filename + action buttons
-            var actionButtons = new List<InlineKeyboardButton>
-            {
-                InlineKeyboardButton.WithCallbackData(
-                    $"📄 {fileName}",
-                    $"{sessionCommand.CommandId}")
-            };
-
-            if (sessionCommand.Status == "processing")
-            {
-                actionButtons.Add(
-                    InlineKeyboardButton.WithCallbackData("⛔ Отменить", $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}"));
-            }
-
-            if (sessionCommand.Status != "processing")
-            {
-                actionButtons.Add(
-                    InlineKeyboardButton.WithCallbackData("🗑", $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}"));
-            }
-
-            buttons.Add(actionButtons);
         }
 
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
