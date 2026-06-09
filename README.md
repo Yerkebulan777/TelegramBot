@@ -1,6 +1,6 @@
 # Telegram Bot Server
 
-Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin). Задачи выполняются асинхронно через отдельный Worker-процесс с PostgreSQL-очередью и минутным polling.
+Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin). Задачи выполняются асинхронно через отдельный Worker-процесс с PostgreSQL-очередью и событийной обработкой через LISTEN/NOTIFY.
 
 ## Документация
 
@@ -32,7 +32,7 @@ Telegram-бот для навигации по файловой системе �
 - **.NET 10** — целевая платформа (`net10.0`)
 - **Telegram.Bot 22.10.0.1** — клиент Telegram Bot API
 - **PostgreSQL** — хранение данных (Npgsql + Dapper 2.1.79)
-- **PostgreSQL queue + polling** — Worker забирает pending-команды из БД раз в минуту
+- **PostgreSQL queue + events** — Worker слушает `LISTEN new_tasks` и мгновенно реагирует на новые команды; fallback-polling раз в 5 минут при потере соединения
 - **Serilog** — структурированное логирование (Console + Seq)
 - **OpenMcdf** — чтение OLE-потоков .rvt/.rfa-файлов (определение версии Revit)
 - **Windows Registry (Microsoft.Win32)** — поиск установленных Revit/Navisworks
@@ -160,12 +160,14 @@ CommandAppService
 Server (создание сессии)
      │
      ├── INSERT INTO Commands (Status='pending') ──► PostgreSQL
-     │
-                                     │
+     │                                              │
+     │                                    NOTIFY new_tasks
+     │                                              │
+                                     │              ▼
                           ┌──────────┴──────────┐
                           ▼                     ▼
                     Worker №1              Worker №N
-                    (poll 1 мин)       (poll 1 мин)
+               (LISTEN new_tasks)    (LISTEN new_tasks)
                           │
                     SELECT ... WHERE Status='pending'
                           │
@@ -182,7 +184,7 @@ Server (создание сессии)
                          PostgreSQL
 ```
 
-Worker автоматически продолжает обработку через polling раз в минуту и скрывает старые неактивные сессии по `Worker:CompletedSessionRetentionDays`.
+Worker мгновенно получает уведомление через `LISTEN new_tasks` и начинает обработку. Fallback-polling раз в 5 минут при потере соединения. Worker также скрывает старые неактивные сессии по `Worker:CompletedSessionRetentionDays`.
 
 ### BimLib (BIM Integration) — встроен в Worker
 
@@ -291,13 +293,14 @@ Soft-delete — строки никогда не удаляются физиче
 
 ### Механизм очереди задач
 
-Worker забирает pending-команды из PostgreSQL через polling:
+Worker получает команды через PostgreSQL LISTEN/NOTIFY:
 
-1. **Server** после подтверждения выбора создаёт `Sessions` и `Commands` со статусом `pending`
-2. **Worker** раз в минуту вызывает `ClaimPendingCommandsAsync`
+1. **Server** после подтверждения выбора создаёт `Sessions` и `Commands` со статусом `pending` и отправляет `NOTIFY new_tasks`
+2. **Worker** слушает канал `new_tasks` и мгновенно реагирует на уведомление, вызывая `ClaimPendingCommandsAsync`
 3. `FOR UPDATE SKIP LOCKED` позволяет нескольким Worker-ам безопасно конкурировать за команды
-4. **Отмена/удаление команд** — пользователь через `/status` → кнопку «⛔ Отменить» или «🗑»; Server сначала показывает подтверждение, затем мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`.
-5. **Уведомление о завершении** — после завершения всей сессии Worker шлёт `command_completed` через PostgreSQL `NOTIFY`, а Server отправляет пользователю сводку с длительностью сессии и списком ошибочных файлов.
+4. **Fallback-polling** — если соединение потеряно, Worker проверяет очередь раз в 5 минут
+5. **Отмена/удаление команд** — пользователь через `/status` → кнопку «⛔ Отменить» или «🗑»; Server сначала показывает подтверждение, затем мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`.
+6. **Уведомление о завершении** — после завершения всей сессии Worker шлёт `command_completed` через PostgreSQL `NOTIFY`, а Server (`CommandNotificationService`) отправляет пользователю сводку с длительностью сессии и списком ошибочных файлов.
 
 Несколько Worker-ов могут работать параллельно (competing consumers) — каждый берёт следующую команду из очереди.
 
@@ -322,7 +325,7 @@ Worker забирает pending-команды из PostgreSQL через pollin
      ↓
 навигация по папкам (проект → секция) → выбор .rvt-файлов
      ↓
-APPLYFILES → дневной лимит файлов → создание сессии + команд в БД → Worker выполняет при следующем poll
+APPLYFILES → дневной лимит файлов → создание сессии + команд в БД → NOTIFY new_tasks → Worker выполняет мгновенно
      ↓
 /status → глобальный просмотр всех сессий (с `[username]`) → SESSIONDETAILS → DELETECOMMAND / DELETESESSION → подтверждение
      ↓
