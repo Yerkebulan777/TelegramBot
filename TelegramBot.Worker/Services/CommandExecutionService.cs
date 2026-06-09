@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Npgsql;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
@@ -13,25 +14,29 @@ using TelegramBot.Worker.BimLib.Monitor;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
-/// Background service: поллинг очереди команд через Postgres, выполняет их
-/// с per-partition пулом процессов и лимитами для защиты от перегрузки.
-/// Просыпается каждые {FallbackTimeoutSec} секунд для проверки новых команд.
+/// Background service: событийная обработка очереди команд через PostgreSQL LISTEN/NOTIFY.
+/// Слушает канал new_tasks и мгновенно реагирует на новые задачи.
+/// Fallback-polling (раз в 5 мин) используется только при потере соединения с уведомлением.
 /// Автоматически переподключается при потере соединения.
 /// </summary>
 public sealed class CommandExecutionService(
     IDataService dataService,
     IOptions<WorkerOptions> workerOptions,
+    IConfiguration configuration,
     ILogger<CommandExecutionService> logger,
     IRevitVersionDetector versionDetector,
     INavisworksPathResolver navisworksPathResolver,
     DialogDismisser dialogDismisser) : BackgroundService
 {
-    private const int FallbackTimeoutSec = 300; // 5 мин — интервал поллинга очереди
+    private const string ListenChannel = "new_tasks";
+    private const int FallbackTimeoutSec = 300; // 5 мин — интервал fallback-поллинга
     private const int DefaultBatchSize = 5;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
     private const int CleanupIntervalSec = 300; // Интервал очистки истёкших lease (5 мин)
     private const int HealthCheckIntervalSec = 30; // Интервал проверки здоровья процессов
 
+    private readonly string _connectionString = configuration.GetConnectionString("Postgres")
+        ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
     // Партиции: максимальный Priority threshold -> пул процессов.
@@ -92,6 +97,95 @@ public sealed class CommandExecutionService(
         }
 
         logger.LogInformation("Worker stopped");
+    }
+
+    /// <summary>
+    /// Основной цикл обработки: LISTEN канала new_tasks + fallback polling.
+    /// При получении уведомления мгновенно обрабатывает пакет задач.
+    /// Fallback polling срабатывает только раз в 5 мин на случай потери соединения.
+    /// </summary>
+    private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
+    {
+        // Освобождаем истёкшие Lease и таймауты (crash recovery упавших воркеров)
+        await dataService.ReleaseExpiredLeasesAsync();
+        await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
+
+        // Первичная проверка — вдруг команды уже есть в БД
+        await ProcessBatchAsync(stoppingToken);
+
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(stoppingToken);
+
+        // Подписываемся на канал уведомлений
+        await using var cmd = new NpgsqlCommand($"LISTEN {ListenChannel};", conn);
+        _=await cmd.ExecuteNonQueryAsync(stoppingToken);
+
+        logger.LogInformation("Listening for notifications on channel '{Channel}'", ListenChannel);
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            // Ждём уведомление с таймаутом fallback polling
+            var notificationReceived = await WaitForNotificationAsync(conn, TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
+
+            if (notificationReceived)
+            {
+                logger.LogDebug("Notification received on channel '{Channel}'", ListenChannel);
+            }
+            else
+            {
+                logger.LogDebug("Fallback polling triggered after {TimeoutSec}s", FallbackTimeoutSec);
+            }
+
+            // Обрабатываем доступные команды
+            await ProcessBatchAsync(stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Ждёт уведомление PostgreSQL с указанным таймаутом.
+    /// Возвращает true, если уведомление получено, false — по таймауту.
+    /// </summary>
+    private async Task<bool> WaitForNotificationAsync(NpgsqlConnection conn, TimeSpan timeout, CancellationToken ct)
+    {
+        var notificationReceived = false;
+        var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeout);
+
+        void OnNotification(object? sender, NpgsqlNotificationEventArgs e)
+        {
+            if (e.Channel == ListenChannel)
+            {
+                notificationReceived = true;
+            }
+        }
+
+        conn.Notification += OnNotification;
+
+        try
+        {
+            await conn.WaitAsync(timeoutCts.Token);
+            return notificationReceived;
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // Таймаут истёк — это нормальная ситуация для fallback polling
+            return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Отмена запроса — пробрасываем дальше
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Error waiting for notification");
+            return false;
+        }
+        finally
+        {
+            conn.Notification -= OnNotification;
+            timeoutCts.Dispose();
+        }
     }
 
     private Task StartCleanupTaskAsync()
@@ -297,36 +391,6 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
-    {
-        // Освобождаем истёкшие Lease и таймауты (crash recovery упавших воркеров)
-        await dataService.ReleaseExpiredLeasesAsync();
-        await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
-
-        // Первичная проверка — вдруг команды уже есть в БД
-        await ProcessBatchAsync(stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            // Поллинг: просыпаемся каждые {FallbackTimeoutSec} секунд
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-
-            // Захватываем до {DefaultBatchSize} команд и выполняем их
-            await ProcessBatchAsync(stoppingToken);
-        }
-    }
-
-    /// <summary>
-    /// Захватывает до {DefaultBatchSize} команд из очереди и выполняет их параллельно.
-    /// Каждая команда проходит через ограничение своей партиции (SemaphoreSlim).
-    /// </summary>
     private async Task ProcessBatchAsync(CancellationToken ct)
     {
         try
