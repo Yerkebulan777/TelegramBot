@@ -45,6 +45,9 @@ public interface IDataService
     /// <summary>Удаляет команду (мягкое удаление). Любой одобренный пользователь может удалить любую команду.</summary>
     Task<bool> DeleteCommandAsync(int commandId, long userId, bool isAdmin = false);
 
+    /// <summary>Удаляет все команды указанного типа в сессии (мягкое удаление). Не затрагивает команды в статусе 'processing'.</summary>
+    Task<int> DeleteCommandsByTypeAsync(int sessionId, string commandType);
+
     /// <summary>Проверяет наличие активных команд в сессии.</summary>
     Task<bool> CheckCommandsStatusAsync(int sessionId);
 

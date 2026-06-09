@@ -39,6 +39,7 @@ internal static partial class SqlQueries
             SELECT
                 s.Status,
                 s.ProjectName,
+                s.CreatedAt,
                 COUNT(CASE WHEN c.Status != 'Deleted' THEN 1 END) AS TotalFiles,
                 COUNT(CASE WHEN c.Status = 'Done'      THEN 1 END) AS DoneFiles,
                 COUNT(CASE WHEN c.Status = 'Failed'    THEN 1 END) AS FailedFiles,
@@ -47,7 +48,7 @@ internal static partial class SqlQueries
             FROM Sessions s
             LEFT JOIN Commands c ON c.SessionId = s.SessionId
             WHERE s.SessionId = @SessionId
-            GROUP BY s.Status, s.ProjectName;";
+            GROUP BY s.SessionId;";
 
         internal const string SoftDelete = @"
             UPDATE Sessions SET Status = 'Deleted'

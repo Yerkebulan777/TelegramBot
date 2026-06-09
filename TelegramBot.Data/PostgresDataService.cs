@@ -207,6 +207,21 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    public async Task<int> DeleteCommandsByTypeAsync(int sessionId, string commandType)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            return await conn.ExecuteAsync(
+                SqlQueries.Commands.SoftDeleteBySessionAndType, new { SessionId = sessionId, CommandType = commandType });
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to delete commands of type {CommandType} in session {SessionId}", commandType, sessionId);
+            return 0;
+        }
+    }
+
     public async Task UpsertUsersBatchAsync(long[] userIds, int role, int status)
     {
         if (userIds.Length == 0)

@@ -32,6 +32,12 @@ internal static partial class SqlQueries
         internal const string SoftDeleteBySession =
             "UPDATE Commands SET Status = 'Deleted' WHERE SessionId = @SessionId;";
 
+        internal const string SoftDeleteBySessionAndType = @"
+            UPDATE Commands SET Status = 'Deleted'
+            WHERE SessionId = @SessionId
+              AND CommandText = @CommandType
+              AND Status NOT IN ('Deleted', 'processing');";
+
         internal const string SoftDeleteLegacyCancelled =
             "UPDATE Commands SET Status = 'Deleted' WHERE Status = 'Cancelled';";
 
