@@ -17,6 +17,9 @@ namespace TelegramBot.Server.Services.Application;
 
 public sealed class SlashCommandService(
     ISessionDataService sessionDataService,
+    IUserDataService userDataService,
+    ICommandDataService commandDataService,
+    IMessageTrackingDataService messageTrackingDataService,
     ITelegramOutputService outputService,
     IKeyboardBuilder keyboardBuilder,
     IOptions<FileSystemOptions> fileSystemOptions,
@@ -57,15 +60,15 @@ public sealed class SlashCommandService(
         if (text == "/start")
         {
             session.Reset(_options.RootPath);
-            var user = await sessionDataService.GetUserAsync(userId);
+            var user = await userDataService.GetUserAsync(userId);
 
             if (user?.Status != UserAccessStatus.Approved)
             {
-                var adminUser = await sessionDataService.GetUserAsync(userId);
+                var adminUser = await userDataService.GetUserAsync(userId);
                 if (adminUser?.Role == UserRole.Admin && adminUser.Status == UserAccessStatus.Approved)
                 {
                     var now = DateTime.UtcNow;
-                    await sessionDataService.UpsertUserAsync(new BotUser
+                    await userDataService.UpsertUserAsync(new BotUser
                     {
                         UserId = userId,
                         Username = username,
@@ -74,7 +77,7 @@ public sealed class SlashCommandService(
                         CreatedAt = user?.CreatedAt ?? now,
                         UpdatedAt = now
                     });
-                    user = await sessionDataService.GetUserAsync(userId);
+                    user = await userDataService.GetUserAsync(userId);
                 }
             }
 
@@ -90,7 +93,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        var userRecord = await sessionDataService.GetUserAsync(userId);
+        var userRecord = await userDataService.GetUserAsync(userId);
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
             logger.LogWarning("Command rejected: command={Command}, user={UserId}, reason=access_denied", text, userId);
@@ -108,7 +111,7 @@ public sealed class SlashCommandService(
 
     public async Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session)
     {
-        var userRecord = await sessionDataService.GetUserAsync(userId);
+        var userRecord = await userDataService.GetUserAsync(userId);
 
         if (userRecord?.Status == UserAccessStatus.Approved)
         {
@@ -288,7 +291,7 @@ public sealed class SlashCommandService(
         }
 
         // Проверяем, нет ли уже таких же (команда + файл) в очереди
-        if (await sessionDataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
+        if (await commandDataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
         {
             logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
             await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
@@ -346,7 +349,7 @@ public sealed class SlashCommandService(
 
     private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
     {
-        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, userId, session,
+        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingDataService, userId, session,
                 _options.IsAtProjectLevel(session.CurrentPath)
                     ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
                     : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
@@ -399,7 +402,7 @@ public sealed class SlashCommandService(
         if (msg != null)
         {
             var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await sessionDataService.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
+            await messageTrackingDataService.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
         }
         return msg;
     }

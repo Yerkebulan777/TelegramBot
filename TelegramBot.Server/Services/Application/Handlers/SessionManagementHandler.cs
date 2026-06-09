@@ -10,6 +10,9 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class SessionManagementHandler(
     ISessionDataService sessionDataService,
+    IUserDataService userDataService,
+    ICommandDataService commandDataService,
+    IMessageTrackingDataService messageTrackingDataService,
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
@@ -28,7 +31,7 @@ public sealed class SessionManagementHandler(
     /// <summary>Проверяет, имеет ли пользователь доступ (все одобренные могут управлять любыми сессиями).</summary>
     private async Task<bool> CanManageAsync(long userId)
     {
-        var user = await sessionDataService.GetUserAsync(userId);
+        var user = await userDataService.GetUserAsync(userId);
         return user?.Status == UserAccessStatus.Approved;
     }
 
@@ -145,7 +148,7 @@ public sealed class SessionManagementHandler(
         }
 
         // Очищаем tracked messages из БД
-        await sessionDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
+        await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
 
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
@@ -206,14 +209,14 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("{Username} delete cmd {CommandId}", context.Username, commandId);
 
         var isAdmin = await CanManageAsync(context.UserId);
-        var sessionId = await dataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
+        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
         if (!sessionId.HasValue)
         {
             Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
             return true;
         }
 
-        if (!await sessionDataService.DeleteCommandAsync(commandId, context.UserId, isAdmin))
+        if (!await commandDataService.DeleteCommandAsync(commandId, context.UserId, isAdmin))
         {
             return true;
         }
@@ -225,7 +228,7 @@ public sealed class SessionManagementHandler(
             // Последняя команда — удаляем сессию и tracked messages
             if (await sessionDataService.DeleteSessionAsync(sessionId.Value, context.UserId, isAdmin))
             {
-                await sessionDataService.DeleteTrackedMessagesBySessionAsync(sessionId.Value);
+                await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId.Value);
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
@@ -285,7 +288,7 @@ public sealed class SessionManagementHandler(
         var commandType = parts[1];
         Logger.LogInformation("{Username} delete all commands of type {CommandType} in session {SessionId}", context.Username, commandType, sessionId);
 
-        var deleted = await sessionDataService.DeleteCommandsByTypeAsync(sessionId, commandType);
+        var deleted = await commandDataService.DeleteCommandsByTypeAsync(sessionId, commandType);
         if (deleted == 0)
         {
             Logger.LogWarning("{Username} no commands deleted for type {CommandType} session {SessionId}", context.Username, commandType, sessionId);
@@ -298,7 +301,7 @@ public sealed class SessionManagementHandler(
         {
             if (await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
             {
-                await sessionDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
+                await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
