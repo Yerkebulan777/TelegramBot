@@ -185,8 +185,16 @@ public sealed class SlashCommandService(
         if (messageText == ButtonTexts.Cancel && (session.IsFileSelectionActive || session.PendingCommand.Count > 0))
         {
             logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
+
+            await outputService.ClearChatHistoryAsync(userId, session);
             session.Reset(_options.RootPath);
-            await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, "Выбор отменен."), session);
+
+            var removedKeyboardMessage = await outputService.RemoveReplyKeyboardAsync(userId, "Выбор отменен.");
+            if (removedKeyboardMessage != null)
+            {
+                await outputService.DeleteMessageAsync(userId, removedKeyboardMessage.Id);
+            }
+
             return true;
         }
 
