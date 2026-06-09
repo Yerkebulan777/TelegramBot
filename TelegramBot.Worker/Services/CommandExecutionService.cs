@@ -6,10 +6,9 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
-using TelegramBot.BimLib.Interfaces;
-using TelegramBot.BimLib.Models;
-using TelegramBot.BimLib.Monitor;
-using TelegramBot.Data;
+using TelegramBot.Worker.BimLib.Interfaces;
+using TelegramBot.Worker.BimLib.Models;
+using TelegramBot.Worker.BimLib.Monitor;
 
 namespace TelegramBot.Worker.Services;
 
@@ -62,49 +61,14 @@ public sealed class CommandExecutionService(
     {
         InitializePartitionPools();
 
-        logger.LogInformation("Worker starting: partitions={PartitionCount}, pools={Pools}",
-            _partitionPools.Count,
-            string.Join(", ", _partitionPools.Select(p => $"{p.Key}={p.Value.CurrentCount}")));
+        var partitionInfo = string.Join(", ", _partitionPools.Select(p => $"{p.Key}={p.Value.CurrentCount}"));
+
+        logger.LogInformation("Worker starting: partitions={PartitionCount}, pools={Pools}", _partitionPools.Count, partitionInfo);
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        // Фоновая задача периодической очистки истёкших lease (через PeriodicTimer — без дрифта)
-        _cleanupTask = Task.Run(async () =>
-        {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(CleanupIntervalSec));
-
-            while (await timer.WaitForNextTickAsync(_shutdownCts.Token))
-            {
-                try
-                {
-                    await dataService.ReleaseExpiredLeasesAsync();
-                    await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
-                    await CleanupInactiveSessionsAsync();
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Error in lease cleanup cycle");
-                }
-            }
-        });
-
-        // Фоновая задача мониторинга здоровья активных процессов (каждые 30 сек)
-        _healthTask = Task.Run(async () =>
-        {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(HealthCheckIntervalSec));
-
-            while (await timer.WaitForNextTickAsync(_shutdownCts.Token))
-            {
-                try
-                {
-                    CheckProcessesHealth();
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Error in process health check cycle");
-                }
-            }
-        });
+        _cleanupTask = StartCleanupTaskAsync();
+        _healthTask = StartHealthMonitoringTaskAsync();
 
         try
         {
@@ -124,36 +88,84 @@ public sealed class CommandExecutionService(
         }
         finally
         {
-            // Graceful shutdown
-            logger.LogInformation("Worker stopping: activeProcesses={Count}", _activeProcesses.Count);
-            await LogActiveProcessesOnShutdownAsync();
-
-            // Отменяем фоновые задачи и ждём их завершения (макс 15 сек)
-            _shutdownCts?.Cancel();
-
-            if (_cleanupTask != null)
-            {
-                var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
-                if (await Task.WhenAny(_cleanupTask, timeout) != _cleanupTask)
-                    logger.LogWarning("Cleanup task did not complete within 15s timeout");
-            }
-
-            if (_healthTask != null)
-            {
-                var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
-                if (await Task.WhenAny(_healthTask, timeout) != _healthTask)
-                    logger.LogWarning("Health monitoring task did not complete within 15s timeout");
-            }
-
-            _shutdownCts?.Dispose();
-
-            foreach (var pool in _partitionPools.Values)
-            {
-                pool.Dispose();
-            }
+            await PerformGracefulShutdownAsync();
         }
 
         logger.LogInformation("Worker stopped");
+    }
+
+    private Task StartCleanupTaskAsync()
+    {
+        return Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(CleanupIntervalSec));
+
+            while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
+            {
+                try
+                {
+                    await dataService.ReleaseExpiredLeasesAsync();
+                    await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
+                    await CleanupInactiveSessionsAsync();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error in lease cleanup cycle");
+                }
+            }
+        });
+    }
+
+    private Task StartHealthMonitoringTaskAsync()
+    {
+        return Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(HealthCheckIntervalSec));
+
+            while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
+            {
+                try
+                {
+                    CheckProcessesHealth();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error in process health check cycle");
+                }
+            }
+        });
+    }
+
+    private async Task PerformGracefulShutdownAsync()
+    {
+        logger.LogInformation("Worker stopping: activeProcesses={Count}", _activeProcesses.Count);
+        await LogActiveProcessesOnShutdownAsync();
+
+        _shutdownCts?.Cancel();
+
+        await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task");
+        await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task");
+
+        _shutdownCts?.Dispose();
+
+        foreach (var pool in _partitionPools.Values)
+        {
+            pool.Dispose();
+        }
+    }
+
+    private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName)
+    {
+        if (task == null)
+        {
+            return;
+        }
+
+        var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
+        if (await Task.WhenAny(task, timeout) != task)
+        {
+            logger.LogWarning("{TaskName} did not complete within 15s timeout", taskName);
+        }
     }
 
     private async Task CleanupInactiveSessionsAsync()
@@ -203,7 +215,9 @@ public sealed class CommandExecutionService(
         foreach (var (commandId, process) in _activeProcesses)
         {
             if (process.HasExited)
+            {
                 continue;
+            }
 
             try
             {
@@ -225,7 +239,7 @@ public sealed class CommandExecutionService(
                 // Закрываем модальные диалоги Revit, если вылезли
                 try
                 {
-                    dialogDismisser.DismissDialogsForProcess((uint)process.Id);
+                    _=dialogDismisser.DismissDialogsForProcess((uint)process.Id);
                 }
                 catch (Exception ex)
                 {
@@ -275,10 +289,11 @@ public sealed class CommandExecutionService(
         {
             var process = kvp.Value;
             if (process.HasExited)
+            {
                 continue;
+            }
 
-            logger.LogInformation("Process left running: commandId={Id}, pid={Pid}",
-                kvp.Key, process.Id);
+            logger.LogInformation("Process left running: commandId={Id}, pid={Pid}", kvp.Key, process.Id);
         }
     }
 
@@ -328,7 +343,7 @@ public sealed class CommandExecutionService(
             // Устанавливаем счётчик оставшихся команд по сессиям
             foreach (var group in claimed.GroupBy(c => c.SessionId))
             {
-                _sessionRemaining.AddOrUpdate(group.Key, group.Count(), (_, existing) => existing + group.Count());
+                _=_sessionRemaining.AddOrUpdate(group.Key, group.Count(), (_, existing) => existing + group.Count());
             }
 
             // Запускаем все команды параллельно, каждая ждёт свободный слот своей партиции
@@ -386,109 +401,22 @@ public sealed class CommandExecutionService(
 
         try
         {
-            if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
+            var commandCfg = await PrepareCommandAsync(cmd, ct);
+
+            if (commandCfg == null)
             {
-                logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
-                    errorMessage: $"Unknown command type: {cmd.CommandText}");
-                await CompleteClaimedCommandAsync(cmd);
                 return;
             }
 
-            if (!ValidateFilePath(cmd, commandCfg))
-            {
-                logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
-                    errorMessage: $"File validation failed for path: {cmd.FilePath}");
-                await CompleteClaimedCommandAsync(cmd);
-                return;
-            }
-
-            var (resolvedPath, resolutionError) = await ResolveExecutablePathAsync(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
-            if (resolvedPath == null)
-            {
-                logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=executable_not_found, error={Error}",
-                    cmd.CommandId, cmd.CommandText, resolutionError);
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
-                    errorMessage: resolutionError);
-                await CompleteClaimedCommandAsync(cmd);
-                return;
-            }
-
-            var startInfo = CreateProcessStartInfo(cmd, commandCfg);
-            startInfo.FileName = resolvedPath;
-            logger.LogInformation("Command start: id={Id}, command={Cmd}, attempt={Attempt}",
-                cmd.CommandId, cmd.CommandText, cmd.RetryCount + 1);
-
-            process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            process.Start();
-            _activeProcesses[cmd.CommandId] = process;
-            await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
-
-            var outputBuilder = new StringBuilder();
-            var errorBuilder = new StringBuilder();
-
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) errorBuilder.AppendLine(e.Data); };
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            var timeoutMs = _workerOptions.ProcessTimeoutSeconds * 1000;
-            var completed = await Task.Run(() => process.WaitForExit(timeoutMs), ct);
-
-            LogProcessOutput(cmd, outputBuilder, errorBuilder);
-
-            var errorMessage = (string?)null;
-
-            if (!completed)
-            {
-                process.Kill(true);
-                try
-                {
-                    using var killTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    await process.WaitForExitAsync(killTimeout.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    logger.LogWarning(
-                        "Kill timeout after process timeout: commandId={Id}, pid={Pid}",
-                        cmd.CommandId, process.Id);
-                }
-                errorMessage = $"Timeout: process exceeded {_workerOptions.ProcessTimeoutSeconds}s limit";
-                logger.LogWarning("Command timeout: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
-                    cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
-            }
-            else if (process.ExitCode != 0)
-            {
-                errorMessage = $"Process exited with code {process.ExitCode}";
-                logger.LogWarning("Command exit: id={Id}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
-                    cmd.CommandId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
-            }
-
-            sw.Stop();
-
-            if (completed && process.ExitCode == 0)
-            {
-                await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
-                logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
-                    cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
-                await CompleteClaimedCommandAsync(cmd);
-            }
-            else if (errorMessage != null)
-            {
-                await HandleCommandFailureAsync(cmd, errorMessage, null, sw);
-            }
+            process = await StartCommandProcessAsync(cmd, commandCfg, ct);
+            await WaitAndHandleProcessResultAsync(cmd, process, sw, ct);
         }
         catch (OperationCanceledException)
         {
-            if (process != null && !process.HasExited)
+            if (process == null || process.HasExited)
             {
-                logger.LogInformation(
-                    "Process left running on Worker shutdown: commandId={Id}, cmd={Cmd}, pid={Pid}",
-                    cmd.CommandId, cmd.CommandText, process.Id);
+                throw;
             }
-
-            throw;
         }
         catch (Exception ex)
         {
@@ -497,7 +425,123 @@ public sealed class CommandExecutionService(
         finally
         {
             _=_activeProcesses.TryRemove(cmd.CommandId, out _);
+            logger.LogDebug("Completed: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}", cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
         }
+    }
+
+    private async Task<CommandConfig?> PrepareCommandAsync(PendingCommand cmd, CancellationToken ct)
+    {
+        if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
+        {
+            logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                errorMessage: $"Unknown command type: {cmd.CommandText}");
+            await CompleteClaimedCommandAsync(cmd);
+            return null;
+        }
+
+        if (!ValidateFilePath(cmd, commandCfg))
+        {
+            logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                errorMessage: $"File validation failed for path: {cmd.FilePath}");
+            await CompleteClaimedCommandAsync(cmd);
+            return null;
+        }
+
+        var (resolvedPath, resolutionError) = await ResolveExecutablePathAsync(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
+        if (resolvedPath == null)
+        {
+            logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=executable_not_found, error={Error}",
+                cmd.CommandId, cmd.CommandText, resolutionError);
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+                errorMessage: resolutionError);
+            await CompleteClaimedCommandAsync(cmd);
+            return null;
+        }
+
+        commandCfg.ExecutablePath = resolvedPath;
+        return commandCfg;
+    }
+
+    private async Task<Process> StartCommandProcessAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
+    {
+        var startInfo = CreateProcessStartInfo(cmd, commandCfg);
+        startInfo.FileName = commandCfg.ExecutablePath;
+
+        logger.LogInformation("Command start: id={Id}, command={Cmd}, attempt={Attempt}",
+            cmd.CommandId, cmd.CommandText, cmd.RetryCount + 1);
+
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        _=process.Start();
+        _activeProcesses[cmd.CommandId] = process;
+        _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
+
+        return process;
+    }
+
+    private async Task WaitAndHandleProcessResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
+    {
+        var outputBuilder = new StringBuilder();
+        var errorBuilder = new StringBuilder();
+
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) {  outputBuilder.AppendLine(e.Data); } };
+        process.ErrorDataReceived += (_, e) => { if (e.Data != null) {  errorBuilder.AppendLine(e.Data); } };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        var timeoutMs = _workerOptions.ProcessTimeoutSeconds * 1000;
+        var completed = await Task.Run(() => process.WaitForExit(timeoutMs), ct);
+
+        LogProcessOutput(cmd, outputBuilder, errorBuilder);
+
+        var errorMessage = GetProcessErrorMessage(cmd, process, completed, sw);
+
+        sw.Stop();
+
+        if (completed && process.ExitCode == 0)
+        {
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
+            logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
+                cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
+            await CompleteClaimedCommandAsync(cmd);
+        }
+        else if (errorMessage != null)
+        {
+            await HandleCommandFailureAsync(cmd, errorMessage, null, sw);
+        }
+    }
+
+    private string? GetProcessErrorMessage(PendingCommand cmd, Process process, bool completed, Stopwatch sw)
+    {
+        if (!completed)
+        {
+            process.Kill(true);
+            try
+            {
+                using var killTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                _=process.WaitForExit(5000);
+            }
+            catch (Exception)
+            {
+                logger.LogWarning(
+                    "Kill timeout after process timeout: commandId={Id}, pid={Pid}",
+                    cmd.CommandId, process.Id);
+            }
+
+            logger.LogWarning("Command timeout: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
+                cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
+            return $"Timeout: process exceeded {_workerOptions.ProcessTimeoutSeconds}s limit";
+        }
+
+        if (process.ExitCode != 0)
+        {
+            logger.LogWarning("Command exit: id={Id}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
+                cmd.CommandId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
+            return $"Process exited with code {process.ExitCode}";
+        }
+
+        return null;
     }
 
     /// <summary>Валидация FilePath: существование файла, расширение, path traversal.</summary>
@@ -564,66 +608,75 @@ public sealed class CommandExecutionService(
     /// BasicFileInfo отсутствует. Поэтому версия не детектится — вместо этого выбирается первая
     /// установленная версия Navisworks (любой версии FileConvert.exe подходит для конвертации NWC).
     /// </remarks>
-    private async Task<(string? resolvedPath, string? errorMessage)> ResolveExecutablePathAsync(
-        PendingCommand cmd, string configuredPath, string commandText, CancellationToken ct)
+    private async Task<(string? resolvedPath, string? errorMessage)> ResolveExecutablePathAsync(PendingCommand cmd, string configuredPath, string commandText, CancellationToken ct)
     {
         if (commandText is "PDF" or "DWG" or "IFC" or "BIMDOC")
         {
-            try
-            {
-                var version = await versionDetector.DetectVersionAsync(cmd.FilePath!, ct);
-                if (version?.ExecutablePath != null)
-                {
-                    logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Revit {Year})",
-                        commandText, version.ExecutablePath, version.Year);
-                    return (version.ExecutablePath, null);
-                }
-
-                // Версия определена, но Revit не установлен — понятная ошибка пользователю
-                if (version != null && version.ExecutablePath == null)
-                {
-                    var msg = $"Revit {version.Year} не установлен на сервере. Пожалуйста, установите Revit {version.Year} или обратитесь к администратору.";
-                    logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
-                    return (null, msg);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "BimLib version detection failed for {Cmd}, falling back to configured path",
-                    commandText);
-            }
+            return await ResolveRevitPathAsync(cmd, commandText, ct) ?? (configuredPath, null);
         }
 
         if (commandText is "NWC" or "CLASHREP")
         {
-            try
-            {
-                var versions = navisworksPathResolver.GetInstalledVersions();
-                if (versions.Count > 0)
-                {
-                    var nwPath = navisworksPathResolver.ResolveFileConvertPath(versions[0])
-                                  ?? navisworksPathResolver.ResolveNavisworksPath(versions[0]);
-                    if (nwPath != null)
-                    {
-                        logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Navisworks {Year})",
-                            commandText, nwPath, versions[0]);
-                        return (nwPath, null);
-                    }
-                }
+            return ResolveNavisworksPath(commandText) ?? (configuredPath, null);
+        }
 
-                // Navisworks не установлен — понятная ошибка пользователю
+        return (configuredPath, null);
+    }
+
+    private async Task<(string? resolvedPath, string? errorMessage)?> ResolveRevitPathAsync(PendingCommand cmd, string commandText, CancellationToken ct)
+    {
+        try
+        {
+            var version = await versionDetector.DetectVersionAsync(cmd.FilePath!, ct);
+            if (version?.ExecutablePath != null)
+            {
+                logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Revit {Year})",  commandText, version.ExecutablePath, version.Year);
+                return (version.ExecutablePath, null);
+            }
+
+            if (version != null && version.ExecutablePath == null)
+            {
+                var msg = $"Revit {version.Year} не установлен на сервере. Пожалуйста, установите Revit {version.Year} или обратитесь к администратору.";
+                logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
+                return (null, msg);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "BimLib version detection failed for {Cmd}, falling back to configured path", commandText);
+        }
+
+        return null;
+    }
+
+    private (string? resolvedPath, string? errorMessage)? ResolveNavisworksPath(string commandText)
+    {
+        try
+        {
+            var versions = navisworksPathResolver.GetInstalledVersions();
+            if (versions.Count == 0)
+            {
                 var msg = "Navisworks не установлен на сервере. Пожалуйста, установите Navisworks или обратитесь к администратору.";
                 logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
                 return (null, msg);
             }
-            catch (Exception ex)
+
+            var nwPath = navisworksPathResolver.ResolveFileConvertPath(versions[0])
+                          ?? navisworksPathResolver.ResolveNavisworksPath(versions[0]);
+            if (nwPath != null)
             {
-                logger.LogWarning(ex, "BimLib Navisworks resolution failed for {Cmd}, falling back to configured path",
-                    commandText);
+                logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Navisworks {Year})",
+                    commandText, nwPath, versions[0]);
+                return (nwPath, null);
             }
         }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "BimLib Navisworks resolution failed for {Cmd}, falling back to configured path",
+                commandText);
+        }
 
-        return (configuredPath, null);
+        return null;
     }
 
     /// <summary>
@@ -645,7 +698,7 @@ public sealed class CommandExecutionService(
         }
         else
         {
-            await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
+            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
             await CompleteClaimedCommandAsync(cmd);

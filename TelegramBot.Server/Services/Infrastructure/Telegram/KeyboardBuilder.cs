@@ -138,14 +138,15 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService) : IKeyboar
 
     private static string GetSessionStatusIcon(string status, int activeCommands)
     {
-        if (activeCommands > 0) return "🔄";
-        return status switch
-        {
-            "Done" => "✅",
-            "Failed" => "❌",
-            "Deleted" => "🗑",
-            _ => "📋"
-        };
+        return activeCommands > 0
+            ? "🔄"
+            : status switch
+            {
+                "Done" => "✅",
+                "Failed" => "❌",
+                "Deleted" => "🗑",
+                _ => "📋"
+            };
     }
 
     private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(

@@ -1,7 +1,6 @@
 using System.Text;
-using TelegramBot.BimLib.Native;
 
-namespace TelegramBot.BimLib.Monitor;
+namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>Win32-утилиты: поиск окон, получение информации, клики.</summary>
 internal static class WindowUtil
@@ -12,7 +11,10 @@ internal static class WindowUtil
     internal static string GetWindowTitle(IntPtr hwnd)
     {
         var length = User32.GetWindowTextLength(hwnd);
-        if (length <= 0) return string.Empty;
+        if (length <= 0)
+        {
+            return string.Empty;
+        }
 
         var sb = new StringBuilder(length + 1);
         _ = User32.GetWindowText(hwnd, sb, sb.Capacity);
@@ -60,30 +62,38 @@ internal static class WindowUtil
     {
         var result = new List<IntPtr>();
 
-        User32.EnumWindows((hwnd, _) =>
+        _=User32.EnumWindows((hwnd, _) =>
         {
             if (!User32.IsWindowVisible(hwnd))
+            {
                 return true;
+            }
 
             if (className != null)
             {
                 var actualClass = GetWindowClassName(hwnd);
                 if (!string.Equals(actualClass, className, StringComparison.Ordinal))
+                {
                     return true;
+                }
             }
 
             if (windowTitle != null)
             {
                 var actualTitle = GetWindowTitle(hwnd);
                 if (!actualTitle.Contains(windowTitle, StringComparison.OrdinalIgnoreCase))
+                {
                     return true;
+                }
             }
 
             if (processId.HasValue)
             {
                 var actualPid = GetWindowProcessId(hwnd);
                 if (actualPid != processId.Value)
+                {
                     return true;
+                }
             }
 
             result.Add(hwnd);
@@ -100,20 +110,24 @@ internal static class WindowUtil
     {
         var result = new List<IntPtr>();
 
-        User32.EnumChildWindows(parentHwnd, (hwnd, _) =>
+        _=User32.EnumChildWindows(parentHwnd, (hwnd, _) =>
         {
             if (className != null)
             {
                 var actualClass = GetWindowClassName(hwnd);
                 if (!string.Equals(actualClass, className, StringComparison.Ordinal))
+                {
                     return true;
+                }
             }
 
             if (windowTitle != null)
             {
                 var actualTitle = GetWindowTitle(hwnd);
                 if (!string.Equals(actualTitle, windowTitle, StringComparison.Ordinal))
+                {
                     return true;
+                }
             }
 
             result.Add(hwnd);
@@ -131,9 +145,11 @@ internal static class WindowUtil
 
         // Если кнопка не реагирует — пробуем установить состояние и отправить LBUTTON
         if (!User32.IsWindowEnabled(hwndButton))
+        {
             return;
+        }
 
-        _ = User32.SendMessage(hwndButton, Win32Consts.BmSetState, (IntPtr)1, IntPtr.Zero);
+        _ = User32.SendMessage(hwndButton, Win32Consts.BmSetState, 1, IntPtr.Zero);
         _ = User32.SendMessage(hwndButton, Win32Consts.WmLButtonDown, IntPtr.Zero, IntPtr.Zero);
         _ = User32.SendMessage(hwndButton, Win32Consts.WmLButtonUp, IntPtr.Zero, IntPtr.Zero);
     }

@@ -1,4 +1,4 @@
-namespace TelegramBot.BimLib.Config;
+namespace TelegramBot.Worker.BimLib.Config;
 
 /// <summary>Конфигурация BIM-интеграции: минимальная версия Revit, пути установки.</summary>
 public sealed class BimIntegrationOptions

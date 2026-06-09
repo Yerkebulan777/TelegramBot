@@ -1,8 +1,7 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Logging;
-using TelegramBot.BimLib.Models;
+using TelegramBot.Worker.BimLib.Models;
 
-namespace TelegramBot.BimLib.Monitor;
+namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>
 /// Мониторинг здоровья процессов Navisworks (Roamer.exe, FileConvert.exe).
@@ -10,14 +9,14 @@ namespace TelegramBot.BimLib.Monitor;
 internal sealed class NavisworksProcessTracker(
     ILogger<NavisworksProcessTracker> logger)
 {
-    private static readonly string[] NavisworksProcessNames = ["Roamer", "FileConvert", "NWD"];
+    private static readonly string[] _navisworksProcessNames = ["Roamer", "FileConvert", "NWD"];
 
     /// <summary>Возвращает список всех активных (не завершённых) процессов Navisworks (Roamer, FileConvert, NWD).</summary>
     public IReadOnlyList<Process> GetAllProcesses()
     {
         var result = new List<Process>();
 
-        foreach (var processName in NavisworksProcessNames)
+        foreach (var processName in _navisworksProcessNames)
         {
             try
             {
@@ -38,5 +37,7 @@ internal sealed class NavisworksProcessTracker(
     }
 
     public RevitProcessHealth CheckHealth(Process process)
-        => ProcessHealthHelper.CheckHealth(process, logger, "Navisworks");
+    {
+        return ProcessHealthHelper.CheckHealth(process, logger, "Navisworks");
+    }
 }

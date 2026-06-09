@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
 using TelegramBot.Core.Config;
 
 namespace TelegramBot.Core.Services;
@@ -23,7 +23,7 @@ public sealed class RateLimiter
 
         lock (timestamps)
         {
-            timestamps.RemoveAll(t => now - t > _window);
+            _=timestamps.RemoveAll(t => now - t > _window);
             timestamps.Add(now);
             return timestamps.Count <= _maxRequests;
         }

@@ -1,9 +1,8 @@
-using System.Runtime.Versioning;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32;
-using TelegramBot.BimLib.Config;
-namespace TelegramBot.BimLib.Services;
+using System.Runtime.Versioning;
+using TelegramBot.Worker.BimLib.Config;
+namespace TelegramBot.Worker.BimLib.Services;
 
 /// <summary>
 /// Определяет установленные версии Revit через Windows Registry
@@ -75,17 +74,21 @@ public sealed class RevitPathResolver(
     {
         // Сначала пробуем SOFTWARE\Autodesk\Revit\{version}
         var path = TryGetRegistryPath($@"SOFTWARE\Autodesk\Revit\{version}");
-        if (path != null) return path;
+        if (path != null)
+        {
+            return path;
+        }
 
         // Fallback: SOFTWARE\Autodesk\Revit{version}
         path = TryGetRegistryPath($@"SOFTWARE\Autodesk\Revit{version}");
-        if (path != null) return path;
+        if (path != null)
+        {
+            return path;
+        }
 
         // Попробовать WOW6432Node для 32-битных версий на 64-битной OS
         path = TryGetRegistryPath($@"SOFTWARE\WOW6432Node\Autodesk\Revit\{version}");
-        if (path != null) return path;
-
-        return null;
+        return path ??null;
     }
 
     /// <summary>
@@ -94,7 +97,10 @@ public sealed class RevitPathResolver(
     private static string? TryGetRegistryPath(string registryKey)
     {
         using var skey = Registry.LocalMachine.OpenSubKey(registryKey);
-        if (skey == null) return null;
+        if (skey == null)
+        {
+            return null;
+        }
 
         var subKeyNames = skey.GetSubKeyNames();
 
@@ -102,12 +108,16 @@ public sealed class RevitPathResolver(
         foreach (var subKey in subKeyNames)
         {
             if (!subKey.Contains("REVIT-", StringComparison.OrdinalIgnoreCase))
+            {
                 continue;
+            }
 
             using var rvtKey = skey.OpenSubKey(subKey);
             var location = rvtKey?.GetValue("InstallationLocation")?.ToString();
             if (!string.IsNullOrWhiteSpace(location))
+            {
                 return location;
+            }
         }
 
         return null;

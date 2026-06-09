@@ -23,7 +23,7 @@ public sealed class SlashCommandService(
     IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger) : ISlashCommandService
 {
-    private static readonly Dictionary<string, int> CommandPriorityMap = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, int> _commandPriorityMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["PDF"] = CommandPriorities.Critical,
         ["DWG"] = CommandPriorities.High,
@@ -94,7 +94,7 @@ public sealed class SlashCommandService(
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
             logger.LogWarning("Command rejected: command={Command}, user={UserId}, reason=access_denied", text, userId);
-            await TrackMessageAsync(outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
+            _=await TrackMessageAsync(outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
             return;
         }
 
@@ -115,7 +115,7 @@ public sealed class SlashCommandService(
             return true;
         }
 
-        await TrackMessageAsync(outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
+        _=await TrackMessageAsync(outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
         return false;
     }
 
@@ -298,7 +298,7 @@ public sealed class SlashCommandService(
         var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
 
         var priorities = session.PendingCommand
-            .Select(c => CommandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
+            .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
 
         var sessionId = await dataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities);
@@ -313,7 +313,7 @@ public sealed class SlashCommandService(
         session.ClearPendingCommands();
         session.IsFileSelectionActive = false;
 
-        await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
+        _=await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
     }
 
     private async Task<bool> CheckDailyFileLimitAsync(long userId, UserSession session, int newFileCount)
@@ -345,10 +345,12 @@ public sealed class SlashCommandService(
     }
 
     private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
-        => HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, userId, session,
-            _options.IsAtProjectLevel(session.CurrentPath)
-                ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
-                : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
+    {
+        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, userId, session,
+                _options.IsAtProjectLevel(session.CurrentPath)
+                    ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
+                    : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
+    }
 
     private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
     {
@@ -373,7 +375,7 @@ public sealed class SlashCommandService(
                 InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
             ]
         ]);
-        await TrackMessageAsync(outputService.SendMessageWithKeyboardAsync(userId,
+        _=await TrackMessageAsync(outputService.SendMessageWithKeyboardAsync(userId,
             "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
             keyboard), session);
     }
@@ -388,7 +390,7 @@ public sealed class SlashCommandService(
             .AppendLine("/help — справка по командам")
             .ToString();
 
-        await TrackMessageAsync(outputService.SendMessageAsync(userId, helpText), session);
+        _=await TrackMessageAsync(outputService.SendMessageAsync(userId, helpText), session);
     }
 
     private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
@@ -471,10 +473,10 @@ public sealed class SlashCommandService(
 
         foreach (var commandName in commandNames)
         {
-            builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(commandName)}");
+            _=builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(commandName)}");
         }
 
-        builder
+        _=builder
             .AppendLine()
             .AppendLine("📌 *Проект*")
             .AppendLine($"`{MarkdownHelper.EscapeMarkdown(projectName)}`")
@@ -483,10 +485,10 @@ public sealed class SlashCommandService(
 
         foreach (var sectionName in sectionNames)
         {
-            builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(sectionName)}");
+            _=builder.AppendLine($"• {MarkdownHelper.EscapeMarkdown(sectionName)}");
         }
 
-        builder
+        _=builder
             .AppendLine()
             .AppendLine($"📄 *Количество файлов:* `{fileCount}`");
 
@@ -526,7 +528,7 @@ public sealed class SlashCommandService(
             {
                 if (_options.IsRevitFile(file))
                 {
-                    files.Add(file);
+                    _=files.Add(file);
                 }
             }
         }

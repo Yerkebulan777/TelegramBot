@@ -1,7 +1,4 @@
-using System.Text;
-using TelegramBot.BimLib.Native;
-
-namespace TelegramBot.BimLib.Monitor;
+namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>Информация об окне Windows: дескриптор, заголовок, класс, процесс.</summary>
 internal sealed class WindowInfo
@@ -40,6 +37,8 @@ internal sealed class WindowInfo
             dialogControlId, className, title, processId);
     }
 
-    public override string ToString() =>
-        $"HWND={Hwnd}, Title='{WindowTitle}', Class='{WindowClassName}', PID={ProcessId}";
+    public override string ToString()
+    {
+        return $"HWND={Hwnd}, Title='{WindowTitle}', Class='{WindowClassName}', PID={ProcessId}";
+    }
 }

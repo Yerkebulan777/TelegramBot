@@ -45,5 +45,7 @@ internal static class HandlerHelpers
         IDataService dataService,
         CallbackContext context,
         Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
-        => SendActionsReplyKeyboardAsync(outputService, dataService, context.UserId, context.Session, keyboardFactory);
+    {
+        return SendActionsReplyKeyboardAsync(outputService, dataService, context.UserId, context.Session, keyboardFactory);
+    }
 }

@@ -58,7 +58,9 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleSessionDetailsAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseId(context, out var sessionId))
+        {
             return true;
+        }
 
         var session = context.Session;
 
@@ -91,7 +93,9 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleDeleteSessionConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseId(context, out var sessionId))
+        {
             return true;
+        }
 
         Logger.LogInformation("{Username} requested delete confirmation for session {SessionId}", context.Username, sessionId);
         context.Session.IsInStatusView = true;
@@ -116,7 +120,9 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleDeleteSessionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseId(context, out var sessionId))
+        {
             return true;
+        }
 
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
@@ -138,7 +144,9 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleDeleteCommandConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseId(context, out var commandId))
+        {
             return true;
+        }
 
         var isAdmin = await CanManageAsync(context.UserId);
         var sessionId = await dataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
@@ -171,7 +179,9 @@ public sealed class SessionManagementHandler(
     private async Task<bool> HandleDeleteCommandAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseId(context, out var commandId))
+        {
             return true;
+        }
 
         Logger.LogInformation("{Username} delete cmd {CommandId}", context.Username, commandId);
 

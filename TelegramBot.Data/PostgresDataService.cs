@@ -23,13 +23,13 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         await using var conn = await CreateConnectionAsync();
 
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
-        await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable);
-        await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
-        await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
+        _=await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled);
     }
 
     public async Task<BotUser?> GetUserAsync(long userId)
@@ -42,7 +42,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
     {
         var now = DateTime.UtcNow;
         await using var conn = await CreateConnectionAsync();
-        await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
+        _=await conn.ExecuteAsync(SqlQueries.Users.Upsert, new
         {
             user.UserId,
             user.Username,
@@ -105,7 +105,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             cmdIdx++;
         }
 
-        await conn.ExecuteAsync(SqlQueries.Commands.InsertBatch,
+        _=await conn.ExecuteAsync(SqlQueries.Commands.InsertBatch,
             new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
             tx);
 
@@ -164,7 +164,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                     return false;
                 }
 
-                await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
+                _=await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
                     new { SessionId = sessionId }, tx);
                 await tx.CommitAsync();
             }
@@ -215,7 +215,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
         var now = DateTime.UtcNow;
         await using var conn = await CreateConnectionAsync();
-        await conn.ExecuteAsync(SqlQueries.Users.UpsertBatch, new
+        _=await conn.ExecuteAsync(SqlQueries.Users.UpsertBatch, new
         {
             UserIds = userIds,
             Role = role,
@@ -294,7 +294,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             }
             finally
             {
-                await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = AdvisoryLockId });
+                _=await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = AdvisoryLockId });
             }
         }
         catch (Exception e)
@@ -307,7 +307,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task ReleaseExpiredLeasesAsync()
     {
-        await TryExecuteWithAdvisoryLockAsync(
+        _=await TryExecuteWithAdvisoryLockAsync(
             "release expired leases",
             conn => conn.ExecuteAsync(
                 SqlQueries.Commands.ReleaseExpiredLeases,
@@ -332,7 +332,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
     public async Task ReleaseTimeoutCommandsAsync(int timeoutSeconds)
     {
-        await TryExecuteWithAdvisoryLockAsync(
+        _=await TryExecuteWithAdvisoryLockAsync(
             "release timeout commands",
             conn => conn.ExecuteAsync(
                 SqlQueries.Commands.ReleaseTimeoutCommands,
@@ -369,7 +369,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         {
             var payload = $"{userId}|{sessionId}|{doneCount}|{totalCount}|{projectName ?? ""}";
             await using var conn = await CreateConnectionAsync();
-            await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
+            _=await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
         }
         catch (Exception e)
         {
@@ -410,7 +410,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         try
         {
             await using var conn = await CreateConnectionAsync();
-            await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert,
+            _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.Insert,
                 new { SessionId = sessionId, ChatId = chatId, MessageIdPg = messageId });
         }
         catch (Exception e)
@@ -424,7 +424,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         try
         {
             await using var conn = await CreateConnectionAsync();
-            await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByIds,
+            _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByIds,
                 new { SessionId = sessionId, MessageIds = messageIds.ToArray() });
         }
         catch (Exception e)
@@ -438,7 +438,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         try
         {
             await using var conn = await CreateConnectionAsync();
-            await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteBySession,
+            _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteBySession,
                 new { SessionId = sessionId });
         }
         catch (Exception e)
@@ -458,7 +458,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             }
 
             await using var conn = await CreateConnectionAsync();
-            await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByChatAndMessages,
+            _=await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByChatAndMessages,
                 new { ChatId = chatId, MessageIds = ids });
         }
         catch (Exception e)

@@ -1,7 +1,4 @@
-using Microsoft.Extensions.Logging;
-using TelegramBot.BimLib.Native;
-
-namespace TelegramBot.BimLib.Monitor;
+namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>
 /// Автоматическое закрытие диалоговых окон Revit (#32770).
@@ -24,7 +21,10 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
     internal bool DismissDialogsForProcess(uint processId)
     {
         var dialogs = FindEnabledDialogs(processId);
-        if (dialogs.Count == 0) return false;
+        if (dialogs.Count == 0)
+        {
+            return false;
+        }
 
         var dismissed = false;
 
@@ -65,20 +65,26 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
     {
         var dialogs = new List<IntPtr>();
 
-        User32.EnumWindows((hwnd, _) =>
+        _=User32.EnumWindows((hwnd, _) =>
         {
             var className = WindowUtil.GetWindowClassName(hwnd);
 
             // #32770 — стандартный класс диалоговых окон
             if (className != "#32770")
+            {
                 return true;
+            }
 
             var actualPid = WindowUtil.GetWindowProcessId(hwnd);
             if (actualPid != processId)
+            {
                 return true;
+            }
 
             if (!User32.IsWindowEnabled(hwnd))
+            {
                 return true;
+            }
 
             dialogs.Add(hwnd);
             return true;
@@ -99,12 +105,18 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
     {
         // Ищем кнопки внутри диалога
         var buttons = WindowUtil.EnumerateChildWindows(hwndDlg, "Button");
-        if (buttons.Count == 0) return false;
+        if (buttons.Count == 0)
+        {
+            return false;
+        }
 
         foreach (var hwndBtn in buttons)
         {
             var btnText = WindowUtil.GetWindowTitle(hwndBtn);
-            if (string.IsNullOrEmpty(btnText)) continue;
+            if (string.IsNullOrEmpty(btnText))
+            {
+                continue;
+            }
 
             var cleanText = btnText.Replace("&", "").Trim();
 
@@ -123,13 +135,18 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
     private static bool TryClickFirstButton(IntPtr hwndDlg)
     {
         var buttons = WindowUtil.EnumerateChildWindows(hwndDlg, "Button");
-        if (buttons.Count == 0) return false;
+        if (buttons.Count == 0)
+        {
+            return false;
+        }
 
         // Пропускаем кнопки с BNS_BUSY
         foreach (var hwndBtn in buttons)
         {
             if (!User32.IsWindowEnabled(hwndBtn))
+            {
                 continue;
+            }
 
             WindowUtil.SendButtonClick(hwndBtn);
             return true;

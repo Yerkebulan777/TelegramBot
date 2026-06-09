@@ -1,11 +1,10 @@
+using OpenMcdf;
 using System.Runtime.Versioning;
 using System.Text;
-using Microsoft.Extensions.Logging;
-using OpenMcdf;
-using TelegramBot.BimLib.Interfaces;
-using TelegramBot.BimLib.Models;
+using TelegramBot.Worker.BimLib.Interfaces;
+using TelegramBot.Worker.BimLib.Models;
 
-namespace TelegramBot.BimLib.Services;
+namespace TelegramBot.Worker.BimLib.Services;
 
 /// <summary>
 /// Определяет версию Revit по OLE-потоку BasicFileInfo внутри .rvt/.rfa-файла.
@@ -91,7 +90,10 @@ public sealed class RevitVersionDetector(
     private string? GetRevitVersionText(string filePath)
     {
         var infoText = GetBasicFileInfoText(filePath);
-        if (infoText == null) return null;
+        if (infoText == null)
+        {
+            return null;
+        }
 
         using var reader = new StringReader(infoText);
         string? line;
@@ -99,7 +101,9 @@ public sealed class RevitVersionDetector(
         {
             line = line.Trim();
             if (!line.StartsWith("Format:", StringComparison.OrdinalIgnoreCase))
+            {
                 continue;
+            }
 
             // Извлекаем только цифры из строки "Format: 2024"
             var digits = new char[line.Length];
@@ -142,17 +146,25 @@ public sealed class RevitVersionDetector(
         foreach (var marker in markers)
         {
             var first = asciiString.IndexOf(marker, StringComparison.Ordinal);
-            if (first < 0) continue;
+            if (first < 0)
+            {
+                continue;
+            }
 
             var second = asciiString.IndexOf(marker, first + marker.Length, StringComparison.Ordinal);
-            if (second < 0) continue;
+            if (second < 0)
+            {
+                continue;
+            }
 
             // Текст находится между двумя маркерами, сразу после первого маркера
             var startIndex = first + marker.Length;
             var length = second - startIndex;
 
             if (length <= 0)
+            {
                 continue;
+            }
 
             // Текст между маркерами — Unicode (UTF-16 LE)
             var textBytes = streamData.Skip(startIndex).Take(length).ToArray();

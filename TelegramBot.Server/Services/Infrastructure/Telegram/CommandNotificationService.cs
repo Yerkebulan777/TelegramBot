@@ -45,7 +45,7 @@ public sealed class CommandNotificationService(
     {
         await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, stoppingToken);
 
-        await conn.ExecuteAsync("LISTEN command_completed;");
+        _=await conn.ExecuteAsync("LISTEN command_completed;");
         conn.Notification += OnNotificationReceived;
 
         logger.LogInformation("Command notifications listening: channel=command_completed");
@@ -112,18 +112,11 @@ public sealed class CommandNotificationService(
 
             var summary = new StringBuilder();
 
-            if (failed == 0)
-            {
-                summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {done} файлов обработано");
-            }
-            else if (done == 0)
-            {
-                summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {failed} файлов с ошибками");
-            }
-            else
-            {
-                summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {done} ✅, {failed} ❌ из {total}");
-            }
+            _=failed == 0
+                ? summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {done} файлов обработано")
+                : done == 0
+                    ? summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {failed} файлов с ошибками")
+                    : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {done} ✅, {failed} ❌ из {total}");
 
             // Если есть ошибки — запрашиваем список файлов с ошибками
             if (failed > 0)
@@ -138,8 +131,8 @@ public sealed class CommandNotificationService(
                     var failedList = failedFiles.Select(f => $"- {Path.GetFileName(f)}").ToList();
                     if (failedList.Count > 0)
                     {
-                        summary.Append("\n\nОшибки:\n");
-                        summary.AppendJoin('\n', failedList);
+                        _=summary.Append("\n\nОшибки:\n");
+                        _=summary.AppendJoin('\n', failedList);
                     }
                 }
                 catch (Exception ex)
@@ -148,7 +141,7 @@ public sealed class CommandNotificationService(
                 }
             }
 
-            await telegramOutput.SendMessageAsync(userId, summary.ToString());
+            _=await telegramOutput.SendMessageAsync(userId, summary.ToString());
             logger.LogInformation("Session completed: user={UserId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
                 userId, projectName, done, failed, total);
         }
@@ -187,16 +180,8 @@ public sealed class CommandNotificationService(
     {
         var duration = TimeSpan.FromSeconds(totalSeconds);
 
-        if (duration.TotalHours >= 1)
-        {
-            return $"{(int)duration.TotalHours} ч {duration.Minutes:D2} мин";
-        }
-
-        if (duration.TotalMinutes >= 1)
-        {
-            return $"{duration.Minutes} мин {duration.Seconds:D2} с";
-        }
-
-        return $"{duration.Seconds} с";
+        return duration.TotalHours >= 1
+            ? $"{(int)duration.TotalHours} ч {duration.Minutes:D2} мин"
+            : duration.TotalMinutes >= 1 ? $"{duration.Minutes} мин {duration.Seconds:D2} с" : $"{duration.Seconds} с";
     }
 }

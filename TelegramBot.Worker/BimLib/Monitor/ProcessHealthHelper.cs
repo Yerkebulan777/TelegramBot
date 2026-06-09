@@ -1,8 +1,7 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Logging;
-using TelegramBot.BimLib.Models;
+using TelegramBot.Worker.BimLib.Models;
 
-namespace TelegramBot.BimLib.Monitor;
+namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>
 /// Статический helper для проверки здоровья процесса.

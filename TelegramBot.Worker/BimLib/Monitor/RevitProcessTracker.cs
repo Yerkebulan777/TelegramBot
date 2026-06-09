@@ -1,8 +1,7 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Logging;
-using TelegramBot.BimLib.Models;
+using TelegramBot.Worker.BimLib.Models;
 
-namespace TelegramBot.BimLib.Monitor;
+namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>
 /// Мониторинг здоровья процессов Revit: проверка отклика, памяти, 
@@ -25,14 +24,19 @@ internal sealed class RevitProcessTracker(
     }
 
     public RevitProcessHealth CheckHealth(Process process)
-        => ProcessHealthHelper.CheckHealth(process, logger, "Revit");
+    {
+        return ProcessHealthHelper.CheckHealth(process, logger, "Revit");
+    }
 
     /// <summary>Закрывает модальные диалоги Revit для указанного процесса. Возвращает 1, если диалоги были закрыты.</summary>
     public int DismissDialogs(int processId)
     {
         var dismissed = dialogDismisser.DismissDialogsForProcess((uint)processId);
         if (dismissed)
+        {
             logger.LogInformation("Dialogs dismissed for process {ProcessId}", processId);
+        }
+
         return dismissed ? 1 : 0;
     }
 }

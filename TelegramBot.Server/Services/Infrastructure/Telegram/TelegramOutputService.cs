@@ -20,9 +20,9 @@ public class TelegramOutputService(
 
     public async Task<Message?> SendMessageAsync(long userId, string message)
     {
-        if (string.IsNullOrWhiteSpace(message)) return null;
-
-        return await ExecuteWithRetryAsync(async () =>
+        return string.IsNullOrWhiteSpace(message)
+            ? null
+            : await ExecuteWithRetryAsync(async () =>
         {
             var t = await botClient.SendMessage(
                 chatId: new ChatId(userId),
@@ -52,7 +52,7 @@ public class TelegramOutputService(
             return;
         }
 
-        await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
+        _=await SendMessageAsync(adminChatId.Value, $"🔔 [Notification]\n{message}");
     }
 
     public async Task DeleteMessageAsync(long chatId, int messageId)
@@ -172,7 +172,7 @@ public class TelegramOutputService(
     {
         try
         {
-            await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
+            _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
         }
         catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
@@ -188,7 +188,7 @@ public class TelegramOutputService(
     {
         try
         {
-            await botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
+            _=await botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
         }
         catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
@@ -204,7 +204,7 @@ public class TelegramOutputService(
     {
         try
         {
-            await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
+            _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
         }
         catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {

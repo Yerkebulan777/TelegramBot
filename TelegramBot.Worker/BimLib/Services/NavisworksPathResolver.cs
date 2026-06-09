@@ -1,11 +1,10 @@
-using System.Runtime.Versioning;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32;
-using TelegramBot.BimLib.Config;
-using TelegramBot.BimLib.Interfaces;
+using System.Runtime.Versioning;
+using TelegramBot.Worker.BimLib.Config;
+using TelegramBot.Worker.BimLib.Interfaces;
 
-namespace TelegramBot.BimLib.Services;
+namespace TelegramBot.Worker.BimLib.Services;
 
 /// <summary>
 /// Определяет установленные версии Navisworks через Windows Registry
@@ -68,7 +67,10 @@ public sealed class NavisworksPathResolver(
     {
         // FileConvert.exe может быть в корне установки или в подпапке
         var installDir = GetNavisworksDirectory(versionYear);
-        if (installDir == null) return null;
+        if (installDir == null)
+        {
+            return null;
+        }
 
         // Пробуем корень установки
         var path = Path.Combine(installDir, "FileConvert.exe");
@@ -98,17 +100,21 @@ public sealed class NavisworksPathResolver(
     {
         // Формат: HKLM\SOFTWARE\Autodesk\Navisworks\R2023
         var path = TryGetRegistryInstallPath($@"SOFTWARE\Autodesk\Navisworks\R{versionYear}");
-        if (path != null) return path;
+        if (path != null)
+        {
+            return path;
+        }
 
         // Альтернативный формат: HKLM\SOFTWARE\Autodesk\NavisworksManage\R2023
         path = TryGetRegistryInstallPath($@"SOFTWARE\Autodesk\NavisworksManage\R{versionYear}");
-        if (path != null) return path;
+        if (path != null)
+        {
+            return path;
+        }
 
         // WOW6432Node для 32-битных версий
         path = TryGetRegistryInstallPath($@"SOFTWARE\WOW6432Node\Autodesk\Navisworks\R{versionYear}");
-        if (path != null) return path;
-
-        return null;
+        return path ??null;
     }
 
     /// <summary>
@@ -117,11 +123,16 @@ public sealed class NavisworksPathResolver(
     private static string? TryGetRegistryInstallPath(string registryKey)
     {
         using var skey = Registry.LocalMachine.OpenSubKey(registryKey);
-        if (skey == null) return null;
+        if (skey == null)
+        {
+            return null;
+        }
 
         var location = skey.GetValue("InstallationLocation")?.ToString();
         if (!string.IsNullOrWhiteSpace(location) && Directory.Exists(location))
+        {
             return location;
+        }
 
         // Некоторые версии хранят путь в подразделах
         var subKeyNames = skey.GetSubKeyNames();
@@ -130,7 +141,9 @@ public sealed class NavisworksPathResolver(
             using var sub = skey.OpenSubKey(subKey);
             var loc = sub?.GetValue("InstallationLocation")?.ToString();
             if (!string.IsNullOrWhiteSpace(loc) && Directory.Exists(loc))
+            {
                 return loc;
+            }
         }
 
         return null;

@@ -56,8 +56,10 @@ public sealed class CommandSelectionHandler(
     }
 
     private Task SendActionsReplyKeyboardAsync(CallbackContext context)
-        => HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, context,
-            keyboardBuilder.GetProjectActionsReplyKeyboardAsync);
+    {
+        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, context,
+                keyboardBuilder.GetProjectActionsReplyKeyboardAsync);
+    }
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {

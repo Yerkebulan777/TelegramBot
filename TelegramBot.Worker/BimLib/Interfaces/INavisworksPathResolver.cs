@@ -1,4 +1,4 @@
-namespace TelegramBot.BimLib.Interfaces;
+namespace TelegramBot.Worker.BimLib.Interfaces;
 
 /// <summary>Определяет путь к Navisworks.exe/FileConvert.exe по версии.</summary>
 public interface INavisworksPathResolver

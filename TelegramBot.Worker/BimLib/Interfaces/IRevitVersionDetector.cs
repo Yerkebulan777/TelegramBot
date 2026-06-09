@@ -1,6 +1,6 @@
-using TelegramBot.BimLib.Models;
+using TelegramBot.Worker.BimLib.Models;
 
-namespace TelegramBot.BimLib.Interfaces;
+namespace TelegramBot.Worker.BimLib.Interfaces;
 
 /// <summary>Определяет версию Revit по заголовку .rvt/.rfa-файла.</summary>
 public interface IRevitVersionDetector

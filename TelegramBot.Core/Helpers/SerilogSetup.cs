@@ -35,7 +35,7 @@ public static class SerilogSetup
         LoggerConfiguration loggerConfiguration,
         string subfolder)
     {
-        loggerConfiguration
+        _=loggerConfiguration
             .ReadFrom.Configuration(configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()

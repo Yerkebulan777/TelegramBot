@@ -26,17 +26,17 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddOptions<FileSystemOptions>()
+        _=services.AddOptions<FileSystemOptions>()
             .Bind(configuration.GetSection(FileSystemOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
             .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
 
-        services.AddOptions<BotOptions>()
+        _=services.AddOptions<BotOptions>()
             .Bind(configuration.GetSection(BotOptions.SectionName))
             .ValidateOnStart()
             .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required");
 
-        services.AddOptions<RateLimitOptions>()
+        _=services.AddOptions<RateLimitOptions>()
             .Bind(configuration.GetSection(RateLimitOptions.SectionName));
 
         return services;
@@ -44,38 +44,38 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddCallbackHandlers(this IServiceCollection services)
     {
-        services.AddSingleton<ICallbackHandler, AccessRequestHandler>();
-        services.AddSingleton<ICallbackHandler, FileNavigationHandler>();
-        services.AddSingleton<ICallbackHandler, FileSelectionHandler>();
-        services.AddSingleton<ICallbackHandler, CommandToggleHandler>();
-        services.AddSingleton<ICallbackHandler, SessionManagementHandler>();
-        services.AddSingleton<ICallbackHandler, CommandSelectionHandler>();
-        services.AddSingleton<ICallbackDispatcher, CallbackDispatcher>();
+        _=services.AddSingleton<ICallbackHandler, AccessRequestHandler>();
+        _=services.AddSingleton<ICallbackHandler, FileNavigationHandler>();
+        _=services.AddSingleton<ICallbackHandler, FileSelectionHandler>();
+        _=services.AddSingleton<ICallbackHandler, CommandToggleHandler>();
+        _=services.AddSingleton<ICallbackHandler, SessionManagementHandler>();
+        _=services.AddSingleton<ICallbackHandler, CommandSelectionHandler>();
+        _=services.AddSingleton<ICallbackDispatcher, CallbackDispatcher>();
 
         return services;
     }
 
     private static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
-        services.AddSingleton<ICommandAppService, CommandAppService>();
-        services.AddSingleton<RateLimiter>();
-        services.AddSingleton<ISlashCommandService, SlashCommandService>();
-        services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
+        _=services.AddSingleton<ICommandAppService, CommandAppService>();
+        _=services.AddSingleton<RateLimiter>();
+        _=services.AddSingleton<ISlashCommandService, SlashCommandService>();
+        _=services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
         return services;
     }
 
     private static IServiceCollection AddInfrastructureServices(this IServiceCollection services)
     {
-        services.AddSingleton<IDataService, PostgresDataService>();
-        services.AddSingleton<FileSystemBrowser>();
+        _=services.AddSingleton<IDataService, PostgresDataService>();
+        _=services.AddSingleton<FileSystemBrowser>();
 
         return services;
     }
 
     private static IServiceCollection AddTelegramServices(this IServiceCollection services)
     {
-        services.AddSingleton<ITelegramBotClient>(serviceProvider =>
+        _=services.AddSingleton<ITelegramBotClient>(serviceProvider =>
         {
             var botOptions = serviceProvider.GetRequiredService<IOptions<BotOptions>>().Value;
 
@@ -84,7 +84,7 @@ public static class DependencyInjectionExtensions
                 : (ITelegramBotClient)new TelegramBotClient(botOptions.Token);
         });
 
-        services.AddSingleton<ITelegramOutputService>(sp =>
+        _=services.AddSingleton<ITelegramOutputService>(sp =>
         {
             var botClient = sp.GetRequiredService<ITelegramBotClient>();
             var dataService = sp.GetRequiredService<IDataService>();
@@ -94,10 +94,10 @@ public static class DependencyInjectionExtensions
 
             return new TelegramOutputService(botClient, dataService, logger, adminId);
         });
-        services.AddSingleton<TelegramUpdateMapper>();
-        services.AddSingleton<IKeyboardBuilder, KeyboardBuilder>();
-        services.AddHostedService<TelegramBotHostedService>();
-        services.AddHostedService<CommandNotificationService>();
+        _=services.AddSingleton<TelegramUpdateMapper>();
+        _=services.AddSingleton<IKeyboardBuilder, KeyboardBuilder>();
+        _=services.AddHostedService<TelegramBotHostedService>();
+        _=services.AddHostedService<CommandNotificationService>();
 
         return services;
     }

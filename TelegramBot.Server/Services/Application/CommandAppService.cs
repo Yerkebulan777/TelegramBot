@@ -18,7 +18,7 @@ public sealed class CommandAppService(
     {
         if (!rateLimiter.IsAllowed(message.UserId))
         {
-            await outputService.SendMessageAsync(message.UserId,
+            _=await outputService.SendMessageAsync(message.UserId,
                 "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
             return;
         }
@@ -34,7 +34,7 @@ public sealed class CommandAppService(
         {
             logger.LogDebug("Post-restart cleanup for {Username} ({UserId}): redirecting to /start",
                 message.Username, message.UserId);
-            await outputService.RemoveReplyKeyboardAsync(message.UserId,
+            _=await outputService.RemoveReplyKeyboardAsync(message.UserId,
                 "⚡️ Сервер был перезапущен.\nСтарые сообщения больше неактуальны.\n\nИспользуйте /start для начала.");
             return;
         }
@@ -81,7 +81,7 @@ public sealed class CommandAppService(
             Session = session
         };
 
-        await callbackDispatcher.DispatchAsync(context, cancellationToken);
+        _=await callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
     private static HashSet<int> GetProtectedMessageIds(MessageDto message, UserSession session)

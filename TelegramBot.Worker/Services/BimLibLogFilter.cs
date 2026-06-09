@@ -1,6 +1,6 @@
 using Serilog.Events;
 
-namespace TelegramBot.Worker;
+namespace TelegramBot.Worker.Services;
 
 /// <summary>
 /// Helper для Serilog-фильтрации событий из пространства имён TelegramBot.BimLib.*.

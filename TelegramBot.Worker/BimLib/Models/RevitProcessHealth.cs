@@ -1,4 +1,4 @@
-namespace TelegramBot.BimLib.Models;
+namespace TelegramBot.Worker.BimLib.Models;
 
 /// <summary>Результат проверки здоровья процесса Revit.</summary>
 public sealed record RevitProcessHealth(

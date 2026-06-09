@@ -1,6 +1,4 @@
-using System.Runtime.InteropServices;
-
-namespace TelegramBot.BimLib.Native;
+namespace TelegramBot.Worker.BimLib.Native;
 
 internal static class Win32Consts
 {
