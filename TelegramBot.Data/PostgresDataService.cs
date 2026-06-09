@@ -111,6 +111,9 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
             tx);
 
+        // Отправляем уведомление Worker о новых задачах
+        _=await conn.ExecuteAsync("SELECT pg_notify('new_tasks', '')", transaction: tx);
+
         await tx.CommitAsync();
         return sessionId;
     }
