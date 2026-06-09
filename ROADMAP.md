@@ -186,7 +186,7 @@
   формирования сообщений и обновления клавиатур, если повторяется один и тот же 5+ строковый
   шаблон.
 - [ ] **Синхронизировать документацию с реальным алгоритмом** — обновить
-  `Docs/execution-algorithm.md`, `README.md`, `AGENTS.md` и `CLAUDE.md` после упрощения кода.
+  `Docs/execution-algorithm.md`, `README.md` и `AGENTS.md` после упрощения кода.
 
 ---
 
@@ -207,7 +207,7 @@
 |   — `TryParseId()` | | Заменяет 5 одинаковых блоков `int.TryParse` в `SessionManagementHandler` |
 | **Упрощение DI** | ✅ Готово | `TelegramOutputService` больше не зависит от `IDataService`; убраны 2 лишних параметра из `TelegramBotHostedService`; мёртвый `IDataService` убран из `CommandAppService` |
 | **PostgresDataService — `CreateConnectionAsync()`** | ✅ Готово | Выделен helper, заменивший ~15 ручных `new NpgsqlConnection + OpenAsync` |
-| **Документация** | ✅ Готово | `AGENTS.md`, `CLAUDE.md`, `ROADMAP.md` обновлены под все изменения |
+| **Документация** | ✅ Готово | `AGENTS.md`, `ROADMAP.md` обновлены под все изменения |
 
 ---
 
@@ -254,6 +254,4 @@
 - [Docs/execution-algorithm.md](Docs/execution-algorithm.md) — полная спецификация алгоритма выполнения команд
 - [README.md](README.md) — обзор проекта (основная документация)
 - [AGENTS.md](AGENTS.md) — руководство для AI-агентов по работе с кодом (RU)
-- [CLAUDE.md](CLAUDE.md) — руководство для Claude Code (EN)
 - [Docs/qodana-setup.md](Docs/qodana-setup.md) — настройка статического анализа Qodana
-- [README.TOKEN.md](README.TOKEN.md) — настройка токена Telegram-бота

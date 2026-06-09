@@ -10,8 +10,6 @@ Telegram-бот для навигации по файловой системе �
 | [Docs/execution-algorithm.md](Docs/execution-algorithm.md) | Полная спецификация алгоритма выполнения команд |
 | [Docs/qodana-setup.md](Docs/qodana-setup.md) | Настройка статического анализа Qodana |
 | [AGENTS.md](AGENTS.md) | Руководство для AI-агентов по работе с кодом |
-| [CLAUDE.md](CLAUDE.md) | Руководство для Claude Code |
-| [README.TOKEN.md](README.TOKEN.md) | Настройка токена Telegram-бота |
 
 ---
 
@@ -32,7 +30,7 @@ Telegram-бот для навигации по файловой системе �
 - **.NET 10** — целевая платформа (`net10.0`)
 - **Telegram.Bot 22.10.0.1** — клиент Telegram Bot API
 - **PostgreSQL** — хранение данных (Npgsql + Dapper 2.1.79)
-- **PostgreSQL queue + polling** — Worker забирает pending-команды из БД раз в минуту
+- **PostgreSQL queue + LISTEN/NOTIFY** — Worker подписан на канал `new_tasks` и мгновенно реагирует на новые задачи; fallback polling — раз в 5 минут
 - **Serilog** — структурированное логирование (Console + Seq)
 - **OpenMcdf** — чтение OLE-потоков .rvt/.rfa-файлов (определение версии Revit)
 - **Windows Registry (Microsoft.Win32)** — поиск установленных Revit/Navisworks
@@ -95,7 +93,8 @@ TelegramBot/
 │       ├── Queries.Schema.cs
 │       ├── Queries.Users.cs
 │       ├── Queries.Sessions.cs
-│       └── Queries.Commands.cs
+│       ├── Queries.Commands.cs
+│       └── Queries.TrackedMessages.cs
 ├── TelegramBot.Server/
 │   ├── Config/           # BotCommandsSetup
 │   ├── Constants/        # HandlerPriorities
@@ -164,8 +163,8 @@ Server (создание сессии)
                                      │
                           ┌──────────┴──────────┐
                           ▼                     ▼
-                    Worker №1              Worker №N
-                    (poll 1 мин)       (poll 1 мин)
+                     Worker №1              Worker №N
+                     (LISTEN/NOTIFY)    (LISTEN/NOTIFY)
                           │
                     SELECT ... WHERE Status='pending'
                           │
@@ -182,7 +181,7 @@ Server (создание сессии)
                          PostgreSQL
 ```
 
-Worker автоматически продолжает обработку через polling раз в минуту и скрывает старые неактивные сессии по `Worker:CompletedSessionRetentionDays`.
+Worker автоматически продолжает обработку через LISTEN/NOTIFY new_tasks с fallback polling раз в 5 минут и скрывает старые неактивные сессии по `Worker:CompletedSessionRetentionDays`.
 
 ### BimLib (BIM Integration) — встроен в Worker
 
@@ -286,15 +285,15 @@ PostgreSQL-сервер, доступный по сети. Инициализа�
 |---------|-----------|---------------|
 | `BotUsers` | Пользователи бота | `UserId` (PK), `Username`, `Role` (User/Admin), `Status` (Pending/Approved/Rejected/Blocked), `CreatedAt`, `UpdatedAt` |
 | `Sessions` | Сессии пользователей | `SessionId` (PK, SERIAL), `UserId`, `Username`, `Status` (pending/done/Deleted), `FilesAmount`, `CreatedAt`, `UpdatedAt` |
-| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Deleted), `GUID`, `Lease`, `Priority`, `RetryCount`, `NextRetryAt` |
+| `Commands` | Команды внутри сессии | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Deleted), `GUID`, `Lease`, `Priority`, `RetryCount`, `NextRetryAt`, `Partition`, `Progress`, `Result` |
 Soft-delete — строки никогда не удаляются физически (статус `Deleted`).
 
 ### Механизм очереди задач
 
-Worker забирает pending-команды из PostgreSQL через polling:
+Worker забирает pending-команды из PostgreSQL через событийную модель LISTEN/NOTIFY с fallback polling:
 
 1. **Server** после подтверждения выбора создаёт `Sessions` и `Commands` со статусом `pending`
-2. **Worker** раз в минуту вызывает `ClaimPendingCommandsAsync`
+2. **Worker** подписан на канал `new_tasks` и мгновенно обрабатывает пакет при получении уведомления. Fallback polling срабатывает раз в 5 минут при потере соединения
 3. `FOR UPDATE SKIP LOCKED` позволяет нескольким Worker-ам безопасно конкурировать за команды
 4. **Отмена/удаление команд** — пользователь через `/status` → кнопку «⛔ Отменить» или «🗑»; Server сначала показывает подтверждение, затем мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`.
 5. **Уведомление о завершении** — после завершения всей сессии Worker шлёт `command_completed` через PostgreSQL `NOTIFY`, а Server отправляет пользователю сводку с длительностью сессии и списком ошибочных файлов.
@@ -449,4 +448,4 @@ docker build -t telegram-bot-server -f Dockerfile .
 docker run --rm telegram-bot-server
 ```
 
-Подробнее: [README.TOKEN.md](README.TOKEN.md) — настройка токена.
+Подробнее: см. `appsettings.Local.json` — настройка токена.

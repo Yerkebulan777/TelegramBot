@@ -16,7 +16,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 ```
 
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
-- **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (4 partial files).
+- **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
 - **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Polls PostgreSQL for pending commands. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
 
@@ -140,6 +140,7 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 | `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — универсальный метод для отправки reply-клавиатуры с трекингом сообщения, заменяет 3 дублированных метода |
 | `ProcessHealthHelper` | `BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общая логика проверки здоровья процесса для Revit и Navisworks |
 | `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` — устраняет дублирование `new NpgsqlConnection + OpenAsync` |
+| `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Фильтр логов для BimLib-событий (отдельный файл для BIM-специфичных логов) |
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 
@@ -152,7 +153,7 @@ SlashCommandService.ConfirmFileSelectionAsync()
     │
     ▼
     CommandExecutionService (Worker)
-        periodic poll (1 мин)
+        LISTEN/NOTIFY new_tasks (мгновенная реакция) + fallback polling (5 мин)
         dataService.ClaimPendingCommandsAsync() -- FOR UPDATE SKIP LOCKED
         ExecuteOneAsync(cmd) -- запуск Revit/Navisworks/AI
         dataService.UpdateCommandStatusAsync() -- UPDATE Status='Done'/'Failed'
@@ -196,6 +197,8 @@ For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.
 
 Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking is fully DB-backed — no in-memory state. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`. Worker auto-cleanup also uses soft-delete for inactive sessions older than `Worker:CompletedSessionRetentionDays`.
 
+**`Commands` table includes `Partition` field** — partition threshold для priority-based пулов процессов.
+
 **`Sessions` table now includes `ProjectName TEXT`** — имя проекта записывается при создании сессии,
 отображается в `/status` и в уведомлениях о завершении.
 
@@ -207,7 +210,7 @@ in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant
 когда команд в сессии > DefaultBatchSize).
 
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
-All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). SQL constants in `TelegramBot.Data/Sql/` (4 partial files total).
+All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). SQL constants in `TelegramBot.Data/Sql/` (5 partial files total: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).
 
 ---
 
@@ -336,7 +339,7 @@ Namespaces must match folder structure:
 ## Known Issues (Do Not Worsen)
 
 - `.editorconfig` exists with naming rules, formatting preferences, and `generated_code = true` markers for data service and handlers — `dotnet format` respects these
-- No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`
+- CI pipeline exists (`.github/workflows/ci.yml`) — runs `dotnet build` and `dotnet publish` on push/PR. No automated tests — the only verification is a successful `dotnet build`
 - Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
 - PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`
 - `/// <inheritdoc/>` comments on methods that no longer implement interfaces (e.g., `RevitPathResolver`, `RevitProcessTracker`) are stale but harmless — replace with proper `<summary>` when editing nearby

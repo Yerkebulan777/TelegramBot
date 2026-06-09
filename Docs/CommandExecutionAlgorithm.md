@@ -42,11 +42,7 @@ User                          Server                    App                     
  │                              │                        │     └─────────────────────┤
  │                              │                        │<──────────────────────────│ sessionId
  │                              │                        │                           │
- │                              │                        │ NotifyNewCommandsAsync()  │
- │                              │                        │──────────────────────────>│
- │                              │                        │     ┌─────────────────────┤
- │                              │                        │     │ NOTIFY new_command  │
- │                              │                        │     └─────────────────────┤
+  │                              │                        │                           │
 ```
 
 ---
@@ -56,13 +52,12 @@ User                          Server                    App                     
 ```
 DB                          Worker
  │                            │
- │ NOTIFY new_command         │
- │═══════════════════════════>│  ┌──────────────────────────────────┐
- │                            │  │ conn.WaitAsync()                 │
- │                            │  │ — просыпается мгновенно         │
- │                            │  └──────────────────────────────────┘
- │                            │ ProcessBatchAsync()
- │                            │─── (внутренняя обработка) ─────────>│
+  │                            │  ┌──────────────────────────────────┐
+  │                            │  │ LISTEN new_tasks                 │
+  │                            │  │ + fallback polling (5 мин)       │
+  │                            │  └──────────────────────────────────┘
+  │                            │ ProcessBatchAsync()
+  │                            │─── (внутренняя обработка) ─────────>│
 ```
 
 ---
@@ -72,7 +67,7 @@ DB                          Worker
 ```
 Worker                                              DB
  │                                                    │
- │ ClaimPendingCommandsAsync(limit=50)                │
+  │ ClaimPendingCommandsAsync(limit=DefaultBatchSize=5)│
  │───────────────────────────────────────────────────>│
  │                  ┌─────────────────────────────────┤
  │                  │ WITH selected AS (               │
@@ -223,9 +218,8 @@ Worker                                                     DB
  │   Retry #5:  +960s     (base * 2^4)                      │
  │                MaxRetries = 5                             │
  │                                                           │
- │   UPDATE Status='pending', NextRetryAt=...                │
- │   NOTIFY new_command (будим воркер)                       │
- │─────────────────────────────────────────────────────────>│
+  │   UPDATE Status='pending', NextRetryAt=...                │
+  │─────────────────────────────────────────────────────────>│
  │                                                           │
  │   └── Если все retry исчерпаны ─────────────────────────┤
  │       UpdateCommandStatus(Failed, errorMessage)           │
@@ -242,18 +236,17 @@ DB                        Server                        User
  │                          │                             │
  │ NOTIFY command_completed │                             │
  │══════════════════════════>│                             │
- │                          │ Parse payload               │
- │                          │ (UserId|CmdId|CmdText       │
- │                          │  |Status|Error)             │
- │                          │                             │
- │                          │ Send Telegram message       │
- │                          │────────────────────────────>│
- │                          │  ┌──────────────────────┐   │
- │                          │  │ ✅ *PDF* завершена   │   │
- │                          │  │ или                  │   │
- │                          │  │ ❌ *PDF* — ошибка    │   │
- │                          │  │ MarkdownV2 экранир.  │   │
- │                          │  └──────────────────────┘   │
+  │                          │ Parse payload               │
+  │                          │ (UserId|SessionId|Done     │
+  │                          │  |Total|ProjectName)       │
+  │                          │                             │
+  │                          │ Send Telegram message       │
+  │                          │────────────────────────────>│
+  │                          │  ┌──────────────────────┐   │
+  │                          │  │ ✅ ProjectA — сессия │   │
+  │                          │  │ завершена — все 5    │   │
+  │                          │  │ файлов обработано    │   │
+  │                          │  └──────────────────────┘   │
 ```
 
 ---
@@ -273,7 +266,7 @@ Worker
 
 ---
 
-## Фоновые задачи (каждые 60 секунд)
+## Фоновые задачи (каждые 5 минут)
 
 ```
 Worker                                              DB
@@ -402,7 +395,7 @@ Worker захватывает команду:
 
 При краше Worker-а:
   ┌─────────────────────────────────────────────┐
-  │ Другой Worker через 60 секунд:              │
+  │ Другой Worker через 5 минут:              │
   │                                             │
   │ UPDATE Commands                             │
   │ SET Status='pending',                       │

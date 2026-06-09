@@ -266,7 +266,7 @@ services.AddSingleton<NavisworksProcessTracker>();
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Очистка истёкших Lease (каждый цикл, фоновая задача 60 сек)   │
+│  Очистка истёкших Lease (фоновая задача каждые 5 мин)          │
 │  - ReleaseExpiredLeasesAsync()                                  │
 │  - ReleaseTimeoutCommandsAsync()                                │
 └────────────────────────────┬────────────────────────────────────┘
@@ -277,12 +277,12 @@ services.AddSingleton<NavisworksProcessTracker>();
 │  - ProcessHealthHelper.CheckHealth()                            │
 │  - DialogDismisser.DismissDialogsForProcess()                   │
 └────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Поллинг: Task.Delay(1 мин)                                     │
-│  - Worker просыпается по таймеру каждую минуту                 │
-│  - Никаких LISTEN/NOTIFY — только таймер                       │
+│  Ожидание уведомлений: LISTEN new_tasks + fallback polling    │
+│  - Worker подписан на канал new_tasks, мгновенно реагирует    │
+│  - Fallback polling (Task.Delay) срабатывает раз в 5 мин       │
 └────────────────────────────┬────────────────────────────────────┘
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -291,16 +291,16 @@ services.AddSingleton<NavisworksProcessTracker>();
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Очистка истёкших Lease (каждый цикл, фоновая задача 60 сек)   │
+│  Очистка истёкших Lease (фоновая задача каждые 5 мин)          │
 │  - ReleaseExpiredLeasesAsync()                                  │
 │  - ReleaseTimeoutCommandsAsync()                                │
 └────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Поллинг: Task.Delay(1 мин)                                     │
-│  - Worker просыпается по таймеру каждую минуту                 │
-│  - Никаких LISTEN/NOTIFY — только таймер                       │
+│  Ожидание уведомлений: LISTEN new_tasks + fallback polling    │
+│  - Worker подписан на канал new_tasks, мгновенно реагирует    │
+│  - Fallback polling (Task.Delay) срабатывает раз в 5 мин       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
@@ -439,9 +439,9 @@ RETURNING ...;
 
 **Очистка истёкших Lease:**
 ```sql
--- Каждые 60 сек + при старте воркера
+-- Каждые 5 минут + при старте воркера
 UPDATE Commands
-SET Status = 'pending', 
+SET Status = 'pending',
     Lease = NULL,
     StartedAt = NULL,
     ErrorMessage = 'Lease expired: worker crash or timeout'
@@ -451,8 +451,8 @@ WHERE Status = 'processing'
 ```
 
 **Параметры:**
-- `LeaseTimeoutMin = 5` — Lease истекает через 5 минут
-- `CleanupIntervalSec = 60` — проверка каждые 60 секунд
+- `Lease` — устанавливается на `ProcessTimeoutSeconds + 5 мин` (долгий TTL), команда не вернётся в очередь раньше таймаута
+- `CleanupIntervalSec = 300` — проверка каждые 5 минут (фоновая задача)
 
 ### 2. Таймаут выполнения процесса
 
@@ -477,7 +477,7 @@ if (!completed)
 
 **Дополнительная защита (SQL):**
 ```sql
--- Фоновая задача каждые 60 сек
+-- Фоновая задача каждые 5 минут
 UPDATE Commands
 SET Status = 'pending',
     StartedAt = NULL,
@@ -622,8 +622,8 @@ while (!stoppingToken.IsCancellationRequested)
 
 ### 3. Ожидание Worker
 
-- Worker забирает команды при следующем поллинге (до 1 мин)
-- Никаких NOTIFY — Worker просыпается по таймеру
+- Worker забирает команды при получении уведомления `new_tasks` (мгновенно) или при fallback polling (до 5 мин)
+- Worker подписан на `LISTEN new_tasks`, fallback polling — раз в 5 минут
 
 ---
 
@@ -816,9 +816,9 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 | `MaxRetries` | `WorkerOptions.MaxRetries` | 5 | Максимальное количество попыток retry |
 | `RetryDelayBaseSeconds` | `WorkerOptions.RetryDelayBaseSeconds` | 60 | Базовая задержка для экспоненциального backoff |
 | `CompletedSessionRetentionDays` | `WorkerOptions.CompletedSessionRetentionDays` | 30 | Через сколько дней мягко удалять старые сессии без `pending`/`processing`; `0` отключает автоочистку |
-| `CleanupIntervalSec` | константа | 60 | Интервал очистки истёкших Lease |
+| `CleanupIntervalSec` | константа | 300 (5 мин) | Интервал очистки истёкших Lease |
 | `HealthCheckIntervalSec` | константа | 30 | Интервал мониторинга здоровья процессов |
-| `FallbackTimeoutSec` | константа | 60 (1 мин) | Интервал поллинга очереди |
+| `FallbackTimeoutSec` | константа | 300 (5 мин) | Интервал fallback-поллинга очереди |
 | `ReconnectDelayMs` | константа | 5000 | Задержка перед переподключением к БД |
 
 ### Настройка через appsettings.json
@@ -962,9 +962,9 @@ UPDATE Commands SET Status = 'Deleted' WHERE ...
 - Можно посмотреть историю: кто, когда и что делал
 - Данные остаются для статистики и отладки
 
-#### Polling — простая проверка очереди
+#### Очередь задач — LISTEN/NOTIFY + fallback polling
 
-Worker не ждёт отдельный `new_command` сигнал. Он раз в минуту проверяет PostgreSQL:
+Worker подписан на канал `new_tasks` через PostgreSQL `LISTEN/NOTIFY` и мгновенно реагирует на новые задачи. Fallback polling срабатывает раз в 5 минут при потере соединения:
 
 ```sql
 SELECT ...
@@ -974,7 +974,7 @@ ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC
 FOR UPDATE SKIP LOCKED;
 ```
 
-Это проще текущих требований: нет отдельной подписки Worker-а на `new_command`, а конкурентность обеспечивается SQL-блокировками.
+Конкурентность обеспечивается SQL-блокировками `FOR UPDATE SKIP LOCKED`.
 
 #### FOR UPDATE SKIP LOCKED — очередь в магазине
 
@@ -1009,8 +1009,13 @@ FOR UPDATE SKIP LOCKED;
 | `CompletedAt` | Когда закончили (`NULL` — пока не закончили) |
 | `Lease` | Срок аренды (см. Lease выше). Unix-время в секундах |
 | `Priority` | Насколько задача важная (1–5, чем **меньше** — тем важнее). По умолчанию 50 (из CommandPriorityMap: PDF=1, DWG=2, NWC/IFC/BIMDOC/CLASHREP=3, AUTORES=4) |
+| `Partition` | Partition threshold для priority-based пулов процессов |
 | `ProcessId` | ID процесса Windows (чтобы можно было «убить» программу, если что-то пошло не так) |
 | `ErrorMessage` | Если команда упала с ошибкой — тут текст ошибки |
+| `RetryCount` | Сколько раз уже пытались выполнить команду |
+| `NextRetryAt` | Когда следующая попытка (NULL — если не запланирована) |
+| `Progress` | Прогресс выполнения (0–100) |
+| `Result` | Результат выполнения (текст) |
 
 ### Индексы — ускорители поиска
 
@@ -1086,7 +1091,7 @@ Payload генерируется в `PostgresDataService.NotifyCommandCompletedA
 ### Очистка истёкших Lease (crash recovery)
 
 ```sql
--- Каждые 60 секунд + при старте воркера
+-- Каждые 5 минут + при старте воркера
 UPDATE "Commands"
 SET "Status" = 'pending',
     "Lease" = NULL,
@@ -1100,7 +1105,7 @@ WHERE "Status" = 'processing'
 ### Очистка команд по таймауту
 
 ```sql
--- Каждые 60 секунд (фоновая задача)
+-- Каждые 5 минут (фоновая задача)
 UPDATE "Commands"
 SET "Status" = 'pending',
     "StartedAt" = NULL,
@@ -1150,7 +1155,7 @@ WHERE CommandId = @CommandId
 | **Уведомления пользователей** | Worker шлёт NOTIFY `command_completed`, Server (`CommandNotificationService`) слушает и отправляет Telegram-сообщение через `ITelegramOutputService` с длительностью сессии и списком ошибочных файлов |
 | **Отмена команд** | Пользователь отменяет команду через UI `/status` → кнопку «⛔ Отменить». Server показывает подтверждение и выполняет soft-delete (`Status = 'Deleted'`), а Worker не перезаписывает `Deleted` после завершения процесса |
 | **Автоочистка сессий** | Worker мягко удаляет старые сессии без `pending`/`processing` старше `CompletedSessionRetentionDays` |
-| **Polling queue** | Worker проверяет очередь каждую минуту без `new_command LISTEN/NOTIFY` |
+| **Очередь задач** | Worker подписан на `LISTEN new_tasks` и мгновенно реагирует на уведомления; fallback polling срабатывает раз в 5 минут при потере соединения |
 
 ---
 
@@ -1381,7 +1386,7 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 | 5 | **Трекинг PID** | ProcessId сохраняется для мониторинга и принудительного завершения |
 | 6 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
 | 7 | **Shutdown Worker** | Graceful shutdown для внешних процессов не реализуется; остановка Worker не является отдельным сценарием завершения Revit/Navisworks |
-| 8 | **Polling queue** | Worker проверяет очередь каждую минуту без `new_command LISTEN/NOTIFY` |
+| 8 | **Очередь задач** | Worker подписан на `LISTEN new_tasks` и мгновенно реагирует; fallback polling — раз в 5 минут |
 | 9 | **Восстановление** | При перезапуске Worker очищает истёкшие Lease и продолжает обработку |
 | 10 | **Наблюдаемость** | Диагностические запросы показывают актуальное состояние (PID, Lease, длительность) |
 | 11 | **Отмена команд** | Пользователь может отменить команду через `/status`. Server мягко удаляет команду (`Status = 'Deleted'`), а Worker не перезаписывает этот статус после завершения процесса |
