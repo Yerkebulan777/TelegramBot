@@ -83,7 +83,7 @@ public sealed class SessionManagementHandler(
             var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId);
             var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId);
             var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId);
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
+            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
             session.StatusMessageId = context.MessageId;
         }
 
@@ -215,7 +215,7 @@ public sealed class SessionManagementHandler(
             var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId.Value);
             var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId.Value);
             var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId.Value);
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), newKeyboard);
+            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
         }
 
         return true;
@@ -231,7 +231,7 @@ public sealed class SessionManagementHandler(
         context.Session.StatusMessageId = context.MessageId;
     }
 
-    private static string BuildStatusReply(SessionStatus sessionStatus)
+    private static string BuildStatusReply(SessionStatus sessionStatus, List<SessionCommands>? sessionCommands = null)
     {
         var percentage = sessionStatus.TotalFiles > 0
             ? 100 * sessionStatus.DoneFiles / sessionStatus.TotalFiles
@@ -248,14 +248,45 @@ public sealed class SessionManagementHandler(
         var progressBar = BuildProgressBar(percentage, 10);
         var projectName = string.IsNullOrEmpty(sessionStatus.ProjectName) ? "" : $" — {sessionStatus.ProjectName}";
 
+        // Summary view (no commands provided)
+        if (sessionCommands == null || sessionCommands.Count == 0)
+        {
+            return $"{statusIcon} *Статус сессии{projectName}*\n" +
+                   $"{progressBar} {percentage}%" +
+                   $"\n\n📊 *Сводка:*" +
+                   $"\n📄 Всего: {sessionStatus.TotalFiles}" +
+                   $"\n✅ Готово: {sessionStatus.DoneFiles}" +
+                   $"\n🔄 Выполняется: {sessionStatus.ProcessingFiles}" +
+                   $"\n⏳ В очереди: {sessionStatus.PendingFiles}" +
+                   $"\n❌ Ошибок: {sessionStatus.FailedFiles}";
+        }
+
+        // Detailed commands view
+        var commandLines = new List<string>();
+        foreach (var cmd in sessionCommands)
+        {
+            var statusIconCmd = cmd.Status switch
+            {
+                "Done" => "✅",
+                "Failed" => "❌",
+                "processing" => "🔄",
+                "pending" => "⏳",
+                "Deleted" => "🗑",
+                _ => "❓"
+            };
+
+            var fileName = Path.GetFileName(cmd.FileName);
+            var timeStr = cmd.Date != default ? cmd.Date.ToString("HH:mm:ss") : "";
+            
+            commandLines.Add($"{cmd.ExecOrder}. {statusIconCmd} {cmd.Command} — {fileName} {timeStr}".Trim());
+        }
+
+        var commandsText = string.Join("\n", commandLines);
+
         return $"{statusIcon} *Статус сессии{projectName}*\n" +
-               $"{progressBar} {percentage}%" +
-               $"\n\n📊 *Сводка:*" +
-               $"\n📄 Всего: {sessionStatus.TotalFiles}" +
-               $"\n✅ Готово: {sessionStatus.DoneFiles}" +
-               $"\n🔄 Выполняется: {sessionStatus.ProcessingFiles}" +
-               $"\n⏳ В очереди: {sessionStatus.PendingFiles}" +
-               $"\n❌ Ошибок: {sessionStatus.FailedFiles}";
+               $"{progressBar} {percentage}%\n" +
+               $"━━━━━━━━━━━━━━━━━━━━\n" +
+               $"{commandsText}";
     }
 
     private static string BuildProgressBar(int percentage, int segments)
