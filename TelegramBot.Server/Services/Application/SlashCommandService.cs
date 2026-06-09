@@ -441,7 +441,7 @@ public sealed class SlashCommandService(
             .Where(messageId => messageId.HasValue)
             .Select(messageId => messageId!.Value);
 
-        await outputService.CleanupTrackedMessagesAsync(userId, session, keepMessageIds);
+        await outputService.ClearChatHistoryAsync(userId, session, keepMessageIds);
     }
 
     private static string NormalizeCommandText(string text)
