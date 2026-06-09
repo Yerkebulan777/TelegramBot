@@ -59,6 +59,7 @@ public static class DependencyInjectionExtensions
     {
         _=services.AddSingleton<ICommandAppService, CommandAppService>();
         _=services.AddSingleton<RateLimiter>();
+        _=services.AddSingleton<IJobSubmissionService, JobSubmissionService>();
         _=services.AddSingleton<ISlashCommandService, SlashCommandService>();
         _=services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
