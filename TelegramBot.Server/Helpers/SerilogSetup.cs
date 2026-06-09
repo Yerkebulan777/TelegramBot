@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Serilog;
 
-namespace TelegramBot.Core.Helpers;
+namespace TelegramBot.Server.Helpers;
 
 /// <summary>
-/// Shared Serilog configuration helpers for Server and Worker entry points.
+/// Shared Serilog configuration helpers for Server entry point.
 /// </summary>
 public static class SerilogSetup
 {
