@@ -69,7 +69,13 @@ public interface IDataService
     Task ReleaseExpiredLeasesAsync();
 
     /// <summary>Обновляет статус команды (done, failed, pending).</summary>
-    Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null);
+    Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null);
+
+    /// <summary>Обновляет прогресс выполнения команды (0-100).</summary>
+    Task<bool> UpdateCommandProgressAsync(int commandId, int progress);
+
+    /// <summary>Обновляет результат выполнения команды.</summary>
+    Task<bool> UpdateCommandResultAsync(int commandId, string result);
 
     /// <summary>
     /// Планирует повторную попытку выполнения команды.

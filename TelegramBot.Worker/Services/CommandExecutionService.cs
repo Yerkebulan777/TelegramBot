@@ -26,10 +26,10 @@ public sealed class CommandExecutionService(
     INavisworksPathResolver navisworksPathResolver,
     DialogDismisser dialogDismisser) : BackgroundService
 {
-    private const int FallbackTimeoutSec = 60; // 1 мин — интервал поллинга очереди
+    private const int FallbackTimeoutSec = 300; // 5 мин — интервал поллинга очереди
     private const int DefaultBatchSize = 5;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
-    private const int CleanupIntervalSec = 60; // Интервал очистки истёкших lease
+    private const int CleanupIntervalSec = 300; // Интервал очистки истёкших lease (5 мин)
     private const int HealthCheckIntervalSec = 30; // Интервал проверки здоровья процессов
 
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
@@ -299,8 +299,9 @@ public sealed class CommandExecutionService(
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
-        // Освобождаем истёкшие Lease (crash recovery упавших воркеров)
+        // Освобождаем истёкшие Lease и таймауты (crash recovery упавших воркеров)
         await dataService.ReleaseExpiredLeasesAsync();
+        await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
 
         // Первичная проверка — вдруг команды уже есть в БД
         await ProcessBatchAsync(stoppingToken);

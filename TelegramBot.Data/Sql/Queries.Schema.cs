@@ -53,8 +53,17 @@ internal static partial class SqlQueries
                 ProcessId INTEGER,
                 ErrorMessage TEXT,
                 RetryCount INTEGER NOT NULL DEFAULT 0,
-                NextRetryAt TIMESTAMPTZ
+                NextRetryAt TIMESTAMPTZ,
+                Progress INTEGER NOT NULL DEFAULT 0,
+                Result TEXT,
+                UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
+
+        internal const string EnsureCommandsColumns = @"
+            ALTER TABLE Commands
+            ADD COLUMN IF NOT EXISTS Progress INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS Result TEXT,
+            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();";
 
         internal const string CreateTrackedMessagesTable = @"
             CREATE TABLE IF NOT EXISTS TrackedMessages (
@@ -81,6 +90,7 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_partition_status ON Commands(Partition, Status);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_session ON TrackedMessages(SessionId);
-            CREATE INDEX IF NOT EXISTS idx_tracked_messages_chat ON TrackedMessages(ChatId);";
+            CREATE INDEX IF NOT EXISTS idx_tracked_messages_chat ON TrackedMessages(ChatId);
+            CREATE INDEX IF NOT EXISTS idx_commands_updated_at ON Commands(UpdatedAt DESC);";
     }
 }

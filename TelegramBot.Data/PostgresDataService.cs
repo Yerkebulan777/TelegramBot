@@ -27,6 +27,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
         _=await conn.ExecuteAsync(SqlQueries.Schema.EnsureSessionsColumns);
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.EnsureCommandsColumns);
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
         _=await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable);
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
@@ -330,13 +331,13 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }));
     }
 
-    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null)
+    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null)
     {
         try
         {
             await using var conn = await CreateConnectionAsync();
             var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateStatus,
-                new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage });
+                new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage, Progress = progress, Result = result });
             return affected > 0;
         }
         catch (Exception e)
@@ -353,6 +354,38 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             conn => conn.ExecuteAsync(
                 SqlQueries.Commands.ReleaseTimeoutCommands,
                 new { TimeoutSeconds = timeoutSeconds }));
+    }
+
+    public async Task<bool> UpdateCommandProgressAsync(int commandId, int progress)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateProgress,
+                new { CommandId = commandId, Progress = progress });
+            return affected > 0;
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to update progress for command {CommandId}", commandId);
+            return false;
+        }
+    }
+
+    public async Task<bool> UpdateCommandResultAsync(int commandId, string result)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateResult,
+                new { CommandId = commandId, Result = result });
+            return affected > 0;
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to update result for command {CommandId}", commandId);
+            return false;
+        }
     }
 
     public async Task<int> SoftDeleteInactiveSessionsOlderThanAsync(DateTime cutoffUtc)
