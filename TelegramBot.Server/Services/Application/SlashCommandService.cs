@@ -299,6 +299,9 @@ public sealed class SlashCommandService(
             "Job queued: session={SessionId}, user={UserId}, commands={CommandCount}, files={FileCount}",
             sessionId, userId, session.PendingCommand.Count, filesToProcess.Count);
 
+        session.SessionId = checked((int)sessionId);
+        await outputService.ClearChatHistoryAsync(userId, session);
+
         session.ResetNavigation(_options.RootPath);
         session.ClearPendingCommands();
         session.IsFileSelectionActive = false;
@@ -384,9 +387,10 @@ public sealed class SlashCommandService(
     private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
     {
         var msg = await task;
-        if (msg != null && session.SessionId > 0)
+        if (msg != null)
         {
-            await dataService.TrackMessageAsync(session.SessionId, msg.Chat.Id, msg.MessageId);
+            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
+            await dataService.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
         }
         return msg;
     }

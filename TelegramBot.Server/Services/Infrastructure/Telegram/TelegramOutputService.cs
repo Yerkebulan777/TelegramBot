@@ -102,6 +102,13 @@ public class TelegramOutputService(
 
     public async Task ClearChatHistoryAsync(long chatId, UserSession session, IEnumerable<int>? exceptMessageIds = null)
     {
+        // Delete the user's own last message (slash command or reply keyboard button press)
+        if (session.LastUserMessageId.HasValue)
+        {
+            await DeleteMessageAsync(chatId, session.LastUserMessageId.Value);
+            session.LastUserMessageId = null;
+        }
+
         await CleanupTrackedMessagesAsync(chatId, session, exceptMessageIds ?? [], CancellationToken.None);
     }
 
@@ -111,19 +118,14 @@ public class TelegramOutputService(
         IEnumerable<int> keepMessageIds,
         CancellationToken cancellationToken = default)
     {
-        if (session.SessionId <= 0)
-        {
-            return;
-        }
-
-        var allMessageIds = await dataService.GetTrackedMessagesBySessionAsync(session.SessionId);
-        if (allMessageIds.Count == 0)
+        var trackedMessageIds = await dataService.GetTrackedMessagesByChatAsync(chatId);
+        if (trackedMessageIds.Count == 0)
         {
             return;
         }
 
         var keepIds = keepMessageIds.ToHashSet();
-        var staleIds = allMessageIds
+        var staleIds = trackedMessageIds
             .Where(messageId => !keepIds.Contains(messageId))
             .ToArray();
 
@@ -133,7 +135,7 @@ public class TelegramOutputService(
         }
 
         await DeleteMessagesAsync(chatId, staleIds, cancellationToken);
-        await dataService.DeleteTrackedMessagesAsync(session.SessionId, staleIds);
+        await dataService.DeleteTrackedMessagesByChatAsync(chatId, staleIds);
     }
 
     public async Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)

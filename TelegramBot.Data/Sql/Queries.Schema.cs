@@ -49,14 +49,17 @@ internal static partial class SqlQueries
             );";
 
         internal const string CreateTrackedMessagesTable = @"
-            DROP TABLE IF EXISTS TrackedMessages CASCADE;
             CREATE TABLE IF NOT EXISTS TrackedMessages (
                 MessageId SERIAL PRIMARY KEY,
-                SessionId INTEGER NOT NULL REFERENCES Sessions(SessionId),
+                SessionId INTEGER REFERENCES Sessions(SessionId),
                 ChatId BIGINT NOT NULL,
                 MessageIdPg INTEGER NOT NULL,
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
+
+        internal const string MakeTrackedMessagesSessionNullable = @"
+            ALTER TABLE TrackedMessages
+            ALTER COLUMN SessionId DROP NOT NULL;";
 
         internal const string CreateIndexes = @"
             CREATE INDEX IF NOT EXISTS idx_commands_status ON Commands(Status);

@@ -60,6 +60,9 @@ public class UserSession
     public int? StatusMessageId { get; set; }
     public int? LastActionsMessageId { get; set; }
 
+    /// <summary>Message ID of the last user-sent message (slash command or reply keyboard button).</summary>
+    public int? LastUserMessageId { get; set; }
+
     // Command manipulation methods
     public void AddPendingCommand(string code, string displayName)
     {
@@ -140,6 +143,7 @@ public class UserSession
         LastActionsMessageId = null;
         StatusMessageId = null;
         SessionId = 0;
+        LastUserMessageId = null;
     }
 
     /// <summary>

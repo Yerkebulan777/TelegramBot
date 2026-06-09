@@ -64,9 +64,10 @@ public sealed class FileNavigationHandler(
             : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
         var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
             context.UserId, message, replyKeyboard);
-        if (errorMessage != null && session.SessionId > 0)
+        if (errorMessage != null)
         {
-            await dataService.TrackMessageAsync(session.SessionId, context.UserId, errorMessage.Id);
+            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
+            await dataService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
         }
     }
 }

@@ -31,10 +31,11 @@ internal static class HandlerHelpers
 
         var replyKeyboard = await keyboardFactory();
         var message = await outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard);
-        if (message != null && session.SessionId > 0)
+        if (message != null)
         {
             session.LastActionsMessageId = message.Id;
-            await dataService.TrackMessageAsync(session.SessionId, userId, message.Id);
+            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
+            await dataService.TrackMessageAsync(userId, message.Id, sessionId);
         }
     }
 

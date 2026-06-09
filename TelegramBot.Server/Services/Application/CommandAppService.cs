@@ -25,6 +25,9 @@ public sealed class CommandAppService(
 
         var session = sessionManager.GetOrCreateSession(message.UserId);
 
+        // Track the user's own message so it can be deleted on the next slash command
+        session.LastUserMessageId = message.MessageId;
+
         // Server restart detection: session is fresh after restart (not yet initialized)
         // and user sends a non-slash text — redirect to /start for a clean slate
         if (!session.Initialized && !message.Text!.StartsWith('/'))

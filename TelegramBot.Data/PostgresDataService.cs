@@ -27,6 +27,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
+        await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable);
         await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
         await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled);
     }
@@ -404,7 +405,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return count > 0;
     }
 
-    public async Task TrackMessageAsync(int sessionId, long chatId, int messageId)
+    public async Task TrackMessageAsync(long chatId, int messageId, int? sessionId = null)
     {
         try
         {
@@ -414,7 +415,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
         catch (Exception e)
         {
-            logger.LogWarning(e, "Failed to track message {MessageId} for session {SessionId}", messageId, sessionId);
+            logger.LogWarning(e, "Failed to track message {MessageId} for chat {ChatId}", messageId, chatId);
         }
     }
 
@@ -446,6 +447,26 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    public async Task DeleteTrackedMessagesByChatAsync(long chatId, IEnumerable<int> messageIds)
+    {
+        try
+        {
+            var ids = messageIds.ToArray();
+            if (ids.Length == 0)
+            {
+                return;
+            }
+
+            await using var conn = await CreateConnectionAsync();
+            await conn.ExecuteAsync(SqlQueries.TrackedMessages.DeleteByChatAndMessages,
+                new { ChatId = chatId, MessageIds = ids });
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to delete tracked messages for chat {ChatId}", chatId);
+        }
+    }
+
     public async Task<IReadOnlyList<int>> GetTrackedMessagesBySessionAsync(int sessionId)
     {
         try
@@ -458,6 +479,22 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         catch (Exception e)
         {
             logger.LogWarning(e, "Failed to get tracked messages for session {SessionId}", sessionId);
+            return [];
+        }
+    }
+
+    public async Task<IReadOnlyList<int>> GetTrackedMessagesByChatAsync(long chatId)
+    {
+        try
+        {
+            await using var conn = await CreateConnectionAsync();
+            var result = await conn.QueryAsync<int>(SqlQueries.TrackedMessages.GetByChat,
+                new { ChatId = chatId });
+            return result.ToList().AsReadOnly();
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to get tracked messages for chat {ChatId}", chatId);
             return [];
         }
     }

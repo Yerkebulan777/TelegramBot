@@ -99,7 +99,7 @@ public interface IDataService
     Task<bool> HasDuplicateCommandsAsync(IEnumerable<string> commandTexts, IEnumerable<string> filePaths);
 
     /// <summary>Записывает отслеживаемое сообщение в БД.</summary>
-    Task TrackMessageAsync(int sessionId, long chatId, int messageId);
+    Task TrackMessageAsync(long chatId, int messageId, int? sessionId = null);
 
     /// <summary>Удаляет сообщения по списку ID для сессии.</summary>
     Task DeleteTrackedMessagesAsync(int sessionId, IEnumerable<int> messageIds);
@@ -109,4 +109,10 @@ public interface IDataService
 
     /// <summary>Получает все ID сообщений для сессии.</summary>
     Task<IReadOnlyList<int>> GetTrackedMessagesBySessionAsync(int sessionId);
+
+    /// <summary>Удаляет сообщения по списку ID для чата.</summary>
+    Task DeleteTrackedMessagesByChatAsync(long chatId, IEnumerable<int> messageIds);
+
+    /// <summary>Получает все ID сообщений для чата.</summary>
+    Task<IReadOnlyList<int>> GetTrackedMessagesByChatAsync(long chatId);
 }

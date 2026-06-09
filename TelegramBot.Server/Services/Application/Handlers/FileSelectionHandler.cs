@@ -45,9 +45,10 @@ public sealed class FileSelectionHandler(
                 : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
             var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
                 context.UserId, "⚠ Error: File not found.", replyKeyboard);
-            if (errorMessage != null && session.SessionId > 0)
+            if (errorMessage != null)
             {
-                await dataService.TrackMessageAsync(session.SessionId, context.UserId, errorMessage.Id);
+                var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
+                await dataService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
             }
 
             return true;
