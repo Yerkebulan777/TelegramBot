@@ -142,6 +142,29 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 | `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` — устраняет дублирование `new NpgsqlConnection + OpenAsync` |
 | `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Фильтр логов для BimLib-событий (отдельный файл для BIM-специфичных логов) |
 
+---
+
+## Constants Reference
+
+All constants are located in `TelegramBot.Core/Constants/`. Use these instead of hardcoded strings/ints.
+
+| File | Purpose | Key Constants |
+|------|---------|---------------|
+| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`, `SessionDetails`, `DeleteSession`, `RequestAccess`, etc. |
+| `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |
+| `Statuses.cs` | Entity statuses (commands/sessions) | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses`, `ActiveStatuses` |
+| `CommandPriorities.cs` | Worker queue priority levels | `Critical`, `High`, `Medium`, `Low`, `Default` |
+| `ButtonTexts.cs` | Reply keyboard button labels | `Apply`, `Confirm`, `Cancel` |
+
+**Important notes:**
+- All callback prefixes end with `:` (colon) for data concatenation
+- `Statuses.FinalStatuses` includes `Done`, `Failed`, `Deleted` — used to check if an entity is terminal
+- `Statuses.ActiveStatuses` includes `Pending`, `Processing` — used to find uncompleted entities
+- Command codes match callback prefix names (e.g., `CommandCodes.Pdf` = `"PDF"`, `CallbackPrefixes.Pdf` = `"PDF:"`)
+- Button texts include emoji and are used with reply keyboards (not inline keyboards)
+
+> **Deprecated:** `CommandStatuses.cs` — use `Statuses` instead. The old class is marked `[Obsolete]` but still works for backward compatibility.
+
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 
 Полная спецификация алгоритма: **[Docs/execution-algorithm.md](Docs/execution-algorithm.md)**
@@ -187,7 +210,7 @@ Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler`
 
 **Error handling:** `CallbackHandlerBase.HandleAsync()` does NOT catch exceptions — they propagate to `CallbackDispatcher.DispatchAsync()`, which catches `Exception`, logs it, and continues to the next handler. This eliminates double logging.
 
-Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. 
+Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Constants/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. 
 
 > **SessionManagementHandler** manages `/status` actions via `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, and `CONFIRMDELETECOMMAND:`. Delete buttons first show a confirmation dialog; the «⛔ Отменить» button for a running command uses the same soft-delete path as command deletion: `Status = 'Deleted'`.
 

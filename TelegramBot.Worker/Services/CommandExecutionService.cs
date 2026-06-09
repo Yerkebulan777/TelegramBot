@@ -502,7 +502,7 @@ public sealed class CommandExecutionService(
         if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
         {
             logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
-            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: $"Unknown command type: {cmd.CommandText}");
             await CompleteClaimedCommandAsync(cmd);
             return null;
@@ -511,7 +511,7 @@ public sealed class CommandExecutionService(
         if (!ValidateFilePath(cmd, commandCfg))
         {
             logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
-            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: $"File validation failed for path: {cmd.FilePath}");
             await CompleteClaimedCommandAsync(cmd);
             return null;
@@ -522,7 +522,7 @@ public sealed class CommandExecutionService(
         {
             logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=executable_not_found, error={Error}",
                 cmd.CommandId, cmd.CommandText, resolutionError);
-            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: resolutionError);
             await CompleteClaimedCommandAsync(cmd);
             return null;
@@ -543,7 +543,7 @@ public sealed class CommandExecutionService(
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _=process.Start();
         _activeProcesses[cmd.CommandId] = process;
-        _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
+        _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Processing, process.Id);
 
         return process;
     }
@@ -569,7 +569,7 @@ public sealed class CommandExecutionService(
 
         if (completed && process.ExitCode == 0)
         {
-            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
             logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
                 cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
             await CompleteClaimedCommandAsync(cmd);
@@ -766,7 +766,7 @@ public sealed class CommandExecutionService(
         }
         else
         {
-            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
             await CompleteClaimedCommandAsync(cmd);

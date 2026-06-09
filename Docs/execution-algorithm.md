@@ -470,7 +470,7 @@ if (!completed)
 {
     // Таймаут: убиваем процесс и всё дерево потомков
     process.Kill(true); // true = kill entire process tree
-    await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+    await dataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
         errorMessage: $"Timeout: process exceeded {ProcessTimeoutSec}s limit");
 }
 ```
