@@ -27,6 +27,14 @@ internal static partial class SqlQueries
                 UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
 
+        internal const string EnsureSessionsColumns = @"
+            ALTER TABLE Sessions
+            ADD COLUMN IF NOT EXISTS PriorityId INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS Status TEXT NOT NULL DEFAULT 'pending',
+            ADD COLUMN IF NOT EXISTS ProjectName TEXT,
+            ADD COLUMN IF NOT EXISTS FilesAmount INTEGER,
+            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();";
+
         internal const string CreateCommandsTable = @"
             CREATE TABLE IF NOT EXISTS Commands (
                 CommandId SERIAL PRIMARY KEY,

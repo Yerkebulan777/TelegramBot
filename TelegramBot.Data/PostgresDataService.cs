@@ -25,6 +25,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
 
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
+        _=await conn.ExecuteAsync(SqlQueries.Schema.EnsureSessionsColumns);
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
         _=await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
         _=await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable);
