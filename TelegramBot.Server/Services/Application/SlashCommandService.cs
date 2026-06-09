@@ -182,7 +182,7 @@ public sealed class SlashCommandService(
             return true;
         }
 
-        if (messageText == ButtonTexts.Cancel && (session.IsFileSelectionActive || session.PendingCommand.Count > 0))
+        if (messageText == ButtonTexts.Cancel)
         {
             logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
 

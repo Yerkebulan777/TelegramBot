@@ -485,8 +485,8 @@ public sealed class CommandExecutionService(
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
 
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) {  outputBuilder.AppendLine(e.Data); } };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) {  errorBuilder.AppendLine(e.Data); } };
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) { outputBuilder.AppendLine(e.Data); } };
+        process.ErrorDataReceived += (_, e) => { if (e.Data != null) { errorBuilder.AppendLine(e.Data); } };
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -630,7 +630,7 @@ public sealed class CommandExecutionService(
             var version = await versionDetector.DetectVersionAsync(cmd.FilePath!, ct);
             if (version?.ExecutablePath != null)
             {
-                logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Revit {Year})",  commandText, version.ExecutablePath, version.Year);
+                logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Revit {Year})", commandText, version.ExecutablePath, version.Year);
                 return (version.ExecutablePath, null);
             }
 
