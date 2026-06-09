@@ -291,8 +291,7 @@ public sealed class SlashCommandService(
         if (await dataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
         {
             logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
-            await SendWarningAndCleanupAsync(userId, session,
-                "⚠️ Одно или несколько заданий уже находятся в очереди. Дождитесь их выполнения и повторите попытку.");
+            await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
             return;
         }
 
