@@ -16,7 +16,7 @@ using Message = Telegram.Bot.Types.Message;
 namespace TelegramBot.Server.Services.Application;
 
 public sealed class SlashCommandService(
-    IDataService dataService,
+    ISessionDataService sessionDataService,
     ITelegramOutputService outputService,
     IKeyboardBuilder keyboardBuilder,
     IOptions<FileSystemOptions> fileSystemOptions,
@@ -57,15 +57,15 @@ public sealed class SlashCommandService(
         if (text == "/start")
         {
             session.Reset(_options.RootPath);
-            var user = await dataService.GetUserAsync(userId);
+            var user = await sessionDataService.GetUserAsync(userId);
 
             if (user?.Status != UserAccessStatus.Approved)
             {
-                var adminUser = await dataService.GetUserAsync(userId);
+                var adminUser = await sessionDataService.GetUserAsync(userId);
                 if (adminUser?.Role == UserRole.Admin && adminUser.Status == UserAccessStatus.Approved)
                 {
                     var now = DateTime.UtcNow;
-                    await dataService.UpsertUserAsync(new BotUser
+                    await sessionDataService.UpsertUserAsync(new BotUser
                     {
                         UserId = userId,
                         Username = username,
@@ -74,7 +74,7 @@ public sealed class SlashCommandService(
                         CreatedAt = user?.CreatedAt ?? now,
                         UpdatedAt = now
                     });
-                    user = await dataService.GetUserAsync(userId);
+                    user = await sessionDataService.GetUserAsync(userId);
                 }
             }
 
@@ -90,7 +90,7 @@ public sealed class SlashCommandService(
             return;
         }
 
-        var userRecord = await dataService.GetUserAsync(userId);
+        var userRecord = await sessionDataService.GetUserAsync(userId);
         if (userRecord?.Status != UserAccessStatus.Approved)
         {
             logger.LogWarning("Command rejected: command={Command}, user={UserId}, reason=access_denied", text, userId);
@@ -108,7 +108,7 @@ public sealed class SlashCommandService(
 
     public async Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session)
     {
-        var userRecord = await dataService.GetUserAsync(userId);
+        var userRecord = await sessionDataService.GetUserAsync(userId);
 
         if (userRecord?.Status == UserAccessStatus.Approved)
         {
@@ -135,7 +135,7 @@ public sealed class SlashCommandService(
                 logger.LogDebug("Executing /status for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 session.IsInStatusView = true;
-                var sessionsStatus = await dataService.GetSessionsListAsync();
+                var sessionsStatus = await sessionDataService.GetSessionsListAsync();
                 var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
                 var statusMessage = await TrackMessageAsync(outputService.SendMessageWithKeyboardAsync(userId, "Сессии:", keyboard), session);
                 session.StatusMessageId = statusMessage?.Id;
@@ -288,7 +288,7 @@ public sealed class SlashCommandService(
         }
 
         // Проверяем, нет ли уже таких же (команда + файл) в очереди
-        if (await dataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
+        if (await sessionDataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
         {
             logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
             await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
@@ -300,7 +300,7 @@ public sealed class SlashCommandService(
         var priorities = session.PendingCommand
             .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
 
-        var sessionId = await dataService.CreateSessionWithCommandsAsync(
+        var sessionId = await sessionDataService.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities);
         logger.LogInformation(
             "Job queued: session={SessionId}, user={UserId}, commands={CommandCount}, files={FileCount}",
@@ -324,7 +324,7 @@ public sealed class SlashCommandService(
         }
 
         var sinceUtc = DateTime.UtcNow.AddDays(-1);
-        var queuedToday = await dataService.CountQueuedFilesByUserSinceAsync(userId, sinceUtc);
+        var queuedToday = await sessionDataService.CountQueuedFilesByUserSinceAsync(userId, sinceUtc);
         var remaining = _rateLimitOptions.MaxFilesPerUserPerDay - queuedToday;
 
         if (newFileCount <= remaining)
@@ -399,7 +399,7 @@ public sealed class SlashCommandService(
         if (msg != null)
         {
             var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await dataService.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
+            await sessionDataService.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
         }
         return msg;
     }

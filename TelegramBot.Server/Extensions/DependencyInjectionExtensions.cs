@@ -67,7 +67,12 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddInfrastructureServices(this IServiceCollection services)
     {
-        _=services.AddSingleton<IDataService, PostgresDataService>();
+        _=services.AddSingleton<IUserDataService, PostgresDataService>();
+        _=services.AddSingleton<ISessionDataService, PostgresDataService>();
+        _=services.AddSingleton<ICommandDataService, PostgresDataService>();
+        _=services.AddSingleton<IMessageTrackingDataService, PostgresDataService>();
+        _=services.AddSingleton<INotificationDataService, PostgresDataService>();
+        _=services.AddSingleton<IDatabaseInitializer, PostgresDataService>();
         _=services.AddSingleton<FileSystemBrowser>();
 
         return services;
@@ -87,12 +92,12 @@ public static class DependencyInjectionExtensions
         _=services.AddSingleton<ITelegramOutputService>(sp =>
         {
             var botClient = sp.GetRequiredService<ITelegramBotClient>();
-            var dataService = sp.GetRequiredService<IDataService>();
+            var messageTrackingService = sp.GetRequiredService<IMessageTrackingDataService>();
             var logger = sp.GetRequiredService<ILogger<TelegramOutputService>>();
             var botOptions = sp.GetRequiredService<IOptions<BotOptions>>().Value;
             var adminId = botOptions.AdminUserIds?.FirstOrDefault();
 
-            return new TelegramOutputService(botClient, dataService, logger, adminId);
+            return new TelegramOutputService(botClient, messageTrackingService, logger, adminId);
         });
         _=services.AddSingleton<TelegramUpdateMapper>();
         _=services.AddSingleton<IKeyboardBuilder, KeyboardBuilder>();

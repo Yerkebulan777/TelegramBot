@@ -9,7 +9,15 @@ using TelegramBot.Core.Models;
 
 namespace TelegramBot.Data;
 
-public class PostgresDataService(IConfiguration configuration, ILogger<PostgresDataService> logger) : IDataService
+public class PostgresDataService(
+    IConfiguration configuration,
+    ILogger<PostgresDataService> logger) :
+    IUserDataService,
+    ISessionDataService,
+    ICommandDataService,
+    IMessageTrackingDataService,
+    INotificationDataService,
+    IDatabaseInitializer
 {
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
@@ -19,6 +27,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString);
     }
 
+    /// <inheritdoc/>
     public async Task InitializeDatabaseAsync()
     {
         await using var conn = await CreateConnectionAsync();
@@ -34,12 +43,14 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         _=await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled);
     }
 
+    /// <inheritdoc/>
     public async Task<BotUser?> GetUserAsync(long userId)
     {
         await using var conn = await CreateConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<BotUser>(SqlQueries.Users.GetById, new { UserId = userId });
     }
 
+    /// <inheritdoc/>
     public async Task UpsertUserAsync(BotUser user)
     {
         var now = DateTime.UtcNow;
@@ -55,6 +66,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         });
     }
 
+    /// <inheritdoc/>
     public async Task<long> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
@@ -118,6 +130,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return sessionId;
     }
 
+    /// <inheritdoc/>
     public async Task<List<SessionsList>> GetSessionsListAsync()
     {
         await using var conn = await CreateConnectionAsync();
@@ -125,6 +138,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return result.ToList();
     }
 
+    /// <inheritdoc/>
     public async Task<int> CountQueuedFilesByUserSinceAsync(long userId, DateTime sinceUtc)
     {
         await using var conn = await CreateConnectionAsync();
@@ -133,6 +147,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             new { UserId = userId, SinceUtc = sinceUtc });
     }
 
+    /// <inheritdoc/>
     public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
@@ -141,6 +156,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return result ?? throw new KeyNotFoundException($"Session {sessionId} not found");
     }
 
+    /// <inheritdoc/>
     public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
@@ -149,6 +165,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return result.ToList();
     }
 
+    /// <inheritdoc/>
     public async Task<bool> DeleteSessionAsync(int sessionId, long userId, bool isAdmin = false)
     {
         try
@@ -188,6 +205,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task<bool> DeleteCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
         try
@@ -211,6 +229,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task<int> DeleteCommandsByTypeAsync(int sessionId, string commandType)
     {
         try
@@ -226,6 +245,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task UpsertUsersBatchAsync(long[] userIds, int role, int status)
     {
         if (userIds.Length == 0)
@@ -245,6 +265,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         });
     }
 
+    /// <inheritdoc/>
     public async Task<bool> CheckCommandsStatusAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
@@ -253,6 +274,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return count > 0;
     }
 
+    /// <inheritdoc/>
     public async Task<int> CountPendingProcessingBySessionAsync(int sessionId)
     {
         await using var conn = await CreateConnectionAsync();
@@ -261,6 +283,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             new { SessionId = sessionId });
     }
 
+    /// <inheritdoc/>
     public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
         await using var conn = await CreateConnectionAsync();
@@ -268,6 +291,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
     {
         await using var conn = await CreateConnectionAsync();
@@ -325,6 +349,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return true;
     }
 
+    /// <inheritdoc/>
     public async Task ReleaseExpiredLeasesAsync()
     {
         _=await TryExecuteWithAdvisoryLockAsync(
@@ -334,6 +359,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }));
     }
 
+    /// <inheritdoc/>
     public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null)
     {
         try
@@ -350,6 +376,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task ReleaseTimeoutCommandsAsync(int timeoutSeconds)
     {
         _=await TryExecuteWithAdvisoryLockAsync(
@@ -359,6 +386,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
                 new { TimeoutSeconds = timeoutSeconds }));
     }
 
+    /// <inheritdoc/>
     public async Task<bool> UpdateCommandProgressAsync(int commandId, int progress)
     {
         try
@@ -375,6 +403,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task<bool> UpdateCommandResultAsync(int commandId, string result)
     {
         try
@@ -391,6 +420,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task<int> SoftDeleteInactiveSessionsOlderThanAsync(DateTime cutoffUtc)
     {
         try
@@ -415,6 +445,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task NotifyCommandCompletedAsync(long userId, int sessionId, int doneCount, int totalCount, string? projectName = null)
     {
         try
@@ -429,6 +460,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage)
     {
         await using var conn = await CreateConnectionAsync();
@@ -438,6 +470,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return retryCount;
     }
 
+    /// <inheritdoc/>
     public async Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId, bool isAdmin = false)
     {
         await using var conn = await CreateConnectionAsync();
@@ -446,6 +479,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
             new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
     }
 
+    /// <inheritdoc/>
     public async Task<bool> HasDuplicateCommandsAsync(
         IEnumerable<string> commandTexts,
         IEnumerable<string> filePaths)
@@ -457,6 +491,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         return count > 0;
     }
 
+    /// <inheritdoc/>
     public async Task TrackMessageAsync(long chatId, int messageId, int? sessionId = null)
     {
         try
@@ -471,6 +506,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task DeleteTrackedMessagesAsync(int sessionId, IEnumerable<int> messageIds)
     {
         try
@@ -485,6 +521,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task DeleteTrackedMessagesBySessionAsync(int sessionId)
     {
         try
@@ -499,6 +536,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task DeleteTrackedMessagesByChatAsync(long chatId, IEnumerable<int> messageIds)
     {
         try
@@ -519,6 +557,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<int>> GetTrackedMessagesBySessionAsync(int sessionId)
     {
         try
@@ -535,6 +574,7 @@ public class PostgresDataService(IConfiguration configuration, ILogger<PostgresD
         }
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<int>> GetTrackedMessagesByChatAsync(long chatId)
     {
         try

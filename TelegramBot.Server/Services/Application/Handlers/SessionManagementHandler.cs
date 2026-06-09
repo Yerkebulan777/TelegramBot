@@ -8,7 +8,7 @@ using TelegramBot.Server.Interfaces;
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class SessionManagementHandler(
-    IDataService dataService,
+    ISessionDataService sessionDataService,
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
@@ -27,7 +27,7 @@ public sealed class SessionManagementHandler(
     /// <summary>Проверяет, имеет ли пользователь доступ (все одобренные могут управлять любыми сессиями).</summary>
     private async Task<bool> CanManageAsync(long userId)
     {
-        var user = await dataService.GetUserAsync(userId);
+        var user = await sessionDataService.GetUserAsync(userId);
         return user?.Status == UserAccessStatus.Approved;
     }
 
@@ -79,7 +79,7 @@ public sealed class SessionManagementHandler(
             session.IsInStatusView = false;
             session.SessionId = sessionId;
 
-            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId);
+            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
             var keyboard = await keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
             await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;
@@ -90,8 +90,8 @@ public sealed class SessionManagementHandler(
             session.IsInStatusView = true;
             session.SessionId = sessionId;
 
-            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId);
-            var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId);
+            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
+            var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
 
             var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter);
             await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
@@ -138,13 +138,13 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
         var isAdmin = await CanManageAsync(context.UserId);
-        if (!await dataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
+        if (!await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
         {
             return true;
         }
 
         // Очищаем tracked messages из БД
-        await dataService.DeleteTrackedMessagesBySessionAsync(sessionId);
+        await sessionDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
 
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
@@ -164,7 +164,7 @@ public sealed class SessionManagementHandler(
         var filter = parts.Length > 1 ? parts[1] : "ALL";
 
         var isAdmin = await CanManageAsync(context.UserId);
-        var sessionId = await dataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
+        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
         if (!sessionId.HasValue)
         {
             Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
@@ -212,27 +212,27 @@ public sealed class SessionManagementHandler(
             return true;
         }
 
-        if (!await dataService.DeleteCommandAsync(commandId, context.UserId, isAdmin))
+        if (!await sessionDataService.DeleteCommandAsync(commandId, context.UserId, isAdmin))
         {
             return true;
         }
 
         context.Session.SessionId = sessionId.Value;
 
-        if (!await dataService.CheckCommandsStatusAsync(sessionId.Value))
+        if (!await sessionDataService.CheckCommandsStatusAsync(sessionId.Value))
         {
             // Последняя команда — удаляем сессию и tracked messages
-            if (await dataService.DeleteSessionAsync(sessionId.Value, context.UserId, isAdmin))
+            if (await sessionDataService.DeleteSessionAsync(sessionId.Value, context.UserId, isAdmin))
             {
-                await dataService.DeleteTrackedMessagesBySessionAsync(sessionId.Value);
+                await sessionDataService.DeleteTrackedMessagesBySessionAsync(sessionId.Value);
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
         }
         else
         {
-            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId.Value);
-            var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId.Value);
+            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId.Value);
+            var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId.Value);
 
             var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId.Value, filter);
             await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
@@ -284,7 +284,7 @@ public sealed class SessionManagementHandler(
         var commandType = parts[1];
         Logger.LogInformation("{Username} delete all commands of type {CommandType} in session {SessionId}", context.Username, commandType, sessionId);
 
-        var deleted = await dataService.DeleteCommandsByTypeAsync(sessionId, commandType);
+        var deleted = await sessionDataService.DeleteCommandsByTypeAsync(sessionId, commandType);
         if (deleted == 0)
         {
             Logger.LogWarning("{Username} no commands deleted for type {CommandType} session {SessionId}", context.Username, commandType, sessionId);
@@ -293,19 +293,19 @@ public sealed class SessionManagementHandler(
         context.Session.SessionId = sessionId;
         var isAdmin = await CanManageAsync(context.UserId);
 
-        if (!await dataService.CheckCommandsStatusAsync(sessionId))
+        if (!await sessionDataService.CheckCommandsStatusAsync(sessionId))
         {
-            if (await dataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
+            if (await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
             {
-                await dataService.DeleteTrackedMessagesBySessionAsync(sessionId);
+                await sessionDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
         }
         else
         {
-            var sessionStatus = await dataService.GetSessionsStatusAsync(sessionId);
-            var sessionCommands = await dataService.GetSessionsCommandsAsync(sessionId);
+            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
+            var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
 
             var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, "ALL");
             await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
@@ -318,7 +318,7 @@ public sealed class SessionManagementHandler(
     {
         Logger.LogInformation("{Username} view sessions", context.Username);
 
-        var sessionsStatus = await dataService.GetSessionsListAsync();
+        var sessionsStatus = await sessionDataService.GetSessionsListAsync();
         var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
         await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
         context.Session.StatusMessageId = context.MessageId;

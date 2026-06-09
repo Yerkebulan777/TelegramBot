@@ -9,7 +9,7 @@ using TelegramBot.Server.Interfaces;
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class AccessRequestHandler(
-    IDataService dataService,
+    IUserDataService userDataService,
     ITelegramOutputService outputService,
     IOptions<BotOptions> botOptions,
     ILogger<AccessRequestHandler> logger) : CallbackHandlerBase(logger)
@@ -38,7 +38,7 @@ public sealed class AccessRequestHandler(
 
     private async Task<bool> HandleRequestAccessAsync(CallbackContext context)
     {
-        var existing = await dataService.GetUserAsync(context.UserId);
+        var existing = await userDataService.GetUserAsync(context.UserId);
 
         if (existing?.Status == UserAccessStatus.Approved)
         {
@@ -55,7 +55,7 @@ public sealed class AccessRequestHandler(
         }
 
         var now = DateTime.UtcNow;
-        await dataService.UpsertUserAsync(new BotUser
+        await userDataService.UpsertUserAsync(new BotUser
         {
             UserId = context.UserId,
             Username = context.Username,
@@ -111,7 +111,7 @@ public sealed class AccessRequestHandler(
             return true;
         }
 
-        var user = await dataService.GetUserAsync(targetUserId);
+        var user = await userDataService.GetUserAsync(targetUserId);
         if (user == null)
         {
             await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Пользователь не найден.");
@@ -120,7 +120,7 @@ public sealed class AccessRequestHandler(
 
         user.Status = newStatus;
         user.UpdatedAt = DateTime.UtcNow;
-        await dataService.UpsertUserAsync(user);
+        await userDataService.UpsertUserAsync(user);
 
         var displayName = string.IsNullOrEmpty(user.Username) ? targetUserId.ToString() : $"@{user.Username}";
         await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));

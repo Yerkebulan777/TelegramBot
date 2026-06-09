@@ -18,7 +18,7 @@ internal static class HandlerHelpers
     /// </summary>
     public static async Task SendActionsReplyKeyboardAsync(
         ITelegramOutputService outputService,
-        IDataService dataService,
+        IMessageTrackingDataService messageTrackingService,
         long userId,
         UserSession session,
         Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
@@ -35,17 +35,17 @@ internal static class HandlerHelpers
         {
             session.LastActionsMessageId = message.Id;
             var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await dataService.TrackMessageAsync(userId, message.Id, sessionId);
+            await messageTrackingService.TrackMessageAsync(userId, message.Id, sessionId);
         }
     }
 
-    /// <inheritdoc cref="SendActionsReplyKeyboardAsync(ITelegramOutputService, IDataService, long, UserSession, Func{Task{ReplyKeyboardMarkup}})"/>
+    /// <inheritdoc cref="SendActionsReplyKeyboardAsync(ITelegramOutputService, IMessageTrackingDataService, long, UserSession, Func{Task{ReplyKeyboardMarkup}})"/>
     public static Task SendActionsReplyKeyboardAsync(
         ITelegramOutputService outputService,
-        IDataService dataService,
+        IMessageTrackingDataService messageTrackingService,
         CallbackContext context,
         Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
     {
-        return SendActionsReplyKeyboardAsync(outputService, dataService, context.UserId, context.Session, keyboardFactory);
+        return SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context.UserId, context.Session, keyboardFactory);
     }
 }

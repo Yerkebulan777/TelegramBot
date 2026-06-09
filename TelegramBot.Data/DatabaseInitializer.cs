@@ -17,8 +17,8 @@ public static class DatabaseInitializer
     public static async Task InitializeDatabaseAsync(this IHost host)
     {
         using var scope = host.Services.CreateScope();
-        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
-        await dataService.InitializeDatabaseAsync();
+        var initializer = scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>();
+        await initializer.InitializeDatabaseAsync();
     }
 
     /// <summary>
@@ -27,7 +27,7 @@ public static class DatabaseInitializer
     public static async Task SeedAdminUsersAsync(this IHost host)
     {
         using var scope = host.Services.CreateScope();
-        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+        var userDataService = scope.ServiceProvider.GetRequiredService<IUserDataService>();
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
         var adminIds = configuration.GetSection("TelegramBot:AdminUserIds").Get<long[]>() ?? [];
@@ -36,6 +36,6 @@ public static class DatabaseInitializer
             return;
         }
 
-        await dataService.UpsertUsersBatchAsync(adminIds, (int)UserRole.Admin, (int)UserAccessStatus.Approved);
+        await userDataService.UpsertUsersBatchAsync(adminIds, (int)UserRole.Admin, (int)UserAccessStatus.Approved);
     }
 }

@@ -10,7 +10,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileSelectionHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
-    IDataService dataService,
+    IMessageTrackingDataService messageTrackingService,
     IOptions<FileSystemOptions> options,
     ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -48,7 +48,7 @@ public sealed class FileSelectionHandler(
             if (errorMessage != null)
             {
                 var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-                await dataService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
+                await messageTrackingService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
             }
 
             return true;

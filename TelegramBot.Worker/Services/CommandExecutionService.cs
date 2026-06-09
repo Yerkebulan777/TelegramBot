@@ -20,7 +20,10 @@ namespace TelegramBot.Worker.Services;
 /// Автоматически переподключается при потере соединения.
 /// </summary>
 public sealed class CommandExecutionService(
-    IDataService dataService,
+    IUserDataService userDataService,
+    ISessionDataService sessionDataService,
+    ICommandDataService commandDataService,
+    INotificationDataService notificationDataService,
     IOptions<WorkerOptions> workerOptions,
     IConfiguration configuration,
     ILogger<CommandExecutionService> logger,
@@ -107,8 +110,8 @@ public sealed class CommandExecutionService(
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
         // Освобождаем истёкшие Lease и таймауты (crash recovery упавших воркеров)
-        await dataService.ReleaseExpiredLeasesAsync();
-        await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
+        await commandDataService.ReleaseExpiredLeasesAsync();
+        await commandDataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
 
         // Первичная проверка — вдруг команды уже есть в БД
         await ProcessBatchAsync(stoppingToken);
@@ -198,8 +201,8 @@ public sealed class CommandExecutionService(
             {
                 try
                 {
-                    await dataService.ReleaseExpiredLeasesAsync();
-                    await dataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
+                    await commandDataService.ReleaseExpiredLeasesAsync();
+                    await commandDataService.ReleaseTimeoutCommandsAsync(_workerOptions.ProcessTimeoutSeconds);
                     await CleanupInactiveSessionsAsync();
                 }
                 catch (Exception ex)
@@ -270,7 +273,7 @@ public sealed class CommandExecutionService(
         }
 
         var cutoffUtc = DateTime.UtcNow.AddDays(-_workerOptions.CompletedSessionRetentionDays);
-        var deletedCount = await dataService.SoftDeleteInactiveSessionsOlderThanAsync(cutoffUtc);
+        var deletedCount = await sessionDataService.SoftDeleteInactiveSessionsOlderThanAsync(cutoffUtc);
         if (deletedCount > 0)
         {
             logger.LogInformation(
@@ -396,7 +399,7 @@ public sealed class CommandExecutionService(
         try
         {
             var leaseTimeoutMinutes = (_workerOptions.ProcessTimeoutSeconds + 300) / 60;
-            var claimed = await dataService.ClaimPendingCommandsAsync(DefaultBatchSize, leaseTimeoutMinutes);
+            var claimed = await commandDataService.ClaimPendingCommandsAsync(DefaultBatchSize, leaseTimeoutMinutes);
 
             if (claimed.Count == 0)
             {
@@ -499,7 +502,7 @@ public sealed class CommandExecutionService(
         if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
         {
             logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                 errorMessage: $"Unknown command type: {cmd.CommandText}");
             await CompleteClaimedCommandAsync(cmd);
             return null;
@@ -508,7 +511,7 @@ public sealed class CommandExecutionService(
         if (!ValidateFilePath(cmd, commandCfg))
         {
             logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                 errorMessage: $"File validation failed for path: {cmd.FilePath}");
             await CompleteClaimedCommandAsync(cmd);
             return null;
@@ -519,7 +522,7 @@ public sealed class CommandExecutionService(
         {
             logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=executable_not_found, error={Error}",
                 cmd.CommandId, cmd.CommandText, resolutionError);
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed,
                 errorMessage: resolutionError);
             await CompleteClaimedCommandAsync(cmd);
             return null;
@@ -540,7 +543,7 @@ public sealed class CommandExecutionService(
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _=process.Start();
         _activeProcesses[cmd.CommandId] = process;
-        _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
+        _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Processing, process.Id);
 
         return process;
     }
@@ -566,7 +569,7 @@ public sealed class CommandExecutionService(
 
         if (completed && process.ExitCode == 0)
         {
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Done);
             logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
                 cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
             await CompleteClaimedCommandAsync(cmd);
@@ -754,7 +757,7 @@ public sealed class CommandExecutionService(
         {
             var nextRetryAt = DateTime.UtcNow.AddSeconds(
                 _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
-            var newRetryCount = await dataService.ScheduleRetryAsync(
+            var newRetryCount = await commandDataService.ScheduleRetryAsync(
                 cmd.CommandId, nextRetryAt, errorMessage);
             logger.LogWarning(ex, "Command {Cmd} ({Id}) failed (attempt {Attempt}/{Max}), retry at {Next}. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
@@ -763,7 +766,7 @@ public sealed class CommandExecutionService(
         }
         else
         {
-            _=await dataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
+            _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, CommandStatuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
             await CompleteClaimedCommandAsync(cmd);
@@ -795,7 +798,7 @@ public sealed class CommandExecutionService(
         {
             // Проверяем БД: если ещё есть pending или processing команды — сессия не завершена.
             // Это корректно обрабатывает случай, когда команд в сессии > DefaultBatchSize.
-            var remainingInDb = await dataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
+            var remainingInDb = await sessionDataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
             if (remainingInDb > 0)
             {
                 logger.LogDebug("Session {SessionId}: counter zero but {Remaining} commands still pending/processing in DB, skipping notification",
@@ -803,8 +806,8 @@ public sealed class CommandExecutionService(
                 return;
             }
 
-            var status = await dataService.GetSessionsStatusAsync(cmd.SessionId);
-            await dataService.NotifyCommandCompletedAsync(
+            var status = await sessionDataService.GetSessionsStatusAsync(cmd.SessionId);
+            await notificationDataService.NotifyCommandCompletedAsync(
                 cmd.UserId, cmd.SessionId, status.DoneFiles, status.TotalFiles, status.ProjectName);
         }
         catch (Exception ex)

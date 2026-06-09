@@ -10,7 +10,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileNavigationHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
-    IDataService dataService,
+    IMessageTrackingDataService messageTrackingService,
     IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -48,7 +48,7 @@ public sealed class FileNavigationHandler(
         var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, context,
+        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
             _options.IsAtProjectLevel(context.Session.CurrentPath)
                 ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
                 : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
@@ -67,7 +67,7 @@ public sealed class FileNavigationHandler(
         if (errorMessage != null)
         {
             var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await dataService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
+            await messageTrackingService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
         }
     }
 }

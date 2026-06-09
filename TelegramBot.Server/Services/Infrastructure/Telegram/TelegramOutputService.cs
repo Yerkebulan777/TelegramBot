@@ -12,7 +12,7 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public class TelegramOutputService(
     ITelegramBotClient botClient,
-    IDataService dataService,
+    IMessageTrackingDataService messageTrackingService,
     ILogger<TelegramOutputService> logger,
     long? adminChatId = null) : ITelegramOutputService
 {
@@ -118,7 +118,7 @@ public class TelegramOutputService(
         IEnumerable<int> keepMessageIds,
         CancellationToken cancellationToken = default)
     {
-        var trackedMessageIds = await dataService.GetTrackedMessagesByChatAsync(chatId);
+        var trackedMessageIds = await messageTrackingService.GetTrackedMessagesByChatAsync(chatId);
         if (trackedMessageIds.Count == 0)
         {
             return;
@@ -135,7 +135,7 @@ public class TelegramOutputService(
         }
 
         await DeleteMessagesAsync(chatId, staleIds, cancellationToken);
-        await dataService.DeleteTrackedMessagesByChatAsync(chatId, staleIds);
+        await messageTrackingService.DeleteTrackedMessagesByChatAsync(chatId, staleIds);
     }
 
     public async Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)

@@ -9,7 +9,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class CommandSelectionHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
-    IDataService dataService,
+    IMessageTrackingDataService messageTrackingService,
     IOptions<FileSystemOptions> options,
     ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -57,7 +57,7 @@ public sealed class CommandSelectionHandler(
 
     private Task SendActionsReplyKeyboardAsync(CallbackContext context)
     {
-        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataService, context,
+        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
                 keyboardBuilder.GetProjectActionsReplyKeyboardAsync);
     }
 
