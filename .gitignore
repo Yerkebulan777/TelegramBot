@@ -1,58 +1,28 @@
+```
 # Build artifacts
 bin/
 obj/
-[Bb]in/
-[Oo]bj/
-[Dd]ebug/
-[Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
-x64/
-x86/
-bld/
-
-# .NET and Visual Studio
-.vs/
-*.user
-*.userosscache
-*.suo
-*.userprefs
-*.pidb
-*.svclog
-*.nupkg
-*.snupkg
-
-# Compiled files
 *.dll
 *.exe
 *.pdb
-*.so
-*.dylib
-*.class
-*.o
-*.a
-*.obj
-*.out
+*.config
 
 # Dependencies
-node_modules/
-vendor/
 packages/
+node_modules/
+.nuget/
 
 # Logs
 *.log
-logs/
-.claude/command-log.txt
-
-# Environment
-.env
-.env.local
-.env.*
 
 # OS generated files
 .DS_Store
 Thumbs.db
-nul
+
+# Environment
+.env
+.env.local
+*.env.*
 
 # Editor files
 .vscode/
@@ -63,95 +33,10 @@ nul
 # Test and coverage
 coverage/
 htmlcov/
-.coverage
 *.coverage
+.testcoverage
 
-# Distribution / packaging
-dist/
-build/
-target/
-*.tar.gz
-*.zip
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-pip-log.txt
-pip-delete-this-directory.txt
-*.egg-info/
-.eggs/
-.tox/
-.nox/
-.coverage.*
-.cache/
-.pytest_cache/
-.mypy_cache/
-.hypothesis/
-
-# Node
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Java
-*.jar
-*.war
-*.ear
-hs_err_pid*
-.recommenders/
-
-# Go
-*.exe~
-
-# Ruby
-*.gem
-*.rbc
-csscachestore/
-.ridkey
-gemfiles/
-.installed
-.bundle/
-vendor/bundle/
-vendor/cache/
-vendor/gems/
-vendor/ruby/
-
-# Rust
-Cargo.lock
-
-# Julia
-.julia/
-
-# Zig
-zig-cache/
-zig-out/
-
-# Gradle
-.gradle/
-
-# Maven
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-
-# CMake
-CMakeFiles/
-CMakeCache.txt
-cmake_install.manifest
-CTestTestfile.cmake
-_deps/
-
-# Temporary folders
-tmp/
-temp/
+# Temporary files
+*.tmp
+*~
+```

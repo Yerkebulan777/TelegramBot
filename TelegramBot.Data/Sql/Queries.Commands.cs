@@ -59,7 +59,9 @@ internal static partial class SqlQueries
                     ELSE CompletedAt 
                 END,
                 ProcessId = @ProcessId,
-                ErrorMessage = @ErrorMessage
+                ErrorMessage = @ErrorMessage,
+                Progress = COALESCE(@Progress, Progress),
+                Result = COALESCE(@Result, Result)
             WHERE CommandId = @CommandId
               AND Status != 'Deleted';";
 
@@ -122,6 +124,18 @@ internal static partial class SqlQueries
                 Lease = NULL
             WHERE Status = 'processing'
               AND StartedAt < NOW() - (@TimeoutSeconds || ' seconds')::INTERVAL;";
+
+        internal const string UpdateProgress = @"
+            UPDATE Commands
+            SET Progress = @Progress,
+                UpdatedAt = NOW()
+            WHERE CommandId = @CommandId;";
+
+        internal const string UpdateResult = @"
+            UPDATE Commands
+            SET Result = @Result,
+                UpdatedAt = NOW()
+            WHERE CommandId = @CommandId;";
 
         internal const string GetById = @"
             SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath,
