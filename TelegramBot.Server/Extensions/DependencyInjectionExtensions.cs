@@ -67,12 +67,14 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddInfrastructureServices(this IServiceCollection services)
     {
-        _=services.AddSingleton<IUserDataService, PostgresDataService>();
-        _=services.AddSingleton<ISessionDataService, PostgresDataService>();
-        _=services.AddSingleton<ICommandDataService, PostgresDataService>();
-        _=services.AddSingleton<IMessageTrackingDataService, PostgresDataService>();
-        _=services.AddSingleton<INotificationDataService, PostgresDataService>();
-        _=services.AddSingleton<IDatabaseInitializer, PostgresDataService>();
+        _=services.AddSingleton<IUserDataService, UserDataService>();
+        _=services.AddSingleton<CommandDataService>();
+        _=services.AddSingleton<ICommandDataService>(sp => sp.GetRequiredService<CommandDataService>());
+        _=services.AddSingleton<SessionDataService>();
+        _=services.AddSingleton<ISessionDataService>(sp => sp.GetRequiredService<SessionDataService>());
+        _=services.AddSingleton<INotificationDataService>(sp => sp.GetRequiredService<SessionDataService>());
+        _=services.AddSingleton<IMessageTrackingDataService, MessageTrackingDataService>();
+        _=services.AddSingleton<IDatabaseInitializer, DatabaseInitializerService>();
         _=services.AddSingleton<FileSystemBrowser>();
 
         return services;
