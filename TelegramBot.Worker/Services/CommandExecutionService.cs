@@ -469,24 +469,46 @@ public sealed class CommandExecutionService(
         var sw = Stopwatch.StartNew();
         Process? process = null;
 
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_workerOptions.ProcessTimeoutMinutes));
+        var timeoutToken = timeoutCts.Token;
+
         try
         {
-            var commandCfg = await PrepareCommandAsync(cmd, ct);
+            var commandCfg = await PrepareCommandAsync(cmd, timeoutToken);
 
             if (commandCfg == null)
             {
                 return;
             }
 
-            process = await StartCommandProcessAsync(cmd, commandCfg, ct);
-            await WaitAndHandleProcessResultAsync(cmd, process, sw, ct);
+            process = await StartCommandProcessAsync(cmd, commandCfg, timeoutToken);
+            await WaitAndHandleProcessResultAsync(cmd, process, sw, timeoutToken);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Timeout — не shutdown
+            sw.Stop();
+
+            if (process != null && !process.HasExited)
+            {
+                logger.LogWarning("Killing timed-out process: commandId={Id}, pid={Pid}, elapsed={Elapsed:F1}s",
+                    cmd.CommandId, process.Id, sw.Elapsed.TotalSeconds);
+                process.Kill(entireProcessTree: true);
+                try { await process.WaitForExitAsync(CancellationToken.None); } catch { }
+            }
+
+            logger.LogError("Command {CommandId} ({Cmd}) timed out after {Timeout} min, elapsed={Elapsed:F1}s",
+                cmd.CommandId, cmd.CommandText, _workerOptions.ProcessTimeoutMinutes, sw.Elapsed.TotalSeconds);
+
+            await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
+                errorMessage: $"Process timed out after {_workerOptions.ProcessTimeoutMinutes} min");
+            await CompleteClaimedCommandAsync(cmd);
         }
         catch (OperationCanceledException)
         {
-            if (process == null || process.HasExited)
-            {
-                throw;
-            }
+            // Shutdown — пробрасываем
+            throw;
         }
         catch (Exception ex)
         {
@@ -560,77 +582,36 @@ public sealed class CommandExecutionService(
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        var timeoutMs = _workerOptions.ProcessTimeoutSeconds * 1000;
-        using var processTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        processTimeoutCts.CancelAfter(timeoutMs);
-
-        bool completed;
-        try
-        {
+        // Timeout управляется сверху — из ExecuteOneAsync. Здесь просто ждём завершения.
+        // Если токен отменён (timeout), OperationCanceledException уходит наверх.
 #pragma warning disable VSTHRD003
-            await process.WaitForExitAsync(processTimeoutCts.Token);
+        await process.WaitForExitAsync(ct);
 #pragma warning restore VSTHRD003
-            completed = true;
-        }
-        catch (OperationCanceledException) when (processTimeoutCts.IsCancellationRequested)
-        {
-            completed = false;
-        }
 
         LogProcessOutput(cmd, outputBuilder, errorBuilder);
 
-        var errorMessage = await GetProcessErrorMessageAsync(cmd, process, completed, sw);
-
         sw.Stop();
 
-        if (completed && process.ExitCode == 0)
+        if (process.ExitCode == 0)
         {
             _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
             logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
                 cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
             await CompleteClaimedCommandAsync(cmd);
         }
-        else if (errorMessage != null)
+        else
         {
+            var errorMessage = await GetProcessErrorMessageAsync(cmd, process, sw);
             await HandleCommandFailureAsync(cmd, errorMessage, null, sw);
         }
     }
 
-    private async Task<string?> GetProcessErrorMessageAsync(PendingCommand cmd, Process process, bool completed, Stopwatch sw)
+    private Task<string> GetProcessErrorMessageAsync(PendingCommand cmd, Process process, Stopwatch sw)
     {
-        if (!completed)
-        {
-            // VSTHRD103: Kill(entireProcessTree: true) has no async equivalent in .NET
-#pragma warning disable VSTHRD103
-            process.Kill(true);
-#pragma warning restore VSTHRD103
-            try
-            {
-                using var killTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-#pragma warning disable VSTHRD003
-                try { await process.WaitForExitAsync(killTimeout.Token); } catch (OperationCanceledException) { }
-#pragma warning restore VSTHRD003
-            }
-            catch (Exception)
-            {
-                logger.LogWarning(
-                    "Kill timeout after process timeout: commandId={Id}, pid={Pid}",
-                    cmd.CommandId, process.Id);
-            }
-
-            logger.LogWarning("Command timeout: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
-                cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
-            return $"Timeout: process exceeded {_workerOptions.ProcessTimeoutSeconds}s limit";
-        }
-
-        if (process.ExitCode != 0)
-        {
-            logger.LogWarning("Command exit: id={Id}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
-                cmd.CommandId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
-            return $"Process exited with code {process.ExitCode}";
-        }
-
-        return null;
+        var message = $"Process exited with code {process.ExitCode}";
+        logger.LogWarning("Command exit: id={Id}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
+            cmd.CommandId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
+        return Task.FromResult(message);
     }
 
     /// <summary>Валидация FilePath: существование файла, расширение, path traversal.</summary>
