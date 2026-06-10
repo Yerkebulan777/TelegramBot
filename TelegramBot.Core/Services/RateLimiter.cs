@@ -6,7 +6,7 @@ namespace TelegramBot.Core.Services;
 
 public sealed class RateLimiter
 {
-    private readonly ConcurrentDictionary<long, List<DateTime>> _requests = new();
+    private readonly ConcurrentDictionary<long, RequestWindow> _requests = new();
     private readonly int _maxRequests;
     private readonly TimeSpan _window;
 
@@ -19,13 +19,41 @@ public sealed class RateLimiter
     public bool IsAllowed(long userId)
     {
         var now = DateTime.UtcNow;
-        var timestamps = _requests.GetOrAdd(userId, static _ => []);
+        var requestWindow = _requests.GetOrAdd(userId, static _ => new RequestWindow());
 
-        lock (timestamps)
+        requestWindow.Timestamps.Enqueue(now);
+
+        if (requestWindow.Timestamps.Count > _maxRequests)
         {
-            _=timestamps.RemoveAll(t => now - t > _window);
-            timestamps.Add(now);
-            return timestamps.Count <= _maxRequests;
+            CleanupExpired(requestWindow, now);
         }
+
+        return requestWindow.Timestamps.Count <= _maxRequests;
+    }
+
+    private void CleanupExpired(RequestWindow requestWindow, DateTime now)
+    {
+        if (Interlocked.CompareExchange(ref requestWindow.CleanupInProgress, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            while (requestWindow.Timestamps.TryPeek(out var timestamp) && now - timestamp > _window)
+            {
+                _ = requestWindow.Timestamps.TryDequeue(out _);
+            }
+        }
+        finally
+        {
+            _ = Interlocked.Exchange(ref requestWindow.CleanupInProgress, 0);
+        }
+    }
+
+    private sealed class RequestWindow
+    {
+        public ConcurrentQueue<DateTime> Timestamps { get; } = new();
+        public int CleanupInProgress;
     }
 }
