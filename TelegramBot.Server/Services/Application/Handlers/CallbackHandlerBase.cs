@@ -29,5 +29,17 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
         Logger.LogWarning("Invalid {FieldName} '{Value}' from user {Username} ({UserId})", fieldName, value, username, userId);
     }
 
-
+    /// <summary>
+    /// Пытается распарсить положительный int из callback-аргумента.
+    /// При неудаче логирует через LogInvalidInput и возвращает false.
+    /// </summary>
+    protected bool TryParseId(CallbackContext context, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out int id)
+    {
+        if (!int.TryParse(context.ParsedCallback.Argument, out id) || id <= 0)
+        {
+            LogInvalidInput("ID", context.ParsedCallback.Argument, context.Username, context.UserId);
+            return false;
+        }
+        return true;
+    }
 }
