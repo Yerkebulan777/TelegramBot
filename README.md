@@ -1,7 +1,7 @@
 # Telegram Bot Server
 
 [![CI](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/ci.yml/badge.svg)](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/ci.yml)
-[![Qodana](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/qodana.yml/badge.svg)](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/qodana.yml)
+[![Qodana](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/code_quality.yml/badge.svg)](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/code_quality.yml)
 
 Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации. Задачи выполняются асинхронно через Worker-процесс с PostgreSQL-очередью (LISTEN/NOTIFY + fallback polling).
 
@@ -187,6 +187,15 @@ docker compose up -d
 1. Собирает все проекты на **Windows** (`windows-latest`) — Worker/BimLib требуют WinAPI
 2. Проверяет code style через `dotnet format --verify-no-changes`
 3. Публикует Server и Worker как артефакты сборки
+
+#### Qodana Code Quality (бесплатно)
+
+Используется **Qodana Community for .NET** (`qodana-cdnet`) — бесплатная лицензия для open source:
+
+- Основан на ReSharper (C#, VB.NET, C/C++)
+- Статический анализ: code smells, потенциальные баги, неиспользуемый код
+- `QODANA_TOKEN` не требуется — работает без регистрации в Qodana Cloud
+- Для загрузки отчётов в [Qodana Cloud](https://qodana.cloud) — добавьте `QODANA_TOKEN` secret
 
 ### Непрерывная доставка (CD) — инструкция по настройке
 
