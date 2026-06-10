@@ -1,1414 +1,878 @@
-# Документные утверждения (Doc Claims)
+# Документационные утверждения (Doc Claims)
 
-> Сгенерировано: 2026-06-09. Источники: `AGENTS.md`, `README.md`, `ROADMAP.md`, `Docs/execution-algorithm.md`, `Docs/CommandExecutionAlgorithm.md`, `Docs/qodana-setup.md`, `.github/copilot-instructions.md`.
+> Сборник проверяемых утверждений из всех файлов документации репозитория `TelegramBot`.
+> Файл предназначен для последующей сверки с фактическим кодом. Цитаты — verbatim,
+> с указанием источника `файл:строка` (или диапазона строк).
 >
-> Каждое утверждение — точная цитата (verbatim) с указанием файла и строки/диапазона. Категории: `[architecture | class-name | namespace | config-key | sql-table | sql-field | callback-prefix | command-code | dependency | build-cmd | run-cmd | other]`.
+> Категории: `architecture` | `class-name` | `namespace` | `config-key` |
+> `sql-table` | `callback-prefix` | `command-code` | `dependency` |
+> `build-cmd` | `run-cmd` | `other`
 >
-> Сверочный агент должен проверять каждое утверждение по фактическому коду/файлам.
+> ID: `AGENTS-NNN`, `README-NNN`, `ROADMAP-NNN`, `DOCS-EXEC-NNN`, `DOCS-CEA-NNN`,
+> `QODANA-NNN`, `COPILOT-NNN`.
 
 ---
 
-## AGENTS.md (AGENTS-###)
-
-### AGENTS-001 — 4 проекта, .slnx, no webhooks, no MVC, Singletons
-- **Файл:** `AGENTS.md:7`
-- **Категория:** architecture
-- **Цитата:** "Telegram bot using long-polling, split into **4 projects** (`.slnx`). No webhooks, no MVC controllers. All services are **Singletons**."
-
-### AGENTS-002 — Диаграмма зависимостей проектов (Core, Data, Server, Worker, BimLib)
-- **Файл:** `AGENTS.md:9-16`
-- **Категория:** architecture
-- **Цитата:**
-  ```
-  TelegramBot.Core   ←──  TelegramBot.Data
-         ↑                       ↑
-         ├──── TelegramBot.Server ──┘
-         │
-         └──── TelegramBot.Worker
-                  └── BimLib/ (BIM-интеграция)
-  ```
-
-### AGENTS-003 — TelegramBot.Core — назначение
-- **Файл:** `AGENTS.md:18`
-- **Категория:** architecture
-- **Цитата:** "**TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency."
-
-### AGENTS-004 — TelegramBot.Data — назначение и стек
-- **Файл:** `AGENTS.md:19`
-- **Категория:** architecture
-- **Цитата:** "**TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (4 partial files)."
-
-### AGENTS-005 — TelegramBot.Server — назначение
-- **Файл:** `AGENTS.md:20`
-- **Категория:** architecture
-- **Цитата:** "**TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data."
-
-### AGENTS-006 — TelegramBot.Worker — назначение
-- **Файл:** `AGENTS.md:21`
-- **Категория:** architecture
-- **Цитата:** "**TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Polls PostgreSQL for pending commands. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project)."
-
-### AGENTS-007 — BimLib не отдельный проект, namespace prefix
-- **Файл:** `AGENTS.md:23`
-- **Категория:** architecture
-- **Цитата:** "BimLib is **not a separate project** — it lives as a directory inside Worker (`TelegramBot.Worker/BimLib/`). Namespaces remain `TelegramBot.BimLib.*`. OpenMcdf dependency is in Worker's `.csproj`."
-
-### AGENTS-008 — Команда сборки
-- **Файл:** `AGENTS.md:31`
-- **Категория:** build-cmd
-- **Цитата:** "dotnet build TelegramBot.slnx"
-
-### AGENTS-009 — Команда запуска Server
-- **Файл:** `AGENTS.md:34`
-- **Категория:** run-cmd
-- **Цитата:** "dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj"
-
-### AGENTS-010 — Команда запуска Worker
-- **Файл:** `AGENTS.md:37`
-- **Категория:** run-cmd
-- **Цитата:** "dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj"
-
-### AGENTS-011 — Команда publish
-- **Файл:** `AGENTS.md:40`
-- **Категория:** build-cmd
-- **Цитата:** "dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release"
-
-### AGENTS-012 — Команда форматирования
-- **Файл:** `AGENTS.md:43`
-- **Категория:** build-cmd
-- **Цитата:** "dotnet format TelegramBot.slnx"
-
-### AGENTS-013 — Тесты отключены, do not run dotnet test
-- **Файл:** `AGENTS.md:46`
-- **Категория:** other
-- **Цитата:** "**Tests are intentionally disabled for this project.** Do not add test projects, do not add unit/integration tests, and do not run `dotnet test`. After making changes, verify correctness by building successfully with `dotnet build TelegramBot.slnx`."
-
-### AGENTS-014 — Server appsettings.json коммитится, содержит Serilog/FileSystem/Postgres
-- **Файл:** `AGENTS.md:54`
-- **Категория:** config-key
-- **Цитата:** "`TelegramBot.Server/appsettings.json` — committed, contains Serilog config, `FileSystem` options, and `ConnectionStrings:Postgres`"
-
-### AGENTS-015 — appsettings.Local.json gitignored
-- **Файл:** `AGENTS.md:55`
-- **Категория:** other
-- **Цитата:** "`TelegramBot.Server/appsettings.Local.json` — **gitignored**, put secrets here (bot token, local overrides)"
-
-### AGENTS-016 — Worker appsettings.json коммитится с ConnectionStrings:Postgres
-- **Файл:** `AGENTS.md:56`
-- **Категория:** config-key
-- **Цитата:** "`TelegramBot.Worker/appsettings.json` — committed, contains `ConnectionStrings:Postgres`"
-
-### AGENTS-017 — TelegramBot:Token (config key, env var)
-- **Файл:** `AGENTS.md:58`
-- **Категория:** config-key
-- **Цитата:** "`TelegramBot:Token` — bot token (also settable via env var `TelegramBot__Token`)"
-
-### AGENTS-018 — TelegramBot:AdminUserIds (long[])
-- **Файл:** `AGENTS.md:59`
-- **Категория:** config-key
-- **Цитата:** "`TelegramBot:AdminUserIds` — long[] of admin Telegram IDs (also settable via `TelegramBot__AdminUserIds__0`, `__1`, etc.)"
-
-### AGENTS-019 — FileSystem:RootPath валидируется через FileSystemOptions
-- **Файл:** `AGENTS.md:60`
-- **Категория:** config-key
-- **Цитата:** "`FileSystem:RootPath` — filesystem browser root (validated on startup via `FileSystemOptions`)"
-
-### AGENTS-020 — ConnectionStrings:Postgres default
-- **Файл:** `AGENTS.md:61`
-- **Категория:** config-key
-- **Цитата:** "`ConnectionStrings:Postgres` — PostgreSQL connection string (defaults to `\"Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres\"`)"
-
-### AGENTS-021 — RateLimit:MaxFilesPerUserPerDay
-- **Файл:** `AGENTS.md:62`
-- **Категория:** config-key
-- **Цитата:** "`RateLimit:MaxFilesPerUserPerDay` — daily per-user file quota; `0` disables it"
-
-### AGENTS-022 — Worker:CompletedSessionRetentionDays
-- **Файл:** `AGENTS.md:63`
-- **Категория:** config-key
-- **Цитата:** "`Worker:CompletedSessionRetentionDays` — auto-cleanup retention for inactive sessions; `0` disables it"
-
-### AGENTS-023 — Request flow (TelegramUpdateMapper, CommandAppService, CallbackDispatcher)
-- **Файл:** `AGENTS.md:70-78`
-- **Категория:** architecture
-- **Цитата:**
-  ```
-  Telegram API -> TelegramBotHostedService (polling)
-               -> TelegramUpdateMapper (Update -> MessageDto | CallbackQueryDto)
-               -> CommandAppService.HandleUserCommandAsync (text commands)
-                  ├── /start bypasses access check → registration or help
-                  └── other commands → BotUsers.Status must be Approved
-               -> ICallbackDispatcher -> CallbackDispatcher.DispatchAsync (inline keyboard callbacks)
-                  ├── REQACCESS/APPROVEUSER/REJECTUSER bypass access check
-                  └── all other callbacks → user must be Approved
-  ```
-
-### AGENTS-024 — REQACCESS/APPROVEUSER/REJECTUSER префиксы bypass access check
-- **Файл:** `AGENTS.md:76-77`
-- **Категория:** callback-prefix
-- **Цитата:** "REQACCESS/APPROVEUSER/REJECTUSER bypass access check" / "all other callbacks → user must be Approved"
-
-### AGENTS-025 — BimLib Windows-only, в Worker
-- **Файл:** `AGENTS.md:82`
-- **Категория:** architecture
-- **Цитата:** "BimLib is a **Windows-only** set of modules located inside the Worker project (`TelegramBot.Worker/BimLib/`). It provides BIM-related infrastructure used by `CommandExecutionService`."
-
-### AGENTS-026 — BimLib Config: BimIntegrationOptions
-- **Файл:** `AGENTS.md:88`
-- **Категория:** class-name
-- **Цитата:** "`Config/` | `BimIntegrationOptions` — min/max supported Revit version, install root path"
-
-### AGENTS-027 — BimLib Interfaces
-- **Файл:** `AGENTS.md:89`
-- **Категория:** class-name
-- **Цитата:** "`Interfaces/` | `IRevitVersionDetector`, `INavisworksPathResolver`"
-
-### AGENTS-028 — BimLib Models
-- **Файл:** `AGENTS.md:90`
-- **Категория:** class-name
-- **Цитата:** "`Models/` | `RevitDetectedVersion`, `RevitProcessHealth` (status: Healthy/NotResponding/Error)"
-
-### AGENTS-029 — BimLib Monitor
-- **Файл:** `AGENTS.md:91`
-- **Категория:** class-name
-- **Цитата:** "`Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `ProcessHealthHelper`, `DialogDismisser`, `WindowUtil`, `WindowInfo`"
-
-### AGENTS-030 — BimLib Native
-- **Файл:** `AGENTS.md:92`
-- **Категория:** class-name
-- **Цитата:** "`Native/` | P/Invoke WinAPI declarations: `User32`, `Win32Consts`"
-
-### AGENTS-031 — BimLib Services
-- **Файл:** `AGENTS.md:93`
-- **Категория:** class-name
-- **Цитата:** "`Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver`"
-
-### AGENTS-032 — RevitVersionDetector: OpenMcdf → Format: YYYY
-- **Файл:** `AGENTS.md:99`
-- **Категория:** class-name
-- **Цитата:** "`RevitVersionDetector` | Reads OLE stream `BasicFileInfo` from .rvt/.rfa via OpenMcdf to extract `Format: YYYY`"
-
-### AGENTS-033 — RevitPathResolver registry path
-- **Файл:** `AGENTS.md:100`
-- **Категория:** other
-- **Цитата:** "`RevitPathResolver` | Finds `Revit.exe` path via Windows Registry (`HKLM\\SOFTWARE\\Autodesk\\Revit\\{version}`)"
-
-### AGENTS-034 — DialogDismisser — авто-закрытие #32770
-- **Файл:** `AGENTS.md:105`
-- **Категория:** class-name
-- **Цитата:** "`DialogDismisser` | Auto-closes modal Revit dialogs (#32770) by finding and clicking known buttons"
-
-### AGENTS-035 — DI-регистрация BimLib в Worker/Program.cs (6 строк)
-- **Файл:** `AGENTS.md:108-115`
-- **Категория:** architecture
-- **Цитата:**
-  ```csharp
-  services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>();
-  services.AddSingleton<RevitPathResolver>();
-  services.AddSingleton<RevitProcessTracker>();
-  services.AddSingleton<DialogDismisser>();
-  services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>();
-  services.AddSingleton<NavisworksProcessTracker>();
-  ```
-
-### AGENTS-036 — Требуется BimIntegrationOptions config section
-- **Файл:** `AGENTS.md:116`
-- **Категория:** config-key
-- **Цитата:** "Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`."
-
-### AGENTS-037 — Namespaces BimLib
-- **Файл:** `AGENTS.md:119-124`
-- **Категория:** namespace
-- **Цитата:** "TelegramBot.BimLib.Config / Interfaces / Models / Monitor / Native / Services"
-
-### AGENTS-038 — BimLib SupportedOSPlatform("windows")
-- **Файл:** `AGENTS.md:127`
-- **Категория:** other
-- **Цитата:** "BimLib is `[SupportedOSPlatform(\"windows\")]` — never run or test on non-Windows."
-
-### AGENTS-039 — OpenMcdf 3.x API
-- **Файл:** `AGENTS.md:128`
-- **Категория:** dependency
-- **Цитата:** "OpenMcdf 3.x is used to parse OLE Structured Storage (.rvt files). API: `RootStorage.OpenRead()` → `root.OpenStream()` → `stream.Read()`."
-
-### AGENTS-040 — RevitProcessStatus 3 значения
-- **Файл:** `AGENTS.md:131`
-- **Категория:** other
-- **Цитата:** "`RevitProcessStatus` enum has only 3 values: `Healthy`, `NotResponding`, `Error`."
-
-### AGENTS-041 — Удалены интерфейсы без потребителей
-- **Файл:** `AGENTS.md:132`
-- **Категория:** class-name
-- **Цитата:** "Removed interfaces (concrete classes only): `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` — they had no consumers outside BimLib."
-
-### AGENTS-042 — ProcessHealthHelper.CheckHealth shared
-- **Файл:** `AGENTS.md:133`
-- **Категория:** class-name
-- **Цитата:** "`ProcessHealthHelper.CheckHealth()` provides shared health-check logic for both `RevitProcessTracker` and `NavisworksProcessTracker`."
-
-### AGENTS-043 — Shared static helpers: HandlerHelpers, ProcessHealthHelper, NpgsqlHelper
-- **Файл:** `AGENTS.md:138-142`
-- **Категория:** class-name
-- **Цитата:**
-  | Helper | Location | Purpose |
-  |--------|----------|---------|
-  | `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — универсальный метод для отправки reply-клавиатуры с трекингом сообщения, заменяет 3 дублированных метода |
-  | `ProcessHealthHelper` | `BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общая логика проверки здоровья процесса для Revit и Navisworks |
-  | `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` — устраняет дублирование `new NpgsqlConnection + OpenAsync` |
-
-### AGENTS-044 — Task Execution Flow (Server → PostgreSQL → Worker)
-- **Файл:** `AGENTS.md:148-168`
-- **Категория:** architecture
-- **Цитата:** Подробный flow от `SlashCommandService.ConfirmFileSelectionAsync()` через `dataService.CreateSessionWithCommandsAsync()` (INSERT INTO Commands) → `CommandExecutionService` (poll 1 мин) → `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED) → `ExecuteOneAsync` → `UpdateCommandStatusAsync` → `CompleteClaimedCommandAsync` → `NotifyCommandCompletedAsync` (NOTIFY command_completed) → `CommandNotificationService` (Server).
-
-### AGENTS-045 — In-memory счётчик _sessionRemaining (ConcurrentDictionary<int,int>)
-- **Файл:** `AGENTS.md:170-175`
-- **Категория:** architecture
-- **Цитата:** "Worker использует `ConcurrentDictionary<int, int> _sessionRemaining` как batch-local оптимизацию. При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`, при каждом выходе захваченной команды из `processing` (Done/Failed/retry) атомарно декрементится через `AddOrUpdate`."
-
-### AGENTS-046 — DI extensions, FileSystemOptions
-- **Файл:** `AGENTS.md:177`
-- **Категория:** other
-- **Цитата:** "DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `\"FileSystem\"` config section). The Worker uses `PostgresDataService` registered directly in `Program.cs`."
-
-### AGENTS-047 — Удалены интерфейсы IFileSystemBrowser, ITelegramUpdateMapper
-- **Файл:** `AGENTS.md:179`
-- **Категория:** class-name
-- **Цитата:** "**Key DI simplification:** `IFileSystemBrowser` and `ITelegramUpdateMapper` interfaces were removed — their consumers now depend on concrete types `FileSystemBrowser` and `TelegramUpdateMapper` directly (no testability requirement for these internal services)."
-
-### AGENTS-048 — Callback Handling — Chain of Responsibility
-- **Файл:** `AGENTS.md:183-187`
-- **Категория:** architecture
-- **Цитата:** "`CallbackDispatcher` (implements `ICallbackDispatcher`) routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (sorted by `Priority`, lower = first). All handlers extend `CallbackHandlerBase`."
-  "Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `CommandToggleHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100)."
-
-### AGENTS-049 — Error handling: CallbackHandlerBase не ловит исключения
-- **Файл:** `AGENTS.md:187`
-- **Категория:** architecture
-- **Цитата:** "**Error handling:** `CallbackHandlerBase.HandleAsync()` does NOT catch exceptions — they propagate to `CallbackDispatcher.DispatchAsync()`, which catches `Exception`, logs it, and continues to the next handler. This eliminates double logging."
-
-### AGENTS-050 — CallbackPrefixes и CommandCodes locations
-- **Файл:** `AGENTS.md:189`
-- **Категория:** class-name
-- **Цитата:** "Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Models/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`."
-
-### AGENTS-051 — SessionManagementHandler callback prefixes
-- **Файл:** `AGENTS.md:191`
-- **Категория:** callback-prefix
-- **Цитата:** "**SessionManagementHandler** manages `/status` actions via `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, and `CONFIRMDELETECOMMAND:`. Delete buttons first show a confirmation dialog; the «⛔ Отменить» button for a running command uses the same soft-delete path as command deletion: `Status = 'Deleted'`."
-
-### AGENTS-052 — MarkdownHelper location
-- **Файл:** `AGENTS.md:193`
-- **Категория:** class-name
-- **Цитата:** "For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`."
-
-### AGENTS-053 — 4 таблицы БД, soft-delete only
-- **Файл:** `AGENTS.md:197`
-- **Категория:** sql-table
-- **Цитата:** "Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking is fully DB-backed — no in-memory state. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`. Worker auto-cleanup also uses soft-delete for inactive sessions older than `Worker:CompletedSessionRetentionDays`."
-
-### AGENTS-054 — Sessions.ProjectName TEXT
-- **Файл:** `AGENTS.md:199-200`
-- **Категория:** sql-field
-- **Цитата:** "**`Sessions` table now includes `ProjectName TEXT`** — имя проекта записывается при создании сессии, отображается в `/status` и в уведомлениях о завершении."
-
-### AGENTS-055 — GetCommandStatusAsync removed
-- **Файл:** `AGENTS.md:202-203`
-- **Категория:** class-name
-- **Цитата:** "**`GetCommandStatusAsync` removed** — was dead code. Deleted commands never appear as `'pending'` in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant."
-
-### AGENTS-056 — CountPendingProcessingBySessionAsync added
-- **Файл:** `AGENTS.md:205-207`
-- **Категория:** class-name
-- **Цитата:** "**`CountPendingProcessingBySessionAsync` added** — используется в `CompleteClaimedCommandAsync` для проверки, не осталось ли ещё pending/processing команд в БД (корректно обрабатывает случай, когда команд в сессии > DefaultBatchSize)."
-
-### AGENTS-057 — DB init: InitializeDatabaseAsync, SeedAdminUsersAsync
-- **Файл:** `AGENTS.md:209`
-- **Категория:** architecture
-- **Цитата:** "Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`. All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). SQL constants in `TelegramBot.Data/Sql/` (4 partial files total)."
-
-### AGENTS-058 — Target framework .NET 10
-- **Файл:** `AGENTS.md:218`
-- **Категория:** other
-- **Цитата:** "**Target framework**: .NET 10 (`net10.0`)"
-
-### AGENTS-059 — Nullable reference types
-- **Файл:** `AGENTS.md:219`
-- **Категория:** other
-- **Цитата:** "**Nullable reference types**: enabled — always annotate nullability (`string?`, `T?`)"
-
-### AGENTS-060 — Implicit usings
-- **Файл:** `AGENTS.md:220`
-- **Категория:** other
-- **Цитата:** "**Implicit usings**: enabled — do not add `using System;` etc. unless needed beyond the implicit set"
-
-### AGENTS-061 — File-scoped namespaces
-- **Файл:** `AGENTS.md:221`
-- **Категория:** other
-- **Цитата:** "**File-scoped namespaces** required: `namespace TelegramBot.Core.Models;`"
-
-### AGENTS-062 — Primary constructors (C# 12)
-- **Файл:** `AGENTS.md:222`
-- **Категория:** other
-- **Цитата:** "**Primary constructors** (C# 12) are used in newer services; either style is acceptable but be consistent within a file"
-
-### AGENTS-063 — Naming conventions
-- **Файл:** `AGENTS.md:226-235`
-- **Категория:** other
-- **Цитата:** Classes `PascalCase`, Interfaces `I` + `PascalCase`, Methods `PascalCase`, Async suffix `Async`, Private fields `_camelCase`, Properties `PascalCase`, Locals `camelCase`, Parameters `camelCase`.
-
-### AGENTS-064 — Namespace conventions
-- **Файл:** `AGENTS.md:239-243`
-- **Категория:** namespace
-- **Цитата:**
-  - `TelegramBot.Core.Models`, `TelegramBot.Core.DTOs`, `TelegramBot.Core.Interfaces`, `TelegramBot.Core.Config`, `TelegramBot.Core.Constants`
-  - `TelegramBot.Data`
-  - `TelegramBot.Server.Services.Application`, `TelegramBot.Server.Services.Infrastructure.Telegram`, `TelegramBot.Server.Helpers`
-  - `TelegramBot.Worker.Services`
-
-### AGENTS-065 — Imports order
-- **Файл:** `AGENTS.md:247-248`
-- **Категория:** other
-- **Цитата:** "Order: framework namespaces, then third-party (`Dapper`, `Npgsql`, `Serilog`, `Telegram.Bot`), then project-internal (`TelegramBot.*`)"
-
-### AGENTS-066 — DI register as Singletons
-- **Файл:** `AGENTS.md:253`
-- **Категория:** other
-- **Цитата:** "Register all new services as **Singletons** in `DependencyInjectionExtensions.cs`"
-
-### AGENTS-067 — DI fluent return discarded
-- **Файл:** `AGENTS.md:254`
-- **Категория:** other
-- **Цитата:** "Use `_ = services.AddSingleton<IFoo, Foo>()` (discard the fluent return value)"
-
-### AGENTS-068 — Primary constructors: не дублировать поля
-- **Файл:** `AGENTS.md:255-271`
-- **Категория:** other
-- **Цитата:** "Inject dependencies via **primary constructors** (C# 12). Parameters are captured automatically — do NOT add redundant `private readonly` fields for direct copies." + примеры ✅/❌.
-
-### AGENTS-069 — Async conventions
-- **Файл:** `AGENTS.md:276-279`
-- **Категория:** other
-- **Цитата:** "All async methods return `Task` or `Task<T>` — never `async void`"; "Always suffix async methods with `Async`"; "Do **not** use `ConfigureAwait(false)` — this is an application, not a library"; "CancellationToken is threaded from `BackgroundService.ExecuteAsync`; inner methods generally do not require it unless doing I/O loops"
-
-### AGENTS-070 — Error handling rules
-- **Файл:** `AGENTS.md:282-289`
-- **Категория:** other
-- **Цитата:** "Startup: wrapped in `try/catch` with `Log.Fatal` in `Program.cs` — do not remove"; "Telegram API calls: catch `ApiRequestException` specifically, log as `LogWarning`, let the bot continue"; "`TelegramOutputService` has retry logic for HTTP 429 (rate limiting) via `ExecuteWithRetryAsync`"; "Do not swallow unknown exceptions — log at `LogError` or rethrow"; "Callback exceptions: `CallbackDispatcher` catches + logs; **`CallbackHandlerBase` does not** (no double logging)"; "Worker: outer retry loop reconnects on PostgreSQL connection loss (5 sec delay)"
-
-### AGENTS-071 — Logging: ILogger<T>, structured logging
-- **Файл:** `AGENTS.md:293-298`
-- **Категория:** other
-- **Цитата:** "Use `ILogger<T>` injected via constructor (Serilog backs it)"; "Use structured logging with message templates — **not** string interpolation"
-
-### AGENTS-072 — UserSession locks pattern
-- **Файл:** `AGENTS.md:302`
-- **Категория:** other
-- **Цитата:** "`UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`) — follow this pattern for new mutable state"
-
-### AGENTS-073 — Paths in callback data directly (no PathMap)
-- **Файл:** `AGENTS.md:303`
-- **Категория:** other
-- **Цитата:** "Paths in callback data are passed directly (no `PathMap`/tokens) since v1.1 refactoring"
-
-### AGENTS-074 — Dapper only, no raw NpgsqlCommand
-- **Файл:** `AGENTS.md:309`
-- **Категория:** other
-- **Цитата:** "Use **Dapper** for all queries (no raw `NpgsqlCommand`/`NpgsqlDataReader`)"
-
-### AGENTS-075 — SQL conventions
-- **Файл:** `AGENTS.md:310-316`
-- **Категория:** other
-- **Цитата:** "SQL statements go in verbatim string literals (`@\"...\"`)"; "Use parameterized queries — never string-concatenate user input into SQL"; "Soft-delete only: `SET Status = 'Deleted'`, never `DELETE FROM`"; "For transactions, use `conn.BeginTransactionAsync()`"; "Use `RETURNING` clause for INSERT to get generated IDs (not `last_insert_rowid()`)"; "Use `ON CONFLICT DO NOTHING / DO UPDATE` for upserts (not `INSERT OR IGNORE/REPLACE`)"; "PostgreSQL data types: `TIMESTAMPTZ` for dates, `SERIAL` for auto-increment, `BIGINT` for user IDs"
-
-### AGENTS-076 — Telegram messages parse modes
-- **Файл:** `AGENTS.md:320-322`
-- **Категория:** other
-- **Цитата:** "Plain messages: `ParseMode.MarkdownV2` — escape special characters with `MarkdownHelper.EscapeMarkdownV2()`"; "Messages with inline keyboards: `ParseMode.Markdown` — escape with `MarkdownHelper.EscapeMarkdown()`"; "Do not mix the two parse modes"
-
-### AGENTS-077 — Required keyword на моделях
-- **Файл:** `AGENTS.md:328`
-- **Категория:** other
-- **Цитата:** "Use `required` keyword on model properties that must always be set"
-
-### AGENTS-078 — dotnet format IDE0005 для unused usings
-- **Файл:** `AGENTS.md:332`
-- **Категория:** build-cmd
-- **Цитата:** "Use `dotnet format --diagnostics IDE0005` to remove unused `using` directives"
-
-### AGENTS-079 — .editorconfig с generated_code markers
-- **Файл:** `AGENTS.md:338`
-- **Категория:** other
-- **Цитата:** "`.editorconfig` exists with naming rules, formatting preferences, and `generated_code = true` markers for data service and handlers — `dotnet format` respects these"
-
-### AGENTS-080 — Нет CI/CD, только dotnet build
-- **Файл:** `AGENTS.md:339`
-- **Категория:** other
-- **Цитата:** "No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`"
-
-### AGENTS-081 — Секреты в appsettings.Local.json или env
-- **Файл:** `AGENTS.md:340`
-- **Категория:** other
-- **Цитата:** "Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens"
-
-### AGENTS-082 — Дефолтные postgres/postgres credentials
-- **Файл:** `AGENTS.md:341`
-- **Категория:** config-key
-- **Цитата:** "PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`"
-
-### AGENTS-083 — Stale /// <inheritdoc/> на конкретных классах
-- **Файл:** `AGENTS.md:342`
-- **Категория:** other
-- **Цитата:** "`/// <inheritdoc/>` comments on methods that no longer implement interfaces (e.g., `RevitPathResolver`, `RevitProcessTracker`) are stale but harmless — replace with proper `<summary>` when editing nearby"
+## AGENTS.md (412 строк, 1 файл)
+
+### Структура проекта (architecture / class-name / namespace)
+
+- **AGENTS-001** — [AGENTS.md:7] `Telegram bot using long-polling, split into **4 projects** (`.slnx`). No webhooks, no MVC controllers. All services are **Singletons**.` — category: architecture
+- **AGENTS-002** — [AGENTS.md:18] `**TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.` — category: architecture
+- **AGENTS-003** — [AGENTS.md:19] `**TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).` — category: architecture
+- **AGENTS-004** — [AGENTS.md:20] `**TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.` — category: architecture
+- **AGENTS-005** — [AGENTS.md:21] `**TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Polls PostgreSQL for pending commands. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).` — category: architecture
+- **AGENTS-006** — [AGENTS.md:23] `**Note:** BimLib is **not a separate project** — it lives as a directory inside Worker (`TelegramBot.Worker/BimLib/`). Namespaces remain `TelegramBot.BimLib.*`. OpenMcdf dependency is in Worker's `.csproj`.` — category: architecture
+- **AGENTS-007** — [AGENTS.md:134] `BimLib is **not a separate project** — it lives as a directory inside Worker. No `TelegramBot.BimLib.csproj` exists.` — category: architecture
+
+### Build & Run команды (build-cmd / run-cmd)
+
+- **AGENTS-008** — [AGENTS.md:31] `dotnet build TelegramBot.slnx` — category: build-cmd
+- **AGENTS-009** — [AGENTS.md:34] `dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj` — category: run-cmd
+- **AGENTS-010** — [AGENTS.md:37] `dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj` — category: run-cmd
+- **AGENTS-011** — [AGENTS.md:40] `dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release` — category: build-cmd
+- **AGENTS-012** — [AGENTS.md:43] `dotnet format TelegramBot.slnx` — category: build-cmd
+- **AGENTS-013** — [AGENTS.md:46] `**Tests are intentionally disabled for this project.** Do not add test projects, do not add unit/integration tests, and do not run `dotnet test`.` — category: other
+- **AGENTS-014** — [AGENTS.md:46] `After making changes, verify correctness by building successfully with `dotnet build TelegramBot.slnx`.` — category: build-cmd
+
+### Конфигурация (config-key / architecture)
+
+- **AGENTS-015** — [AGENTS.md:54] `TelegramBot.Server/appsettings.json` — committed, contains Serilog config, `FileSystem` options, and `ConnectionStrings:Postgres`` — category: config-key
+- **AGENTS-016** — [AGENTS.md:55] `TelegramBot.Server/appsettings.Local.json` — **gitignored**, put secrets here (bot token, local overrides)` — category: config-key
+- **AGENTS-017** — [AGENTS.md:56] `TelegramBot.Worker/appsettings.json` — committed, contains `ConnectionStrings:Postgres`` — category: config-key
+- **AGENTS-018** — [AGENTS.md:58] `TelegramBot:Token` — bot token (also settable via env var `TelegramBot__Token`)` — category: config-key
+- **AGENTS-019** — [AGENTS.md:59] `TelegramBot:AdminUserIds` — long[] of admin Telegram IDs (also settable via `TelegramBot__AdminUserIds__0`, `__1`, etc.)` — category: config-key
+- **AGENTS-020** — [AGENTS.md:60] `FileSystem:RootPath` — filesystem browser root (validated on startup via `FileSystemOptions`)` — category: config-key
+- **AGENTS-021** — [AGENTS.md:61] `ConnectionStrings:Postgres` — PostgreSQL connection string (defaults to `"Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"`)` — category: config-key
+- **AGENTS-022** — [AGENTS.md:62] `RateLimit:MaxFilesPerUserPerDay` — daily per-user file quota; `0` disables it` — category: config-key
+- **AGENTS-023** — [AGENTS.md:63] `Worker:CompletedSessionRetentionDays` — auto-cleanup retention for inactive sessions; `0` disables it` — category: config-key
+
+### Архитектура request flow (architecture / class-name)
+
+- **AGENTS-024** — [AGENTS.md:70] `Telegram API -> TelegramBotHostedService (polling)` — category: class-name
+- **AGENTS-025** — [AGENTS.md:71] `-> TelegramUpdateMapper (Update -> MessageDto | CallbackQueryDto)` — category: class-name
+- **AGENTS-026** — [AGENTS.md:72] `-> CommandAppService.HandleUserCommandAsync (text commands)` — category: class-name
+- **AGENTS-027** — [AGENTS.md:73] `├── /start bypasses access check → registration or help` — category: architecture
+- **AGENTS-028** — [AGENTS.md:74] `└── other commands → BotUsers.Status must be Approved` — category: architecture
+- **AGENTS-029** — [AGENTS.md:75] `-> ICallbackDispatcher -> CallbackDispatcher.DispatchAsync (inline keyboard callbacks)` — category: class-name
+- **AGENTS-030** — [AGENTS.md:76] `├── REQACCESS/APPROVEUSER/REJECTUSER bypass access check` — category: callback-prefix
+- **AGENTS-031** — [AGENTS.md:77] `└── all other callbacks → user must be Approved` — category: architecture
+
+### BimLib (architecture / class-name / namespace)
+
+- **AGENTS-032** — [AGENTS.md:82] `BimLib is a **Windows-only** set of modules located inside the Worker project (`TelegramBot.Worker/BimLib/`).` — category: architecture
+- **AGENTS-033** — [AGENTS.md:88] `| `Config/` | `BimIntegrationOptions` — min/max supported Revit version, install root path |` — category: class-name
+- **AGENTS-034** — [AGENTS.md:89] `| `Interfaces/` | `IRevitVersionDetector`, `INavisworksPathResolver` |` — category: class-name
+- **AGENTS-035** — [AGENTS.md:90] `| `Models/` | `RevitDetectedVersion`, `RevitProcessHealth` (status: Healthy/NotResponding/Error) |` — category: class-name
+- **AGENTS-036** — [AGENTS.md:91] `| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `ProcessHealthHelper`, `DialogDismisser`, `WindowUtil`, `WindowInfo` |` — category: class-name
+- **AGENTS-037** — [AGENTS.md:92] `| `Native/` | P/Invoke WinAPI declarations: `User32`, `Win32Consts` |` — category: class-name
+- **AGENTS-038** — [AGENTS.md:93] `| `Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver` |` — category: class-name
+- **AGENTS-039** — [AGENTS.md:99] `| `RevitVersionDetector` | Reads OLE stream `BasicFileInfo` from .rvt/.rfa via OpenMcdf to extract `Format: YYYY` |` — category: class-name
+- **AGENTS-040** — [AGENTS.md:100] `| `RevitPathResolver` | Finds `Revit.exe` path via Windows Registry (`HKLM\SOFTWARE\Autodesk\Revit\{version}`) |` — category: class-name
+- **AGENTS-041** — [AGENTS.md:101] `| `NavisworksPathResolver` | Finds `Navisworks.exe`/`FileConvert.exe` via Windows Registry |` — category: class-name
+- **AGENTS-042** — [AGENTS.md:102] `| `RevitProcessTracker` | Monitors Revit processes: responsiveness, dialog dismissal, PID tracking (uses `ProcessHealthHelper`) |` — category: class-name
+- **AGENTS-043** — [AGENTS.md:103] `| `NavisworksProcessTracker` | Monitors Navisworks processes (Roamer, FileConvert) (uses `ProcessHealthHelper`) |` — category: class-name
+- **AGENTS-044** — [AGENTS.md:104] `| `ProcessHealthHelper` | Static helper for `CheckHealth()` — shared between both process trackers |` — category: class-name
+- **AGENTS-045** — [AGENTS.md:105] `| `DialogDismisser` | Auto-closes modal Revit dialogs (#32770) by finding and clicking known buttons |` — category: class-name
+- **AGENTS-046** — [AGENTS.md:109-114] `services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>(); services.AddSingleton<RevitPathResolver>(); services.AddSingleton<RevitProcessTracker>(); services.AddSingleton<DialogDismisser>(); services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>(); services.AddSingleton<NavisworksProcessTracker>();` — category: architecture
+- **AGENTS-047** — [AGENTS.md:116] `Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.` — category: config-key
+- **AGENTS-048** — [AGENTS.md:119-124] `Namespaces: TelegramBot.BimLib.Config, TelegramBot.BimLib.Interfaces, TelegramBot.BimLib.Models, TelegramBot.BimLib.Monitor, TelegramBot.BimLib.Native, TelegramBot.BimLib.Services` — category: namespace
+- **AGENTS-049** — [AGENTS.md:127] `BimLib is `[SupportedOSPlatform("windows")]` — never run or test on non-Windows.` — category: dependency
+- **AGENTS-050** — [AGENTS.md:128] `OpenMcdf 3.x is used to parse OLE Structured Storage (.rvt files). API: `RootStorage.OpenRead()` → `root.OpenStream()` → `stream.Read()`.` — category: dependency
+- **AGENTS-051** — [AGENTS.md:129] `Registry access uses `Microsoft.Win32.Registry` — only works on Windows.` — category: dependency
+- **AGENTS-052** — [AGENTS.md:131] `RevitProcessStatus` enum has only 3 values: `Healthy`, `NotResponding`, `Error`.` — category: class-name
+- **AGENTS-053** — [AGENTS.md:132] `Removed interfaces (concrete classes only): `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` — they had no consumers outside BimLib.` — category: class-name
+
+### Shared Static Helpers (class-name)
+
+- **AGENTS-054** — [AGENTS.md:140] `| `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — универсальный метод |` — category: class-name
+- **AGENTS-055** — [AGENTS.md:142] `| `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` |` — category: class-name
+- **AGENTS-056** — [AGENTS.md:143] `| `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` |` — category: class-name
+
+### Constants (class-name / callback-prefix / command-code)
+
+- **AGENTS-057** — [AGENTS.md:149] `All constants are located in `TelegramBot.Core/Constants/`.` — category: namespace
+- **AGENTS-058** — [AGENTS.md:153] `| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`, `SessionDetails`, `DeleteSession`, `RequestAccess`, etc. |` — category: callback-prefix
+- **AGENTS-059** — [AGENTS.md:154] `| `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |` — category: command-code
+- **AGENTS-060** — [AGENTS.md:155] `| `Statuses.cs` | Entity statuses | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses`, `ActiveStatuses` |` — category: class-name
+- **AGENTS-061** — [AGENTS.md:156] `| `CommandPriorities.cs` | Worker queue priority levels | `Critical`, `High`, `Medium`, `Low`, `Default` |` — category: class-name
+- **AGENTS-062** — [AGENTS.md:157] `| `ButtonTexts.cs` | Reply keyboard button labels | `Apply`, `Confirm`, `Cancel` |` — category: class-name
+- **AGENTS-063** — [AGENTS.md:160] `All callback prefixes end with `:` (colon) for data concatenation` — category: callback-prefix
+- **AGENTS-064** — [AGENTS.md:161] `Statuses.FinalStatuses` includes `Done`, `Failed`, `Deleted`` — category: class-name
+- **AGENTS-065** — [AGENTS.md:162] `Statuses.ActiveStatuses` includes `Pending`, `Processing`` — category: class-name
+- **AGENTS-066** — [AGENTS.md:163] `Command codes match callback prefix names (e.g., `CommandCodes.Pdf` = `"PDF"`, `CallbackPrefixes.Pdf` = `"PDF:"`)` — category: callback-prefix
+- **AGENTS-067** — [AGENTS.md:166] `Deprecated: `CommandStatuses.cs` — use `Statuses` instead. The old class is marked `[Obsolete]` but still works for backward compatibility.` — category: class-name
+
+### Task execution flow (architecture / class-name / sql-table)
+
+- **AGENTS-068** — [AGENTS.md:173] `SlashCommandService.ConfirmFileSelectionAsync()` — category: class-name
+- **AGENTS-069** — [AGENTS.md:175] `├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Commands (ProjectName)` — category: class-name
+- **AGENTS-070** — [AGENTS.md:179] `LISTEN/NOTIFY new_tasks (мгновенная реакция) + fallback polling (5 мин)` — category: architecture
+- **AGENTS-071** — [AGENTS.md:180] `dataService.ClaimPendingCommandsAsync() -- FOR UPDATE SKIP LOCKED` — category: class-name
+- **AGENTS-072** — [AGENTS.md:182] `dataService.UpdateCommandStatusAsync() -- UPDATE Status='Done'/'Failed'` — category: class-name
+- **AGENTS-073** — [AGENTS.md:183] `CompleteClaimedCommandAsync() -- декремент batch-счётчика + проверка финальности по БД` — category: class-name
+- **AGENTS-074** — [AGENTS.md:184] `└── dataService.NotifyCommandCompletedAsync() -- NOTIFY command_completed` — category: class-name
+- **AGENTS-075** — [AGENTS.md:188] `CommandNotificationService (Server)` — category: class-name
+- **AGENTS-076** — [AGENTS.md:189] `Получает NOTIFY → парсит payload (UserId|SessionId|Done|Total|ProjectName)` — category: architecture
+- **AGENTS-077** — [AGENTS.md:195] `Worker использует `ConcurrentDictionary<int, int> _sessionRemaining`` — category: class-name
+- **AGENTS-078** — [AGENTS.md:201] `DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.` — category: namespace
+- **AGENTS-079** — [AGENTS.md:201] `The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section).` — category: config-key
+- **AGENTS-080** — [AGENTS.md:201] `The Worker uses `PostgresDataService` registered directly in `Program.cs`.` — category: class-name
+- **AGENTS-081** — [AGENTS.md:203] `IFileSystemBrowser` and `ITelegramUpdateMapper` interfaces were removed — their consumers now depend on concrete types `FileSystemBrowser` and `TelegramUpdateMapper` directly` — category: class-name
+
+### Callback Handling (callback-prefix / class-name)
+
+- **AGENTS-082** — [AGENTS.md:207] `CallbackDispatcher` (implements `ICallbackDispatcher`) routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (sorted by `Priority`, lower = first). All handlers extend `CallbackHandlerBase`.` — category: class-name
+- **AGENTS-083** — [AGENTS.md:209] `Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `CommandToggleHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).` — category: class-name
+- **AGENTS-084** — [AGENTS.md:211] `CallbackHandlerBase.HandleAsync()` does NOT catch exceptions — they propagate to `CallbackDispatcher.DispatchAsync()`, which catches `Exception`, logs it, and continues to the next handler.` — category: architecture
+- **AGENTS-085** — [AGENTS.md:213] `Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`.` — category: class-name
+- **AGENTS-086** — [AGENTS.md:215] `SessionManagementHandler` manages `/status` actions via `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, and `CONFIRMDELETECOMMAND:`. Delete buttons first show a confirmation dialog` — category: callback-prefix
+- **AGENTS-087** — [AGENTS.md:215] `the «⛔ Отменить» button for a running command uses the same soft-delete path as command deletion: `Status = 'Deleted'`.` — category: architecture
+- **AGENTS-088** — [AGENTS.md:217] `For Markdown escaping, use `MarkdownHelper` from `TelegramBot.Server/Helpers/`.` — category: class-name
+
+### Database (sql-table / class-name)
+
+- **AGENTS-089** — [AGENTS.md:221] `Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`.` — category: sql-table
+- **AGENTS-090** — [AGENTS.md:221] `Message tracking is fully DB-backed — no in-memory state.` — category: architecture
+- **AGENTS-091** — [AGENTS.md:221] `Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`.` — category: architecture
+- **AGENTS-092** — [AGENTS.md:221] `Worker auto-cleanup also uses soft-delete for inactive sessions older than `Worker:CompletedSessionRetentionDays`.` — category: architecture
+- **AGENTS-093** — [AGENTS.md:223] `Commands` table includes `Partition` field — partition threshold для priority-based пулов процессов.` — category: sql-table
+- **AGENTS-094** — [AGENTS.md:225-226] `Sessions` table now includes `ProjectName TEXT` — имя проекта записывается при создании сессии, отображается в `/status` и в уведомлениях о завершении.` — category: sql-table
+- **AGENTS-095** — [AGENTS.md:228-229] `GetCommandStatusAsync` removed — was dead code. Deleted commands never appear as `'pending'` in `ClaimPendingCommandsAsync`` — category: class-name
+- **AGENTS-096** — [AGENTS.md:231-233] `CountPendingProcessingBySessionAsync` added — используется в `CompleteClaimedCommandAsync` для проверки, не осталось ли ещё pending/processing команд в БД` — category: class-name
+- **AGENTS-097** — [AGENTS.md:235] `Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.` — category: architecture
+- **AGENTS-098** — [AGENTS.md:236] `All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`).` — category: class-name
+- **AGENTS-099** — [AGENTS.md:236] `Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns).` — category: class-name
+- **AGENTS-100** — [AGENTS.md:236] `SQL constants in `TelegramBot.Data/Sql/` (5 partial files total: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).` — category: namespace
+
+### C# Language Features (other)
+
+- **AGENTS-101** — [AGENTS.md:244] `Target framework: .NET 10 (`net10.0`)` — category: dependency
+- **AGENTS-102** — [AGENTS.md:245] `Nullable reference types: enabled — always annotate nullability (`string?`, `T?`)` — category: other
+- **AGENTS-103** — [AGENTS.md:246] `Implicit usings: enabled — do not add `using System;` etc. unless needed beyond the implicit set` — category: other
+- **AGENTS-104** — [AGENTS.md:247] `File-scoped namespaces` required: `namespace TelegramBot.Core.Models;`` — category: other
+- **AGENTS-105** — [AGENTS.md:248] `Primary constructors` (C# 12) are used in newer services` — category: other
+
+### Naming Conventions (other)
+
+- **AGENTS-106** — [AGENTS.md:254] `Classes: PascalCase — CommandAppService` — category: other
+- **AGENTS-107** — [AGENTS.md:255] `Interfaces: I + PascalCase — IDataService` — category: other
+- **AGENTS-108** — [AGENTS.md:256] `Methods: PascalCase — HandleCallbackAsync` — category: other
+- **AGENTS-109** — [AGENTS.md:257] `Async methods: suffix Async — InitializeDatabaseAsync` — category: other
+- **AGENTS-110** — [AGENTS.md:258] `Private fields: _camelCase — _logger, _sessionManager` — category: other
+- **AGENTS-111** — [AGENTS.md:259] `Properties: PascalCase — SelectedFiles, CurrentPath` — category: other
+- **AGENTS-112** — [AGENTS.md:260] `Local variables: camelCase — chatId, sessionId` — category: other
+- **AGENTS-113** — [AGENTS.md:261] `Parameters: camelCase — userId, cancellationToken` — category: other
+
+### Namespace Conventions (namespace)
+
+- **AGENTS-114** — [AGENTS.md:266] `TelegramBot.Core.Models, TelegramBot.Core.DTOs, TelegramBot.Core.Interfaces, TelegramBot.Core.Config, TelegramBot.Core.Constants` — category: namespace
+- **AGENTS-115** — [AGENTS.md:267] `TelegramBot.Data` — category: namespace
+- **AGENTS-116** — [AGENTS.md:268] `TelegramBot.Server.Services.Application, TelegramBot.Server.Services.Infrastructure.Telegram, TelegramBot.Server.Helpers` — category: namespace
+- **AGENTS-117** — [AGENTS.md:269] `TelegramBot.Worker.Services` — category: namespace
+
+### Imports / Using Directives (other)
+
+- **AGENTS-118** — [AGENTS.md:273] `Place `using` directives at the top of the file, before the namespace` — category: other
+- **AGENTS-119** — [AGENTS.md:274] `Order: framework namespaces, then third-party (`Dapper`, `Npgsql`, `Serilog`, `Telegram.Bot`), then project-internal (`TelegramBot.*`)` — category: other
+
+### Dependency Injection (architecture / other)
+
+- **AGENTS-120** — [AGENTS.md:279] `Register all new services as **Singletons** in `DependencyInjectionExtensions.cs`` — category: architecture
+- **AGENTS-121** — [AGENTS.md:280] `Use `_ = services.AddSingleton<IFoo, Foo>()` (discard the fluent return value)` — category: other
+- **AGENTS-122** — [AGENTS.md:281-294] `Inject dependencies via **primary constructors** (C# 12). Parameters are captured automatically — do NOT add redundant `private readonly` fields for direct copies` — category: other
+- **AGENTS-123** — [AGENTS.md:295-297] `Fields that **transform** parameters are fine: `private readonly FileSystemOptions _options = options.Value;` ... Fields that create **new instances** are fine: `private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();`` — category: other
+- **AGENTS-124** — [AGENTS.md:298] `New callback handlers: implement `ICallbackHandler`, extend `CallbackHandlerBase`, register in `AddCallbackHandlers()`` — category: other
+
+### Async / Await (other)
+
+- **AGENTS-125** — [AGENTS.md:302] `All async methods return `Task` or `Task<T>` — never `async void`` — category: other
+- **AGENTS-126** — [AGENTS.md:303] `Always suffix async methods with `Async`` — category: other
+- **AGENTS-127** — [AGENTS.md:304] `Do **not** use `ConfigureAwait(false)` — this is an application, not a library` — category: other
+- **AGENTS-128** — [AGENTS.md:305] `CancellationToken` is threaded from `BackgroundService.ExecuteAsync`; inner methods generally do not require it unless doing I/O loops` — category: other
+
+### Error Handling (other)
+
+- **AGENTS-129** — [AGENTS.md:309] `Startup: wrapped in `try/catch` with `Log.Fatal` in `Program.cs` — do not remove` — category: other
+- **AGENTS-130** — [AGENTS.md:310] `Telegram API calls: catch `ApiRequestException` specifically, log as `LogWarning`, let the bot continue` — category: other
+- **AGENTS-131** — [AGENTS.md:311] `TelegramOutputService` has retry logic for HTTP 429 (rate limiting) via `ExecuteWithRetryAsync`` — category: class-name
+- **AGENTS-132** — [AGENTS.md:314] `Callback exceptions: `CallbackDispatcher` catches + logs; **`CallbackHandlerBase` does not** (no double logging)` — category: other
+- **AGENTS-133** — [AGENTS.md:315] `Worker: outer retry loop reconnects on PostgreSQL connection loss (5 sec delay)` — category: other
+
+### Logging (other)
+
+- **AGENTS-134** — [AGENTS.md:319] `Use `ILogger<T>` injected via constructor (Serilog backs it)` — category: dependency
+- **AGENTS-135** — [AGENTS.md:320-323] `Use structured logging with message templates — **not** string interpolation` — category: other
+- **AGENTS-136** — [AGENTS.md:324] `Log levels: `LogDebug` for diagnostics, `LogInformation` for normal flow, `LogWarning` for recoverable issues, `LogError` / `Log.Fatal` for failures` — category: other
+
+### Collections & Thread Safety (other)
+
+- **AGENTS-137** — [AGENTS.md:328] `UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`) — follow this pattern for new mutable state` — category: class-name
+- **AGENTS-138** — [AGENTS.md:329] `Paths in callback data are passed directly (no `PathMap`/tokens) since v1.1 refactoring` — category: other
+- **AGENTS-139** — [AGENTS.md:330] `For new shared dictionaries, prefer `ConcurrentDictionary<,>`` — category: other
+
+### SQL / Data Access (other / sql-table)
+
+- **AGENTS-140** — [AGENTS.md:334] `Use `await using var conn = await CreateConnectionAsync()` — connection creation is unified via a private helper in `PostgresDataService`` — category: other
+- **AGENTS-141** — [AGENTS.md:335] `Use **Dapper** for all queries (no raw `NpgsqlCommand`/`NpgsqlDataReader`)` — category: dependency
+- **AGENTS-142** — [AGENTS.md:336] `SQL statements go in verbatim string literals (`@"..."`)` — category: other
+- **AGENTS-143** — [AGENTS.md:337] `Use parameterized queries — never string-concatenate user input into SQL` — category: other
+- **AGENTS-144** — [AGENTS.md:338] `Soft-delete only: `SET Status = 'Deleted'`, never `DELETE FROM`` — category: other
+- **AGENTS-145** — [AGENTS.md:339] `For transactions, use `conn.BeginTransactionAsync()`` — category: other
+- **AGENTS-146** — [AGENTS.md:340] `Use `RETURNING` clause for INSERT to get generated IDs (not `last_insert_rowid()`)` — category: other
+- **AGENTS-147** — [AGENTS.md:341] `Use `ON CONFLICT DO NOTHING / DO UPDATE` for upserts (not `INSERT OR IGNORE/REPLACE`)` — category: other
+- **AGENTS-148** — [AGENTS.md:342] `PostgreSQL data types: `TIMESTAMPTZ` for dates, `SERIAL` for auto-increment, `BIGINT` for user IDs` — category: sql-table
+
+### Telegram Messages (other)
+
+- **AGENTS-149** — [AGENTS.md:346] `Plain messages: `ParseMode.MarkdownV2` — escape special characters with `MarkdownHelper.EscapeMarkdownV2()`` — category: other
+- **AGENTS-150** — [AGENTS.md:347] `Messages with inline keyboards: `ParseMode.Markdown` — escape with `MarkdownHelper.EscapeMarkdown()`` — category: other
+- **AGENTS-151** — [AGENTS.md:348] `Do not mix the two parse modes` — category: other
+- **AGENTS-152** — [AGENTS.md:349] `All Telegram API methods must be current — do not use deprecated approaches` — category: other
+
+### General (other)
+
+- **AGENTS-153** — [AGENTS.md:353] `XML doc comments (`/// <summary>`) on new interface methods` — category: other
+- **AGENTS-154** — [AGENTS.md:354] `Use `required` keyword on model properties that must always be set` — category: other
+- **AGENTS-155** — [AGENTS.md:355] `Prefer `??` and `?? throw new InvalidOperationException(...)` over unchecked null dereferences` — category: other
+- **AGENTS-156** — [AGENTS.md:357] `Extract shared static helpers (`HandlerHelpers`, `NpgsqlHelper`) when the same 5+ line pattern appears in multiple files` — category: other
+- **AGENTS-157** — [AGENTS.md:358] `Use `dotnet format --diagnostics IDE0005` to remove unused `using` directives` — category: build-cmd
+
+### Known Issues (other)
+
+- **AGENTS-158** — [AGENTS.md:364] `.editorconfig` exists with naming rules, formatting preferences, and `generated_code = true` markers for data service and handlers — `dotnet format` respects these` — category: other
+- **AGENTS-159** — [AGENTS.md:365] `CI pipeline exists (`.github/workflows/ci.yml`) — runs `dotnet build` and `dotnet publish` on push/PR. No automated tests — the only verification is a successful `dotnet build`` — category: other
+- **AGENTS-160** — [AGENTS.md:366] `Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens` — category: other
+- **AGENTS-161** — [AGENTS.md:367] `PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`` — category: other
+- **AGENTS-162** — [AGENTS.md:368] `/// <inheritdoc/>` comments on methods that no longer implement interfaces (e.g., `RevitPathResolver`, `RevitProcessTracker`) are stale but harmless — replace with proper `<summary>` when editing nearby` — category: other
+
+### GitNexus section (other)
+
+- **AGENTS-163** — [AGENTS.md:373] `This project is indexed by GitNexus as **TelegramBot** (1463 symbols, 3693 relationships, 123 execution flows).` — category: other
+- **AGENTS-164** — [AGENTS.md:379] `MUST run impact analysis before editing any symbol.` — category: other
+- **AGENTS-165** — [AGENTS.md:380] `MUST run `gitnexus_detect_changes()` before committing` — category: other
+- **AGENTS-166** — [AGENTS.md:387] `NEVER edit a function, class, or method without first running `gitnexus_impact` on it.` — category: other
 
 ---
 
-## README.md (README-###)
+## README.md (179 строк)
 
-### README-001 — Документация (5 связанных документов, включая CLAUDE.md и README.TOKEN.md)
-- **Файл:** `README.md:7-14`
-- **Категория:** other
-- **Цитата:** Таблица ссылок: ROADMAP.md, Docs/execution-algorithm.md, Docs/qodana-setup.md, AGENTS.md, CLAUDE.md, README.TOKEN.md. (NB: CLAUDE.md и README.TOKEN.md в репо отсутствуют — см. секцию «ДУБЛИ И ПРОТИВОРЕЧИЯ».)
+### Заголовок / обзор (architecture)
 
-### README-002 — Telegram-бот: навигация, сессии, BIM-команды
-- **Файл:** `README.md:3`
-- **Категория:** other
-- **Цитата:** "Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации с системой запроса доступа и ролями (User/Admin). Задачи выполняются асинхронно через отдельный Worker-процесс с PostgreSQL-очередью и минутным polling."
+- **README-001** — [README.md:3] `Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации. Задачи выполняются асинхронно через Worker-процесс с PostgreSQL-очередью (LISTEN/NOTIFY + fallback polling).` — category: architecture
 
-### README-003 — .NET 10 long-polling
-- **Файл:** `README.md:20`
-- **Категория:** other
-- **Цитата:** ".NET 10 background service — Telegram-бот с long-polling (webhook-ов нет)."
+### Ссылки на документы (other)
 
-### README-004 — Telegram.Bot 22.10.0.1
-- **Файл:** `README.md:33`
-- **Категория:** dependency
-- **Цитата:** "**Telegram.Bot 22.10.0.1** — клиент Telegram Bot API"
+- **README-002** — [README.md:9-11] `Документация: ROADMAP.md, AGENTS.md, Docs/execution-algorithm.md` — category: other
+- **README-003** — [README.md:11] `Docs/execution-algorithm.md` — Алгоритм выполнения команд` — category: architecture
 
-### README-005 — Npgsql + Dapper 2.1.79
-- **Файл:** `README.md:34`
-- **Категория:** dependency
-- **Цитата:** "**PostgreSQL** — хранение данных (Npgsql + Dapper 2.1.79)"
+### Возможности (architecture)
 
-### README-006 — Worker poll 1 мин
-- **Файл:** `README.md:35`
-- **Категория:** other
-- **Цитата:** "**PostgreSQL queue + polling** — Worker забирает pending-команды из БД раз в минуту"
+- **README-004** — [README.md:15] `.NET 10 background service с long-polling. Авторизованным пользователям доступны:` — category: architecture
+- **README-005** — [README.md:17] `Навигация по файловой системе и выбор RVT-файлов через inline-клавиатуры` — category: architecture
+- **README-006** — [README.md:18] `Экспорт: PDF, DWG, NWC, IFC` — category: command-code
+- **README-007** — [README.md:19] `Автоматизация: BIM-документирование, Clash Reports, AutoResolve` — category: command-code
+- **README-008** — [README.md:20] `Управление сессиями и командами через `/status`` — category: other
+- **README-009** — [README.md:21] `Запрос доступа с подтверждением администратором` — category: architecture
+- **README-010** — [README.md:22] `Дневной лимит файлов на пользователя` — category: architecture
 
-### README-007 — Serilog Console + Seq
-- **Файл:** `README.md:36`
-- **Категория:** dependency
-- **Цитата:** "**Serilog** — структурированное логирование (Console + Seq)"
+### Технологии (dependency)
 
-### README-008 — OpenMcdf для OLE-потоков
-- **Файл:** `README.md:37`
-- **Категория:** dependency
-- **Цитата:** "**OpenMcdf** — чтение OLE-потоков .rvt/.rfa-файлов (определение версии Revit)"
+- **README-011** — [README.md:26] `.NET 10` (`net10.0`)` — category: dependency
+- **README-012** — [README.md:27] `Telegram.Bot 22.10.0.1` — category: dependency
+- **README-013** — [README.md:28] `PostgreSQL` (Npgsql + Dapper)` — category: dependency
+- **README-014** — [README.md:29] `Serilog` (Console + Seq)` — category: dependency
+- **README-015** — [README.md:30] `OpenMcdf` — чтение OLE-потоков .rvt/.rfa` — category: dependency
+- **README-016** — [README.md:31] `Windows Registry` — поиск Revit/Navisworks` — category: dependency
 
-### README-009 — Windows Registry + Microsoft.Win32
-- **Файл:** `README.md:38`
-- **Категория:** dependency
-- **Цитата:** "**Windows Registry (Microsoft.Win32)** — поиск установленных Revit/Navisworks"
+### Требования (other)
 
-### README-010 — Qodana статический анализ
-- **Файл:** `README.md:43`
-- **Категория:** other
-- **Цитата:** "**Qodana** — статический анализ и поиск мертвого кода. Подробности в [Docs/qodana-setup.md](Docs/qodana-setup.md)."
+- **README-017** — [README.md:35] `**Windows only** — использует Windows Registry и P/Invoke WinAPI.` — category: other
+- **README-018** — [README.md:37] `PostgreSQL 15+` — category: dependency
+- **README-019** — [README.md:38] `Docker` (рекомендуется для PostgreSQL)` — category: dependency
 
-### README-011 — Windows only + BimLib Windows API
-- **Файл:** `README.md:47-49`
-- **Категория:** other
-- **Цитата:** "⚠️ **Windows only** — проект использует Windows-specific API: Навигация по файловой системе (локальные пути, проверка `RuntimeInformation.IsOSPlatform` в `Program.cs`); **BimLib**: Windows Registry (`Microsoft.Win32`) для поиска Revit.exe/Navisworks.exe; P/Invoke WinAPI (`User32`) для мониторинга процессов и закрытия диалогов"
+### Структура (architecture / class-name)
 
-### README-012 — PostgreSQL 15+
-- **Файл:** `README.md:55`
-- **Категория:** dependency
-- **Цитата:** "**PostgreSQL 15+** — доступный по сети для Server и всех Worker-ов"
+- **README-020** — [README.md:42] `4 проекта (`TelegramBot.slnx`):` — category: architecture
+- **README-021** — [README.md:50] `└── TelegramBot.Worker └── BimLib/ (BIM-интеграция)` — category: architecture
+- **README-022** — [README.md:55-58] `TelegramBot.Core | Модели, DTO, интерфейсы, константы; TelegramBot.Data | PostgreSQL persistence (Dapper); TelegramBot.Server | Telegram-инфраструктура, хендлеры, хостинг; TelegramBot.Worker | Фоновое выполнение задач + BimLib` — category: architecture
+- **README-023** — [README.md:64] `| `TelegramBotHostedService` | Server | Polling-цикл, точка входа |` — category: class-name
+- **README-024** — [README.md:65] `| `CommandAppService` | Server | Центральный диспетчер, проверка доступа |` — category: class-name
+- **README-025** — [README.md:66] `| `SlashCommandService` | Server | Обработка текстовых команд |` — category: class-name
+- **README-026** — [README.md:67] `| `CallbackDispatcher` | Server | Chain-of-responsibility маршрутизация callback-ов |` — category: class-name
+- **README-027** — [README.md:68] `| `SessionManager` | Server | In-memory сессии (5 мин timeout) |` — category: class-name
+- **README-028** — [README.md:69] `| `FileSystemBrowser` | Server | Навигация по файловой системе |` — category: class-name
+- **README-029** — [README.md:70] `| `PostgresDataService` | Data | Вся работа с БД |` — category: class-name
+- **README-030** — [README.md:71] `| `CommandExecutionService` | Worker | Polling очереди, выполнение Revit/Navisworks/AI |` — category: class-name
+- **README-031** — [README.md:72] `| `RevitVersionDetector` | Worker/BimLib | Определение версии Revit по .rvt-файлу |` — category: class-name
+- **README-032** — [README.md:73] `| `RevitPathResolver` | Worker/BimLib | Поиск Revit.exe через реестр |` — category: class-name
+- **README-033** — [README.md:74] `| `DialogDismisser` | Worker/BimLib | Автозакрытие диалогов Revit |` — category: class-name
 
-### README-013 — 4 проекта, .slnx, BimLib в Worker
-- **Файл:** `README.md:61`
-- **Категория:** architecture
-- **Цитата:** "Решение состоит из **4 проектов** (solution file: `TelegramBot.slnx`). BimLib — не отдельный проект, а директория внутри Worker (`TelegramBot.Worker/BimLib/`)."
+### Архитектура (architecture / class-name)
 
-### README-014 — Диаграмма проектов (та же что AGENTS.md)
-- **Файл:** `README.md:64-70`
-- **Категория:** architecture
-- **Цитата:** Идентична AGENTS.md:2-16 (TelegramBot.Core ← TelegramBot.Data → Server, Worker + BimLib).
+- **README-034** — [README.md:81-83] `Telegram API → TelegramBotHostedService → TelegramUpdateMapper → CommandAppService → SlashCommandService / CallbackDispatcher` — category: architecture
+- **README-035** — [README.md:88-90] `Server создаёт Commands (Status='pending') → PostgreSQL NOTIFY new_tasks → Worker CLAIM (FOR UPDATE SKIP LOCKED) → выполнение → UPDATE Status='Done'/'Failed' → NOTIFY command_completed → Server шлёт сводку пользователю` — category: architecture
+- **README-036** — [README.md:93] `Поддерживается несколько Worker-ов (competing consumers).` — category: architecture
 
-### README-015 — Зависимости проектов
-- **Файл:** `README.md:74-77`
-- **Категория:** architecture
-- **Цитата:** "| `TelegramBot.Core` | Модели, DTO, интерфейсы, конфигурация, константы | Нет (без Telegram SDK) | | `TelegramBot.Data` | PostgreSQL persistence через Dapper + Npgsql | Core | | `TelegramBot.Server` | Telegram инфраструктура, сервисы, хендлеры, хостинг, helpers | Core + Data | | `TelegramBot.Worker` | Фоновое выполнение задач (Revit, Navisworks, AI) + BimLib | Core + Data |"
+### Команды бота (other)
 
-### README-016 — Полное дерево проекта
-- **Файл:** `README.md:81-133`
-- **Категория:** architecture
-- **Цитата:** Дерево TelegramBot/ (TelegramBot.slnx, TelegramBot.Core/{Config,Constants,DTOs,Extensions,Interfaces,Models}, TelegramBot.Data/{DatabaseInitializer.cs, PostgresDataService.cs, Sql/{Queries.Schema.cs, Queries.Users.cs, Queries.Sessions.cs, Queries.Commands.cs}}, TelegramBot.Server/{Config,Constants,Extensions,Helpers,Interfaces,Properties,Services/{Application,Infrastructure/{FileSystem,Telegram}},Program.cs,appsettings.json}, TelegramBot.Worker/{BimLib/{Config,Interfaces,Models,Monitor,Native,Services}, Services/{CommandExecutionService.cs, BimLibLogFilter.cs}, Program.cs, appsettings.json}, Docs/, scripts/, Dockerfile, .editorconfig, README.md)
+- **README-037** — [README.md:99] `| `/start` | Регистрация, запрос доступа |` — category: other
+- **README-038** — [README.md:100] `| `/export` | Меню экспорта (PDF/DWG/NWC/IFC) |` — category: other
+- **README-039** — [README.md:101] `| `/automation` | Меню автоматизации (BIMDOC/CLASHREP/AUTORES) |` — category: other
+- **README-040** — [README.md:102] `| `/status` | Глобальный просмотр всех сессий и управление ими |` — category: other
+- **README-041** — [README.md:103] `| `/help` | Справка |` — category: other
 
-### README-017 — Поток обработки запроса (Server)
-- **Файл:** `README.md:140-155`
-- **Категория:** architecture
-- **Цитата:**
-  ```
-  Telegram API
-       ↓
-  TelegramBotHostedService (polling, BackgroundService)
-       ↓
-  TelegramUpdateMapper (Update → MessageDto | CallbackQueryDto)
-       ↓
-  CommandAppService
-       ├── HandleUserCommandAsync (текстовые команды)
-       │    ├── /start, /help → SlashCommandService (без проверки доступа)
-       │    └── /export, /automation, /status → SlashCommandService (требуется Approved)
-       └── HandleCallbackAsync (inline-клавиатуры)
-            ↓
-       CallbackDispatcher (Chain of Responsibility)
-            ↓
-       ICallbackHandler (первый подходящий по приоритету)
-  ```
+### Конфигурация (config-key)
 
-### README-018 — Поток выполнения задач
-- **Файл:** `README.md:158-183`
-- **Категория:** architecture
-- **Цитата:** Схема Server (INSERT INTO Commands Status='pending') → PostgreSQL → Worker №1..№N (poll 1 мин, SELECT ... WHERE Status='pending') → PDF/DWG через Revit.exe, NWC/CLASHREP через Navisworks.exe → UPDATE Status='Done'/'Failed' → PostgreSQL.
+- **README-042** — [README.md:111] `| `TelegramBot:Token` | Токен бота (или `TelegramBot__Token`) |` — category: config-key
+- **README-043** — [README.md:112] `| `TelegramBot:AdminUserIds` | ID администраторов |` — category: config-key
+- **README-044** — [README.md:113] `| `FileSystem:RootPath` | Корневая директория для навигации |` — category: config-key
+- **README-045** — [README.md:114] `| `ConnectionStrings:Postgres` | PostgreSQL connection string |` — category: config-key
+- **README-046** — [README.md:118-125] Пример `appsettings.Local.json` (gitignored) с ключами `TelegramBot:Token`, `TelegramBot:AdminUserIds`, `FileSystem:RootPath` — category: config-key
+- **README-047** — [README.md:128] `Полный список параметров — см. `appsettings.json` в проектах Server и Worker.` — category: other
 
-### README-019 — Worker auto-cleanup по CompletedSessionRetentionDays
-- **Файл:** `README.md:185`
-- **Категория:** other
-- **Цитата:** "Worker автоматически продолжает обработку через polling раз в минуту и скрывает старые неактивные сессии по `Worker:CompletedSessionRetentionDays`."
+### База данных (sql-table / architecture)
 
-### README-020 — BimLib: структура, namespaces
-- **Файл:** `README.md:189-219`
-- **Категория:** architecture / namespace / class-name
-- **Цитата:** Те же 6 папок (Config, Interfaces, Models, Monitor, Native, Services) и 6 namespaces (`TelegramBot.BimLib.*`) — см. AGENTS-026..037.
+- **README-048** — [README.md:134] `| `BotUsers` | Пользователи (роли, статусы доступа) |` — category: sql-table
+- **README-049** — [README.md:135] `| `Sessions` | Сессии пользователей |` — category: sql-table
+- **README-050** — [README.md:136] `| `Commands` | Команды внутри сессии (pending → processing → Done/Failed) |` — category: sql-table
+- **README-051** — [README.md:137] `| `TrackedMessages` | Отслеживание сообщений Telegram |` — category: sql-table
+- **README-052** — [README.md:139] `Soft-delete только — `Status = 'Deleted'`, никогда `DELETE FROM`.` — category: architecture
 
-### README-021 — BimLib DI-регистрация (6 строк)
-- **Файл:** `README.md:204-210`
-- **Категория:** architecture
-- **Цитата:** Идентична AGENTS-035: 6 строк AddSingleton в Worker/Program.cs (IRevitVersionDetector→RevitVersionDetector, RevitPathResolver, RevitProcessTracker, DialogDismisser, INavisworksPathResolver→NavisworksPathResolver, NavisworksProcessTracker).
+### Запуск (build-cmd / run-cmd)
 
-### README-022 — BimIntegration секция в appsettings.json Worker
-- **Файл:** `README.md:211`
-- **Категория:** config-key
-- **Цитата:** "Для работы требуется секция `BimIntegration` в `appsettings.json` Worker-а"
+- **README-053** — [README.md:145] `dotnet build TelegramBot.slnx` — category: build-cmd
+- **README-054** — [README.md:148] `dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj` — category: run-cmd
+- **README-055** — [README.md:151] `dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj` — category: run-cmd
 
-### README-023 — RevitProcessStatus 3 значения
-- **Файл:** `README.md:226`
-- **Категория:** other
-- **Цитата:** "`RevitProcessStatus` содержит только 3 значения: `Healthy`, `NotResponding`, `Error`."
+### Docker (other)
 
-### README-024 — Удалены интерфейсы BimLib
-- **Файл:** `README.md:227`
-- **Категория:** class-name
-- **Цитата:** "Удалены интерфейсы, не имевшие потребителей вне BimLib: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`."
+- **README-056** — [README.md:160-163] Docker: `docker run -d --name telegram-bot-db -e POSTGRES_DB=telegram_bot -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17` — category: other
+- **README-057** — [README.md:166-167] `docker build -t telegram-bot-server -f Dockerfile .` / `docker run --rm telegram-bot-server` — category: other
+- **README-058** — [README.md:165] `Server (Windows-контейнер)` — category: other
 
-### README-025 — Все сервисы — Singleton
-- **Файл:** `README.md:231`
-- **Категория:** other
-- **Цитата:** "Все сервисы регистрируются как **Singleton** в `DependencyInjectionExtensions.cs` (Server) или напрямую в `Program.cs` (Worker)."
+### Безопасность (other)
 
-### README-026 — Таблица ключевых сервисов Server
-- **Файл:** `README.md:236-246`
-- **Категория:** class-name
-- **Цитата:** TelegramBotHostedService (Server/Services/Infrastructure/Telegram, polling, очистка), CommandAppService (Server/Services/Application, проверка доступа), SlashCommandService (Server/Services/Application, /export /automation /status /start /help), CallbackDispatcher (Server/Services/Application, Chain-of-responsibility), SessionManager (Server/Services/Application, in-memory ConcurrentDictionary, 5 мин timeout, автоочистка), FileSystemBrowser (Server/Services/Infrastructure/FileSystem), KeyboardBuilder (Server/Services/Infrastructure/Telegram), TelegramOutputService (Server/Services/Infrastructure/Telegram, retry 429), TelegramUpdateMapper (Server/Services/Infrastructure/Telegram), PostgresDataService (TelegramBot.Data, Dapper+Npgsql).
+- **README-059** — [README.md:172] `Пользователи со статусом `Pending` ждут подтверждения администратором` — category: other
+- **README-060** — [README.md:173] `Администраторы (из `AdminUserIds`) автоматически получают `Approved`` — category: other
+- **README-061** — [README.md:174] `Все `Approved` видят **все сессии** всех пользователей через `/status`` — category: other
+- **README-062** — [README.md:175] `Токен хранится в `appsettings.Local.json` или переменной окружения` — category: other
 
-### README-027 — Таблица BimLib-сервисов
-- **Файл:** `README.md:251-257`
-- **Категория:** class-name
-- **Цитата:** RevitVersionDetector, RevitPathResolver, NavisworksPathResolver (Worker/BimLib/Services); RevitProcessTracker, NavisworksProcessTracker (Worker/BimLib/Monitor); DialogDismisser (Worker/BimLib/Monitor).
+### История (other)
 
-### README-028 — Таблица Worker-сервисов
-- **Файл:** `README.md:262-264`
-- **Категория:** class-name
-- **Цитата:** CommandExecutionService (TelegramBot.Worker/Services: polling pending, Revit/Navisworks/AI, in-memory batch-счётчик + DB finality, мониторинг здоровья, timeout/lease/crash recovery, автоочистка неактивных сессий, Graceful shutdown для внешних процессов не нужен); BimLibLogFilter (TelegramBot.Worker/Services, отдельный файл для BIM-специфичных логов).
-
-### README-029 — Callback handlers + приоритеты + префиксы
-- **Файл:** `README.md:268-277`
-- **Категория:** callback-prefix
-- **Цитата:**
-  | Handler | Priority | Префиксы |
-  |---------|----------|----------|
-  | `AccessRequestHandler` | 0 | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` |
-  | `FileNavigationHandler` | 10 | `GOTOPARENT:` |
-  | `FileSelectionHandler` | 20 | `FILE:` |
-  | `CommandToggleHandler` | 100 | `PDF:`, `DWG:`, `NWC:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:` |
-  | `SessionManagementHandler` | 100 | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:` |
-  | `CommandSelectionHandler` | 100 | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
-
-### README-030 — DB: InitializeDatabaseAsync
-- **Файл:** `README.md:281`
-- **Категория:** other
-- **Цитата:** "PostgreSQL-сервер, доступный по сети. Инициализация таблиц при старте через `host.InitializeDatabaseAsync()`."
-
-### README-031 — Таблицы БД (BotUsers, Sessions, Commands)
-- **Файл:** `README.md:285-290`
-- **Категория:** sql-table / sql-field
-- **Цитата:**
-  | Таблица | Поля |
-  |---------|------|
-  | `BotUsers` | `UserId` (PK), `Username`, `Role` (User/Admin), `Status` (Pending/Approved/Rejected/Blocked), `CreatedAt`, `UpdatedAt` |
-  | `Sessions` | `SessionId` (PK, SERIAL), `UserId`, `Username`, `Status` (pending/done/Deleted), `FilesAmount`, `CreatedAt`, `UpdatedAt` |
-  | `Commands` | `CommandId` (PK, SERIAL), `SessionId` (FK → Sessions), `CommandText`, `FilePath`, `ExecutionOrder`, `Status` (pending/processing/Done/Failed/Deleted), `GUID`, `Lease`, `Priority`, `RetryCount`, `NextRetryAt` |
-
-  Soft-delete — строки никогда не удаляются физически (статус `Deleted`).
-
-### README-032 — Soft-delete через ⛔ Отменить
-- **Файл:** `README.md:299`
-- **Категория:** other
-- **Цитата:** "**Отмена/удаление команд** — пользователь через `/status` → кнопку «⛔ Отменить» или «🗑»; Server сначала показывает подтверждение, затем мягко удаляет команду (`Status = 'Deleted'`). Worker не выбирает удалённые команды, а `UpdateStatus` не перезаписывает `Deleted`."
-
-### README-033 — command_completed NOTIFY + summary
-- **Файл:** `README.md:300`
-- **Категория:** other
-- **Цитата:** "**Уведомление о завершении** — после завершения всей сессии Worker шлёт `command_completed` через PostgreSQL `NOTIFY`, а Server отправляет пользователю сводку с длительностью сессии и списком ошибочных файлов."
-
-### README-034 — Несколько Worker-ов (competing consumers)
-- **Файл:** `README.md:302`
-- **Категория:** architecture
-- **Цитата:** "Несколько Worker-ов могут работать параллельно (competing consumers) — каждый берёт следующую команду из очереди."
-
-### README-035 — Команды бота (5 команд)
-- **Файл:** `README.md:306-314`
-- **Категория:** command-code
-- **Цитата:** BotCommandsSetup.ConfigureAsync() регистрирует: /start (регистрация, запрос доступа), /export (выбор команд экспорта), /automation (меню команд автоматизации), /status (глобальный просмотр всех сессий с [username], управление), /help (справка).
-
-### README-036 — Базовый флоу работы
-- **Файл:** `README.md:318-329`
-- **Категория:** other
-- **Цитата:** /start → регистрация → /export → APPLYCOMMANDS → выбор .rvt → APPLYFILES → дневной лимит → сессия+команды в БД → Worker → /status → SESSIONDETAILS → DELETECOMMAND/DELETESESSION → ⛔ Отменить → DELETECOMMAND → soft-delete.
-
-### README-037 — Команды экспорта/автоматизации
-- **Файл:** `README.md:332`
-- **Категория:** command-code
-- **Цитата:** "Аналогичный флоу для `/automation` (BIMDOC/CLASHREP/AUTORES)."
-
-### README-038 — Server appsettings.json (пример)
-- **Файл:** `README.md:339-362`
-- **Категория:** config-key
-- **Цитата:** JSON с Serilog (Console+Seq), ConnectionStrings:Postgres, RateLimit{MaxRequests:30, WindowSeconds:60, MaxFilesPerUserPerDay:100}, FileSystem{RvtDirectoryName:"01_RVT", ProjectDirectoryName:"01_PROJECT", RevitFileExtension:".rvt", SectionFolderPattern:"^(\\d{2}|\\d{3}|I{1,3})_"}.
-
-### README-039 — Worker appsettings.json (пример)
-- **Файл:** `README.md:365-380`
-- **Категория:** config-key
-- **Цитата:** JSON с ConnectionStrings:Postgres, BimIntegration{MinSupportedVersion:2018, MaxSupportedVersion:2026, RevitInstallRoot:"C:\\Program Files\\Autodesk"}, Worker{ProcessTimeoutSeconds:10800, CompletedSessionRetentionDays:30}.
-
-### README-040 — appsettings.Local.json пример
-- **Файл:** `README.md:383-392`
-- **Категория:** config-key
-- **Цитата:** JSON с TelegramBot{Token,AdminUserIds:[123456789]} и FileSystem{RootPath:"B:\\"}.
-
-### README-041 — Полная таблица параметров конфигурации
-- **Файл:** `README.md:396-415`
-- **Категория:** config-key
-- **Цитата:**
-  - `TelegramBot:Token` → `TelegramBot__Token` (обязательно, валидируется)
-  - `TelegramBot:AdminUserIds:0` → `TelegramBot__AdminUserIds__0`
-  - `FileSystem:RootPath` → `FileSystem__RootPath` (обязательно, валидируется)
-  - `FileSystem:RvtDirectoryName` (default `01_RVT`)
-  - `FileSystem:ProjectDirectoryName` (default `01_PROJECT`)
-  - `FileSystem:RevitFileExtension` (default `.rvt`)
-  - `FileSystem:SectionFolderPattern` (regex)
-  - `ConnectionStrings:Postgres` → `ConnectionStrings__Postgres` (default `Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres`)
-  - `RateLimit:MaxRequests`, `RateLimit:WindowSeconds`, `RateLimit:MaxFilesPerUserPerDay` (`0` отключает)
-  - `Worker:ProcessTimeoutSeconds`
-  - `Worker:CompletedSessionRetentionDays` (`0` отключает автоочистку)
-  - `BimIntegration:MinSupportedVersion` (default 2018)
-  - `BimIntegration:MaxSupportedVersion` (default 2026)
-  - `BimIntegration:RevitInstallRoot` (default `C:\Program Files\Autodesk`)
-
-### README-042 — Security: Approved/Blocked/Rejected, админы
-- **Файл:** `README.md:423-428`
-- **Категория:** other
-- **Цитата:** Доступ через /start → Pending → одобрение (APPROVEUSER:); токен в appsettings.Local.json или env; Blocked/Rejected не используют бот; админы (AdminUserIds) автоматически Approved при первом запуске; все одобренные пользователи видят в /status все сессии.
-
-### README-043 — Docker postgres:17
-- **Файл:** `README.md:435-441`
-- **Категория:** other
-- **Цитата:** `docker run -d --name telegram-bot-db -e POSTGRES_DB=telegram_bot -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17`
-
-### README-044 — Windows-контейнеры, Dockerfile
-- **Файл:** `README.md:445-450`
-- **Категория:** other
-- **Цитата:** "Windows-контейнеры (nanoserver ltsc2022). Сборка через многостадийный Dockerfile: `docker build -t telegram-bot-server -f Dockerfile .`; `docker run --rm telegram-bot-server`"
+- **README-063** — [README.md:178] `История изменений — см. ROADMAP.md.` — category: other
 
 ---
 
-## ROADMAP.md (ROADMAP-###)
+## ROADMAP.md (257 строк)
 
-### ROADMAP-001 — Дата актуальности
-- **Файл:** `ROADMAP.md:3`
-- **Категория:** other
-- **Цитата:** "> Актуально на: 8 июня 2026"
+### Версия 1.0 (architecture / sql-table / class-name)
 
-### ROADMAP-002 — v1.0 Core: 4 проекта, DI Singleton
-- **Файл:** `ROADMAP.md:9-16`
-- **Категория:** architecture
-- **Цитата:** "Модели, DTO, интерфейсы, конфигурация — нулевая зависимость от Telegram SDK"; "Архитектура с 4 проектами: `Core → Data → Server`, `Worker`"; "DI-регистрация всех сервисов как Singleton"; "PostgreSQL persistence через Dapper + Npgsql"; "Soft-delete для всех сущностей".
+- **ROADMAP-001** — [ROADMAP.md:3] `Актуально на: 8 июня 2026` — category: other
+- **ROADMAP-002** — [ROADMAP.md:10] `Модели, DTO, интерфейсы, конфигурация — нулевая зависимость от Telegram SDK` — category: architecture
+- **ROADMAP-003** — [ROADMAP.md:11] `Архитектура с 4 проектами: `Core → Data → Server`, `Worker`` — category: architecture
+- **ROADMAP-004** — [ROADMAP.md:12] `DI-регистрация всех сервисов как Singleton` — category: architecture
+- **ROADMAP-005** — [ROADMAP.md:13] `PostgreSQL persistence через Dapper + Npgsql` — category: dependency
+- **ROADMAP-006** — [ROADMAP.md:14] `Система доступа: регистрация → запрос → подтверждение администратором` — category: architecture
+- **ROADMAP-007** — [ROADMAP.md:15] `Soft-delete для всех сущностей` — category: architecture
+- **ROADMAP-008** — [ROADMAP.md:16] `.editorconfig` с правилами именования и форматирования` — category: other
+- **ROADMAP-009** — [ROADMAP.md:19] `Long-polling через `TelegramBotHostedService` (BackgroundService)` — category: class-name
+- **ROADMAP-010** — [ROADMAP.md:20] `Обработка текстовых команд: `/start`, `/help`, `/export`, `/automation`, `/status`` — category: other
+- **ROADMAP-011** — [ROADMAP.md:21] `Chain of Responsibility для callback-хендлеров (7 хендлеров)` — category: class-name
+- **ROADMAP-012** — [ROADMAP.md:22] `Навигация по файловой системе через inline-клавиатуры` — category: architecture
+- **ROADMAP-013** — [ROADMAP.md:23] `Выбор проектов/секций/RVT-файлов` — category: architecture
+- **ROADMAP-014** — [ROADMAP.md:24] `Управление сессиями и командами` — category: architecture
+- **ROADMAP-015** — [ROADMAP.md:25] `Markdown-экранирование (MarkdownV2 + Markdown)` — category: other
+- **ROADMAP-016** — [ROADMAP.md:27] `Команды экспорта: PDF, DWG, NWC, IFC` — category: command-code
+- **ROADMAP-017** — [ROADMAP.md:28] `Команды автоматизации: BIMDOC, CLASHREP, AUTORES` — category: command-code
+- **ROADMAP-018** — [ROADMAP.md:31] `Polling очереди команд раз в 1 минуту` — category: architecture
+- **ROADMAP-019** — [ROADMAP.md:32] `Пул процессов (глобальный SemaphoreSlim)` — category: class-name
+- **ROADMAP-020** — [ROADMAP.md:33] `Lease-механизм (TTL)` — category: architecture
+- **ROADMAP-021** — [ROADMAP.md:34] `Таймаут выполнения процесса` — category: architecture
+- **ROADMAP-022** — [ROADMAP.md:35] `Трекинг PID (ConcurrentDictionary + БД)` — category: class-name
+- **ROADMAP-023** — [ROADMAP.md:36] `FOR UPDATE SKIP LOCKED — конкурентная обработка несколькими воркерами` — category: architecture
+- **ROADMAP-024** — [ROADMAP.md:37] `Graceful shutdown исключён из требований — внешние процессы покрываются timeout/lease/crash recovery` — category: architecture
+- **ROADMAP-025** — [ROADMAP.md:38] `Повторная проверка очереди после временных ошибок batch-а` — category: architecture
+- **ROADMAP-026** — [ROADMAP.md:39] `Приоритеты команд (`Priority ASC, CreatedAt ASC, CommandId ASC`)` — category: architecture
+- **ROADMAP-027** — [ROADMAP.md:40] `Поля `StartedAt`, `CompletedAt`, `ProcessId`, `ErrorMessage`` — category: sql-table
+- **ROADMAP-028** — [ROADMAP.md:41] `Трекинг сообщений бота` — category: architecture
+- **ROADMAP-029** — [ROADMAP.md:44] `SQL-запросы, разбитые по сущностям (5 partial-файлов)` — category: namespace
+- **ROADMAP-030** — [ROADMAP.md:45] `Инициализация таблиц при старте` — category: architecture
+- **ROADMAP-031** — [ROADMAP.md:46] `Сид администраторов` — category: architecture
+- **ROADMAP-032** — [ROADMAP.md:47] `Индексы для производительности` — category: sql-table
 
-### ROADMAP-003 — v1.0 Server: Long-polling, 7 callback-хендлеров
-- **Файл:** `ROADMAP.md:18-28`
-- **Категория:** other
-- **Цитата:** "Long-polling через `TelegramBotHostedService` (BackgroundService)"; "Обработка текстовых команд: `/start`, `/help`, `/export`, `/automation`, `/status`"; "Chain of Responsibility для callback-хендлеров (7 хендлеров)"; "Команды экспорта: PDF, DWG, NWC, IFC"; "Команды автоматизации: BIMDOC, CLASHREP, AUTORES".
+### Версия 1.1 (architecture)
 
-### ROADMAP-004 — v1.0 Worker: poll 1 мин, lease, FOR UPDATE SKIP LOCKED
-- **Файл:** `ROADMAP.md:30-41`
-- **Категория:** architecture
-- **Цитата:** "Polling очереди команд раз в 1 минуту"; "Пул процессов (глобальный SemaphoreSlim)"; "Lease-механизм (TTL)"; "FOR UPDATE SKIP LOCKED — конкурентная обработка несколькими воркерами"; "Graceful shutdown исключён из требований"; "Приоритеты команд (`Priority ASC, CreatedAt ASC, CommandId ASC`)"; "Поля `StartedAt`, `CompletedAt`, `ProcessId`, `ErrorMessage`".
+- **ROADMAP-033** — [ROADMAP.md:53] `Lease с долгим TTL — при захвате команды Lease = ProcessTimeoutSeconds + 5 мин.` — category: architecture
+- **ROADMAP-034** — [ROADMAP.md:54] `Фоновая очистка каждые 60 сек возвращает команды с истёкшим Lease.` — category: architecture
+- **ROADMAP-035** — [ROADMAP.md:56] `Асинхронное чтение stdout/stderr — `BeginOutputReadLine` / `BeginErrorReadLine`.` — category: class-name
+- **ROADMAP-036** — [ROADMAP.md:57] `Вывод собирается в `StringBuilder` через событийные хендлеры.` — category: class-name
+- **ROADMAP-037** — [ROADMAP.md:58] `stdout → Information, stderr → Warning. Обрезка >4KB для защиты от раздувания логов.` — category: other
+- **ROADMAP-038** — [ROADMAP.md:60] `Валидация FilePath — проверка существования файла, расширения (из `AllowedExtensions`), защита от path traversal (`Path.GetFullPath()`).` — category: class-name
+- **ROADMAP-039** — [ROADMAP.md:62-67] `Приоритетные партиции (priority-based) — SortedDictionary<int, SemaphoreSlim>: Critical (1, 3), High (2, 5), Medium (3, 3), Low (4, 1), Lowest (5+, 1)` — category: architecture
+- **ROADMAP-040** — [ROADMAP.md:68-69] `Маршрутизация: первый partition threshold `>= Priority`, иначе последний threshold. Пороги: [1, 2, 3, 4, 5]. Чем меньше Priority, тем выше приоритет` — category: architecture
+- **ROADMAP-041** — [ROADMAP.md:71] `Конфигурация через `WorkerOptions.Partitions` + appsettings.json` — category: config-key
+- **ROADMAP-042** — [ROADMAP.md:72] `Retry logic — экспоненциальная задержка (`base * 2^(attempt-1)`): 60s, 120s, 240s, ... Лимит: `MaxRetries=5` Команда возвращается в `pending` с `NextRetryAt`..` — category: architecture
+- **ROADMAP-043** — [ROADMAP.md:74] `Telegram-уведомления — о завершении/ошибках команд через отдельный канал LISTEN/NOTIFY (`command_completed`).` — category: architecture
+- **ROADMAP-044** — [ROADMAP.md:75] `CommandNotificationService` слушает и отправляет сообщения.` — category: class-name
+- **ROADMAP-045** — [ROADMAP.md:76] `Уведомления приходят только при завершении всей сессии (сводка: `N ✅, M ❌`)` — category: architecture
+- **ROADMAP-046** — [ROADMAP.md:78] `Координация очистки Lease — `pg_try_advisory_lock(1234567)` перед каждой очисткой.` — category: architecture
+- **ROADMAP-047** — [ROADMAP.md:80] `Primary constructors — миграция сервисов на C# 12 (TelegramBotHostedService, CallbackDispatcher, CommandExecutionService, CommandNotificationService и др.)` — category: class-name
+- **ROADMAP-048** — [ROADMAP.md:82] `Рефакторинг навигации — удалён `PathMap`/`TryResolvePath`, передача путей напрямую в callback-данных вместо токенов. Упрощение `FileSystemBrowser`, `FileNavigationHandler`, `FileSelectionHandler`..` — category: class-name
 
-### ROADMAP-005 — v1.0 Data: 5 partial-файлов SQL
-- **Файл:** `ROADMAP.md:43-47`
-- **Категория:** other
-- **Цитата:** "SQL-запросы, разбитые по сущностям (5 partial-файлов)" — **NB:** AGENTS.md:19/210 утверждает 4 partial-файла. См. секцию «ПРОТИВОРЕЧИЯ».
+### Версия 1.2 (architecture / class-name / config-key / sql-table)
 
-### ROADMAP-006 — v1.1 Lease TTL = ProcessTimeoutSeconds + 5 мин
-- **Файл:** `ROADMAP.md:53`
-- **Категория:** other
-- **Цитата:** "**Lease с долгим TTL** — при захвате команды Lease = ProcessTimeoutSeconds + 5 мин. Команда не вернётся в очередь раньше ProcessTimeout. Фоновая очистка каждые 60 сек возвращает команды с истёкшим Lease."
+- **ROADMAP-049** — [ROADMAP.md:91] `BimLib (встроен в Worker) — библиотека для определения версии Revit, резолвинга Revit.exe и мониторинга процессов` — category: architecture
+- **ROADMAP-050** — [ROADMAP.md:92] `Определение версии Revit по .rvt-файлу: чтение OLE-потока BasicFileInfo через OpenMcdf, поиск строки `Format: YYYY`` — category: class-name
+- **ROADMAP-051** — [ROADMAP.md:93] `Автоматический выбор Revit.exe: поиск пути через реестр Windows (`HKLM\SOFTWARE\Autodesk\Revit\{version}`) с fallback на WOW6432Node` — category: class-name
+- **ROADMAP-052** — [ROADMAP.md:94] `Мониторинг здоровья процесса: проверка отклика, автозакрытие диалогов Revit` — category: class-name
+- **ROADMAP-053** — [ROADMAP.md:95] `Поддержка Navisworks: поиск Navisworks.exe/FileConvert.exe через реестр Windows, мониторинг процессов (Roamer, FileConvert)` — category: class-name
+- **ROADMAP-054** — [ROADMAP.md:96] `Graceful shutdown не нужен — при остановке Worker не реализует отдельное ожидание или завершение Revit/Navisworks. Корректность обеспечивают timeout, lease/crash recovery и повторный захват команд после перезапуска.` — category: architecture
+- **ROADMAP-055** — [ROADMAP.md:98] `Расширенное логирование Revit-специфичных ошибок — отдельный файл BimLib.log (`~/Documents/TelegramBot/Logs/Worker/BimLib/log-.txt`), фильтрация через BimLibLogFilter по SourceContext "TelegramBot.BimLib.*"` — category: class-name
+- **ROADMAP-056** — [ROADMAP.md:101] `Rate limiting — ограничение на количество команд от одного пользователя в единицу времени (sliding window per-user).` — category: architecture
+- **ROADMAP-057** — [ROADMAP.md:103-104] `ProjectName в БД — колонка `ProjectName TEXT` в таблице `Sessions`. Имя проекта отображается в `/status` и в уведомлениях о завершении.` — category: sql-table
+- **ROADMAP-058** — [ROADMAP.md:105-106] `Список ошибочных файлов в уведомлении — при наличии ошибок уведомление содержит список файлов с ошибками: `\n\nОшибки:\n- file.rvt`.` — category: architecture
+- **ROADMAP-059** — [ROADMAP.md:107-108] `Timing stats в уведомлениях — уведомление о завершении содержит длительность сессии, рассчитанную по `MIN(StartedAt)` / `MAX(CompletedAt)` из таблицы `Commands`.` — category: architecture
+- **ROADMAP-060** — [ROADMAP.md:109-111] `Оптимизация: in-memory счётчик сессий — удалён per-command `GetSessionProgressAsync`, заменён на `ConcurrentDictionary.AddOrUpdate`. Счётчик используется как batch-local оптимизация, а финальность сессии подтверждается БД через отсутствие `pending`/`processing`..` — category: class-name
+- **ROADMAP-061** — [ROADMAP.md:112-113] `Исправлен retry/counter bug — retry теперь завершает текущий claim и декрементит `_sessionRemaining`; уведомление не теряется после повторных попыток.` — category: architecture
+- **ROADMAP-062** — [ROADMAP.md:114-115] `Дневной лимит файлов на пользователя — `RateLimit:MaxFilesPerUserPerDay` ограничивает количество файлов, которые пользователь может поставить в очередь за 24 часа (`0` отключает лимит).` — category: config-key
+- **ROADMAP-063** — [ROADMAP.md:116-117] `Автоочистка старых сессий — Worker мягко удаляет неактивные сессии старше `Worker:CompletedSessionRetentionDays`, если в них нет `pending`/`processing` команд (`0` отключает).` — category: config-key
+- **ROADMAP-064** — [ROADMAP.md:118-119] `Confirmation dialogs для удаления — кнопки удаления сессии/команды сначала показывают подтверждение через `CONFIRMDELETESESSION:` / `CONFIRMDELETECOMMAND:`.` — category: callback-prefix
+- **ROADMAP-065** — [ROADMAP.md:120-121] `Удалён мёртвый код — `GetCommandStatusAsync` (interface + implementation + SQL), `GetFailedFilesBySession` (не использовался — inline SQL вместо константы).` — category: class-name
 
-### ROADMAP-007 — v1.1 Async stdout/stderr
-- **Файл:** `ROADMAP.md:55-58`
-- **Категория:** other
-- **Цитата:** "**Асинхронное чтение stdout/stderr** — `BeginOutputReadLine` / `BeginErrorReadLine`. Вывод собирается в `StringBuilder` через событийные хендлеры. Больше нет deadlock при заполнении буфера 64KB. Логируется: stdout → Information, stderr → Warning. Обрезка >4KB для защиты от раздувания логов."
+### В планах / Открытые вопросы / Не планируется (other)
 
-### ROADMAP-008 — v1.1 FilePath validation + AllowedExtensions
-- **Файл:** `ROADMAP.md:60`
-- **Категория:** other
-- **Цитата:** "**Валидация FilePath** — проверка существования файла, расширения (из `AllowedExtensions`), защита от path traversal (`Path.GetFullPath()`)."
+- **ROADMAP-066** — [ROADMAP.md:124] Опционально: Revit Journal-автоматизация — запуск сценариев через journal-файлы` — category: other
+- **ROADMAP-067** — [ROADMAP.md:125-127] Интеграция Prometheus/Grafana — метрики в `CommandExecutionService` и `CommandNotificationService` (В ПЛАНАХ)` — category: other
+- **ROADMAP-068** — [ROADMAP.md:128-129] Статистика выполнения — среднее время выполнения, процент успеха/ошибок по типам команд, по пользователям (В ПЛАНАХ)` — category: other
+- **ROADMAP-069** — [ROADMAP.md:132] Открытый вопрос: Prometheus/Grafana — нужен отдельный HTTP exporter или достаточно периодических SQL-запросов?` — category: other
+- **ROADMAP-070** — [ROADMAP.md:138] Открытый вопрос: Статус `Sessions` — нужно ли переводить `Sessions.Status` в `Done`/`Failed`?` — category: other
+- **ROADMAP-071** — [ROADMAP.md:146] `Health checks для Worker — удалено из roadmap: сейчас не используется Docker/K8s, поэтому отдельные `/health`, `/healthz`, `/readyz` не нужны.` — category: other
+- **ROADMAP-072** — [ROADMAP.md:147-148] `new_command LISTEN/NOTIFY` для Worker — по текущему решению не требуется; Worker использует polling очереди раз в минуту. `LISTEN/NOTIFY` остаётся только для `command_completed` уведомлений Server-а.` — category: other
 
-### ROADMAP-009 — v1.1 Priority partitions (Critical/High/Medium/Low/Lowest)
-- **Файл:** `ROADMAP.md:62-71`
-- **Категория:** other
-- **Цитата:** "**Приоритетные партиции (priority-based)** — `SortedDictionary<int, SemaphoreSlim>`: Critical (1) → 3, High (2) → 5, Medium (3) → 3, Low (4) → 1, Lowest (5+) → 1. Маршрутизация: первый partition threshold `>= Priority`, иначе последний threshold. Пороги по возрастанию: thresholds `[1, 2, 3, 4, 5]`. Чем меньше Priority, тем выше приоритет (1 = Critical, 5 = Lowest)."
+### v1.3 (architecture / other)
 
-### ROADMAP-010 — v1.1 Retry logic
-- **Файл:** `ROADMAP.md:72-73`
-- **Категория:** other
-- **Цитата:** "**Retry logic** — экспоненциальная задержка (`base * 2^(attempt-1)`): 60s, 120s, 240s, ... Лимит попыток: `MaxRetries=5`. Команда возвращается в `pending` с `NextRetryAt`."
+- **ROADMAP-073** — [ROADMAP.md:152] `v1.3 — Упрощение алгоритма и кодовой базы (в планах)` — category: other
+- **ROADMAP-074** — [ROADMAP.md:159] `Исправить критические ошибки — устранить утечки ресурсов, баги и другие проблемы` — category: other
+- **ROADMAP-075** — [ROADMAP.md:161] `Единая модель жизненного цикла команды — явно описать допустимые переходы статусов (`pending → processing → done/failed/deleted`)` — category: other
+- **ROADMAP-076** — [ROADMAP.md:164] `Свести retry, lease и timeout к одному понятному сценарию` — category: other
+- **ROADMAP-077** — [ROADMAP.md:167] `Упростить уведомления о завершении сессии — оставить один источник истины для определения финальности` — category: other
+- **ROADMAP-078** — [ROADMAP.md:170] `Пересмотреть in-memory счётчик сессий — оставить его только как оптимизацию; корректность завершения должна подтверждаться БД` — category: other
+- **ROADMAP-079** — [ROADMAP.md:172] `Синхронизировать модель очереди с кодом — Worker не использует `new_command LISTEN/NOTIFY`; основной контур — polling раз в минуту, `command_completed` остаётся каналом уведомлений Server-а.` — category: other
+- **ROADMAP-080** — [ROADMAP.md:176] `Разделить `CommandExecutionService` на небольшие компоненты — отдельно claim/lease, execution, retry/fail handling, notification trigger` — category: other
+- **ROADMAP-081** — [ROADMAP.md:179] `Свести SQL-операции к сценарным методам — методы Data-слоя должны отражать бизнес-действия (`ClaimPendingCommandsAsync`, `MarkCommandCompletedAsync`, `ScheduleRetryAsync`)` — category: other
+- **ROADMAP-082** — [ROADMAP.md:182] `Удалить оставшиеся мёртвые и исторические ветки` — category: other
+- **ROADMAP-083** — [ROADMAP.md:185] `Упростить callback-хендлеры статуса и удаления` — category: other
+- **ROADMAP-084** — [ROADMAP.md:188-189] `Синхронизировать документацию с реальным алгоритмом — обновить `Docs/execution-algorithm.md`, `README.md` и `AGENTS.md` после упрощения кода.` — category: other
 
-### ROADMAP-011 — v1.1 command_completed LISTEN/NOTIFY
-- **Файл:** `ROADMAP.md:74-77`
-- **Категория:** other
-- **Цитата:** "**Telegram-уведомления** — о завершении/ошибках команд через отдельный канал LISTEN/NOTIFY (`command_completed`). `CommandNotificationService` слушает и отправляет сообщения. Уведомления приходят только при завершении всей сессии (сводка: `N ✅, M ❌`), с указанием имени проекта и списком файлов с ошибками."
+### v1.2 рефакторинг (уже завершено) (class-name)
 
-### ROADMAP-012 — v1.1 Lease cleanup coordination pg_try_advisory_lock
-- **Файл:** `ROADMAP.md:78-79`
-- **Категория:** other
-- **Цитата:** "**Координация очистки Lease** — `pg_try_advisory_lock(1234567)` перед каждой очисткой. Только один воркер выполняет очистку, остальные пропускают цикл."
+- **ROADMAP-085** — [ROADMAP.md:197] `DB-трекинг сообщений сохранён — `TrackedMessages` и методы `IDataService` используются для очистки сообщений` — category: class-name
+- **ROADMAP-086** — [ROADMAP.md:198] `Удалены лишние интерфейсы — Удалены `IFileSystemBrowser`, `ITelegramUpdateMapper`, `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` — прямые зависимости без потери тестируемости` — category: class-name
+- **ROADMAP-087** — [ROADMAP.md:199] `Primary constructors — удалены redundant поля. Из 8 классов удалены ~23 redundant `private readonly` поля, дублирующих параметры primary constructor` — category: other
+- **ROADMAP-088** — [ROADMAP.md:200] `CallbackHandlerBase — убрано двойное логирование. `HandleAsync()` больше не ловит исключения — только `CallbackDispatcher`.` — category: other
+- **ROADMAP-089** — [ROADMAP.md:201] `Unused usings — `dotnet format --diagnostics IDE0005` удалил все неиспользуемые `using` directives по всему проекту` — category: build-cmd
+- **ROADMAP-090** — [ROADMAP.md:203] `HandlerHelpers.SendActionsReplyKeyboardAsync() — Заменяет 3 дублированных метода в `FileNavigationHandler`, `CommandSelectionHandler`, `SlashCommandService`` — category: class-name
+- **ROADMAP-091** — [ROADMAP.md:204] `ProcessHealthHelper.CheckHealth() — Общая логика для `RevitProcessTracker` и `NavisworksProcessTracker`` — category: class-name
+- **ROADMAP-092** — [ROADMAP.md:205-206] `NpgsqlHelper.CreateOpenConnectionAsync() — Перенесён из `Worker.Services` (internal) → `TelegramBot.Data` (public). Используется в `CommandExecutionService` (Worker) и `CommandNotificationService` (Server)` — category: class-name
+- **ROADMAP-093** — [ROADMAP.md:207] `TryParseId() — Заменяет 5 одинаковых блоков `int.TryParse` в `SessionManagementHandler`` — category: class-name
+- **ROADMAP-094** — [ROADMAP.md:208] `Упрощение DI — `TelegramOutputService` больше не зависит от `IDataService`; убраны 2 лишних параметра из `TelegramBotHostedService`; мёртвый `IDataService` убран из `CommandAppService`` — category: class-name
+- **ROADMAP-095** — [ROADMAP.md:209] `PostgresDataService — `CreateConnectionAsync()` — Выделен helper, заменивший ~15 ручных `new NpgsqlConnection + OpenAsync`` — category: class-name
+- **ROADMAP-096** — [ROADMAP.md:210] `Документация — `AGENTS.md`, `ROADMAP.md` обновлены под все изменения` — category: other
 
-### ROADMAP-013 — v1.1 Primary constructors migration
-- **Файл:** `ROADMAP.md:80-81`
-- **Категория:** other
-- **Цитата:** "**Primary constructors** — миграция сервисов на C# 12 (TelegramBotHostedService, CallbackDispatcher, CommandExecutionService, CommandNotificationService и др.)"
+### Рекомендации (other)
 
-### ROADMAP-014 — v1.1 PathMap удалён
-- **Файл:** `ROADMAP.md:82-84`
-- **Категория:** other
-- **Цитата:** "**Рефакторинг навигации** — удалён `PathMap`/`TryResolvePath`, передача путей напрямую в callback-данных вместо токенов. Упрощение `FileSystemBrowser`, `FileNavigationHandler`, `FileSelectionHandler`."
+- **ROADMAP-097** — [ROADMAP.md:221] `Pre-warm Revit — Запуск Revit.exe занимает 1–10 минут. Решение: держать пул idle Revit-процессов, передавать файлы уже в запущенный Revit через API/Journal.` — category: other
+- **ROADMAP-098** — [ROADMAP.md:222] `Timing stats в уведомлениях — ✅ Реализовано` — category: other
+- **ROADMAP-099** — [ROADMAP.md:223] `Фильтрация в /status — При большом количестве сессий список становится нечитаемым. Решение: фильтрация по проекту (`ProjectName`) и статусу, пагинация по страницам` — category: other
+- **ROADMAP-100** — [ROADMAP.md:224] `Дневной лимит файлов на пользователя — ✅ Реализовано. `RateLimit:MaxFilesPerUserPerDay = 100`; при превышении бот отказывает в создании новой сессии` — category: config-key
+- **ROADMAP-101** — [ROADMAP.md:225] `Автоочистка старых сессий — ✅ Реализовано. Worker мягко удаляет сессии старше `CompletedSessionRetentionDays`, если в них нет `pending`/`processing`` — category: config-key
+- **ROADMAP-102** — [ROADMAP.md:226] `Умный retry: transient vs permanent — Сейчас retry для всех ошибок одинаков. Решение: классифицировать по exit code / error message` — category: other
+- **ROADMAP-103** — [ROADMAP.md:227] `Confirmation dialogs для удаления — ✅ Реализовано. `DELETESESSION:` / `DELETECOMMAND:` сначала показывают подтверждение, затем soft-delete` — category: callback-prefix
 
-### ROADMAP-015 — v1.2 BimLib встроен в Worker
-- **Файл:** `ROADMAP.md:91-95`
-- **Категория:** architecture
-- **Цитата:** "**BimLib (встроен в Worker)** — библиотека для определения версии Revit, резолвинга Revit.exe и мониторинга процессов. [x] **Определение версии Revit по .rvt-файлу**: чтение OLE-потока BasicFileInfo через OpenMcdf, поиск строки `Format: YYYY`. [x] **Автоматический выбор Revit.exe**: поиск пути через реестр Windows (`HKLM\\SOFTWARE\\Autodesk\\Revit\\{version}`) с fallback на WOW6432Node. [x] **Мониторинг здоровья процесса**: проверка отклика, автозакрытие диалогов Revit. [x] **Поддержка Navisworks**: поиск Navisworks.exe/FileConvert.exe через реестр Windows, мониторинг процессов (Roamer, FileConvert)."
+### Легенда (other)
 
-### ROADMAP-016 — v1.2 Graceful shutdown не нужен
-- **Файл:** `ROADMAP.md:96-97`
-- **Категория:** other
-- **Цитата:** "**Graceful shutdown не нужен** — при остановке Worker не реализует отдельное ожидание или завершение Revit/Navisworks. Корректность обеспечивают timeout, lease/crash recovery и повторный захват команд после перезапуска."
+- **ROADMAP-104** — [ROADMAP.md:243] `v1.0 ✅ Реализовано в базовой версии` — category: other
+- **ROADMAP-105** — [ROADMAP.md:244] `v1.1 🟢 Реализовано (улучшения надёжности)` — category: other
+- **ROADMAP-106** — [ROADMAP.md:245] `v1.2 🟢 Частично реализовано, оставшиеся пункты в планах` — category: other
+- **ROADMAP-107** — [ROADMAP.md:246] `v1.3 🟡 В планах: упрощение алгоритма и кодовой базы` — category: other
+- **ROADMAP-108** — [ROADMAP.md:247] `v2.0+ ⚪ Долгосрочные планы` — category: other
 
-### ROADMAP-017 — v1.2 BimLibLogFilter, отдельный файл логов
-- **Файл:** `ROADMAP.md:98-100`
-- **Категория:** other
-- **Цитата:** "**Расширенное логирование Revit-специфичных ошибок** — отдельный файл BimLib.log (`~/Documents/TelegramBot/Logs/Worker/BimLib/log-.txt`), фильтрация через BimLibLogFilter по SourceContext \"TelegramBot.BimLib.*\""
+### Связанные документы (other)
 
-### ROADMAP-018 — v1.2 Rate limiting (sliding window per-user)
-- **Файл:** `ROADMAP.md:101-102`
-- **Категория:** other
-- **Цитата:** "**Rate limiting** — ограничение на количество команд от одного пользователя в единицу времени (sliding window per-user)."
-
-### ROADMAP-019 — v1.2 ProjectName TEXT в Sessions
-- **Файл:** `ROADMAP.md:103-104`
-- **Категория:** sql-field
-- **Цитата:** "**ProjectName в БД** — колонка `ProjectName TEXT` в таблице `Sessions`. Имя проекта отображается в `/status` и в уведомлениях о завершении."
-
-### ROADMAP-020 — v1.2 Список ошибочных файлов
-- **Файл:** `ROADMAP.md:105-106`
-- **Категория:** other
-- **Цитата:** "**Список ошибочных файлов в уведомлении** — при наличии ошибок уведомление содержит список файлов с ошибками: `\\n\\nОшибки:\\n- file.rvt`."
-
-### ROADMAP-021 — v1.2 Timing stats MIN(StartedAt)/MAX(CompletedAt)
-- **Файл:** `ROADMAP.md:107-108`
-- **Категория:** other
-- **Цитата:** "**Timing stats в уведомлениях** — уведомление о завершении содержит длительность сессии, рассчитанную по `MIN(StartedAt)` / `MAX(CompletedAt)` из таблицы `Commands`."
-
-### ROADMAP-022 — v1.2 In-memory счётчик сессий
-- **Файл:** `ROADMAP.md:109-111`
-- **Категория:** other
-- **Цитата:** "**Оптимизация: in-memory счётчик сессий** — удалён per-command `GetSessionProgressAsync`, заменён на `ConcurrentDictionary.AddOrUpdate`. Счётчик используется как batch-local оптимизация, а финальность сессии подтверждается БД через отсутствие `pending`/`processing`."
-
-### ROADMAP-023 — v1.2 Retry/counter bug fix
-- **Файл:** `ROADMAP.md:112-113`
-- **Категория:** other
-- **Цитата:** "**Исправлен retry/counter bug** — retry теперь завершает текущий claim и декрементит `_sessionRemaining`; уведомление не теряется после повторных попыток."
-
-### ROADMAP-024 — v1.2 MaxFilesPerUserPerDay
-- **Файл:** `ROADMAP.md:114-115`
-- **Категория:** config-key
-- **Цитата:** "**Дневной лимит файлов на пользователя** — `RateLimit:MaxFilesPerUserPerDay` ограничивает количество файлов, которые пользователь может поставить в очередь за 24 часа (`0` отключает лимит)."
-
-### ROADMAP-025 — v1.2 Автоочистка старых сессий
-- **Файл:** `ROADMAP.md:116-117`
-- **Категория:** other
-- **Цитата:** "**Автоочистка старых сессий** — Worker мягко удаляет неактивные сессии старше `Worker:CompletedSessionRetentionDays`, если в них нет `pending`/`processing` команд (`0` отключает)."
-
-### ROADMAP-026 — v1.2 Confirmation dialogs
-- **Файл:** `ROADMAP.md:118-119`
-- **Категория:** callback-prefix
-- **Цитата:** "**Confirmation dialogs для удаления** — кнопки удаления сессии/команды сначала показывают подтверждение через `CONFIRMDELETESESSION:` / `CONFIRMDELETECOMMAND:`."
-
-### ROADMAP-027 — v1.2 Удалён мёртвый код
-- **Файл:** `ROADMAP.md:120-121`
-- **Категория:** other
-- **Цитата:** "**Удалён мёртвый код** — `GetCommandStatusAsync` (interface + implementation + SQL), `GetFailedFilesBySession` (не использовался — inline SQL вместо константы)."
-
-### ROADMAP-028 — v1.2 В планах: Revit Journal, Prometheus, статистика
-- **Файл:** `ROADMAP.md:123-129`
-- **Категория:** other
-- **Цитата:** "Опционально: Revit Journal-автоматизация"; "Интеграция Prometheus/Grafana — метрики: количество активных команд, время выполнения, количество ошибок по типам, размер очереди. Exporter в `CommandExecutionService` и `CommandNotificationService`"; "Статистика выполнения — среднее время выполнения, процент успеха/ошибок".
-
-### ROADMAP-029 — Открытые вопросы (6)
-- **Файл:** `ROADMAP.md:131-143`
-- **Категория:** other
-- **Цитата:** Prometheus/Grafana (HTTP exporter vs SQL); статистика (агрегаты vs on-demand); Revit Journal (сценарии); статус Sessions (Done/Failed vs computed); фильтрация /status (проект/пользователь/статус/пагинация); Pre-warm Revit (idle пул).
-
-### ROADMAP-030 — Не планируется: Health checks, new_command LISTEN/NOTIFY
-- **Файл:** `ROADMAP.md:146-148`
-- **Категория:** other
-- **Цитата:** "**Health checks для Worker** — удалено из roadmap: сейчас не используется Docker/K8s, поэтому отдельные `/health`, `/healthz`, `/readyz` не нужны."; "**`new_command LISTEN/NOTIFY` для Worker** — по текущему решению не требуется; Worker использует polling очереди раз в минуту. `LISTEN/NOTIFY` остаётся только для `command_completed` уведомлений Server-а."
-
-### ROADMAP-031 — v1.3 Упрощение алгоритма (планы)
-- **Файл:** `ROADMAP.md:151-173`
-- **Категория:** architecture
-- **Цитата:** Разделы: «Упрощение алгоритма выполнения» (Исправить критические ошибки, Единая модель жизненного цикла команды `pending → processing → done/failed/deleted`, Свести retry/lease/timeout к одному сценарию, Упростить уведомления о завершении сессии; уже отмечены: Пересмотреть in-memory счётчик сессий ✅, Синхронизировать модель очереди с кодом ✅) + «Упрощение кодовой базы» (Разделить CommandExecutionService, Свести SQL к сценарным методам, Удалить мёртвые/исторические ветки, Упростить callback-хендлеры статуса и удаления, Синхронизировать документацию).
-
-### ROADMAP-032 — v1.2 Рефакторинг (завершено)
-- **Файл:** `ROADMAP.md:195-210`
-- **Категория:** other
-- **Цитата:** Таблица завершённых пунктов: DB-трекинг сообщений сохранён ✅, Удалены лишние интерфейсы (`IFileSystemBrowser`, `ITelegramUpdateMapper`, `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`) ✅, Primary constructors — удалены ~23 redundant поля из 8 классов ✅, CallbackHandlerBase — убрано двойное логирование ✅, Unused usings (dotnet format --diagnostics IDE0005) ✅, Унификация дубликатов (HandlerHelpers, ProcessHealthHelper, NpgsqlHelper, TryParseId) ✅, Упрощение DI (TelegramOutputService без IDataService, убраны 2 лишних параметра из TelegramBotHostedService, мёртвый IDataService убран из CommandAppService) ✅, PostgresDataService.CreateConnectionAsync() ✅, Документация обновлена ✅.
-
-### ROADMAP-033 — TryParseId унификация 5 блоков int.TryParse
-- **Файл:** `ROADMAP.md:207`
-- **Категория:** class-name
-- **Цитата:** "`TryParseId()` | Заменяет 5 одинаковых блоков `int.TryParse` в `SessionManagementHandler`"
-
-### ROADMAP-034 — NpgsqlHelper перенесён Worker.Services → TelegramBot.Data
-- **Файл:** `ROADMAP.md:205-206`
-- **Категория:** class-name
-- **Цитата:** "`NpgsqlHelper.CreateOpenConnectionAsync()` | Перенесён из `Worker.Services` (internal) → `TelegramBot.Data` (public). Используется в `CommandExecutionService` (Worker) и `CommandNotificationService` (Server)"
-
-### ROADMAP-035 — Рекомендации по улучшению
-- **Файл:** `ROADMAP.md:218-226`
-- **Категория:** other
-- **Цитата:** Таблица: 1) Pre-warm Revit 🔥, 2) Timing stats ✅ Реализовано, 3) Фильтрация в /status 🟠, 4) Дневной лимит файлов ✅, 5) Автоочистка старых сессий ✅, 6) Умный retry (transient vs permanent) 🟡, 7) Confirmation dialogs ✅.
-
-### ROADMAP-036 — Шкала приоритетов и статусов
-- **Файл:** `ROADMAP.md:229-248`
-- **Категория:** other
-- **Цитата:** 🔥 Высокий, 🟠 Средний, 🟡 Низкий. ✅ v1.0, 🟢 v1.1/v1.2, 🟡 v1.3, ⚪ v2.0+, 🔄 в работе.
-
-### ROADMAP-037 — Связанные документы
-- **Файл:** `ROADMAP.md:252-259`
-- **Категория:** other
-- **Цитата:** "Docs/execution-algorithm.md, README.md, AGENTS.md, CLAUDE.md, Docs/qodana-setup.md, README.TOKEN.md" — **NB:** CLAUDE.md и README.TOKEN.md в репо отсутствуют.
+- **ROADMAP-109** — [ROADMAP.md:254-257] Связанные документы: Docs/execution-algorithm.md, README.md, AGENTS.md, Docs/qodana-setup.md` — category: other
 
 ---
 
-## Docs/execution-algorithm.md (DOCS-EXEC-###)
+## Docs/execution-algorithm.md (1431 строка)
 
-### DOCS-EXEC-001 — Архитектурные паттерны
-- **Файл:** `Docs/execution-algorithm.md:29-43`
-- **Категория:** architecture
-- **Цитата:** "Chain of Responsibility (CallbackDispatcher), Strategy (CommandConfig), Competing Consumers (FOR UPDATE SKIP LOCKED), Polling (Task.Delay), Bulkhead (Priority-based партиции, SemaphoreSlim), Recovery loop, Retry with Exponential Backoff (`MaxRetries=5`, 60s → 120s → 240s → 480s → 960s), Lease, Soft Delete, Singleton."
+### Архитектурные паттерны (architecture / class-name)
 
-### DOCS-EXEC-002 — Ключевые концепции
-- **Файл:** `Docs/execution-algorithm.md:48-56`
-- **Категория:** architecture
-- **Цитата:** "Пул процессов, Lease-механизм, Таймауты, Приоритеты, Партиции, Отмена команд (любой одобренный пользователь, soft-delete, все одобренные могут удалять чужие сессии)."
+- **DOCS-EXEC-001** — [Docs/execution-algorithm.md:33] `Chain of Responsibility — Обработка callback-запросов (`CallbackDispatcher`). Каждый хендлер проверяет, может ли он обработать callback. Если нет — передаёт следующему` — category: class-name
+- **DOCS-EXEC-002** — [Docs/execution-algorithm.md:34] `Strategy — Исполнение команд (`CommandConfig`). Конфигурация команды определяет, какую стратегию запуска применить (Revit, Navisworks, Python)` — category: class-name
+- **DOCS-EXEC-003** — [Docs/execution-algorithm.md:35] `Competing Consumers — Параллельная обработка (FOR UPDATE SKIP LOCKED). Несколько Worker-ов конкурируют за команды, каждая выполняется ровно одним` — category: architecture
+- **DOCS-EXEC-004** — [Docs/execution-algorithm.md:36] `Polling — Очередь задач (Task.Delay). Worker просыпается каждую минуту для проверки новых команд. Server получает уведомления через `command_completed`` — category: architecture
+- **DOCS-EXEC-005** — [Docs/execution-algorithm.md:37] `Bulkhead (изоляция) — Priority-based партиции (`SemaphoreSlim`). Каждый уровень приоритета имеет изолированный пул слотов` — category: architecture
+- **DOCS-EXEC-006** — [Docs/execution-algorithm.md:39] `Retry with Exponential Backoff — Повторные попытки (`MaxRetries=5`). Задержка растёт экспоненциально: 60s → 120s → 240s → 480s → 960s` — category: architecture
+- **DOCS-EXEC-007** — [Docs/execution-algorithm.md:40] `Lease (аренда) — Защита от сбоев воркеров (`Lease` + `StartedAt`). Команда «арендуется» на время выполнения; при сбое воркера возвращается в очередь` — category: architecture
+- **DOCS-EXEC-008** — [Docs/execution-algorithm.md:41] `Soft Delete — Логическое удаление (`Status = 'Deleted'`). Строки никогда не удаляются физически` — category: architecture
+- **DOCS-EXEC-009** — [Docs/execution-algorithm.md:42] `Singleton — DI-регистрация всех сервисов. Гарантирует единый экземпляр сервиса на всё приложение` — category: architecture
 
-### DOCS-EXEC-003 — Партиции по умолчанию
-- **Файл:** `Docs/execution-algorithm.md:120-125`
-- **Категория:** other
-- **Цитата:** "Priority 1 → Critical, SemaphoreSlim(3); Priority 2 → High, SemaphoreSlim(5); Priority 3 → Medium, SemaphoreSlim(3); Priority 4 → Low, SemaphoreSlim(1); Priority 5+ → Lowest, SemaphoreSlim(1)."
+### Ключевые концепции (architecture)
 
-### DOCS-EXEC-004 — BimLib в Worker, не отдельный проект
-- **Файл:** `Docs/execution-algorithm.md:138-139`
-- **Категория:** architecture
-- **Цитата:** "BimLib — **Windows-only** набор модулей, расположенный внутри Worker-проекта (`TelegramBot.Worker/BimLib/`). Используется `CommandExecutionService` при выполнении Revit/Navisworks-команд."
+- **DOCS-EXEC-010** — [Docs/execution-algorithm.md:56] `Отмена команд — любой одобренный пользователь может отменить команду через `/status` → кнопка «⛔ Отменить»; Server мягко удаляет команду (`Status = 'Deleted'`). Все одобренные пользователи могут удалять чужие сессии и команды.` — category: architecture
 
-### DOCS-EXEC-005 — BimLib подпапки (Services/Monitor/Native/Interfaces/Models/Config)
-- **Файл:** `Docs/execution-algorithm.md:154-174`
-- **Категория:** class-name
-- **Цитата:** Та же структура что AGENTS.md: Services (RevitVersionDetector, RevitPathResolver, NavisworksPathResolver), Monitor (RevitProcessTracker, NavisworksProcessTracker, DialogDismisser, ProcessHealthHelper, WindowUtil, WindowInfo), Native (P/Invoke User32, Win32Consts), Interfaces (IRevitVersionDetector, INavisworksPathResolver — 2 интерфейса), Models (RevitDetectedVersion, RevitProcessHealth), Config (BimIntegrationOptions).
+### Priority-based партиции (architecture)
 
-### DOCS-EXEC-006 — Удалённые интерфейсы BimLib
-- **Файл:** `Docs/execution-algorithm.md:178-179`
-- **Категория:** class-name
-- **Цитата:** "Ранее существовавшие интерфейсы `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` удалены — у них не было потребителей вне BimLib."
+- **DOCS-EXEC-011** — [Docs/execution-algorithm.md:121-125] `Priority 1 → Critical, SemaphoreSlim(3); Priority 2 → High, SemaphoreSlim(5); Priority 3 → Medium, SemaphoreSlim(3); Priority 4 → Low, SemaphoreSlim(1); Priority 5+ → Lowest, SemaphoreSlim(1)` — category: architecture
+- **DOCS-EXEC-012** — [Docs/execution-algorithm.md:130-133] `Высокоприоритетные команды (Priority=1) имеют выделенные слоты и не ждут за низкоприоритетными. Гарантированная пропускная способность для критических задач. Low-priority команды не блокируют High-priority (даже если очередь забита)` — category: architecture
 
-### DOCS-EXEC-007 — DI регистрация BimLib (6 строк)
-- **Файл:** `Docs/execution-algorithm.md:209-216`
-- **Категория:** architecture
-- **Цитата:** Идентичный блок из 6 AddSingleton-ов в Worker/Program.cs.
+### BimLib (architecture / class-name / namespace / dependency)
 
-### DOCS-EXEC-008 — BimIntegration секция JSON
-- **Файл:** `Docs/execution-algorithm.md:218-225`
-- **Категория:** config-key
-- **Цитата:** `BimIntegration: {MinSupportedVersion: 2018, MaxSupportedVersion: 2026, RevitInstallRoot: "C:\\Program Files\\Autodesk"}`
+- **DOCS-EXEC-013** — [Docs/execution-algorithm.md:138] `BimLib — **Windows-only** набор модулей, расположенный внутри Worker-проекта (`TelegramBot.Worker/BimLib/`).` — category: architecture
+- **DOCS-EXEC-014** — [Docs/execution-algorithm.md:139] `Используется `CommandExecutionService` при выполнении Revit/Navisworks-команд.` — category: class-name
+- **DOCS-EXEC-015** — [Docs/execution-algorithm.md:156-167] `Services/: RevitVersionDetector, RevitPathResolver, NavisworksPathResolver; Monitor/: RevitProcessTracker, NavisworksProcessTracker, DialogDismisser, ProcessHealthHelper, WindowUtil, WindowInfo; Native/ — P/Invoke WinAPI (User32, Win32Consts); Interfaces/ — 2 интерфейса: IRevitVersionDetector, INavisworksPathResolver; Models/ — RevitDetectedVersion, RevitProcessHealth; Config/ — BimIntegrationOptions` — category: class-name
+- **DOCS-EXEC-016** — [Docs/execution-algorithm.md:177-180] `BimLib — не отдельный проект. Это директория внутри Worker. Ранее существовавшие интерфейсы `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker` удалены — у них не было потребителей вне BimLib. DI-регистрация выполняется напрямую в `Worker/Program.cs` (без `AddBimIntegration()`).` — category: architecture
+- **DOCS-EXEC-017** — [Docs/execution-algorithm.md:188] `RootStorage.OpenRead() → OpenStream("BasicFileInfo") → извлечение "Format: YYYY"` — category: dependency
+- **DOCS-EXEC-018** — [Docs/execution-algorithm.md:191] `HKLM\SOFTWARE\Autodesk\Revit\{version} → Revit.exe` — category: class-name
+- **DOCS-EXEC-019** — [Docs/execution-algorithm.md:196] `RevitProcessTracker.CheckHealth(process) — Проверка Responding + автозакрытие диалогов через DialogDismisser` — category: class-name
+- **DOCS-EXEC-020** — [Docs/execution-algorithm.md:203-204] `IRevitVersionDetector.DetectVersionAsync(filePath); INavisworksPathResolver.GetInstalledVersions(), ResolveNavisworksPath(year), ResolveFileConvertPath(year)` — category: class-name
+- **DOCS-EXEC-021** — [Docs/execution-algorithm.md:210-215] `services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>(); services.AddSingleton<RevitPathResolver>(); services.AddSingleton<RevitProcessTracker>(); services.AddSingleton<DialogDismisser>(); services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>(); services.AddSingleton<NavisworksProcessTracker>();` — category: architecture
+- **DOCS-EXEC-022** — [Docs/execution-algorithm.md:219-225] Требуется секция `BimIntegration` в `appsettings.json`: MinSupportedVersion=2018, MaxSupportedVersion=2026, RevitInstallRoot=`C:\\Program Files\\Autodesk`` — category: config-key
+- **DOCS-EXEC-023** — [Docs/execution-algorithm.md:230] `BimLib помечена `[SupportedOSPlatform("windows")]` — работает только на Windows` — category: dependency
+- **DOCS-EXEC-024** — [Docs/execution-algorithm.md:231] `OpenMcdf 3.x парсит OLE Structured Storage (.rvt). API: `RootStorage.OpenRead()` → `OpenStream()` → `stream.Read()`` — category: dependency
+- **DOCS-EXEC-025** — [Docs/execution-algorithm.md:233] `P/Invoke — в `Native/User32.cs` (поиск окон, клики, закрытие диалогов)` — category: namespace
+- **DOCS-EXEC-026** — [Docs/execution-algorithm.md:234] `RevitProcessStatus` содержит 3 значения: `Healthy`, `NotResponding`, `Error`` — category: class-name
 
-### DOCS-EXEC-009 — BimLib important notes
-- **Файл:** `Docs/execution-algorithm.md:230-234`
-- **Категория:** other
-- **Цитата:** "BimLib помечена `[SupportedOSPlatform(\"windows\")]` — работает только на Windows"; "OpenMcdf 3.x парсит OLE Structured Storage (.rvt). API: `RootStorage.OpenRead()` → `OpenStream()` → `stream.Read()`"; "Доступ к реестру Windows через `Microsoft.Win32.Registry`"; "P/Invoke — в `Native/User32.cs`"; "`RevitProcessStatus` содержит 3 значения: `Healthy`, `NotResponding`, `Error`"
+### Жизненный цикл команды (architecture)
 
-### DOCS-EXEC-010 — Жизненный цикл команды (5 статусов)
-- **Файл:** `Docs/execution-algorithm.md:240-249`
-- **Категория:** other
-- **Цитата:** "pending, processing, Done, Failed, Deleted." + "Статус `processing` устанавливается атомарно при захвате команды с использованием `SELECT ... FOR UPDATE SKIP LOCKED`. Статус `Deleted` является финальным — Worker не должен перезаписывать мягко удалённую команду."
+- **DOCS-EXEC-027** — [Docs/execution-algorithm.md:242-246] `pending (Команда создана и ожидает выполнения в очереди); processing (Команда захвачена воркером и выполняется (Lease установлен)); Done (Команда успешно завершена); Failed (Команда завершена с ошибкой); Deleted (Команда удалена (логическое удаление, soft-delete))` — category: architecture
+- **DOCS-EXEC-028** — [Docs/execution-algorithm.md:248] `Статус `processing` устанавливается атомарно при захвате команды с использованием `SELECT ... FOR UPDATE SKIP LOCKED`.` — category: architecture
+- **DOCS-EXEC-029** — [Docs/execution-algorithm.md:249] `Статус `Deleted` является финальным — Worker не должен перезаписывать мягко удалённую команду.` — category: architecture
 
-### DOCS-EXEC-011 — DefaultBatchSize=5
-- **Файл:** `Docs/execution-algorithm.md:309`
-- **Категория:** other
-- **Цитата:** "Захват pending-команд из БД (до DefaultBatchSize=5)"
+### Алгоритм работы Worker (architecture / class-name)
 
-### DOCS-EXEC-012 — Алгоритм захвата/освобождения partition слота
-- **Файл:** `Docs/execution-algorithm.md:366-373`
-- **Категория:** architecture
-- **Цитата:** "`threshold = GetPartitionThreshold(cmd.Priority)` выбирает первый threshold в [1,2,3,4,5], где threshold >= Priority. Если подходящего threshold нет — fallback: `threshold = _partitionThresholds[^1]` (5). `_partitionPools[threshold].WaitAsync()` блокирует поток, пока слот не освободится. При отмене (CancellationToken) выбрасывает `OperationCanceledException`. Освобождение в `finally` `ProcessWithPoolAsync`."
+- **DOCS-EXEC-030** — [Docs/execution-algorithm.md:257] `Инициализация per-partition пулов (`SortedDictionary<int, SemaphoreSlim>`) из конфигурации (`WorkerOptions.Partitions`)` — category: architecture
+- **DOCS-EXEC-031** — [Docs/execution-algorithm.md:268-303] `Цикл: Очистка истёкших Lease (каждые 5 мин) → Мониторинг здоровья процессов (каждые 30 сек) → Ожидание уведомлений: LISTEN new_tasks + fallback polling (5 мин) → Захват pending-команд (до DefaultBatchSize=5)` — category: architecture
+- **DOCS-EXEC-032** — [Docs/execution-algorithm.md:284] `Worker подписан на канал new_tasks, мгновенно реагирует` — category: architecture
+- **DOCS-EXEC-033** — [Docs/execution-algorithm.md:285] `Fallback polling (Task.Delay) срабатывает раз в 5 мин` — category: architecture
+- **DOCS-EXEC-034** — [Docs/execution-algorithm.md:308-310] `Захват pending-команд из БД (до DefaultBatchSize=5) — SELECT ... FOR UPDATE SKIP LOCKED; ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC; Статус → 'processing', Lease = timestamp` — category: architecture
+- **DOCS-EXEC-035** — [Docs/execution-algorithm.md:317-322] `Параллельная обработка с priority-based пулами: определение партиции по приоритету команды, ожидание слота в своей партиции, чем меньше Priority, тем выше приоритет` — category: architecture
+- **DOCS-EXEC-036** — [Docs/execution-algorithm.md:328-338] `Выполнение одной команды: Валидация FilePath → Создать ProcessStartInfo → process.Start() → Сохранить в _activeProcesses → Статус: 'processing', ProcessId = PID → Асинхронное чтение stdout/stderr → WaitForExit с таймаутом → Логирование → Status = 'Done' или 'Failed' → _activeProcesses.Remove() + partitionPool.Release()` — category: architecture
+- **DOCS-EXEC-037** — [Docs/execution-algorithm.md:362] `Thresholds кешируются по возрастанию: `[1, 2, 3, 4, 5]`` — category: architecture
+- **DOCS-EXEC-038** — [Docs/execution-algorithm.md:363] `По умолчанию: Priority 1 → pool(3), Priority 2 → pool(5), Priority 3 → pool(3), Priority 4 → pool(1), Priority 5+ → pool(1)` — category: architecture
+- **DOCS-EXEC-039** — [Docs/execution-algorithm.md:383] `private readonly ConcurrentDictionary<int, Process> _activeProcesses;` — category: class-name
+- **DOCS-EXEC-040** — [Docs/execution-algorithm.md:395] `Process` хранится напрямую, без класса-обёртки. `Stopwatch` и `CommandId` — локальные переменные в `ExecuteOneAsync`.` — category: class-name
+- **DOCS-EXEC-041** — [Docs/execution-algorithm.md:400] `При отмене команды пользователем Server устанавливает статус `Deleted` в БД. Отдельного промежуточного статуса отмены, per-command CTS и отдельного cancel-уведомления нет.` — category: architecture
+- **DOCS-EXEC-042** — [Docs/execution-algorithm.md:402-408] `Процесс отмены: Пользователь нажимает «⛔ Отменить» в Telegram; Server обновляет статус команды на `Deleted` в БД; Worker не включает удалённую команду в выборку `ClaimPendingCommandsAsync`; Если команда уже в статусе `processing` (выполняется), она продолжит выполнение, но её результат (`Done`/`Failed`) не перезапишет soft-delete — `UpdateStatus` имеет защиту: `WHERE Status != 'Deleted'`` — category: architecture
+- **DOCS-EXEC-043** — [Docs/execution-algorithm.md:414-416] `При потере соединения с базой данных: Зафиксировать ошибку в логе, Выждать паузу 5 сек, Восстановить подключение, Продолжить обработку очередей` — category: architecture
 
-### DOCS-EXEC-013 — Трекинг активных процессов: ConcurrentDictionary<int, Process>
-- **Файл:** `Docs/execution-algorithm.md:383-395`
-- **Категория:** architecture
-- **Цитата:** "`private readonly ConcurrentDictionary<int, Process> _activeProcesses;` Перед запуском `_activeProcesses[cmd.CommandId] = process`; после завершения (в finally) `_activeProcesses.TryRemove(cmd.CommandId, out _)`. `Process` хранится напрямую, без класса-обёртки. `Stopwatch` и `CommandId` — локальные переменные в `ExecuteOneAsync`."
+### Защита от зависаний и сбоев (architecture / class-name / sql-table)
 
-### DOCS-EXEC-014 — Graceful shutdown не нужен (см. также ROADMAP-016, AGENTS)
-- **Файл:** `Docs/execution-algorithm.md:379`
-- **Категория:** architecture
-- **Цитата:** "**Graceful Shutdown не нужен.** При остановке Worker не должен ждать активные Revit/Navisworks-процессы и не должен пытаться завершать их отдельным shutdown-сценарием."
+- **DOCS-EXEC-044** — [Docs/execution-algorithm.md:430-451] `Lease-механизм: атомарный захват с Lease (TTL). Очистка истёкших Lease: каждые 5 минут + при старте воркера, Status = 'pending', Lease = NULL, StartedAt = NULL, ErrorMessage = 'Lease expired: worker crash or timeout'` — category: architecture
+- **DOCS-EXEC-045** — [Docs/execution-algorithm.md:454-455] `Lease устанавливается на `ProcessTimeoutSeconds + 5 мин` (долгий TTL); CleanupIntervalSec = 300 (5 мин) — проверка каждые 5 минут (фоновая задача)` — category: architecture
+- **DOCS-EXEC-046** — [Docs/execution-algorithm.md:465] `var timeout = TimeSpan.FromSeconds(ProcessTimeoutSec); // 3600 сек = 1 час` — category: other
+- **DOCS-EXEC-047** — [Docs/execution-algorithm.md:480-488] `Дополнительная защита (SQL): каждые 5 минут — UPDATE Commands SET Status = 'pending', StartedAt = NULL, ProcessId = NULL, ErrorMessage = 'Timeout: process exceeded maximum execution time', WHERE Status = 'processing' AND StartedAt < NOW() - INTERVAL '@TimeoutSeconds seconds'` — category: sql-table
+- **DOCS-EXEC-048** — [Docs/execution-algorithm.md:496-507] `_activeProcesses[cmd.CommandId] = process; _activeProcesses.TryRemove(cmd.CommandId, out _);` — category: class-name
+- **DOCS-EXEC-049** — [Docs/execution-algorithm.md:516-531] `FOR UPDATE SKIP LOCKED — несколько воркеров могут работать параллельно. SQL: WITH selected AS (SELECT ... FOR UPDATE SKIP LOCKED) UPDATE Commands c SET Status = 'processing', Lease = @LeaseExpiry FROM selected WHERE c.CommandId = selected.CommandId RETURNING ...` — category: sql-table
+- **DOCS-EXEC-050** — [Docs/execution-algorithm.md:575-580] `Валидация FilePath: путь не пустой, канонический путь не отличается от исходного (защита от `../` traversal), файл существует, расширение файла входит в `AllowedExtensions` (если указаны)` — category: class-name
+- **DOCS-EXEC-051** — [Docs/execution-algorithm.md:589-600] `Outer retry loop для переподключения при потере связи с PostgreSQL: while (!stoppingToken.IsCancellationRequested) { try { await RunListenerLoopAsync(stoppingToken); } catch (Exception ex) { ... await Task.Delay(ReconnectDelayMs, stoppingToken); } }` — category: class-name
 
-### DOCS-EXEC-015 — LeaseTimeoutMin=5, CleanupIntervalSec=60
-- **Файл:** `Docs/execution-algorithm.md:454-455`
-- **Категория:** config-key
-- **Цитата:** "`LeaseTimeoutMin = 5` — Lease истекает через 5 минут"; "`CleanupIntervalSec = 60` — проверка каждые 60 секунд" — **NB:** в ROADMAP-006 сказано Lease = ProcessTimeoutSeconds + 5 мин; тут LeaseTimeoutMin=5 мин (фиксированное 5 мин). Возможное противоречие (см. секцию «ПРОТИВОРЕЧИЯ»).
+### Алгоритм работы Server (architecture)
 
-### DOCS-EXEC-016 — SQL захвата (FOR UPDATE SKIP LOCKED) + lease
-- **Файл:** `Docs/execution-algorithm.md:516-531`
-- **Категория:** sql-table / sql-field
-- **Цитата:** "WITH selected AS (SELECT c.CommandId FROM Commands c JOIN Sessions s ON s.SessionId = c.SessionId WHERE c.Status = 'pending' AND s.Status != 'Deleted' ORDER BY Priority ASC, CreatedAt ASC LIMIT @Limit FOR UPDATE SKIP LOCKED) UPDATE Commands c SET Status = 'processing', Lease = @LeaseExpiry FROM selected WHERE c.CommandId = selected.CommandId RETURNING ..."
+- **DOCS-EXEC-052** — [Docs/execution-algorithm.md:614-621] `Определить приоритет команды на основе контекста (тип задачи, роль пользователя); Партиция вычисляется автоматически воркером из поля `Priority` (не задаётся на сервере); Создать сессию (если требуется); Вставить команду со статусом `pending`, указав приоритет; Все операции в одной транзакции` — category: architecture
+- **DOCS-EXEC-053** — [Docs/execution-algorithm.md:625-626] `Worker забирает команды при получении уведомления `new_tasks` (мгновенно) или при fallback polling (до 5 мин). Worker подписан на `LISTEN new_tasks`, fallback polling — раз в 5 минут` — category: architecture
 
-### DOCS-EXEC-017 — Connection reconnection (5 sec)
-- **Файл:** `Docs/execution-algorithm.md:587-606`
-- **Категория:** other
-- **Цитата:** "Outer retry loop: `await Task.Delay(ReconnectDelayMs, stoppingToken)` при потере соединения. При переподключении: 1) Создаётся новое подключение, 2) Очищаются истёкшие Lease, 3) Цикл продолжается."
+### Отмена команды пользователем (architecture / sql-table)
 
-### DOCS-EXEC-018 — Валидация FilePath
-- **Файл:** `Docs/execution-algorithm.md:574-580`
-- **Категория:** other
-- **Цитата:** "Путь не пустой; Канонический путь не отличается от исходного (защита от `../` traversal); Файл существует; Расширение файла входит в `AllowedExtensions` (если указаны)"
+- **DOCS-EXEC-054** — [Docs/execution-algorithm.md:632-646] `В /status отображаются **все сессии всех пользователей** (глобальный статус), с указанием `[username]` рядом с каждой сессией. SQL: UPDATE Commands SET Status = 'Deleted' WHERE CommandId = @CommandId AND (SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId) OR @IsAdmin = true)` — category: sql-table
+- **DOCS-EXEC-055** — [Docs/execution-algorithm.md:650-652] `Ранее отмена включала отдельный промежуточный статус и отдельное cancel-уведомление. В текущей реализации отмена является soft-delete команды.` — category: architecture
 
-### DOCS-EXEC-019 — Payload command_completed
-- **Файл:** `Docs/execution-algorithm.md:695-706`
-- **Категория:** other
-- **Цитата:** "NOTIFY command_completed, 'UserId|SessionId|Done|Total|ProjectName' (pipe-разделённые поля, Split('|', 5)). UserId BIGINT, SessionId INT, Done INT, Total INT, ProjectName TEXT (пусто для старых сессий)."
+### Уведомления пользователей (architecture / class-name / sql-table)
 
-### DOCS-EXEC-020 — In-memory счётчик _sessionRemaining (Worker)
-- **Файл:** `Docs/execution-algorithm.md:729-761`
-- **Категория:** architecture
-- **Цитата:** "`private readonly ConcurrentDictionary<int, int> _sessionRemaining = new();` При ClaimPendingCommandsAsync — добавляем claimed-команды текущего batch-а (`GroupBy(SessionId)`, AddOrUpdate). При выходе захваченной команды из processing — CompleteClaimedCommandAsync: `AddOrUpdate` декрементит. Если `newRemaining == 0` — проверяем `CountPendingProcessingBySessionAsync`. Если 0 — `GetSessionsStatusAsync` + `NotifyCommandCompletedAsync`. Lock-free."
+- **DOCS-EXEC-056** — [Docs/execution-algorithm.md:695] `NOTIFY command_completed, 'UserId|SessionId|Done|Total|ProjectName'` — category: architecture
+- **DOCS-EXEC-057** — [Docs/execution-algorithm.md:698] `Формат: pipe-разделённые поля (`Split('|', 5)`)` — category: other
+- **DOCS-EXEC-058** — [Docs/execution-algorithm.md:702-706] `Payload поля: UserId BIGINT, SessionId INT, Done INT, Total INT, ProjectName TEXT (пусто для старых сессий)` — category: sql-table
+- **DOCS-EXEC-059** — [Docs/execution-algorithm.md:711-719] `Формат сообщения: ✅ ProjectA — сессия завершена — все 5 файлов обработано; ❌ ProjectA — сессия завершена — все 3 файлов с ошибками; ⚠️ ProjectA — сессия завершена: 3 ✅, 2 ❌ из 5; Ошибки:\n- model.rvt\n- another.rvt` — category: other
+- **DOCS-EXEC-060** — [Docs/execution-algorithm.md:733-754] `In-memory счётчик сессий: ConcurrentDictionary<int, int> _sessionRemaining; При ClaimPendingCommandsAsync добавляем claimed-команды; При выходе команды из processing — CompleteClaimedCommandAsync декрементит счётчик; если newRemaining == 0 проверяет БД через CountPendingProcessingBySessionAsync; если 0 в БД — вызывает NotifyCommandCompletedAsync` — category: class-name
+- **DOCS-EXEC-061** — [Docs/execution-algorithm.md:768-775] `Запрос длительности сессии: SELECT EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))::int FROM Commands WHERE SessionId = @SessionId AND Status != 'Deleted' AND StartedAt IS NOT NULL AND CompletedAt IS NOT NULL` — category: sql-table
+- **DOCS-EXEC-062** — [Docs/execution-algorithm.md:779-782] `Запрос Failed-файлов: SELECT FilePath FROM Commands WHERE SessionId = @SessionId AND Status = 'Failed';` — category: sql-table
+- **DOCS-EXEC-063** — [Docs/execution-algorithm.md:786] `Имена файлов извлекаются через `Path.GetFileName()` и добавляются в сообщение: \n\nОшибки:\n- model.rvt\n- another.rvt` — category: other
+- **DOCS-EXEC-064** — [Docs/execution-algorithm.md:791-796] `Сторона Worker (`CommandExecutionService.CompleteClaimedCommandAsync`): Вызывается после `Done`, `Failed`, unknown/invalid command и после планирования retry; Декрементит in-memory счётчик; Если newRemaining == 0 — проверяет CountPendingProcessingBySessionAsync; Если в БД нет pending/processing — шлёт NotifyCommandCompletedAsync; Промежуточные команды и retry не отправляют пользовательских уведомлений` — category: class-name
+- **DOCS-EXEC-065** — [Docs/execution-algorithm.md:799-804] `Сторона Server (`CommandNotificationService`): BackgroundService, подписан на LISTEN command_completed; При получении NOTIFY парсит payload через Split('|', 5); Запрашивает длительность сессии; Если failed > 0 — запрашивает Failed-файлы из БД; Отправляет сводку через ITelegramOutputService.SendMessageAsync(); Markdown-форматирование не используется (plain text)` — category: class-name
 
-### DOCS-EXEC-021 — Server side: duration + failed files SQL
-- **Файл:** `Docs/execution-algorithm.md:768-787`
-- **Категория:** sql-table / sql-field
-- **Цитата:** "SELECT EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))::int FROM Commands WHERE SessionId = @SessionId AND Status != 'Deleted' AND StartedAt IS NOT NULL AND CompletedAt IS NOT NULL; SELECT FilePath FROM Commands WHERE SessionId = @SessionId AND Status = 'Failed'; имена через `Path.GetFileName()` + добавляются как `\\n\\nОшибки:\\n- model.rvt\\n- another.rvt`"
+### Конфигурация (config-key)
 
-### DOCS-EXEC-022 — Server side: NOTIFY без markdown
-- **Файл:** `Docs/execution-algorithm.md:799-804`
-- **Категория:** other
-- **Цитата:** "`CommandNotificationService` — `BackgroundService`, подписан на `LISTEN command_completed`. При получении NOTIFY парсит payload через `Split('|', 5)`. Запрашивает длительность сессии по `MIN(StartedAt)` / `MAX(CompletedAt)`. Если `failed > 0` — запрашивает Failed-файлы из БД. Отправляет сводку через `ITelegramOutputService.SendMessageAsync()`. Markdown-форматирование не используется (plain text)."
+- **DOCS-EXEC-066** — [Docs/execution-algorithm.md:812-822] `Параметры CommandExecutionService: Partitions {1→3, 2→5, 3→3, 4→1, 5→1}, ProcessTimeoutSeconds=10800 (3 часа), MaxRetries=5, RetryDelayBaseSeconds=60, CompletedSessionRetentionDays=30, CleanupIntervalSec=300, HealthCheckIntervalSec=30, FallbackTimeoutSec=300, ReconnectDelayMs=5000` — category: config-key
+- **DOCS-EXEC-067** — [Docs/execution-algorithm.md:826-865] `appsettings.json Worker: ProcessTimeoutSeconds=10800, CompletedSessionRetentionDays=30, Partitions {1:3, 2:5, 3:3, 4:1, 5:1}, Commands: { PDF: Revit.exe /command "{CommandText}" "{FilePath}" [".rvt", ".rfa"]; DWG: Revit.exe ...; NWC: FileConvert.exe ...; AUTORES: python ai_agent.py --command "{CommandText}" --file "{FilePath}" [".rvt", ".ifc", ".nwc"] WorkingDirectory="." }` — category: config-key
+- **DOCS-EXEC-068** — [Docs/execution-algorithm.md:868] `ProcessTimeoutSeconds` задаётся в секции `Worker`. Если не указан — по умолчанию 10800 сек (3 часа).` — category: config-key
+- **DOCS-EXEC-069** — [Docs/execution-algorithm.md:873-878] `Приоритеты команд (CommandPriorityMap в SlashCommandService.cs): PDF=1 Critical, DWG=2 High, NWC/IFC/BIMDOC/CLASHREP=3 Medium, AUTORES=4 Low, Не указана=50 Lowest (fallback)` — category: class-name
 
-### DOCS-EXEC-023 — Параметры конфигурации
-- **Файл:** `Docs/execution-algorithm.md:812-822`
-- **Категория:** config-key
-- **Цитата:** "Partitions: `{1→3, 2→5, 3→3, 4→1, 5→1}`; ProcessTimeoutSeconds: 10800 (3 часа); MaxRetries: 5; RetryDelayBaseSeconds: 60; CompletedSessionRetentionDays: 30; CleanupIntervalSec: 60; HealthCheckIntervalSec: 30; FallbackTimeoutSec: 60 (1 мин — polling); ReconnectDelayMs: 5000."
+### База данных (sql-table)
 
-### DOCS-EXEC-024 — Worker:Commands JSON (PDF/DWG/NWC/AUTORES)
-- **Файл:** `Docs/execution-algorithm.md:826-866`
-- **Категория:** config-key
-- **Цитата:** Worker.Commands: PDF (Revit.exe, `/command \"{CommandText}\" \"{FilePath}\"`, .rvt/.rfa); DWG (то же); NWC (FileConvert.exe, .nwc/.nwd/.nwf); AUTORES (python, `ai_agent.py --command \"{CommandText}\" --file \"{FilePath}\"`, .rvt/.ifc/.nwc, WorkingDirectory=".")."
+- **DOCS-EXEC-070** — [Docs/execution-algorithm.md:890] `В системе **4 таблицы**` — category: sql-table
+- **DOCS-EXEC-071** — [Docs/execution-algorithm.md:894-897] `Таблицы: BotUsers (UserId, Status), Sessions (SessionId, UserId, CreatedAt), Commands (CommandId, SessionId, Status), TrackedMessages (MessageId, SessionId, ChatId, MessageIdPg)` — category: sql-table
+- **DOCS-EXEC-072** — [Docs/execution-algorithm.md:954-963] `Soft-delete: мы **никогда** не удаляем строки из БД физически. Вместо `DELETE FROM Commands` мы пишем: UPDATE Commands SET Status = 'Deleted' WHERE ...` — category: architecture
+- **DOCS-EXEC-073** — [Docs/execution-algorithm.md:967-974] `LISTEN/NOTIFY + fallback polling: Worker подписан на канал `new_tasks` через PostgreSQL `LISTEN/NOTIFY` и мгновенно реагирует на новые задачи. Fallback polling срабатывает раз в 5 минут при потере соединения` — category: architecture
+- **DOCS-EXEC-074** — [Docs/execution-algorithm.md:990-994] `Lease — страховка от падения Worker. Когда Worker забирает команду, он говорит: «Я забрал эту команду. Если через 5 минут я не отвечу — значит, я упал, забирайте её обратно в очередь»` — category: architecture
+- **DOCS-EXEC-075** — [Docs/execution-algorithm.md:1001-1018] `Таблица Commands поля: CommandId, SessionId, CommandText, FilePath, ExecutionOrder, Status, CreatedAt, StartedAt, CompletedAt, Lease (Unix-время в секундах), Priority (1-5, 1=наивысший, 50=default из CommandPriorityMap), Partition, ProcessId, ErrorMessage, RetryCount, NextRetryAt, Progress, Result` — category: sql-table
+- **DOCS-EXEC-076** — [Docs/execution-algorithm.md:1026-1029] `Индексы: (Status, Priority, CreatedAt); (Status, Lease) WHERE Status = 'processing'; (SessionId); (UserId, CreatedAt DESC)` — category: sql-table
 
-### DOCS-EXEC-025 — CommandPriorityMap (PDF=1, DWG=2, NWC/IFC/BIMDOC/CLASHREP=3, AUTORES=4, fallback=50)
-- **Файл:** `Docs/execution-algorithm.md:870-880`
-- **Категория:** other
-- **Цитата:** "PDF=1, DWG=2, NWC/IFC/BIMDOC/CLASHREP=3, AUTORES=4, Не указана в мапе=50 (Lowest, fallback)."
+### SQL-операции (sql-table)
 
-### DOCS-EXEC-026 — База данных: 4 таблицы
-- **Файл:** `Docs/execution-algorithm.md:890-897`
-- **Категория:** sql-table
-- **Цитата:** "В системе **4 таблицы**: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`."
+- **DOCS-EXEC-077** — [Docs/execution-algorithm.md:1037-1041] `Вставка команды: INSERT INTO "Commands" ("SessionId", "CommandText", "FilePath", "ExecutionOrder", "Priority") SELECT @SessionId, unnest(@CommandTexts::text[]), unnest(@FilePaths::text[]), unnest(@Orders::int[]), unnest(@Priorities::int[]);` — category: sql-table
+- **DOCS-EXEC-078** — [Docs/execution-algorithm.md:1047-1066] `Захват команд (атомарный, с Lease): WITH selected AS (... FOR UPDATE SKIP LOCKED) UPDATE "Commands" c SET "Status" = 'processing', "Lease" = @LeaseExpiry, "StartedAt" = NOW() FROM selected WHERE c."CommandId" = selected."CommandId" RETURNING selected.CommandId, selected.SessionId, selected.CommandText, selected.FilePath, selected.ExecutionOrder, selected.UserId, selected.Username, selected.Partition, selected.Priority;` — category: sql-table
+- **DOCS-EXEC-079** — [Docs/execution-algorithm.md:1071-1080] `Обновление статуса: UPDATE "Commands" SET "Status" = @Status, "CompletedAt" = CASE WHEN @Status IN ('Done', 'Failed') THEN NOW() ELSE "CompletedAt" END, "ProcessId" = @ProcessId, "ErrorMessage" = @ErrorMessage WHERE "CommandId" = @CommandId;` — category: sql-table
+- **DOCS-EXEC-080** — [Docs/execution-algorithm.md:1085-1089] `NOTIFY command_completed, 'UserId|SessionId|Done|Total|ProjectName'; Payload генерируется в PostgresDataService.NotifyCommandCompletedAsync()` — category: class-name
+- **DOCS-EXEC-081** — [Docs/execution-algorithm.md:1093-1103] `Очистка истёкших Lease (каждые 5 мин + при старте воркера): UPDATE "Commands" SET "Status" = 'pending', "Lease" = NULL, "StartedAt" = NULL, "ErrorMessage" = 'Lease expired: worker crash or timeout' WHERE "Status" = 'processing' AND "Lease" IS NOT NULL AND "Lease" < @CurrentTimeSec;` — category: sql-table
+- **DOCS-EXEC-082** — [Docs/execution-algorithm.md:1107-1118] `Очистка команд по таймауту: UPDATE "Commands" SET "Status" = 'pending', ... WHERE "Status" = 'processing' AND "StartedAt" < NOW() - INTERVAL '@TimeoutSeconds seconds';` — category: sql-table
+- **DOCS-EXEC-083** — [Docs/execution-algorithm.md:1122-1129] `Отмена команды пользователем: UPDATE Commands SET Status = 'Deleted' WHERE CommandId = @CommandId AND (SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId) OR @IsAdmin = true);` — category: sql-table
 
-### DOCS-EXEC-027 — Команды (поля) — повтор AGENTS / README
-- **Файл:** `Docs/execution-algorithm.md:1000-1013`
-- **Категория:** sql-field
-- **Цитата:** "CommandId, SessionId, CommandText, FilePath, ExecutionOrder, Status, CreatedAt, StartedAt, CompletedAt, Lease (Unix sec), Priority (1–5, default 50, из CommandPriorityMap: PDF=1, DWG=2, NWC/IFC/BIMDOC/CLASHREP=3, AUTORES=4), ProcessId, ErrorMessage."
+### Безопасность и надёжность (architecture)
 
-### DOCS-EXEC-028 — Индексы БД
-- **Файл:** `Docs/execution-algorithm.md:1019-1024`
-- **Категория:** sql-table
-- **Цитата:** "Индексы: `(Status, Priority, CreatedAt)`; `(Status, Lease) WHERE Status = 'processing'`; `(SessionId)`; `(UserId, CreatedAt DESC)`."
+- **DOCS-EXEC-084** — [Docs/execution-algorithm.md:1138-1158] `Принципы: Логическое удаление; Транзакционность (FOR UPDATE SKIP LOCKED); Per-partition пулы; Приоритизация (Priority ASC); Lease-механизм; Таймауты (process.Kill(true)); Трекинг PID; Отказоустойчивость (5 сек задержка); Логирование stdout/stderr; Изоляция компонентов; Shutdown Worker — Graceful shutdown не нужен; FOR UPDATE SKIP LOCKED; Валидация FilePath; Асинхронное чтение stdout/stderr; Уведомления пользователей; Отмена команд; Автоочистка сессий; Очередь задач (LISTEN new_tasks + fallback)` — category: architecture
 
-### DOCS-EXEC-029 — SQL вставки Commands
-- **Файл:** `Docs/execution-algorithm.md:1032-1037`
-- **Категория:** sql-table
-- **Цитата:** "INSERT INTO \"Commands\" (\"SessionId\", \"CommandText\", \"FilePath\", \"ExecutionOrder\", \"Priority\") SELECT @SessionId, unnest(@CommandTexts::text[]), unnest(@FilePaths::text[]), unnest(@Orders::int[]), unnest(@Priorities::int[]);"
+### Выполнение внешнего процесса (architecture / class-name)
 
-### DOCS-EXEC-030 — SQL захвата (Commands + JOIN Sessions, project name поле)
-- **Файл:** `Docs/execution-algorithm.md:1042-1062`
-- **Категория:** sql-table / sql-field
-- **Цитата:** "SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder, s.UserId, s.Username, **c.Partition, c.Priority** FROM \"Commands\" c JOIN \"Sessions\" s ON s.\"SessionId\" = c.\"SessionId\" WHERE c.\"Status\" = 'pending' AND s.\"Status\" != 'Deleted' ORDER BY c.\"Priority\" ASC, c.\"CreatedAt\" ASC LIMIT @Limit FOR UPDATE SKIP LOCKED; UPDATE \"Commands\" c SET \"Status\" = 'processing', \"Lease\" = @LeaseExpiry, \"StartedAt\" = NOW() FROM selected WHERE c.\"CommandId\" = selected.\"CommandId\" RETURNING ..." — **NB:** упомянуто поле `c.Partition` (не упомянуто в AGENTS/README/ROADMAP). См. «ПРОТИВОРЕЧИЯ».
+- **DOCS-EXEC-085** — [Docs/execution-algorithm.md:1164-1183] `ExecuteOneAsync: Валидация FilePath → Поиск конфигурации WorkerOptions.Commands.TryGetValue(CommandText) → Создание ProcessStartInfo → Запуск process.Start() → Трекинг _activeProcesses[CommandId] = process → Статус UpdateCommandStatus(Processing, ProcessId=PID) → stdout/stderr → WaitForExit(ProcessTimeoutSeconds) → Логирование (обрезка >4KB) → Таймаут Kill(true) / ExitCode==0 Done / иначе Failed → Очистка partitionPool.Release() + _activeProcesses.TryRemove()` — category: architecture
+- **DOCS-EXEC-086** — [Docs/execution-algorithm.md:1188-1194] `CommandConfig поля: ExecutablePath, ArgumentsTemplate ({CommandText}, {FilePath}), AllowedExtensions (null=любое), WorkingDirectory (null=папка файла, "." =корень)` — category: class-name
+- **DOCS-EXEC-087** — [Docs/execution-algorithm.md:1197-1222] `CreateProcessStartInfo: FileName=cfg.ExecutablePath, Arguments=args (Replace), WorkingDirectory=..., RedirectStandardOutput=true, RedirectStandardError=true, UseShellExecute=false, CreateNoWindow=true, StandardOutputEncoding=UTF8, StandardErrorEncoding=UTF8` — category: class-name
 
-### DOCS-EXEC-031 — SQL отмены команды пользователем
-- **Файл:** `Docs/execution-algorithm.md:1118-1125`
-- **Категория:** sql-table
-- **Цитата:** "UPDATE Commands SET Status = 'Deleted' WHERE CommandId = @CommandId AND (SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId) OR @IsAdmin = true);"
+### Расширение системы (architecture / other)
 
-### DOCS-EXEC-032 — Безопасность и надёжность (таблица)
-- **Файл:** `Docs/execution-algorithm.md:1131-1153`
-- **Категория:** other
-- **Цитата:** Логическое удаление, FOR UPDATE SKIP LOCKED, SortedDictionary<int,SemaphoreSlim>, ORDER BY Priority ASC, ProcessId+Kill(true), Переподключение 5 сек, Stdout/stderr асинхронно (64KB), NOTIFY command_completed → CommandNotificationService, Автоочистка, Polling queue, Lease = ProcessTimeoutSeconds + 5 мин (долгий TTL), Валидация FilePath, Подтверждение удаления (`Status = 'Deleted'`, UpdateStatus с `WHERE Status != 'Deleted'`).
+- **DOCS-EXEC-088** — [Docs/execution-algorithm.md:1229-1255] `Добавление новой команды: appsettings.json Commands → Приоритет в CommandPriorityMap в SlashCommandService.cs (default=50, попадёт в Lowest) → Партиции — пороги 1=Critical(3), 2=High(5), 3=Medium(3), 4=Low(1), 5=Lowest(1)` — category: architecture
+- **DOCS-EXEC-089** — [Docs/execution-algorithm.md:1241] `Партиция не указывается в команде — определяется автоматически по полю `Priority` из БД.` — category: architecture
+- **DOCS-EXEC-090** — [Docs/execution-algorithm.md:1259-1267] `Стандартные лимиты партиций: 1→3, 2→5, 3→3, 4→1, 5→1` — category: config-key
 
-### DOCS-EXEC-033 — ExecuteOneAsync: 11 шагов
-- **Файл:** `Docs/execution-algorithm.md:1159-1178`
-- **Категория:** other
-- **Цитата:** "1. Валидация FilePath → 2. Поиск конфигурации `WorkerOptions.Commands.TryGetValue(CommandText)` → 3. `CreateProcessStartInfo` (FileName, Arguments (с подстановкой {CommandText}, {FilePath}), WorkingDirectory (null→папка файла, "."→CurrentDirectory), Redirect, UseShellExecute=false, CreateNoWindow=true) → 4. process.Start() → 5. Трекинг → 6. UpdateCommandStatus(Processing, ProcessId) → 7. BeginOutputReadLine/BeginErrorReadLine → 8. WaitForExit → 9. Логирование stdout/stderr (обрезка >4KB) → 10. Результат (Timeout→Kill(true) Failed, ExitCode 0→Done, иначе Failed) → 11. Очистка (partitionPool.Release, _activeProcesses.TryRemove)."
+### Диагностика и мониторинг (sql-table)
 
-### DOCS-EXEC-034 — CommandConfig поля
-- **Файл:** `Docs/execution-algorithm.md:1184-1189`
-- **Категория:** other
-- **Цитата:** "CommandConfig: `ExecutablePath`, `ArgumentsTemplate`, `AllowedExtensions` (null — любое), `WorkingDirectory` (null — папка файла, \".\" — корень процесса)."
+- **DOCS-EXEC-091** — [Docs/execution-algorithm.md:1281-1373] `Диагностические запросы: pending-команды с приоритетами; активные выполнения с PID и длительностью; история за 24 часа; зависшие команды (Lease/StartedAt); статистика по статусам; удалённые команды; pg_listening_channels() для Server должен вернуть 'command_completed'` — category: sql-table
+- **DOCS-EXEC-092** — [Docs/execution-algorithm.md:1368-1373] `PowerShell: Get-Process -Id <ProcessId> -ErrorAction SilentlyContinue; Get-Process Revit* | Select-Object Id, StartTime, CPU` — category: other
 
-### DOCS-EXEC-035 — Расширение системы (4 шага)
-- **Файл:** `Docs/execution-algorithm.md:1222-1267`
-- **Категория:** other
-- **Цитата:** "1. Добавить запись в Commands (JSON); 2. Настроить приоритет через CommandPriorityMap (иначе Priority=50, Lowest); 3. Опционально — настроить лимиты партиций; 4. Опционально — добавить кнопку в UI."
+### Критерии корректной реализации (architecture)
 
-### DOCS-EXEC-036 — Диагностические SQL запросы
-- **Файл:** `Docs/execution-algorithm.md:1271-1369`
-- **Категория:** other
-- **Цитата:** Запросы для: pending-очереди, активных выполнений, истории 24ч, зависших (Lease, StartedAt > 1 час), статистики, удалённых, pg_listening_channels, мониторинга PID, Get-Process PowerShell.
+- **DOCS-EXEC-093** — [Docs/execution-algorithm.md:1380-1392] `Критерии корректной реализации: 1) Лимит процессов (Critical=1→3, High=2→5, Medium=3→3, Low=4→1, Lowest=5+→1); 2) Приоритизация; 3) Lease-механизм; 4) Таймауты (3 часа default); 5) Трекинг PID; 6) FOR UPDATE SKIP LOCKED; 7) Shutdown Worker — graceful не реализуется; 8) Очередь задач (LISTEN new_tasks + 5 мин fallback); 9) Восстановление; 10) Наблюдаемость; 11) Отмена команд` — category: architecture
 
-### DOCS-EXEC-037 — Критерии корректной реализации (11 пунктов)
-- **Файл:** `Docs/execution-algorithm.md:1373-1387`
-- **Категория:** other
-- **Цитата:** 11 критериев: Лимит процессов (Critical=1→3, High=2→5, Medium=3→3, Low=4→1, Lowest=5+→1); Приоритизация; Lease; Таймауты; PID; FOR UPDATE SKIP LOCKED; Graceful shutdown; Polling queue; Восстановление; Наблюдаемость; Отмена команд.
+### Известные ограничения и технический долг (other / architecture)
 
-### DOCS-EXEC-038 — Известные ограничения и технический долг (DOC-001..011)
-- **Файл:** `Docs/execution-algorithm.md:1391-1415`
-- **Категория:** other
-- **Цитата:** DOC-001..011 таблица: Lease < ProcessTimeout (✅ Исправлено v1.1), Stdout/stderr deadlock (✅ v1.1), FilePath validation (✅ v1.1), Приоритетные партиции (✅ v1.1), Retry (✅ v1.2), Prometheus (В планах v1.2), Координация очистки Lease pg_try_advisory_lock(1234567) (✅ v1.2), Graceful shutdown (🟢 NONE Зафиксировано), Health checks (🟡 Улучшение), Лимит очереди (🟡 Улучшение), Runbook (🟡 Улучшение)."
+- **DOCS-EXEC-094** — [Docs/execution-algorithm.md:1401-1412] `Тех. долг: DOC-001 Lease(5 мин)<ProcessTimeout(1 час) ✅ Исправлено (v1.1); DOC-002 stdout/stderr ✅ Исправлено (v1.1); DOC-003 Валидация FilePath ✅ Исправлено (v1.1); DOC-004 Партиции (priority-based) ✅ Реализовано (v1.1); DOC-005 Retry logic ✅ Реализовано (v1.2); DOC-006 Prometheus/Grafana В планах (v1.2); DOC-007 Координация очистки Lease ✅ Реализовано (v1.2); DOC-008 Graceful shutdown не нужен; DOC-009 Health checks Улучшение; DOC-010 Нет ограничения очереди Улучшение; DOC-011 Не описаны runbook Улучшение` — category: other
+- **DOCS-EXEC-095** — [Docs/execution-algorithm.md:1418-1420] `Приоритеты исправлений: 🔴 HIGH (до production), 🟠 MEDIUM (v1.1-v1.2), 🟡 LOW (по мере доступности)` — category: other
+
+### Связанные документы (other)
+
+- **DOCS-EXEC-096** — [Docs/execution-algorithm.md:3] `Связанные документы: ROADMAP.md — дорожная карта проекта; README.md — обзор проекта` — category: other
+- **DOCS-EXEC-097** — [Docs/execution-algorithm.md:1422-1431] `План работ → см. ROADMAP.md. v1.0 ✅, v1.1 ✅, v1.2 🟡, v2.0+ ⚪, Текущий спринт 🔄` — category: other
 
 ---
 
-## Docs/CommandExecutionAlgorithm.md (DOCS-CEA-###)
+## Docs/CommandExecutionAlgorithm.md (407 строк)
 
-### DOCS-CEA-001 — Участники (User, Server, App, DB, Worker, Process)
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:10-17`
-- **Категория:** other
-- **Цитата:** "User, Server (`TelegramBotHostedService`), App (`CommandAppService` + `SlashCommandService`), DB (PostgreSQL, LISTEN/NOTIFY), Worker (`CommandExecutionService`), Process (Revit/Navisworks/Python)."
+### Заголовок / Участники (class-name)
 
-### DOCS-CEA-002 — Создание задачи: ConfirmFileSelectionAsync, CreateSessionWithCommandsAsync
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:23-50`
-- **Категория:** architecture
-- **Цитата:** "User → /export → команды → Confirm → Server → ConfirmFileSelectionAsync() → App → CollectRvtFiles() → DB; CreateSessionWithCommandsAsync() → Batch INSERT Session + Commands Status='pending' с Priority из CommandPriorityMap. NotifyNewCommandsAsync() → NOTIFY new_command → DB."
+- **DOCS-CEA-001** — [Docs/CommandExecutionAlgorithm.md:1] `# Алгоритм выполнения команд (Sequence Diagram)` — category: other
+- **DOCS-CEA-002** — [Docs/CommandExecutionAlgorithm.md:3-4] `Текстовое представление диаграммы `CommandExecutionAlgorithm.puml`. Полная спецификация: execution-algorithm.md` — category: other
+- **DOCS-CEA-003** — [Docs/CommandExecutionAlgorithm.md:12-17] `Участники: User; Server — TelegramBotHostedService — точка входа, polling; App — CommandAppService + SlashCommandService — логика команд; DB — PostgreSQL (очередь + LISTEN/NOTIFY); Worker — CommandExecutionService — фоновое выполнение; Process — Внешний процесс (Revit / Navisworks / Python)` — category: class-name
 
-### DOCS-CEA-003 — Worker просыпается через conn.WaitAsync() — **ПРОТИВОРЕЧИТ AGENTS/README/ROADMAP!**
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:58-66`
-- **Категория:** architecture
-- **Цитата:** "DB → NOTIFY new_command → Worker: `conn.WaitAsync()` — просыпается мгновенно" — **NB:** это противоречит AGENTS/README/ROADMAP/execution-algorithm.md, которые утверждают что Worker использует **только polling 1 мин**, `new_command LISTEN/NOTIFY` не используется. См. секцию «ПРОТИВОРЕЧИЯ».
+### Создание задачи (class-name)
 
-### DOCS-CEA-004 — ClaimPendingCommandsAsync(limit=50)
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:73-97`
-- **Категория:** architecture
-- **Цитата:** "ClaimPendingCommandsAsync(limit=50)" — **NB:** execution-algorithm.md указывает `DefaultBatchSize=5` (DOCS-EXEC-011). Противоречие.
+- **DOCS-CEA-004** — [Docs/CommandExecutionAlgorithm.md:28-43] `Создание задачи: User → Server → App: ConfirmFileSelectionAsync() → App: CollectRvtFiles() → App: CreateSessionWithCommandsAsync() → DB: Batch INSERT (Session + Commands, Status='pending', Priority из CommandPriorityMap) → sessionId` — category: class-name
 
-### DOCS-CEA-005 — Priority-based партиции (схема)
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:104-134`
-- **Категория:** architecture
-- **Цитата:** "ProcessWithPoolAsync(cmd): Priority 1 → Critical 3 слота, Priority 2 → High 5, Priority 3 → Medium 3, Priority 4 → Low 1, Priority 5+ → Lowest 1; `await pool.WaitAsync(ct)`"
+### Worker просыпается (architecture / class-name)
 
-### DOCS-CEA-006 — ValidateFilePath: 3 проверки
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:142-154`
-- **Категория:** other
-- **Цитата:** "1. `Path.GetFullPath()` — защита от path traversal; 2. `File.Exists()` — файл существует?; 3. `AllowedExtensions` — расширение разрешено? Если ошибка — DB: UpdateCommandStatus(Failed), иначе — продолжаем."
+- **DOCS-CEA-005** — [Docs/CommandExecutionAlgorithm.md:55-60] `Worker: LISTEN new_tasks + fallback polling (5 мин); ProcessBatchAsync() — (внутренняя обработка)` — category: architecture
 
-### DOCS-CEA-007 — Запуск процесса + асинхронные stdout/stderr
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:160-188`
-- **Категория:** other
-- **Цитата:** "CreateProcessStartInfo: ExecutablePath: \"Revit.exe\"; Arguments: `/command PDF \"file.rvt\"`; WorkingDirectory: из конфига; RedirectStandardOutput/Error = true; `process.Start()` → `UpdateCommandStatus(Processing, ProcessId=PID)` → `BeginOutputReadLine` + `BeginErrorReadLine` (асинхронное чтение в StringBuilder, deadlock 64KB)."
+### Захват команд (architecture / sql-table / class-name)
 
-### DOCS-CEA-008 — Завершение процесса (Done / Failed / retry / timeout)
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:194-234`
-- **Категория:** other
-- **Цитата:** "process.WaitForExit(timeoutMs). Timeout → process.Kill(true) + UpdateCommandStatus(Failed, \"Timeout...\"). ExitCode == 0 → UpdateCommandStatus(Done) + NotifyCommandCompletedAsync → NOTIFY command_completed. ExitCode != 0 → ScheduleRetryAsync: Retry #1 +60s (base*2^0), #2 +120s, #3 +240s, #4 +480s, #5 +960s. MaxRetries=5. UPDATE Status='pending', NextRetryAt=...; NOTIFY new_command (будим воркер). Если retry исчерпаны — UpdateCommandStatus(Failed) + NotifyCommandCompletedAsync."
+- **DOCS-CEA-006** — [Docs/CommandExecutionAlgorithm.md:70-92] `ClaimPendingCommandsAsync(limit=DefaultBatchSize=5) → WITH selected AS (... FOR UPDATE SKIP LOCKED) UPDATE Commands c SET Status = 'processing', Lease = @LeaseExpiry, StartedAt = NOW() FROM selected WHERE c.CommandId = selected.Id RETURNING ...;` — category: sql-table
+- **DOCS-CEA-007** — [Docs/CommandExecutionAlgorithm.md:80] `LIMIT 50` (в SELECT) — category: other
 
-### DOCS-CEA-009 — Уведомление пользователя (payload Parse, NOTIFY)
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:240-256`
-- **Категория:** other
-- **Цитата:** "DB → NOTIFY command_completed → Server: Parse payload `(UserId|CmdId|CmdText|Status|Error)` → Send Telegram message (✅ *PDF* завершена или ❌ *PDF* — ошибка), MarkdownV2 экранир." — **NB:** формат payload здесь `(UserId|CmdId|CmdText|Status|Error)` — 5 полей, тогда как execution-algorithm.md (DOCS-EXEC-019) указывает `UserId|SessionId|Done|Total|ProjectName`. ПРОТИВОРЕЧИЕ.
+### Priority-based партиции (architecture)
 
-### DOCS-CEA-010 — Cleanup: _activeProcesses.TryRemove, pool.Release
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:262-272`
-- **Категория:** other
-- **Цитата:** "`_activeProcesses.TryRemove(commandId)`, `pool.Release()` — освобождаем ресурсы и слот партиции."
+- **DOCS-CEA-008** — [Docs/CommandExecutionAlgorithm.md:101-128] `ProcessWithPoolAsync(cmd) — определение партиции. Priority 1 → Critical → 3 слота; Priority 2 → High → 5 слотов; Priority 3 → Medium → 3 слота; Priority 4 → Low → 1 слот; Priority 5+ → Lowest → 1 слот. Чем меньше Priority, тем выше приоритет. await pool.WaitAsync(ct)` — category: architecture
+- **DOCS-CEA-009** — [Docs/CommandExecutionAlgorithm.md:114-128] `Схема: Critical (≤1) — 3 процесса; High (≤2) — 5; Medium (≤3) — 3; Low (≤4) — 1; Lowest (≤5) — 1` — category: architecture
 
-### DOCS-CEA-011 — Background cleanup (60 sec) + pg_try_advisory_lock(1234567)
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:279-305`
-- **Категория:** other
-- **Цитата:** "ReleaseExpiredLeasesAsync() — UPDATE Commands SET Status='pending', Lease=NULL, ... WHERE Status='processing' AND Lease < @Now; `pg_try_advisory_lock(1234567)` для предотвращения дублирования. ReleaseTimeoutCommandsAsync() — UPDATE ... WHERE Status='processing' AND StartedAt < NOW() - INTERVAL ..."
+### Валидация FilePath (class-name)
 
-### DOCS-CEA-012 — Отмена команды (UI/server/DB/Worker)
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:309-334`
-- **Категория:** other
-- **Цитата:** "User → /status → кнопка «⛔ Отменить» → Server → DeleteCommandAsync() → DB: UPDATE Commands SET Status='Deleted' WHERE CommandId=@Id. Если процесс уже выполняется — он завершится штатно. UpdateStatus не перезаписывает Deleted."
+- **DOCS-CEA-010** — [Docs/CommandExecutionAlgorithm.md:138-148] `ValidateFilePath(): 1. Path.GetFullPath() — защита от path traversal; 2. File.Exists() — файл существует?; 3. AllowedExtensions — расширение разрешено? Если ошибка → DB: UpdateCommandStatus(Failed). Если OK → продолжаем` — category: class-name
 
-### DOCS-CEA-013 — Полный жизненный цикл статусов
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:340-368`
-- **Категория:** other
-- **Цитата:** "pending → processing → (Done | Failed | Deleted). Retry → pending. NOTIFY command_completed → Server → Telegram-уведомление."
+### Запуск процесса (class-name / architecture)
 
-### DOCS-CEA-014 — Priority-based partition thresholds
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:374-393`
-- **Категория:** other
-- **Цитата:** "Order by Priority ASC, CreatedAt ASC, CommandId ASC. P<=1 → Critical SemaphoreSlim(3), P<=2 → High(5), P<=3 → Medium(3), P<=4 → Low(1), P<=5 → Lowest(1)."
+- **DOCS-CEA-011** — [Docs/CommandExecutionAlgorithm.md:158-183] `Запуск процесса: CreateProcessStartInfo() — ExecutablePath: "Revit.exe"; Arguments: "/command PDF \"file.rvt\""; WorkingDirectory: из конфига; RedirectStandardOutput/Error = true. process.Start() → UpdateCommandStatus(Processing, ProcessId=PID) → BeginOutputReadLine() + BeginErrorReadLine() — асинхронное чтение stdout/stderr в StringBuilder через событийные хендлеры — предотвращает deadlock при заполнении буфера 64KB` — category: class-name
 
-### DOCS-CEA-015 — Lease TTL = ProcessTimeoutSeconds + 5 мин
-- **Файл:** `Docs/CommandExecutionAlgorithm.md:399-413`
-- **Категория:** other
-- **Цитата:** "Worker захватывает команду: Lease = ProcessTimeoutSeconds + 5 мин (в секундах Unix). При краше Worker-а — другой Worker через 60 секунд: UPDATE Commands SET Status='pending', Lease=NULL, ErrorMessage='Lease expired: ...' WHERE Status='processing' AND Lease < @CurrentTimeSec."
+### Завершение процесса (class-name)
+
+- **DOCS-CEA-012** — [Docs/CommandExecutionAlgorithm.md:191-227] `process.WaitForExit(timeoutMs) — ожидание с таймаутом. Timeout → process.Kill(true) → UpdateCommandStatus(Failed, "Timeout..."). ExitCode == 0 (успех) → UpdateCommandStatus(Done) → NotifyCommandCompletedAsync() → NOTIFY command_completed. ExitCode != 0 (ошибка) → ScheduleRetryAsync(): Retry #1: +60s (base * 2^0); Retry #2: +120s (base * 2^1); Retry #3: +240s (base * 2^2); Retry #4: +480s (base * 2^3); Retry #5: +960s (base * 2^4); MaxRetries=5. UPDATE Status='pending', NextRetryAt=... Если все retry исчерпаны → UpdateCommandStatus(Failed, errorMessage) + NotifyCommandCompletedAsync() → NOTIFY command_completed` — category: class-name
+
+### Уведомление пользователя (architecture / class-name)
+
+- **DOCS-CEA-013** — [Docs/CommandExecutionAlgorithm.md:235-249] `DB: NOTIFY command_completed → Server: Parse payload (UserId|SessionId|Done|Total|ProjectName) → Server: Send Telegram message → User: ✅ ProjectA — сессия завершена — все 5 файлов обработано` — category: architecture
+
+### Cleanup (class-name)
+
+- **DOCS-CEA-014** — [Docs/CommandExecutionAlgorithm.md:258-264] `Worker: _activeProcesses.TryRemove(commandId); pool.Release()` — category: class-name
+
+### Фоновые задачи (architecture / class-name)
+
+- **DOCS-CEA-015** — [Docs/CommandExecutionAlgorithm.md:272-297] `BACKGROUND CLEANUP: ReleaseExpiredLeasesAsync() — UPDATE Commands SET Status='pending', Lease=NULL, ... WHERE Status='processing' AND Lease < @Now. Используется pg_try_advisory_lock(1234567) для предотвращения дублирования. ReleaseTimeoutCommandsAsync() — UPDATE Commands SET Status='pending', ... WHERE Status='processing' AND StartedAt < NOW() - INTERVAL` — category: class-name
+
+### Отмена команды (class-name / architecture)
+
+- **DOCS-CEA-016** — [Docs/CommandExecutionAlgorithm.md:303-327] `User: /status → кнопка "⛔ Отменить" → Server: DeleteCommandAsync() → DB: UPDATE Commands SET Status='Deleted' WHERE CommandId=@Id. Если процесс уже выполняется, он завершится штатно. UpdateStatus не перезаписывает Deleted` — category: class-name
+
+### Жизненный цикл статусов (architecture)
+
+- **DOCS-CEA-017** — [Docs/CommandExecutionAlgorithm.md:333-361] `pending (Создана INSERT в БД) → processing (Захвачена Worker-ом) → Done | Failed | Deleted. Failed → (retry) → pending. Done → NOTIFY command_completed → Server → Telegram-уведомление` — category: architecture
+
+### Priority-based партиции (схема) (architecture)
+
+- **DOCS-CEA-018** — [Docs/CommandExecutionAlgorithm.md:368-386] `Очередь команд (Order by Priority ASC, CreatedAt ASC, CommandId ASC). Маршрутизация по порогам: P <= 1 → Critical → SemaphoreSlim(3); P <= 2 → High → SemaphoreSlim(5); P <= 3 → Medium → SemaphoreSlim(3); P <= 4 → Low → SemaphoreSlim(1); P <= 5 → Lowest → SemaphoreSlim(1)` — category: architecture
+
+### Lease-механизм (architecture)
+
+- **DOCS-CEA-019** — [Docs/CommandExecutionAlgorithm.md:392-407] `Worker захватывает команду: Lease = ProcessTimeoutSeconds + 5 мин (в секундах Unix). При крахе Worker-а другой Worker через 5 минут: UPDATE Commands SET Status='pending', Lease=NULL, ErrorMessage='Lease expired: ...' WHERE Status='processing' AND Lease < @CurrentTimeSec` — category: architecture
 
 ---
 
-## Docs/qodana-setup.md (QODANA-###)
+## Docs/qodana-setup.md (68 строк)
 
-### QODANA-001 — Qodana JetBrains
-- **Файл:** `Docs/qodana-setup.md:3`
-- **Категория:** other
-- **Цитата:** "[Qodana](https://www.jetbrains.com/qodana/) — это платформа для контроля качества кода от JetBrains, которая переносит проверки из Rider/ReSharper в CI/CD."
+### Обзор Qodana (other / dependency)
 
-### QODANA-002 — Запуск через Rider
-- **Файл:** `Docs/qodana-setup.md:7-10`
-- **Категория:** other
-- **Цитата:** "Tools | Qodana | Try Code Analysis with Qodana."
-
-### QODANA-003 — Docker команда
-- **Файл:** `Docs/qodana-setup.md:14-17`
-- **Категория:** other
-- **Цитата:** "`docker run --rm -v ${PWD}:/data/project/ -p 8080:8080 jetbrains/qodana-dotnet --show-report`. Отчет по `http://localhost:8080`."
-
-### QODANA-004 — Qodana в GitHub Actions workflow
-- **Файл:** `Docs/qodana-setup.md:21-49`
-- **Категория:** other
-- **Цитата:** YAML-файл `.github/workflows/qodana.yml`: trigger на workflow_dispatch, pull_request, push (main, master); runs-on ubuntu-latest; JetBrains/qodana-action@v2024.1; env QODANA_TOKEN.
-
-### QODANA-005 — qodana.yaml: linter jetbrains/qodana-dotnet
-- **Файл:** `Docs/qodana-setup.md:52-55`
-- **Категория:** config-key
-- **Цитата:** "Файл `qodana.yaml` в корне проекта содержит основные настройки: linter: используемый образ линтера (`jetbrains/qodana-dotnet`); dotnet: путь к решению (`TelegramBot.slnx`); profile: используемый профиль проверок (`qodana.recommended`)."
-
-### QODANA-006 — CI пайплайн
-- **Файл:** `Docs/qodana-setup.md:59-62`
-- **Категория:** other
-- **Цитата:** "Текущий CI-пайплайн (`.github/workflows/ci.yml`) включает: `dotnet format --verify-no-changes` — проверка стиля кода; `dotnet build` — проверка сборки; `dotnet publish` — публикация артефакта." — **NB:** AGENTS.md:80 утверждает «No CI/CD pipeline or automated tests». Противоречие (см. секцию «ПРОТИВОРЕЧИЯ»).
-
-### QODANA-007 — Qodana не интегрирована в CI
-- **Файл:** `Docs/qodana-setup.md:64`
-- **Категория:** other
-- **Цитата:** "**Примечание:** Qodana пока не интегрирована в CI. Для добавления используйте workflow из раздела «Настройка в CI/CD»."
-
-### QODANA-008 — Тесты отключены, .NET 10
-- **Файл:** `Docs/qodana-setup.md:67-68`
-- **Категория:** other
-- **Цитата:** "Тесты в данном проекте отключены согласно [AGENTS.md](../AGENTS.md). Qodana настроена только на анализ статического кода. Используется .NET 10. Убедитесь, что используемая версия линтера поддерживает этот SDK."
+- **QODANA-001** — [Docs/qodana-setup.md:3] `Qodana — это платформа для контроля качества кода от JetBrains, которая переносит проверки из Rider/ReSharper в CI/CD.` — category: other
+- **QODANA-002** — [Docs/qodana-setup.md:15] `docker run --rm -v ${PWD}:/data/project/ -p 8080:8080 jetbrains/qodana-dotnet --show-report` — category: other
+- **QODANA-003** — [Docs/qodana-setup.md:17] `После завершения отчет будет доступен по адресу `http://localhost:8080`.` — category: other
+- **QODANA-004** — [Docs/qodana-setup.md:21] `Создайте файл `.github/workflows/qodana.yml`:` — category: other
+- **QODANA-005** — [Docs/qodana-setup.md:24] `name: Qodana` — category: other
+- **QODANA-006** — [Docs/qodana-setup.md:30-31] `on: workflow_dispatch: pull_request: push: branches: [main, master]` — category: other
+- **QODANA-007** — [Docs/qodana-setup.md:35] `runs-on: ubuntu-latest` — category: other
+- **QODANA-008** — [Docs/qodana-setup.md:37-39] `permissions: contents: write, pull-requests: write, checks: write` — category: other
+- **QODANA-009** — [Docs/qodana-setup.md:41] `- uses: actions/checkout@v4` — category: dependency
+- **QODANA-010** — [Docs/qodana-setup.md:46] `- name: 'Qodana Scan' uses: JetBrains/qodana-action@v2024.1` — category: dependency
+- **QODANA-011** — [Docs/qodana-setup.md:48] `env: QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}` — category: other
+- **QODANA-012** — [Docs/qodana-setup.md:52] `Файл `qodana.yaml` в корне проекта содержит основные настройки` — category: other
+- **QODANA-013** — [Docs/qodana-setup.md:53] `linter: используемый образ линтера (`jetbrains/qodana-dotnet`)` — category: dependency
+- **QODANA-014** — [Docs/qodana-setup.md:54] `dotnet: путь к решению (`TelegramBot.slnx`)` — category: dependency
+- **QODANA-015** — [Docs/qodana-setup.md:55] `profile: используемый профиль проверок (`qodana.recommended`)` — category: other
+- **QODANA-016** — [Docs/qodana-setup.md:59] `Текущий CI-пайплайн (`.github/workflows/ci.yml`) включает:` — category: other
+- **QODANA-017** — [Docs/qodana-setup.md:60-62] `dotnet format --verify-no-changes` — проверка стиля кода; `dotnet build` — проверка сборки; `dotnet publish` — публикация артефакта` — category: build-cmd
+- **QODANA-018** — [Docs/qodana-setup.md:64] `Qodana пока не интегрирована в CI. Для добавления используйте workflow из раздела «Настройка в CI/CD».` — category: other
+- **QODANA-019** — [Docs/qodana-setup.md:67] `Тесты в данном проекте отключены согласно AGENTS.md. Qodana настроена только на анализ статического кода.` — category: other
+- **QODANA-020** — [Docs/qodana-setup.md:68] `Используется .NET 10. Убедитесь, что используемая версия линтера поддерживает этот SDK.` — category: dependency
 
 ---
 
-## .github/copilot-instructions.md (COPILOT-###)
+## .github/copilot-instructions.md (5 строк)
 
-### COPILOT-001 — Telegram API актуальные методы
-- **Файл:** `.github/copilot-instructions.md:4`
-- **Категория:** other
-- **Цитата:** "Все реализуемые методы Telegram API должны быть актуальными и не устаревшими (без deprecated-подходов)."
-
-### COPILOT-002 — Унификация методов
-- **Файл:** `.github/copilot-instructions.md:5`
-- **Категория:** other
-- **Цитата:** "Поддерживайте хорошую читаемость кода и унифицируйте методы для упрощения редактирования."
+- **COPILOT-001** — [.github/copilot-instructions.md:4] `Все реализуемые методы Telegram API должны быть актуальными и не устаревшими (без deprecated-подходов).` — category: other
+- **COPILOT-002** — [.github/copilot-instructions.md:5] `Поддерживайте хорошую читаемость кода и унифицируйте методы для упрощения редактирования.` — category: other
 
 ---
 
 ## ДУБЛИ И ПРОТИВОРЕЧИЯ МЕЖДУ ДОКУМЕНТАМИ
 
-### A. Дубли
+### 1. Дубли файлов в `Docs/`
 
-#### A1. Диаграмма 4 проектов + BimLib
-Дословно идентична в **AGENTS.md:9-16** и **README.md:64-70** (Core ← Data → Server, Worker + BimLib). В ROADMAP.md:11 — текстовое упоминание: "Архитектура с 4 проектами: `Core → Data → Server`, `Worker`".
+- **`Docs/execution-algorithm.md`** (1431 строка, 90 КБ) и **`Docs/CommandExecutionAlgorithm.md`** (407 строк, 26 КБ) — оба файла описывают один и тот же алгоритм выполнения команд.
+  - `Docs/CommandExecutionAlgorithm.md:4` явно ссылается: `Полная спецификация: execution-algorithm.md`
+  - `Docs/execution-algorithm.md` является полной (и более новой) версией; `CommandExecutionAlgorithm.md` — сокращённый sequence-diagram в текстовом виде (соответствует `CommandExecutionAlgorithm.puml`).
+  - **Это явный дубликат по содержанию** — оба файла покрывают: создание задачи, Worker просыпается, захват команд, priority-based партиции, валидация FilePath, запуск процесса, завершение процесса, уведомление пользователя, cleanup, фоновые задачи, отмена команды, жизненный цикл статусов, lease-механизм.
 
-#### A2. BimLib — структура папок
-Одинаковые таблицы папок (Config/Interfaces/Models/Monitor/Native/Services) и одинаковые 6 namespace-ов в **AGENTS.md:88-124**, **README.md:194-219**, **Docs/execution-algorithm.md:154-179**.
+### 2. Противоречия и расхождения между документами
 
-#### A3. BimLib DI-регистрация
-Идентичный блок из 6 `services.AddSingleton<...>(...)` строк в **AGENTS.md:108-115**, **README.md:204-210**, **Docs/execution-algorithm.md:209-216**.
+| ID | Утверждение | Где | Противоречие / расхождение |
+|---|---|---|---|
+| **DUP-001** | Polling интервал: 1 мин vs 5 мин | `ROADMAP.md:31` (Polling очереди команд раз в 1 минуту) vs `AGENTS.md:179`, `Docs/execution-algorithm.md:33/285/303/626/821/967/1158/1389` (LISTEN new_tasks + fallback polling 5 мин) | ROADMAP говорит про 1 мин, все остальные — про 5 мин. ROADMAP устарел (v1.0) и не учитывает добавление LISTEN/NOTIFY в v1.1. |
+| **DUP-002** | Lease TTL | `Docs/execution-algorithm.md:46,994` (5 мин Lease) vs `ROADMAP.md:33,53` (`Lease = ProcessTimeoutSeconds + 5 мин`, долгий TTL) vs `Docs/execution-algorithm.md:454-455,1402` (`Lease устанавливается на ProcessTimeoutSeconds + 5 мин`) | `execution-algorithm.md` в одном месте говорит "если через 5 минут" (как в v1.0), в другом — `ProcessTimeoutSeconds + 5 мин` (v1.1). Дрейф в самом execution-algorithm.md. |
+| **DUP-003** | ProcessTimeout default | `Docs/execution-algorithm.md:46` (3600 сек = 1 час) vs `Docs/execution-algorithm.md:465` (`// 3600 сек = 1 час`) vs `Docs/execution-algorithm.md:815,832,1385` (10800 сек = 3 часа, default в v1.1+) | В одном и том же файле — расхождение: "1 час" в комментариях к коду vs "3 часа" в таблицах конфигурации. |
+| **DUP-004** | Status lifecycle — промежуточный статус отмены | `AGENTS.md:215` («⛔ Отменить» использует тот же soft-delete `Status = 'Deleted'`) vs `Docs/execution-algorithm.md:400,650-652` (отдельно отмечает, что "отдельного промежуточного статуса отмены, per-command CTS и отдельного cancel-уведомления нет") | Согласованы — это история, а не противоречие. Но AGENTS.md явно, а execution-algorithm.md развёрнуто. |
+| **DUP-005** | CleanupIntervalSec | `Docs/execution-algorithm.md:269,455,819` (5 мин) vs `ROADMAP.md:54` (60 сек) | Расхождение: 5 мин vs 60 сек. Возможно ROADMAP устарел. |
+| **DUP-006** | Количество callback-хендлеров | `ROADMAP.md:21` (7 хендлеров) vs `AGENTS.md:209` (AccessRequestHandler, FileNavigationHandler, FileSelectionHandler, CommandToggleHandler, SessionManagementHandler, CommandSelectionHandler = 6 хендлеров) | 7 vs 6 — расхождение. Возможно в ROADMAP устаревшее значение. |
+| **DUP-007** | Worker | `AGENTS.md:20-21` vs `README.md:42-50` vs `ROADMAP.md:11` — все сходятся: 4 проекта Core/Data/Server/Worker + BimLib внутри Worker. | Согласованы. |
+| **DUP-008** | Воркеры и NOTIFY | `AGENTS.md:179` (LISTEN/NOTIFY new_tasks + fallback 5 мин) vs `ROADMAP.md:147-148` (new_command LISTEN/NOTIFY не требуется, polling раз в минуту) | AGENTS говорит new_tasks NOTIFY активен, ROADMAP в "не планируется" говорит, что new_command NOTIFY не нужен. Это разные каналы — возможно, не противоречие, но разные формулировки сбивают с толку. |
+| **DUP-009** | Длительность lease | `Docs/execution-algorithm.md:46` — Lease 5 мин, в примере кода; `Docs/execution-algorithm.md:454-455,1402` — Lease = ProcessTimeoutSeconds + 5 мин | Расхождение внутри одного файла. |
+| **DUP-010** | Порядок batch size | `Docs/execution-algorithm.md:308` (DefaultBatchSize=5) vs `Docs/CommandExecutionAlgorithm.md:70` (DefaultBatchSize=5) vs `Docs/CommandExecutionAlgorithm.md:80` (LIMIT 50) | CEA внутри себя противоречит: в одном месте limit=5, в SQL limit=50. Это похоже на опечатку. |
+| **DUP-011** | App Service — что входит в /status | `AGENTS.md:215` (SESSIONDETAILS/DELETESESSION/DELETECOMMAND/CONFIRMDELETESESSION/CONFIRMDELETECOMMAND) vs `ROADMAP.md:118-119` (CONFIRMDELETESESSION/CONFIRMDELETECOMMAND) vs `ROADMAP.md:227` (DELETESESSION/DELETECOMMAND) | Согласованы по сути (подтверждение + удаление), но перечисления разной полноты. |
+| **DUP-012** | Дата актуальности ROADMAP | `ROADMAP.md:3` (`Актуально на: 8 июня 2026`) — файл декларирует дату 8 июня 2026, тогда как git log показывает более поздние правки (8 июня 2026 / 9 июня 2026). | Возможно, дата в шапке не обновлялась. |
 
-#### A4. Callback handlers (Priority + префиксы)
-**AGENTS.md:185** перечисляет 6 хендлеров с приоритетами; **README.md:270-277** даёт ту же таблицу с дополнительной колонкой префиксов (REQACCESS/APPROVEUSER/REJECTUSER, GOTOPARENT, FILE, PDF/DWG/NWC/IFC/BIMDOC/CLASHREP/AUTORES, SESSIONDETAILS/DELETESESSION/DELETECOMMAND/CONFIRMDELETESESSION/CONFIRMDELETECOMMAND, APPLYCOMMANDS/CANCELCOMMANDSSEL).
+### 3. Утверждения, присутствующие только в одном из документов
 
-#### A5. In-memory счётчик `_sessionRemaining` (ConcurrentDictionary)
-Описан в **AGENTS.md:170-175**, **Docs/execution-algorithm.md:729-761**, **ROADMAP.md:109-111**.
+| Утверждение | Только в | Нет в |
+|---|---|---|
+| `Telegram.Bot 22.10.0.1` | `README.md:27` | AGENTS.md, ROADMAP.md, Docs/* |
+| `PostgreSQL 15+` | `README.md:37` | AGENTS.md, ROADMAP.md, Docs/* |
+| `Docker` (рекомендуется) | `README.md:38, 158-167` | AGENTS.md, ROADMAP.md, Docs/* |
+| `Telegram-бот для навигации...` (обзор) | `README.md:3` | Другие файлы |
+| Команды бота `/start`, `/help`, `/export`, `/automation`, `/status` | `README.md:97-103` (таблица), `ROADMAP.md:20` (список) | AGENTS.md, Docs/* |
+| `dotnet format TelegramBot.slnx` | `AGENTS.md:43`, `ROADMAP.md:201` (через `--diagnostics IDE0005`), `QODANA-017` (через `dotnet format --verify-no-changes`) | Согласованы (но разные флаги). |
+| `dotnet test` запрещён | `AGENTS.md:46` | QODANA-019 (упомянуто "Тесты отключены согласно AGENTS.md") |
+| Qodana настройка (workflow, image, profile) | `Docs/qodana-setup.md` | AGENTS.md, README.md, ROADMAP.md |
+| `pg_try_advisory_lock(1234567)` | `ROADMAP.md:78`, `Docs/execution-algorithm.md:1408`, `Docs/CommandExecutionAlgorithm.md:286` | Согласованы |
+| Команды `XLSEXPORT` как пример расширения | `Docs/execution-algorithm.md:1233-1238` | Другие файлы |
+| GitNexus indexer | `AGENTS.md:370-401` | Другие файлы |
+| Copilot instructions (просто "deprecated-подходы не использовать") | `.github/copilot-instructions.md` | Другие файлы |
+| `2026-06-08` (actual date) | `ROADMAP.md:3` | Другие файлы |
+| `dotnet-audit-2026` reference | — | (отсутствует во всех) |
+| `Рекомендации по улучшению` (таблица с приоритетами 🔥🟠🟡) | `ROADMAP.md:219-235` | Другие файлы |
 
-#### A6. Удалённые интерфейсы
-**AGENTS.md:132**, **ROADMAP.md:197**, **Docs/execution-algorithm.md:178-179**, **README.md:227** все упоминают `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`. AGENTS.md и ROADMAP.md дополнительно упоминают `IFileSystemBrowser`, `ITelegramUpdateMapper`.
+### 4. Уникальные утверждения AGENTS.md (не упомянутые явно в README/ROADMAP/Docs)
 
-#### A7. 4 таблицы БД
-**AGENTS.md:197**, **README.md:285-290**, **Docs/execution-algorithm.md:890-897** — все называют BotUsers/Sessions/Commands/TrackedMessages.
+- Полный список 6 callback-хендлеров с приоритетами (AccessRequestHandler:0, FileNavigationHandler:10, FileSelectionHandler:20, CommandToggleHandler:100, SessionManagementHandler:100, CommandSelectionHandler:100)
+- `CallbackDataParser.Parse(data)` + `ParsedCallback.Is(...)` pattern
+- `MarkdownHelper.EscapeMarkdownV2()` vs `MarkdownHelper.EscapeMarkdown()`
+- Удалённые интерфейсы (`IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IFileSystemBrowser`, `ITelegramUpdateMapper`)
+- Конкретные namespaces всех проектов
+- Правила именования (PascalCase, `_camelCase`, `I`-prefix)
+- Структура файла констант: `TelegramBot.Core/Constants/`
+- Primary constructors — правила и примеры
+- Telegram parse mode — MarkdownV2 для plain / Markdown для inline keyboards
+- PostgreSQL типы данных: TIMESTAMPTZ, SERIAL, BIGINT
+- SQL: `RETURNING`, `ON CONFLICT DO NOTHING/UPDATE`
+- `Process` хранится напрямую, без обёртки (атомарный `AddOrUpdate` в `_sessionRemaining`)
+- GitNexus workflow
 
-#### A8. ProjectName в Sessions
-**AGENTS.md:199-200**, **ROADMAP.md:103-104** — `ProjectName TEXT` в `Sessions`.
+### 5. Уникальные утверждения Docs/execution-algorithm.md (не упомянутые в AGENTS/README/ROADMAP)
 
-#### A9. Graceful shutdown не нужен
-**AGENTS.md (нет прямой строки)**, **ROADMAP.md:96-97**, **ROADMAP.md:146**, **Docs/execution-algorithm.md:379**, **Docs/execution-algorithm.md:1404 (DOC-008)**, **README.md:263** — все зафиксировано.
+- Паттерн "Strategy" — конфигурация команды определяет стратегию запуска (Revit, Navisworks, Python)
+- `BimIntegration` appsettings keys: `MinSupportedVersion`, `MaxSupportedVersion`, `RevitInstallRoot`
+- Семантика `Path.GetFileName()` для извлечения имён файлов в уведомлениях
+- PowerShell команды для диагностики процессов Revit
+- Полные SQL-блоки (INSERT, UPDATE с `unnest`, NOTIFY payload)
+- Тех. долг 11 пунктов (DOC-001 — DOC-011)
+- Диагностические SQL-запросы (8 штук)
+- `Path.GetFullPath()` для защиты от path traversal
 
-#### A10. GetCommandStatusAsync удалён
-**AGENTS.md:202-203**, **ROADMAP.md:120-121**, **ROADMAP.md:197** — все упоминают удаление.
+### 6. Уникальные утверждения ROADMAP.md (не упомянутые в других документах)
 
-#### A11. BimLib SupportedOSPlatform("windows")
-**AGENTS.md:127**, **README.md:222**, **Docs/execution-algorithm.md:230**.
+- Конкретные версии v1.0, v1.1, v1.2, v1.3, v2.0+ со статусами
+- 8+ предложений по улучшению (pre-warm Revit, статистика, умный retry)
+- 6 открытых вопросов
+- "Не планируется" секция (Health checks, new_command LISTEN/NOTIFY)
+- `~23 redundant поля` — конкретное число удалённых полей в C# 12 рефакторе
+- `~15 ручных new NpgsqlConnection + OpenAsync` — конкретное число в CreateConnectionAsync
+- `MaxRetries=5` (конкретное число)
+- Удалённые SQL/интерфейсы в v1.2 (`GetCommandStatusAsync`, `GetFailedFilesBySession`, `IFileSystemBrowser`, `ITelegramUpdateMapper`, `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`)
+- Конкретный retry bug: retry раньше не декрементит `_sessionRemaining` (исправлен в v1.2)
+- Конкретные значения конфига: `RateLimit:MaxFilesPerUserPerDay = 100`
 
-#### A12. OpenMcdf 3.x API
-**AGENTS.md:128**, **README.md:223**, **Docs/execution-algorithm.md:231** — все указывают `RootStorage.OpenRead() → OpenStream() → stream.Read()`.
+### 7. Уникальные утверждения Docs/CommandExecutionAlgorithm.md (не упомянутые в других)
 
-#### A13. RevitProcessStatus 3 значения
-**AGENTS.md:131**, **README.md:226**, **Docs/execution-algorithm.md:234** — `Healthy`, `NotResponding`, `Error`.
+- `App = CommandAppService + SlashCommandService` — ServiceApp как комбинация
+- `CollectRvtFiles()` — отдельный метод (не описан в AGENTS/README/ROADMAP/execution-algorithm)
+- Конкретный SQL: `LIMIT 50` в `FOR UPDATE SKIP LOCKED` (расхождение с `DefaultBatchSize=5` в `execution-algorithm.md`)
 
-#### A14. ProcessHealthHelper.CheckHealth
-**AGENTS.md:104/133/141**, **Docs/execution-algorithm.md:166** (упоминание в BimLib-структуре).
+### 8. Уникальные утверждения Docs/qodana-setup.md (не упомянутые в других)
 
-#### A15. NpgsqlHelper.CreateOpenConnectionAsync
-**AGENTS.md:142**, **ROADMAP.md:205-206** — перенесён из Worker.Services в TelegramBot.Data.
+- Workflow file: `.github/workflows/qodana.yml` (ещё не существует — файл не интегрирован в CI)
+- Qodana image: `jetbrains/qodana-dotnet`
+- Qodana action: `JetBrains/qodana-action@v2024.1`
+- Qodana profile: `qodana.recommended`
+- `dotnet format --verify-no-changes`
 
----
+### 9. Уникальные утверждения .github/copilot-instructions.md
 
-### B. Противоречия
-
-#### B1. Кол-во partial-файлов SQL: **4 vs 5**
-- **AGENTS.md:19**: "SQL constants in `Sql/` (4 partial files)"
-- **AGENTS.md:210**: "SQL constants in `TelegramBot.Data/Sql/` (4 partial files total)"
-- **ROADMAP.md:44**: "SQL-запросы, разбитые по сущностям (**5 partial-файлов**)"
-- **README.md:96-98** перечисляет 4 файла: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`.
-
-#### B2. docs/CommandExecutionAlgorithm.md (CEA) — устаревший / противоречивый
-Файл `Docs/CommandExecutionAlgorithm.md` — это текстовое представление PlantUML диаграммы `CommandExecutionAlgorithm.puml`. Он содержит несколько утверждений, которые **ПРОТИВОРЕЧАТ** остальной документации (AGENTS.md, README.md, ROADMAP.md, Docs/execution-algorithm.md):
-
-- **CEA-002 / CEA-003**: Утверждает что Server вызывает `NotifyNewCommandsAsync()` → `NOTIFY new_command` (CEA:47-49) и Worker просыпается мгновенно через `conn.WaitAsync()` (CEA:58-66). Это **противоречит**:
-  - AGENTS.md (нет упоминания NOTIFY new_command)
-  - README.md:35 "Worker забирает pending-команды из БД раз в минуту"
-  - ROADMAP.md:148 "`new_command LISTEN/NOTIFY` для Worker ... по текущему решению не требуется"
-  - Docs/execution-algorithm.md:285-286 "Никаких LISTEN/NOTIFY — только таймер"
-  - Docs/execution-algorithm.md:977 "Worker не ждёт отдельный `new_command` сигнал. Он раз в минуту проверяет PostgreSQL"
-  - Docs/execution-algorithm.md:1153 "Polling queue | Worker проверяет очередь каждую минуту без `new_command LISTEN/NOTIFY`"
-
-- **CEA-004**: Утверждает `ClaimPendingCommandsAsync(limit=50)`, тогда как Docs/execution-algorithm.md:309 указывает `DefaultBatchSize=5`. (50 vs 5 — расхождение.)
-
-- **CEA-008 (retry)**: CEA-227 "NOTIFY new_command (будим воркер)" — опять NOTIFY new_command, противоречит остальным документам.
-
-- **CEA-009 (payload)**: CEA-247 "Parse payload `(UserId|CmdId|CmdText|Status|Error)` — 5 полей", тогда как Docs/execution-algorithm.md:695 указывает `UserId|SessionId|Done|Total|ProjectName` (тоже 5 полей, но **совершенно разные**). И CEA отправляет per-command уведомление, тогда как основные документы говорят что уведомление идёт только при завершении всей сессии (per-session).
-
-#### B3. `LeaseTimeoutMin=5` (фиксированное) vs `Lease = ProcessTimeoutSeconds + 5 мин` (долгий TTL)
-- **Docs/execution-algorithm.md:454**: "`LeaseTimeoutMin = 5` — Lease истекает через 5 минут" (фиксированное значение, не зависящее от ProcessTimeoutSeconds)
-- **ROADMAP.md:53**: "**Lease с долгим TTL** — при захвате команды Lease = ProcessTimeoutSeconds + 5 мин"
-- **Docs/CommandExecutionAlgorithm.md:401**: "Worker захватывает команду: Lease = ProcessTimeoutSeconds + 5 мин (в секундах Unix)"
-- **Docs/execution-algorithm.md:1147**: "**Lease (долгий TTL)** | Lease устанавливается на `ProcessTimeoutSeconds + 5 мин`, команда не вернётся в очередь раньше таймаута"
-
-**NB:** Возможно `LeaseTimeoutMin=5` в execution-algorithm.md:454 — это имя константы, а не её значение, и она используется для расчёта долгого TTL. Проверить в коде.
-
-#### B4. CI/CD наличие
-- **AGENTS.md:80**: "No CI/CD pipeline or automated tests — the only verification is a successful `dotnet build`"
-- **Docs/qodana-setup.md:59-62**: Утверждает наличие CI-пайплайна `.github/workflows/ci.yml` с `dotnet format --verify-no-changes`, `dotnet build`, `dotnet publish`.
-
-**NB:** `qodana-setup.md` от 2024/2025, AGENTS.md тоже упоминает в `Known Issues`. Возможно AGENTS.md устарел, либо `.github/workflows/ci.yml` существовал ранее.
-
-#### B5. Наличие полей `GUID`, `RetryCount`, `NextRetryAt`, `Partition` в Commands
-- **README.md:289** упоминает `GUID`, `Lease`, `Priority`, `RetryCount`, `NextRetryAt`.
-- **Docs/execution-algorithm.md:1042-1062** в SQL упоминает `c.Partition` как колонку Commands (в SELECT ... c.Partition, c.Priority). **Это поле нигде больше не задокументировано** (в AGENTS.md, ROADMAP.md, README.md Partition не упоминается как колонка Commands).
-
-#### B6. `Notifications per-command` vs `per-session`
-- **Docs/CommandExecutionAlgorithm.md:242-256**: Сервер слушает NOTIFY command_completed и отправляет per-command сообщение (✅ *PDF* завершена / ❌ *PDF* — ошибка).
-- **AGENTS.md:165-167** / **Docs/execution-algorithm.md:658-661**: Уведомление отправляется **только после завершения всей сессии** (per-session сводка, не per-command).
-- **ROADMAP.md:74-77**: "Уведомления приходят только при завершении всей сессии (сводка: N ✅, M ❌)".
-
-#### B7. Worker Services папка — наличие BimLibLogFilter
-- **ROADMAP.md:198** ("Удалены лишние интерфейсы") не упоминает BimLibLogFilter.
-- **README.md:264** упоминает BimLibLogFilter как `TelegramBot.Worker/Services`.
-- **AGENTS.md** не упоминает BimLibLogFilter вообще.
-
-#### B8. Документы CLAUDE.md и README.TOKEN.md
-- **README.md:13,14**, **ROADMAP.md:256,257,259** ссылаются на `CLAUDE.md` и `README.TOKEN.md`.
-- В репозитории эти файлы **отсутствуют** (проверено: `ls C:\Users\y.zhumabayev\Repository\TelegramBot | grep -iE "(CLAUDE|TOKEN)"` → пусто).
-
-#### B9. Пространства имён
-- **AGENTS.md:241-243** и **README.md** (косвенно через дерево) указывают namespace `TelegramBot.Server.Services.Infrastructure.Telegram`. **README.md:111** упоминает `Services/Infrastructure/Telegram`. **AGENTS.md:243** упоминает `TelegramBot.Server.Services.Infrastructure.Telegram`.
-
-#### B10. Структура `Sql/`
-- **README.md:95-98** перечисляет 4 файла: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`. Это совпадает с **AGENTS.md (4 partial files)**, но **противоречит ROADMAP.md:44 (5 partial files)**. Фактически надо сверить с `ls TelegramBot.Data/Sql/`.
+- Минимальный, всего 2 пункта. Не дублирует ничего — это руководство для Copilot-а.
 
 ---
 
-### C. Возможные дубли в `Docs/`
+## Итог
 
-- `Docs/execution-algorithm.md` (1426 строк) — **основная** детальная спецификация алгоритма.
-- `Docs/CommandExecutionAlgorithm.md` (414 строк) — текстовое представление PUML-диаграммы `CommandExecutionAlgorithm.puml`.
-
-**Вердикт:** Содержимое **пересекается по теме**, но `CommandExecutionAlgorithm.md` содержит **устаревшие/противоречивые утверждения** (NOTIFY new_command, per-command уведомления, payload формат, limit=50). Скорее всего файл не обновлялся после v1.x и описывает более раннее состояние системы.
-
-Файл `CommandExecutionAlgorithm.puml`, упомянутый в CEA.md:3 ("Текстовое представление диаграммы `CommandExecutionAlgorithm.puml`"), в репозитории **не обнаружен** (нужно проверить отдельно — вероятно отсутствует).
-
----
-
-### D. Известные «оговорки про stale-документацию» в самих документах
-
-- **AGENTS.md:342**: "`/// <inheritdoc/>` comments on methods that no longer implement interfaces (e.g., `RevitPathResolver`, `RevitProcessTracker`) are stale but harmless — replace with proper `<summary>` when editing nearby"
-- **AGENTS.md:340**: "Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens"
-- **ROADMAP.md:188-189** (v1.3): "**Синхронизировать документацию с реальным алгоритмом** — обновить `Docs/execution-algorithm.md`, `README.md`, `AGENTS.md` и `CLAUDE.md` после упрощения кода" (planned, not done)
-- **Docs/execution-algorithm.md:1391-1408** (DOC-001..011) — таблица "Известные ограничения и технический долг" со статусами ✅ Реализовано / В планах / Улучшение
-
----
-
-## Сводная статистика
-
-| Файл | ID префикс | Кол-во утверждений |
-|------|-----------|-------------------|
-| AGENTS.md | AGENTS- | 83 |
-| README.md | README- | 44 |
-| ROADMAP.md | ROADMAP- | 37 |
-| Docs/execution-algorithm.md | DOCS-EXEC- | 38 |
-| Docs/CommandExecutionAlgorithm.md | DOCS-CEA- | 15 |
-| Docs/qodana-setup.md | QODANA- | 8 |
-| .github/copilot-instructions.md | COPILOT- | 2 |
-| **ИТОГО** | | **227** |
-
-Категории:
-- architecture: ~50
-- class-name: ~30
-- namespace: ~7
-- config-key: ~30
-- sql-table / sql-field: ~25
-- callback-prefix / command-code: ~10
-- dependency: ~10
-- build-cmd / run-cmd: ~10
-- other: ~55
+Готово. Файл: audit/doc-claims.md, 379 утверждений из 7 файлов.
