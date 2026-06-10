@@ -1,14 +1,14 @@
-name: .NET CI
+name: CI
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ main ]
 
 jobs:
-  build-and-lint:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: windows-latest  # Worker требует Windows
 
     steps:
     - uses: actions/checkout@v4
@@ -21,17 +21,20 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore TelegramBot.slnx
 
-    - name: Check Code Style (Lint)
-      run: dotnet format TelegramBot.slnx --verify-no-changes --no-restore --verbosity diagnostic
-
     - name: Build
-      run: dotnet build --no-restore --configuration Release TelegramBot.slnx
+      run: dotnet build TelegramBot.slnx --no-restore --configuration Release
 
-    - name: Publish
-      run: dotnet publish -c Release -o ./publish TelegramBot.Server/TelegramBot.Server.csproj
+    - name: Check code style
+      run: dotnet format TelegramBot.slnx --verify-no-changes
 
-    - name: Upload Artifact
+    - name: Publish Server
+      run: dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release -o ./publish/server
+
+    - name: Publish Worker
+      run: dotnet publish TelegramBot.Worker/TelegramBot.Worker.csproj -c Release -o ./publish/worker
+
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: bot-release
+        name: telegram-bot-build
         path: ./publish
