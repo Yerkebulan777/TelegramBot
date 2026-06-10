@@ -4,6 +4,7 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Core.Services;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Middleware;
 
 namespace TelegramBot.Server.Services.Application;
 
@@ -12,6 +13,7 @@ public sealed class CommandAppService(
     ICallbackDispatcher callbackDispatcher,
     ISlashCommandService slashCommandService,
     ITelegramOutputService outputService,
+    IAccessValidator accessValidator,
     RateLimiter rateLimiter,
     ILogger<CommandAppService> logger) : ICommandAppService
 {
@@ -60,12 +62,8 @@ public sealed class CommandAppService(
         var session = sessionManager.GetOrCreateSession(callback.UserId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
-        var isRegistrationCallback = parsed.Prefix is
-            CallbackPrefixes.RequestAccess or
-            CallbackPrefixes.ApproveUser or
-            CallbackPrefixes.RejectUser;
-
-        if (!isRegistrationCallback && !await slashCommandService.CheckAndNotifyAccessAsync(callback.UserId, session))
+        if (!accessValidator.BypassesAccessCheck(parsed.Prefix) &&
+            !await accessValidator.EnsureActiveOrNotifyAsync(callback.UserId, session))
         {
             logger.LogWarning("Callback rejected: prefix={Prefix}, user={UserId}, reason=access_denied", parsed.Prefix, callback.UserId);
             return;

@@ -5,16 +5,17 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Middleware;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class SessionManagementHandler(
     ISessionDataService sessionDataService,
-    IUserDataService userDataService,
     ICommandDataService commandDataService,
     IMessageTrackingDataService messageTrackingDataService,
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
+    IAccessValidator accessValidator,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
 {
     protected override HashSet<string> SupportedPrefixes { get; } =
@@ -31,8 +32,8 @@ public sealed class SessionManagementHandler(
     /// <summary>Проверяет, имеет ли пользователь доступ (все одобренные могут управлять любыми сессиями).</summary>
     private async Task<bool> CanManageAsync(long userId)
     {
-        var user = await userDataService.GetUserAsync(userId);
-        return user?.Status == UserAccessStatus.Approved;
+        var access = await accessValidator.ValidateAsync(userId);
+        return access.IsActive;
     }
 
     /// <summary>

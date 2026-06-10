@@ -5,6 +5,7 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Services;
 using TelegramBot.Data;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Services.Application;
 using TelegramBot.Server.Services.Application.Handlers;
 using TelegramBot.Server.Services.Infrastructure.FileSystem;
@@ -58,6 +59,7 @@ public static class DependencyInjectionExtensions
     private static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
         _=services.AddSingleton<ICommandAppService, CommandAppService>();
+        _=services.AddSingleton<IAccessValidator, AuthorizationMiddleware>();
         _=services.AddSingleton<RateLimiter>();
         _=services.AddSingleton<ISlashCommandService, SlashCommandService>();
         _=services.AddSingleton<ISessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));

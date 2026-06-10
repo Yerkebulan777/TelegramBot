@@ -6,12 +6,14 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Middleware;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class AccessRequestHandler(
     IUserDataService userDataService,
     ITelegramOutputService outputService,
+    IAccessValidator accessValidator,
     IOptions<BotOptions> botOptions,
     ILogger<AccessRequestHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -39,9 +41,10 @@ public sealed class AccessRequestHandler(
 
     private async Task<bool> HandleRequestAccessAsync(CallbackContext context)
     {
-        var existing = await userDataService.GetUserAsync(context.UserId);
+        var access = await accessValidator.ValidateAsync(context.UserId);
+        var existing = access.User;
 
-        if (existing?.Status == UserAccessStatus.Approved)
+        if (access.IsActive)
         {
             await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
                 "У вас уже есть доступ. Введите /help для просмотра команд.");
@@ -106,6 +109,14 @@ public sealed class AccessRequestHandler(
         Func<string, string> adminMessage,
         string userMessage)
     {
+        var access = await accessValidator.ValidateAsync(context.UserId);
+        if (!access.IsAdmin)
+        {
+            Logger.LogWarning("Access decision rejected: user={UserId}, reason=not_admin", context.UserId);
+            await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Недостаточно прав.");
+            return true;
+        }
+
         if (!long.TryParse(context.ParsedCallback.Argument, out long targetUserId))
         {
             LogInvalidInput("user ID", context.ParsedCallback.Argument, context.Username, context.UserId);

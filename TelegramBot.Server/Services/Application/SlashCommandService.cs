@@ -10,6 +10,7 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Application.Handlers;
 using Message = Telegram.Bot.Types.Message;
@@ -18,11 +19,11 @@ namespace TelegramBot.Server.Services.Application;
 
 public sealed class SlashCommandService(
     ISessionDataService sessionDataService,
-    IUserDataService userDataService,
     ICommandDataService commandDataService,
     IMessageTrackingDataService messageTrackingDataService,
     ITelegramOutputService outputService,
     IKeyboardBuilder keyboardBuilder,
+    IAccessValidator accessValidator,
     IOptions<FileSystemOptions> fileSystemOptions,
     IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger) : ISlashCommandService
@@ -50,19 +51,6 @@ public sealed class SlashCommandService(
 
         await SendSafeResponseAsync(context.ChatId, responseMessage, context.Session);
         await LogCommandExecutionAsync(context, strategy, result);
-    }
-
-    public async Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session)
-    {
-        var userRecord = await userDataService.GetUserAsync(userId);
-
-        if (userRecord?.Status == UserAccessStatus.Approved)
-        {
-            return true;
-        }
-
-        _=await TrackMessageAsync(outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
-        return false;
     }
 
     private async Task HandleSlashCommandAsync(string command, MessageDto message, UserSession session, string username)
@@ -125,10 +113,13 @@ public sealed class SlashCommandService(
 
         logger.LogDebug("Command received: command={Command}, user={UserId}", text, userId);
 
-        var user = await userDataService.GetUserAsync(userId);
-        if (text == "/start" && user?.Status != UserAccessStatus.Approved)
+        var access = await accessValidator.ValidateAsync(userId);
+        var user = access.User;
+        if (text == "/start" && !access.IsActive)
         {
-            user = await RefreshApprovedAdminUserAsync(userId, username, user);
+            _ = await accessValidator.RefreshApprovedAdminUserAsync(userId, username, user);
+            access = await accessValidator.ValidateAsync(userId);
+            user = access.User;
         }
 
         return new UserCommandContext(
@@ -140,7 +131,7 @@ public sealed class SlashCommandService(
             text,
             username,
             user,
-            text == "/start" || user?.Status == UserAccessStatus.Approved);
+            text == "/start" || access.HasAccess);
     }
 
     private Task<CommandStrategy> ResolveCommandStrategyAsync(UserCommandContext context)
@@ -177,7 +168,7 @@ public sealed class SlashCommandService(
 
             case CommandStrategy.Start:
                 context.Session.Reset(_options.RootPath);
-                if (context.User?.Status == UserAccessStatus.Approved)
+                if (context.HasAccess)
                 {
                     await SendHelpMessageAsync(context.UserId, context.Session);
                 }
@@ -259,28 +250,6 @@ public sealed class SlashCommandService(
         }
 
         return Task.CompletedTask;
-    }
-
-    private async Task<BotUser?> RefreshApprovedAdminUserAsync(long userId, string username, BotUser? user)
-    {
-        var adminUser = await userDataService.GetUserAsync(userId);
-        if (adminUser?.Role != UserRole.Admin || adminUser.Status != UserAccessStatus.Approved)
-        {
-            return user;
-        }
-
-        var now = DateTime.UtcNow;
-        await userDataService.UpsertUserAsync(new BotUser
-        {
-            UserId = userId,
-            Username = username,
-            Role = UserRole.Admin,
-            Status = UserAccessStatus.Approved,
-            CreatedAt = user?.CreatedAt ?? now,
-            UpdatedAt = now
-        });
-
-        return await userDataService.GetUserAsync(userId);
     }
 
     private static bool IsCommandSelectionAction(string messageText)
