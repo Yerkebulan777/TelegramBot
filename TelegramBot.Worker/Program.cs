@@ -6,6 +6,7 @@ using TelegramBot.Data;
 using TelegramBot.Worker.BimLib.Config;
 using TelegramBot.Worker.BimLib.Interfaces;
 using TelegramBot.Worker.BimLib.Monitor;
+using TelegramBot.Worker.BimLib.Native;
 using TelegramBot.Worker.BimLib.Services;
 using TelegramBot.Worker.Helpers;
 using TelegramBot.Worker.Services;
@@ -67,6 +68,10 @@ public static class Program
                                 rollingInterval: RollingInterval.Day));
                     })
                 .Build();
+
+            // Initialize WinApiHelper logger for safe P/Invoke error logging
+            var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
+            WinApiHelper.SetLogger(loggerFactory.CreateLogger("TelegramBot.Worker.BimLib.Native.WinApiHelper"));
 
             await host.InitializeDatabaseAsync();
             await host.RunAsync();

@@ -147,7 +147,7 @@ public sealed class DialogDismisser(
 
         // Фильтруем: оставляем только enabled окна
         return found
-            .Where(hwnd => User32.IsWindowEnabled(hwnd))
+            .Where(hwnd => User32.IsWindowEnabledSafe(hwnd))
             .OrderBy(WindowUtil.GetWindowTitle)
             .ToList();
     }
@@ -200,7 +200,7 @@ public sealed class DialogDismisser(
 
         foreach (var hwndBtn in buttons)
         {
-            if (!User32.IsWindowEnabled(hwndBtn))
+            if (!User32.IsWindowEnabledSafe(hwndBtn))
             {
                 continue;
             }
