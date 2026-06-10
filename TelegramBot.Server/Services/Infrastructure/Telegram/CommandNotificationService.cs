@@ -7,7 +7,7 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 /// <summary>
 /// Background service: слушает PostgreSQL LISTEN/NOTIFY на канале 'command_completed'.
-/// При получении уведомления отправляет пользователю сводку по завершённой сессии.
+/// При получении уведомления ставит задачу отправки в очередь.
 /// </summary>
 public sealed class CommandNotificationService(
     IConfiguration configuration,

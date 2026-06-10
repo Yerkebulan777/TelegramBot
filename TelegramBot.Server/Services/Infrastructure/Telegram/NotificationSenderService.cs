@@ -22,9 +22,15 @@ public sealed class NotificationSenderService(
     {
         logger.LogInformation("Notification sender starting");
 
-        await foreach (var item in notificationChannel.Reader.ReadAllAsync(stoppingToken))
+        try
         {
-            await SendNotificationAsync(item);
+            await foreach (var item in notificationChannel.Reader.ReadAllAsync(stoppingToken))
+            {
+                await SendNotificationAsync(item);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
         }
 
         logger.LogInformation("Notification sender stopped");
