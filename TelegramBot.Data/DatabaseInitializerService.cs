@@ -17,15 +17,26 @@ public sealed class DatabaseInitializerService(
     public async Task InitializeDatabaseAsync()
     {
         await using var conn = await CreateOpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
 
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable);
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable);
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureSessionsColumns);
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable);
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureCommandsColumns);
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable);
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable);
-        _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes);
-        _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled);
+        try
+        {
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureSessionsColumns, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureCommandsColumns, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateTrackedMessagesTable, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled, transaction: tx);
+
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
     }
 }
