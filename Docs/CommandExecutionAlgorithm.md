@@ -1,7 +1,7 @@
 # Алгоритм выполнения команд (Sequence Diagram)
 
 > Текстовое представление диаграммы `CommandExecutionAlgorithm.puml`
-> Полная спецификация: [execution-algorithm.md](execution-algorithm.md)
+> Полная спецификация: [ExecutionAlgorithm.md](ExecutionAlgorithm.md)
 
 ---
 

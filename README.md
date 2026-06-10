@@ -11,7 +11,7 @@ Telegram-бот для навигации по файловой системе �
 |----------|----------|
 | [ROADMAP.md](ROADMAP.md) | Дорожная карта проекта |
 | [AGENTS.md](AGENTS.md) | Руководство для AI-агентов |
-| [Docs/execution-algorithm.md](Docs/execution-algorithm.md) | Алгоритм выполнения команд |
+| [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд |
 
 ## Обзор
 
@@ -65,7 +65,6 @@ TelegramBot.Core   ←──  TelegramBot.Data
 | Сервис | Проект | Роль |
 |--------|--------|------|
 | `TelegramBotHostedService` | Server | Polling-цикл, точка входа |
-| `TelegramBotHostedService` | Server | Polling-цикл, точка входа |
 | `CommandAppService` | Server | Центральный диспетчер, проверка доступа, rate limiting |
 | `SlashCommandService` | Server | Обработка текстовых команд |
 | `AuthorizationMiddleware` | Server | Доступ через `IAccessValidator` |
@@ -78,7 +77,6 @@ TelegramBot.Core   ←──  TelegramBot.Data
 | `CommandExecutionService` | Worker | LISTEN/NOTIFY + fallback polling, выполнение Revit/Navisworks/AI |
 | `CommandNotificationService` | Server | LISTEN command_completed → Channel<NotificationItem> |
 | `NotificationSenderService` | Server | Отправка уведомлений из канала в Telegram |
-| `CommandExecutionService` | Worker | Polling очереди, выполнение Revit/Navisworks/AI |
 | `RevitVersionDetector` | Worker/BimLib | Определение версии Revit по .rvt-файлу |
 | `RevitPathResolver` | Worker/BimLib | Поиск Revit.exe через реестр |
 | `DialogDismisser` | Worker/BimLib | Автозакрытие диалогов Revit |

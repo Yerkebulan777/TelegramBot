@@ -167,7 +167,7 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 
-Полная спецификация алгоритма: **[Docs/execution-algorithm.md](Docs/execution-algorithm.md)**
+Полная спецификация алгоритма: **[Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md)**
 
 ```
 SlashCommandService.ConfirmFileSelectionAsync()

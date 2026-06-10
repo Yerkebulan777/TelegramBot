@@ -18,17 +18,19 @@ docker run --rm -v ${PWD}:/data/project/ -p 8080:8080 jetbrains/qodana-dotnet --
 
 ## Настройка в CI/CD (GitHub Actions)
 
-Создайте файл `.github/workflows/qodana.yml`:
+Интеграция Qodana в репозиторий настроена в файле `.github/workflows/code_quality.yml`:
 
 ```yaml
-name: Qodana
+name: Qodana Code Quality
+
+# Бесплатная версия: Qodana Community for .NET (qodana-cdnet)
+# Основана на ReSharper, Docker-only, C# + VB.NET + C/C++
+# QODANA_TOKEN опционален — нужен только для загрузки отчётов в Qodana Cloud
+
 on:
-  workflow_dispatch:
-  pull_request:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
+  pull_request:
 
 jobs:
   qodana:
@@ -37,31 +39,36 @@ jobs:
       contents: write
       pull-requests: write
       checks: write
+
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - name: 'Qodana Scan'
-        uses: JetBrains/qodana-action@v2024.1
-        env:
-          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}  # анализировать реальный коммит PR, не merge-коммит
+        fetch-depth: 0  # полная история нужна для инкрементального анализа PR
+
+    - name: Qodana Scan
+      uses: JetBrains/qodana-action@v2026.1
+      with:
+        pr-mode: false
+        args: |
+          --linter qodana-cdnet
+          --solution TelegramBot.slnx
 ```
 
 ## Конфигурация
 Файл `qodana.yaml` в корне проекта содержит основные настройки:
-- **linter**: используемый образ линтера (`jetbrains/qodana-dotnet`).
+- **linter**: используемый образ линтера (`jetbrains/qodana-dotnet:latest`).
 - **dotnet**: путь к решению (`TelegramBot.slnx`).
 - **profile**: используемый профиль проверок (`qodana.recommended`).
 
 ## Интеграция с CI
 
-Текущий CI-пайплайн (`.github/workflows/ci.yml`) включает:
+Qodana успешно интегрирована в репозиторий как отдельный шаг контроля качества кода (workflow `Qodana Code Quality`).
+
+Текущий CI-пайплайн (`.github/workflows/ci.yml`) также включает:
 - `dotnet format --verify-no-changes` — проверка стиля кода
 - `dotnet build` — проверка сборки
 - `dotnet publish` — публикация артефакта
-
-> **Примечание:** Qodana пока не интегрирована в CI. Для добавления используйте workflow из раздела «Настройка в CI/CD».
 
 ## Особенности проекта
 - Тесты в данном проекте отключены согласно [AGENTS.md](../AGENTS.md). Qodana настроена только на анализ статического кода.
