@@ -1,6 +1,6 @@
 # Алгоритм выполнения команд (Command Execution Algorithm)
 
-> **Связанные документы:** [ROADMAP.md](../ROADMAP.md) — дорожная карта проекта | [README.md](../README.md) — обзор проекта
+> **Связанные документы:** [ROADMAP.md](../ROADMAP.md) — дорожная карта проекта | [README.md](../README.md) — обзор проекта | [CadIntegrationAlgorithm.md](CadIntegrationAlgorithm.md) — интеграция с CAD-плагинами
 
 ## Содержание
 

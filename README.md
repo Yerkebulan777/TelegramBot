@@ -12,6 +12,7 @@ Telegram-бот для навигации по файловой системе �
 | [ROADMAP.md](ROADMAP.md) | Дорожная карта проекта |
 | [AGENTS.md](AGENTS.md) | Руководство для AI-агентов |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд |
+| [Docs/CadIntegrationAlgorithm.md](Docs/CadIntegrationAlgorithm.md) | Интеграция с CAD-плагинами (Revit/Navisworks) |
 
 ## Обзор
 
