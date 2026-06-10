@@ -226,6 +226,10 @@
 | 6 | **Умный retry: transient vs permanent** | 🟡 Низкий | 🟡 Средняя | Сейчас retry для всех ошибок одинаков. **Решение:** классифицировать по exit code / error message: `InvalidFileError` → сразу Failed (retry бесполезен), `ProcessCrashError` → retry (возможно временный сбой) |
 | 7 | **Confirmation dialogs для удаления** | ✅ Реализовано | 🟢 Низкая | `DELETESESSION:` / `DELETECOMMAND:` сначала показывают подтверждение, затем soft-delete |
 
+| 8 | **Асинхронное ожидание процессов** | 🔥 Высокий | 🟢 Низкая | В .NET 10 использовать `await process.WaitForExitAsync(ct)` вместо блокирующего `WaitForExit()` внутри `Task.Run` для освобождения потоков ThreadPool |
+| 9 | **Асинхронный сбор файлов (RVT)** | 🟠 Средний | 🟢 Низкая | В `SlashCommandService.CollectRvtFiles` заменить синхронный обход ФС на асинхронный, чтобы не блокировать цикл обработки Telegram-сообщений |
+| 10 | **Persistent RateLimiter** | 🟡 Низкий | 🟡 Средняя | Перенести хранение окон запросов из `ConcurrentDictionary` в PostgreSQL/Redis для сохранения лимитов после перезагрузки сервера |
+
 ### Шкала приоритетов
 
 | Приоритет | Описание |
