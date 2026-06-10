@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Interfaces;
@@ -34,20 +33,6 @@ public sealed class SessionManagementHandler(
     {
         var access = await accessValidator.ValidateAsync(userId);
         return access.IsActive;
-    }
-
-    /// <summary>
-    /// Пытается распарсить положительный int из callback-аргумента.
-    /// При неудаче логирует через LogInvalidInput и возвращает false.
-    /// </summary>
-    private bool TryParseId(CallbackContext context, [NotNullWhen(true)] out int id)
-    {
-        if (!int.TryParse(context.ParsedCallback.Argument, out id) || id <= 0)
-        {
-            LogInvalidInput("ID", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return false;
-        }
-        return true;
     }
 
     protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
