@@ -48,3 +48,6 @@ htmlcov/
 # Cache directories
 .mypy_cache/
 .pytest_cache/
+
+# Visual Studio temporary files
+.vs/
