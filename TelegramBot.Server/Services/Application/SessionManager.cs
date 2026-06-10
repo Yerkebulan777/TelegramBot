@@ -9,16 +9,14 @@ public class SessionManager : ISessionManager, IDisposable
     private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();
     private readonly TimeSpan _sessionTimeout;
-    private readonly Timer _cleanupTimer;
+    private readonly PeriodicTimer _cleanupTimer;
+    private readonly CancellationTokenSource _cleanupCts = new();
 
     public SessionManager(TimeSpan sessionTimeout)
     {
         _sessionTimeout = sessionTimeout;
-        _cleanupTimer = new Timer(
-            _ => CleanUpExpiredSessions(),
-            null,
-            sessionTimeout,
-            sessionTimeout);
+        _cleanupTimer = new PeriodicTimer(sessionTimeout);
+        _ = RunCleanupLoopAsync(_cleanupCts.Token);
     }
 
     public UserSession GetOrCreateSession(long userId)
@@ -44,18 +42,21 @@ public class SessionManager : ISessionManager, IDisposable
         }
     }
 
-    private void CleanUpExpiredSessions()
+    private async Task CleanUpExpiredSessionsAsync(CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
 
-        foreach (var (key, session) in _sessions)
+        foreach (var key in _sessions.Keys.ToList())
         {
-            if (now - session.LastActivity <= _sessionTimeout)
-            {
-                continue;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (!_sessionLocks.TryGetValue(key, out var sessionLock) || !sessionLock.Wait(0))
+            if (!_sessions.TryGetValue(key, out var session))
+                continue;
+
+            if (now - session.LastActivity <= _sessionTimeout)
+                continue;
+
+            if (!_sessionLocks.TryGetValue(key, out var sessionLock) || !await sessionLock.WaitAsync(0, cancellationToken))
             {
                 _ = _sessions.TryRemove(key, out _);
                 continue;
@@ -74,7 +75,6 @@ public class SessionManager : ISessionManager, IDisposable
             {
                 if (lockRemoved)
                 {
-                    // We hold the exclusive lock (Wait(0) succeeded), no other thread uses it
                     sessionLock.Dispose();
                 }
                 else
@@ -85,8 +85,25 @@ public class SessionManager : ISessionManager, IDisposable
         }
     }
 
+    private async Task RunCleanupLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await _cleanupTimer.WaitForNextTickAsync(cancellationToken))
+            {
+                await CleanUpExpiredSessionsAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown requested
+        }
+    }
+
     public void Dispose()
     {
+        _cleanupCts.Cancel();
+        _cleanupCts.Dispose();
         _cleanupTimer.Dispose();
         foreach (var (_, semaphore) in _sessionLocks)
         {
