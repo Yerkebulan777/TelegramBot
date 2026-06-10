@@ -1,17 +1,22 @@
-```
 # Dependencies
 packages/
+
 # Build artifacts
 bin/
 obj/
+
 # Logs
 *.log
+
 # Environment
 .env
 .env.local
+
 # Editors
 .vscode/
 .vs/
 .idea/
 .opencode/
-```
+
+# AI tools temp files
+.omo/
