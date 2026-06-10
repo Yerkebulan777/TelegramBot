@@ -21,5 +21,5 @@ exclude:
     paths:
       - .idea
       - .git
-      - **/bin
-      - **/obj
+      - "**/bin"
+      - "**/obj"
