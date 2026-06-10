@@ -16,7 +16,8 @@ namespace TelegramBot.Worker.Services;
 /// <summary>
 /// Background service: событийная обработка очереди команд через PostgreSQL LISTEN/NOTIFY.
 /// Слушает канал new_tasks и мгновенно реагирует на новые задачи.
-/// Fallback-polling (раз в 5 мин) используется только при потере соединения с уведомлением.
+/// Fallback-polling (настраивается через <c>Worker.FallbackPollingIntervalSeconds</c>)
+/// используется только при потере соединения с уведомлением.
 /// Автоматически переподключается при потере соединения.
 /// </summary>
 public sealed class CommandExecutionService(
@@ -31,11 +32,8 @@ public sealed class CommandExecutionService(
     DialogDismisser dialogDismisser) : BackgroundService
 {
     private const string ListenChannel = "new_tasks";
-    private const int FallbackTimeoutSec = 300; // 5 мин — интервал fallback-поллинга
     private const int DefaultBatchSize = 5;
     private const int ReconnectDelayMs = 5_000; // 5 сек между попытками переподключения
-    private const int CleanupIntervalSec = 300; // Интервал очистки истёкших lease (5 мин)
-    private const int HealthCheckIntervalSec = 30; // Интервал проверки здоровья процессов
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
@@ -104,7 +102,7 @@ public sealed class CommandExecutionService(
     /// <summary>
     /// Основной цикл обработки: LISTEN канала new_tasks + fallback polling.
     /// При получении уведомления мгновенно обрабатывает пакет задач.
-    /// Fallback polling срабатывает только раз в 5 мин на случай потери соединения.
+    /// Fallback polling срабатывает только по истечении <c>FallbackPollingIntervalSeconds</c>.
     /// </summary>
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
@@ -127,7 +125,8 @@ public sealed class CommandExecutionService(
         while (!stoppingToken.IsCancellationRequested)
         {
             // Ждём уведомление с таймаутом fallback polling
-            var notificationReceived = await WaitForNotificationAsync(conn, TimeSpan.FromSeconds(FallbackTimeoutSec), stoppingToken);
+            var fallbackTimeoutSec = _workerOptions.FallbackPollingIntervalSeconds;
+            var notificationReceived = await WaitForNotificationAsync(conn, TimeSpan.FromSeconds(fallbackTimeoutSec), stoppingToken);
 
             if (notificationReceived)
             {
@@ -135,7 +134,7 @@ public sealed class CommandExecutionService(
             }
             else
             {
-                logger.LogDebug("Fallback polling triggered after {TimeoutSec}s", FallbackTimeoutSec);
+                logger.LogDebug("Fallback polling triggered after {TimeoutSec}s", fallbackTimeoutSec);
             }
 
             // Обрабатываем доступные команды
@@ -194,7 +193,7 @@ public sealed class CommandExecutionService(
     {
         return Task.Run(async () =>
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(CleanupIntervalSec));
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_workerOptions.CleanupIntervalSeconds));
 
             while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
             {
@@ -216,7 +215,7 @@ public sealed class CommandExecutionService(
     {
         return Task.Run(async () =>
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(HealthCheckIntervalSec));
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_workerOptions.HealthCheckIntervalSeconds));
 
             while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
             {

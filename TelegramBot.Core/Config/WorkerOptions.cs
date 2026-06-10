@@ -22,6 +22,22 @@ public sealed class WorkerOptions
     public int RetryDelayBaseSeconds { get; set; } = 60;
 
     /// <summary>
+    /// Интервал fallback-поллинга новых задач в секундах (по умолчанию 300 = 5 минут).
+    /// Используется только при потере соединения с LISTEN/NOTIFY.
+    /// </summary>
+    public int FallbackPollingIntervalSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// Интервал фоновой очистки истёкших lease в секундах (по умолчанию 300 = 5 минут).
+    /// </summary>
+    public int CleanupIntervalSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// Интервал проверки здоровья active процессов в секундах (по умолчанию 30).
+    /// </summary>
+    public int HealthCheckIntervalSeconds { get; set; } = 30;
+
+    /// <summary>
     /// Через сколько дней автоматически скрывать сессии без pending/processing команд.
     /// Значение 0 или меньше отключает автоочистку.
     /// </summary>
