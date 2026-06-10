@@ -408,7 +408,10 @@ public sealed class CommandExecutionService(
                 return;
             }
 
-            logger.LogInformation("Worker batch claimed: count={Count}", claimed.Count);
+            logger.LogInformation(
+                "Worker batch claimed: count={Count}, correlationIds={CorrelationIds}",
+                claimed.Count,
+                string.Join(", ", claimed.Select(c => c.CorrelationId).Distinct()));
 
             // Устанавливаем счётчик оставшихся команд по сессиям
             foreach (var group in claimed.GroupBy(c => c.SessionId))
@@ -432,8 +435,8 @@ public sealed class CommandExecutionService(
         var threshold = GetPartitionThreshold(cmd.Priority);
         var pool = _partitionPools[threshold];
 
-        logger.LogDebug("Command partition: id={Id}, command={Cmd}, priority={Prio}, threshold={Threshold}, slots={Slots}",
-            cmd.CommandId, cmd.CommandText, cmd.Priority, threshold, pool.CurrentCount);
+        logger.LogDebug("Command partition: id={Id}, correlationId={CorrelationId}, command={Cmd}, priority={Prio}, threshold={Threshold}, slots={Slots}",
+            cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.Priority, threshold, pool.CurrentCount);
 
         await pool.WaitAsync(ct);
 
@@ -443,7 +446,8 @@ public sealed class CommandExecutionService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Error executing command {CommandId}", cmd.CommandId);
+            logger.LogError(ex, "Error executing command {CommandId}, correlationId={CorrelationId}",
+                cmd.CommandId, cmd.CorrelationId);
         }
         finally
         {
@@ -492,14 +496,14 @@ public sealed class CommandExecutionService(
 
             if (process != null && !process.HasExited)
             {
-                logger.LogWarning("Killing timed-out process: commandId={Id}, pid={Pid}, elapsed={Elapsed:F1}s",
-                    cmd.CommandId, process.Id, sw.Elapsed.TotalSeconds);
+                logger.LogWarning("Killing timed-out process: commandId={Id}, correlationId={CorrelationId}, pid={Pid}, elapsed={Elapsed:F1}s",
+                    cmd.CommandId, cmd.CorrelationId, process.Id, sw.Elapsed.TotalSeconds);
                 process.Kill(entireProcessTree: true);
                 try { await process.WaitForExitAsync(CancellationToken.None); } catch { }
             }
 
-            logger.LogError("Command {CommandId} ({Cmd}) timed out after {Timeout} min, elapsed={Elapsed:F1}s",
-                cmd.CommandId, cmd.CommandText, _workerOptions.ProcessTimeoutMinutes, sw.Elapsed.TotalSeconds);
+            logger.LogError("Command {CommandId} ({Cmd}) timed out: correlationId={CorrelationId}, timeout={Timeout} min, elapsed={Elapsed:F1}s",
+                cmd.CommandId, cmd.CommandText, cmd.CorrelationId, _workerOptions.ProcessTimeoutMinutes, sw.Elapsed.TotalSeconds);
 
             await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: $"Process timed out after {_workerOptions.ProcessTimeoutMinutes} min");
@@ -517,7 +521,8 @@ public sealed class CommandExecutionService(
         finally
         {
             _=_activeProcesses.TryRemove(cmd.CommandId, out _);
-            logger.LogDebug("Completed: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}", cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
+            logger.LogDebug("Completed: id={Id}, correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);
         }
     }
 
@@ -525,7 +530,8 @@ public sealed class CommandExecutionService(
     {
         if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
         {
-            logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=unknown_command", cmd.CommandId, cmd.CommandText);
+            logger.LogWarning("Command failed: id={Id}, correlationId={CorrelationId}, command={Cmd}, reason=unknown_command",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
             _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: $"Unknown command type: {cmd.CommandText}");
             await CompleteClaimedCommandAsync(cmd);
@@ -534,7 +540,8 @@ public sealed class CommandExecutionService(
 
         if (!ValidateFilePath(cmd, commandCfg))
         {
-            logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=invalid_file", cmd.CommandId, cmd.CommandText);
+            logger.LogWarning("Command failed: id={Id}, correlationId={CorrelationId}, command={Cmd}, reason=invalid_file",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
             _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: $"File validation failed for path: {cmd.FilePath}");
             await CompleteClaimedCommandAsync(cmd);
@@ -544,8 +551,8 @@ public sealed class CommandExecutionService(
         var (resolvedPath, resolutionError) = await ResolveExecutablePathAsync(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
         if (resolvedPath == null)
         {
-            logger.LogWarning("Command failed: id={Id}, command={Cmd}, reason=executable_not_found, error={Error}",
-                cmd.CommandId, cmd.CommandText, resolutionError);
+            logger.LogWarning("Command failed: id={Id}, correlationId={CorrelationId}, command={Cmd}, reason=executable_not_found, error={Error}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, resolutionError);
             _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: resolutionError);
             await CompleteClaimedCommandAsync(cmd);
@@ -561,8 +568,8 @@ public sealed class CommandExecutionService(
         var startInfo = CreateProcessStartInfo(cmd, commandCfg);
         startInfo.FileName = commandCfg.ExecutablePath;
 
-        logger.LogInformation("Command start: id={Id}, command={Cmd}, attempt={Attempt}",
-            cmd.CommandId, cmd.CommandText, cmd.RetryCount + 1);
+        logger.LogInformation("Command start: id={Id}, correlationId={CorrelationId}, command={Cmd}, attempt={Attempt}",
+            cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _=process.Start();
@@ -595,8 +602,8 @@ public sealed class CommandExecutionService(
         if (process.ExitCode == 0)
         {
             _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
-            logger.LogInformation("Command done: id={Id}, command={Cmd}, elapsedMs={ElapsedMs}",
-                cmd.CommandId, cmd.CommandText, sw.ElapsedMilliseconds);
+            logger.LogInformation("Command done: id={Id}, correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);
             await CompleteClaimedCommandAsync(cmd);
         }
         else
@@ -609,8 +616,8 @@ public sealed class CommandExecutionService(
     private Task<string> GetProcessErrorMessageAsync(PendingCommand cmd, Process process, Stopwatch sw)
     {
         var message = $"Process exited with code {process.ExitCode}";
-        logger.LogWarning("Command exit: id={Id}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
-            cmd.CommandId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
+        logger.LogWarning("Command exit: id={Id}, correlationId={CorrelationId}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
+            cmd.CommandId, cmd.CorrelationId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
         return Task.FromResult(message);
     }
 
@@ -761,16 +768,16 @@ public sealed class CommandExecutionService(
                 _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
             var newRetryCount = await commandDataService.ScheduleRetryAsync(
                 cmd.CommandId, nextRetryAt, errorMessage);
-            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed (attempt {Attempt}/{Max}), retry at {Next}. Error: {Msg}",
-                cmd.CommandText, cmd.CommandId, newRetryCount, _workerOptions.MaxRetries,
+            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next}, error={Msg}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt.ToString("O"), errorMessage);
             await CompleteClaimedCommandAsync(cmd);
         }
         else
         {
             _=await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
-            logger.LogError(ex, "Command {Cmd} ({Id}) failed after {Attempt} attempts. Error: {Msg}",
-                cmd.CommandText, cmd.CommandId, cmd.RetryCount + 1, errorMessage);
+            logger.LogError(ex, "Command {Cmd} ({Id}) failed after attempts: correlationId={CorrelationId}, attempt={Attempt}, error={Msg}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, errorMessage);
             await CompleteClaimedCommandAsync(cmd);
         }
     }
@@ -803,18 +810,20 @@ public sealed class CommandExecutionService(
             var remainingInDb = await sessionDataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
             if (remainingInDb > 0)
             {
-                logger.LogDebug("Session {SessionId}: counter zero but {Remaining} commands still pending/processing in DB, skipping notification",
-                    cmd.SessionId, remainingInDb);
+                logger.LogDebug(
+                    "Session {SessionId}: counter zero but {Remaining} commands still pending/processing in DB, skipping notification, correlationId={CorrelationId}",
+                    cmd.SessionId, remainingInDb, cmd.CorrelationId);
                 return;
             }
 
             var status = await sessionDataService.GetSessionsStatusAsync(cmd.SessionId);
             await notificationDataService.NotifyCommandCompletedAsync(
-                cmd.UserId, cmd.SessionId, status.DoneFiles, status.TotalFiles, status.ProjectName);
+                cmd.UserId, cmd.SessionId, cmd.CorrelationId, status.DoneFiles, status.TotalFiles, status.ProjectName);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to notify session completion: session={SessionId}", cmd.SessionId);
+            logger.LogWarning(ex, "Failed to notify session completion: session={SessionId}, correlationId={CorrelationId}",
+                cmd.SessionId, cmd.CorrelationId);
         }
     }
 
@@ -823,14 +832,14 @@ public sealed class CommandExecutionService(
     {
         if (outputBuilder.Length > 0)
         {
-            logger.LogInformation("Output [{Cmd} {Id}]: {Output}",
-                cmd.CommandText, cmd.CommandId, TruncateOutput(outputBuilder));
+            logger.LogInformation("Output [{Cmd} {Id} {CorrelationId}]: {Output}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, TruncateOutput(outputBuilder));
         }
 
         if (errorBuilder.Length > 0)
         {
-            logger.LogWarning("Stderr [{Cmd} {Id}]: {Error}",
-                cmd.CommandText, cmd.CommandId, TruncateOutput(errorBuilder));
+            logger.LogWarning("Stderr [{Cmd} {Id} {CorrelationId}]: {Error}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, TruncateOutput(errorBuilder));
         }
     }
 

@@ -69,7 +69,7 @@ internal static partial class SqlQueries
         internal const string ClaimAndReturn = @"
             WITH selected AS (
                 SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder,
-                       s.UserId, s.Username, c.Partition, c.Priority, c.RetryCount
+                       s.UserId, s.Username, s.CorrelationId, c.Partition, c.Priority, c.RetryCount
                 FROM Commands c
                 JOIN Sessions s ON s.SessionId = c.SessionId
                 WHERE c.Status = 'pending'
@@ -87,7 +87,7 @@ internal static partial class SqlQueries
             WHERE c.CommandId = selected.CommandId
             RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
                       selected.FilePath, selected.ExecutionOrder, selected.UserId, 
-                      selected.Username, selected.Partition, selected.Priority, selected.RetryCount;";
+                      selected.Username, selected.CorrelationId, selected.Partition, selected.Priority, selected.RetryCount;";
 
         internal const string ScheduleRetry = @"
             UPDATE Commands
@@ -139,7 +139,7 @@ internal static partial class SqlQueries
 
         internal const string GetById = @"
             SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath,
-                   c.ExecutionOrder, s.UserId, s.Username, c.Partition, c.Priority, c.RetryCount
+                   c.ExecutionOrder, s.UserId, s.Username, s.CorrelationId, c.Partition, c.Priority, c.RetryCount
             FROM Commands c
             JOIN Sessions s ON s.SessionId = c.SessionId
             WHERE c.CommandId = @CommandId

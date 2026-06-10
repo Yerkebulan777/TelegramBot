@@ -19,6 +19,7 @@ internal static partial class SqlQueries
                 SessionId SERIAL PRIMARY KEY,
                 UserId BIGINT NOT NULL,
                 Username TEXT,
+                CorrelationId TEXT NOT NULL,
                 PriorityId INTEGER NOT NULL DEFAULT 0,
                 Status TEXT NOT NULL DEFAULT 'pending',
                 ProjectName TEXT,
@@ -29,11 +30,19 @@ internal static partial class SqlQueries
 
         internal const string EnsureSessionsColumns = @"
             ALTER TABLE Sessions
+            ADD COLUMN IF NOT EXISTS CorrelationId TEXT,
             ADD COLUMN IF NOT EXISTS PriorityId INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS Status TEXT NOT NULL DEFAULT 'pending',
             ADD COLUMN IF NOT EXISTS ProjectName TEXT,
             ADD COLUMN IF NOT EXISTS FilesAmount INTEGER,
-            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();";
+            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+            UPDATE Sessions
+            SET CorrelationId = 'legacy-' || SessionId
+            WHERE CorrelationId IS NULL;
+
+            ALTER TABLE Sessions
+            ALTER COLUMN CorrelationId SET NOT NULL;";
 
         internal const string CreateCommandsTable = @"
             CREATE TABLE IF NOT EXISTS Commands (
@@ -84,6 +93,7 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_status_lease ON Commands(Status, Lease)
                 WHERE Status = 'processing';
             CREATE INDEX IF NOT EXISTS idx_sessions_user_created ON Sessions(UserId, CreatedAt DESC);
+            CREATE INDEX IF NOT EXISTS idx_sessions_correlation_id ON Sessions(CorrelationId);
             DROP INDEX IF EXISTS idx_commands_pending_priority;
             CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority ASC, CreatedAt ASC, CommandId ASC)
                 WHERE Status = 'pending';

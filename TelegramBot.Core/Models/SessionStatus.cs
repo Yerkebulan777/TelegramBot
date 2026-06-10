@@ -4,6 +4,7 @@ namespace TelegramBot.Core.Models;
 public class SessionStatus
 {
     public string Status { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
     public string? ProjectName { get; set; }
     public DateTime CreatedAt { get; set; }
     public int TotalFiles { get; set; }

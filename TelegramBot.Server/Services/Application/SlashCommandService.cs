@@ -393,11 +393,12 @@ public sealed class SlashCommandService(
         var priorities = session.PendingCommand
             .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
 
+        var correlationId = Guid.NewGuid().ToString("N");
         var sessionId = await sessionDataService.CreateSessionWithCommandsAsync(
-            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities);
+            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
         logger.LogInformation(
-            "Job queued: session={SessionId}, user={UserId}, commands={CommandCount}, files={FileCount}",
-            sessionId, userId, session.PendingCommand.Count, filesToProcess.Count);
+            "Job queued: session={SessionId}, correlationId={CorrelationId}, user={UserId}, commands={CommandCount}, files={FileCount}",
+            sessionId, correlationId, userId, session.PendingCommand.Count, filesToProcess.Count);
 
         session.SessionId = checked((int)sessionId);
         await outputService.ClearChatHistoryAsync(userId, session);

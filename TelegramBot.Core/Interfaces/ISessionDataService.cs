@@ -15,7 +15,8 @@ public interface ISessionDataService
         string username,
         int filesAmount,
         string? projectName = null,
-        IEnumerable<int>? commandPriorities = null);
+        IEnumerable<int>? commandPriorities = null,
+        string? correlationId = null);
 
     /// <summary>Возвращает список всех сессий.</summary>
     Task<List<SessionsList>> GetSessionsListAsync();

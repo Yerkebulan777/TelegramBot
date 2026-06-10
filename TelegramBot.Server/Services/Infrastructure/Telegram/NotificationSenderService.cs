@@ -58,12 +58,13 @@ public sealed class NotificationSenderService(
             }
 
             _=await telegramOutput.SendMessageAsync(item.UserId, summary.ToString());
-            logger.LogInformation("Session completed: user={UserId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
-                item.UserId, item.ProjectName, item.Done, failed, item.Total);
+            logger.LogInformation("Session completed: user={UserId}, session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+                item.UserId, item.SessionId, item.CorrelationId, item.ProjectName, item.Done, failed, item.Total);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to send queued notification for session {SessionId}", item.SessionId);
+            logger.LogError(ex, "Failed to send queued notification for session {SessionId}, correlationId={CorrelationId}",
+                item.SessionId, item.CorrelationId);
         }
     }
 

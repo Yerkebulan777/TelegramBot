@@ -5,8 +5,8 @@ internal static partial class SqlQueries
     internal static class Sessions
     {
         internal const string Insert = @"
-            INSERT INTO Sessions (UserId, Username, ProjectName, FilesAmount)
-            VALUES (@UserId, @Username, @ProjectName, @FilesAmount)
+            INSERT INTO Sessions (UserId, Username, CorrelationId, ProjectName, FilesAmount)
+            VALUES (@UserId, @Username, @CorrelationId, @ProjectName, @FilesAmount)
             RETURNING SessionId;";
 
         internal const string GetList = @"
@@ -38,6 +38,7 @@ internal static partial class SqlQueries
         internal const string GetStatus = @"
             SELECT
                 s.Status,
+                s.CorrelationId,
                 s.ProjectName,
                 s.CreatedAt,
                 COUNT(CASE WHEN c.Status != 'Deleted' THEN 1 END) AS TotalFiles,

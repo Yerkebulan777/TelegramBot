@@ -5,6 +5,7 @@ public class PendingCommand
 {
     public int CommandId { get; set; }
     public int SessionId { get; set; }
+    public required string CorrelationId { get; set; }
     public required string CommandText { get; set; }
     public string? FilePath { get; set; }
     public int ExecutionOrder { get; set; }

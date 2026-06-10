@@ -77,9 +77,9 @@ public sealed class CommandNotificationService(
                 return;
             }
 
-            // Payload: UserId|SessionId|Done|Total|ProjectName
-            var parts = e.Payload.Split('|', 5);
-            if (parts.Length < 4)
+            // Payload: UserId|SessionId|CorrelationId|Done|Total|ProjectName
+            var parts = e.Payload.Split('|', 6);
+            if (parts.Length < 5)
             {
                 logger.LogWarning("Completion notify ignored: reason=invalid_payload");
                 return;
@@ -97,14 +97,23 @@ public sealed class CommandNotificationService(
                 return;
             }
 
-            if (!int.TryParse(parts[2], out var done) || !int.TryParse(parts[3], out var total) || total == 0)
+            var correlationId = parts[2];
+            if (string.IsNullOrWhiteSpace(correlationId))
+            {
+                logger.LogWarning("Completion notify ignored: reason=invalid_correlation_id");
+                return;
+            }
+
+            if (!int.TryParse(parts[3], out var done) || !int.TryParse(parts[4], out var total) || total == 0)
             {
                 return;
             }
 
-            var projectName = parts.Length > 4 ? parts[4] : null;
-            var item = new NotificationItem(userId, sessionId, done, total, projectName);
+            var projectName = parts.Length > 5 ? parts[5] : null;
+            var item = new NotificationItem(userId, sessionId, correlationId, done, total, projectName);
             await notificationChannel.Writer.WriteAsync(item).AsTask();
+            logger.LogDebug("Completion notify queued: session={SessionId}, correlationId={CorrelationId}",
+                sessionId, correlationId);
         }
         catch (Exception ex)
         {

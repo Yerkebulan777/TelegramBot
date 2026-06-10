@@ -25,7 +25,8 @@ public sealed class SessionDataService(
         string username,
         int filesAmount,
         string? projectName = null,
-        IEnumerable<int>? commandPriorities = null)
+        IEnumerable<int>? commandPriorities = null,
+        string? correlationId = null)
     {
         var commands = commandText.ToArray();
         var fileList = files.ToArray();
@@ -38,9 +39,10 @@ public sealed class SessionDataService(
         await using var conn = await CreateOpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
+        correlationId ??= Guid.NewGuid().ToString("N");
         var sessionId = await conn.QuerySingleAsync<long>(
             SqlQueries.Sessions.Insert,
-            new { UserId = userId, Username = username, ProjectName = projectName, FilesAmount = filesAmount },
+            new { UserId = userId, Username = username, CorrelationId = correlationId, ProjectName = projectName, FilesAmount = filesAmount },
             tx);
 
         var totalRows = commands.Length * fileList.Length;
@@ -75,9 +77,10 @@ public sealed class SessionDataService(
             tx);
 
         // Отправляем уведомление Worker о новых задачах
-        _ = await conn.ExecuteAsync("SELECT pg_notify('new_tasks', '')", transaction: tx);
+        _ = await conn.ExecuteAsync("SELECT pg_notify('new_tasks', @Payload)", new { Payload = correlationId }, tx);
 
         await tx.CommitAsync();
+        Logger.LogInformation("Session created: session={SessionId}, correlationId={CorrelationId}", sessionId, correlationId);
         return sessionId;
     }
 
@@ -208,17 +211,24 @@ public sealed class SessionDataService(
     }
 
     /// <inheritdoc/>
-    public async Task NotifyCommandCompletedAsync(long userId, int sessionId, int doneCount, int totalCount, string? projectName = null)
+    public async Task NotifyCommandCompletedAsync(
+        long userId,
+        int sessionId,
+        string correlationId,
+        int doneCount,
+        int totalCount,
+        string? projectName = null)
     {
         try
         {
-            var payload = $"{userId}|{sessionId}|{doneCount}|{totalCount}|{projectName ?? ""}";
+            var payload = $"{userId}|{sessionId}|{correlationId}|{doneCount}|{totalCount}|{projectName ?? ""}";
             await using var conn = await CreateOpenConnectionAsync();
             _ = await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
         }
         catch (Exception e)
         {
-            Logger.LogWarning(e, "Failed to send command_completed NOTIFY for session {SessionId}", sessionId);
+            Logger.LogWarning(e, "Failed to send command_completed NOTIFY for session {SessionId}, correlationId={CorrelationId}",
+                sessionId, correlationId);
         }
     }
 }
