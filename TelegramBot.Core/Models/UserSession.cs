@@ -106,6 +106,17 @@ public class UserSession
     }
 
     // File selection methods
+    public void AddSelectedFiles(IEnumerable<string> filePaths)
+    {
+        lock (_selectionLock)
+        {
+            foreach (var filePath in filePaths)
+            {
+                _ = _selectedFiles.Add(filePath);
+            }
+        }
+    }
+
     public bool ToggleSelectedFile(string filePath)
     {
         lock (_selectionLock)

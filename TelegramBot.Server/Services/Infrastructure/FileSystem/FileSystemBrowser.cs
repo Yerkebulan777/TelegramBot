@@ -35,6 +35,11 @@ public class FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOpti
         return Task.FromResult(keyboard);
     }
 
+    public List<string> GetSectionFolderPaths(string path)
+    {
+        return EnumerateSectionFolders(path).ToList();
+    }
+
     private InlineKeyboardMarkup BuildProjectKeyboard(UserSession session, string path)
     {
         var selected = session.GetSelectedFiles();
@@ -59,6 +64,8 @@ public class FileSystemBrowser(ISessionManager sessions, IOptions<FileSystemOpti
             var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{dir}")]);
         }
+
+        buttons.Add([InlineKeyboardButton.WithCallbackData("Выбрать все", $"{CallbackPrefixes.SelectAllSectionFolders}{path}")]);
 
         return new InlineKeyboardMarkup(buttons);
     }

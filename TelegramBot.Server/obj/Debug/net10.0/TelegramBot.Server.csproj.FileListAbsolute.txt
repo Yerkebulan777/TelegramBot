@@ -49,7 +49,6 @@ C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.
 C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.0\staticwebassets.development.json
 C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.0\staticwebassets.build.endpoints.json
 C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.0\swae.build.ex.cache
-C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.0\staticwebassets.upToDateCheck.txt
 C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.0\Telegram.914FF372.Up2Date
 C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.0\TelegramBot.Server.dll
 C:\Users\y.zhumabayev\Repository\TelegramBot\TelegramBot.Server\obj\Debug\net10.0\refint\TelegramBot.Server.dll

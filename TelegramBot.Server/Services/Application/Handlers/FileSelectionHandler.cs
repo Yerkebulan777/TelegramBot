@@ -12,6 +12,7 @@ public sealed class FileSelectionHandler(
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
     IMessageTrackingDataService messageTrackingService,
+    TelegramBot.Server.Services.Infrastructure.FileSystem.FileSystemBrowser fileBrowser,
     IOptions<FileSystemOptions> options,
     ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -19,7 +20,8 @@ public sealed class FileSelectionHandler(
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
-        CallbackPrefixes.File
+        CallbackPrefixes.File,
+        CallbackPrefixes.SelectAllSectionFolders
     ];
 
     public override int Priority => HandlerPriorities.FileSelection;
@@ -29,8 +31,28 @@ public sealed class FileSelectionHandler(
         return context.ParsedCallback.Prefix switch
         {
             CallbackPrefixes.File => await HandleFileToggleAsync(context, cancellationToken),
+            CallbackPrefixes.SelectAllSectionFolders => await HandleSelectAllSectionFoldersAsync(context, cancellationToken),
             _ => false
         };
+    }
+
+    private async Task<bool> HandleSelectAllSectionFoldersAsync(CallbackContext context, CancellationToken cancellationToken)
+    {
+        var session = context.Session;
+        session.FileSelectionMessageId = context.MessageId;
+
+        var path = context.ParsedCallback.Argument;
+        if (!string.IsNullOrEmpty(path))
+        {
+            var folderPaths = fileBrowser.GetSectionFolderPaths(path);
+            session.AddSelectedFiles(folderPaths);
+        }
+
+        var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
+        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "Все папки выбраны");
+
+        return true;
     }
 
     private async Task<bool> HandleFileToggleAsync(CallbackContext context, CancellationToken cancellationToken)

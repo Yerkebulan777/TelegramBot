@@ -56,6 +56,9 @@ public static class CallbackPrefixes
     /// <summary>Удаление сессии по типу.</summary>
     public const string DeleteSessionByType = "DELETESESSIONBYTYPE:";
 
+    /// <summary>Выбрать все папки разделов.</summary>
+    public const string SelectAllSectionFolders = "SELECTALLSECTIONS:";
+
     /// <summary>Подтверждение удаления сессии по типу.</summary>
     public const string ConfirmDeleteSessionByType = "CONFIRMDELETESESSIONBYTYPE:";
 
