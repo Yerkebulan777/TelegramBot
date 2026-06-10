@@ -58,7 +58,6 @@ public class SessionManager : ISessionManager, IDisposable
 
             if (!_sessionLocks.TryGetValue(key, out var sessionLock) || !await sessionLock.WaitAsync(0, cancellationToken))
             {
-                _ = _sessions.TryRemove(key, out _);
                 continue;
             }
 
