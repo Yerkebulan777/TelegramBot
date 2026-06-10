@@ -37,7 +37,11 @@ public class SessionManager : ISessionManager, IDisposable
 
     public void RemoveSession(long userId)
     {
-        _=_sessions.TryRemove(userId, out _);
+        _ = _sessions.TryRemove(userId, out _);
+        if (_sessionLocks.TryRemove(userId, out var semaphore))
+        {
+            semaphore.Dispose();
+        }
     }
 
     private void CleanUpExpiredSessions()
@@ -53,20 +57,30 @@ public class SessionManager : ISessionManager, IDisposable
 
             if (!_sessionLocks.TryGetValue(key, out var sessionLock) || !sessionLock.Wait(0))
             {
-                _=_sessions.TryRemove(key, out _);
+                _ = _sessions.TryRemove(key, out _);
                 continue;
             }
 
+            var lockRemoved = false;
             try
             {
                 if (_sessions.TryGetValue(key, out var candidate) && now - candidate.LastActivity > _sessionTimeout)
                 {
-                    _=_sessions.TryRemove(key, out _);
+                    _ = _sessions.TryRemove(key, out _);
+                    lockRemoved = _sessionLocks.TryRemove(key, out _);
                 }
             }
             finally
             {
-                _=sessionLock.Release();
+                if (lockRemoved)
+                {
+                    // We hold the exclusive lock (Wait(0) succeeded), no other thread uses it
+                    sessionLock.Dispose();
+                }
+                else
+                {
+                    _ = sessionLock.Release();
+                }
             }
         }
     }
@@ -74,6 +88,10 @@ public class SessionManager : ISessionManager, IDisposable
     public void Dispose()
     {
         _cleanupTimer.Dispose();
+        foreach (var (_, semaphore) in _sessionLocks)
+        {
+            semaphore.Dispose();
+        }
         _sessionLocks.Clear();
     }
 
