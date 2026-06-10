@@ -1,6 +1,7 @@
 
 using Microsoft.Extensions.Options;
 using System.Text;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
@@ -42,71 +43,13 @@ public sealed class SlashCommandService(
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
-        var userId = message.UserId;
-        var rawText = message.Text!;
-        var username = message.Username!;
+        var context = await ValidateUserContextAsync(message.UserId, message.Text!, message, session);
+        var strategy = await ResolveCommandStrategyAsync(context);
+        var result = await ExecuteBusinessLogicAsync(context, strategy, cancellationToken);
+        var responseMessage = await FormatResponseMessageAsync(result);
 
-        var text = NormalizeCommandText(rawText);
-
-        ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
-
-        logger.LogDebug("Command received: command={Command}, user={UserId}", text, userId);
-
-        if (text.StartsWith('/'))
-        {
-            await outputService.ClearChatHistoryAsync(userId, session);
-        }
-
-        if (text == "/start")
-        {
-            session.Reset(_options.RootPath);
-            var user = await userDataService.GetUserAsync(userId);
-
-            if (user?.Status != UserAccessStatus.Approved)
-            {
-                var adminUser = await userDataService.GetUserAsync(userId);
-                if (adminUser?.Role == UserRole.Admin && adminUser.Status == UserAccessStatus.Approved)
-                {
-                    var now = DateTime.UtcNow;
-                    await userDataService.UpsertUserAsync(new BotUser
-                    {
-                        UserId = userId,
-                        Username = username,
-                        Role = UserRole.Admin,
-                        Status = UserAccessStatus.Approved,
-                        CreatedAt = user?.CreatedAt ?? now,
-                        UpdatedAt = now
-                    });
-                    user = await userDataService.GetUserAsync(userId);
-                }
-            }
-
-            if (user?.Status == UserAccessStatus.Approved)
-            {
-                await SendHelpMessageAsync(userId, session);
-            }
-            else
-            {
-                await SendRegistrationMessageAsync(userId, session);
-            }
-
-            return;
-        }
-
-        var userRecord = await userDataService.GetUserAsync(userId);
-        if (userRecord?.Status != UserAccessStatus.Approved)
-        {
-            logger.LogWarning("Command rejected: command={Command}, user={UserId}, reason=access_denied", text, userId);
-            _=await TrackMessageAsync(outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."), session);
-            return;
-        }
-
-        if (await HandleCommandSelectionActionsAsync(userId, username, rawText, session, cancellationToken))
-        {
-            return;
-        }
-
-        await HandleSlashCommandAsync(text, message, session, username);
+        await SendSafeResponseAsync(context.ChatId, responseMessage, context.Session);
+        await LogCommandExecutionAsync(context, strategy, result);
     }
 
     public async Task<bool> CheckAndNotifyAccessAsync(long userId, UserSession session)
@@ -167,6 +110,184 @@ public sealed class SlashCommandService(
 
                 break;
         }
+    }
+
+    private async Task<UserCommandContext> ValidateUserContextAsync(
+        long userId,
+        string command,
+        MessageDto message,
+        UserSession session)
+    {
+        var text = NormalizeCommandText(command);
+        var username = message.Username!;
+
+        ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
+
+        logger.LogDebug("Command received: command={Command}, user={UserId}", text, userId);
+
+        var user = await userDataService.GetUserAsync(userId);
+        if (text == "/start" && user?.Status != UserAccessStatus.Approved)
+        {
+            user = await RefreshApprovedAdminUserAsync(userId, username, user);
+        }
+
+        return new UserCommandContext(
+            message,
+            session,
+            userId,
+            message.ChatId == 0 ? userId : message.ChatId,
+            command,
+            text,
+            username,
+            user,
+            text == "/start" || user?.Status == UserAccessStatus.Approved);
+    }
+
+    private Task<CommandStrategy> ResolveCommandStrategyAsync(UserCommandContext context)
+    {
+        if (!context.HasAccess)
+        {
+            return Task.FromResult(CommandStrategy.AccessDenied);
+        }
+
+        if (context.Command == "/start")
+        {
+            return Task.FromResult(CommandStrategy.Start);
+        }
+
+        return Task.FromResult(IsCommandSelectionAction(context.RawText)
+            ? CommandStrategy.CommandSelectionAction
+            : CommandStrategy.SlashCommand);
+    }
+
+    private async Task<CommandExecutionResult> ExecuteBusinessLogicAsync(
+        UserCommandContext context,
+        CommandStrategy strategy,
+        CancellationToken cancellationToken)
+    {
+        if (context.Command.StartsWith('/'))
+        {
+            await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
+        }
+
+        switch (strategy)
+        {
+            case CommandStrategy.AccessDenied:
+                return CommandExecutionResult.AccessDenied();
+
+            case CommandStrategy.Start:
+                context.Session.Reset(_options.RootPath);
+                if (context.User?.Status == UserAccessStatus.Approved)
+                {
+                    await SendHelpMessageAsync(context.UserId, context.Session);
+                }
+                else
+                {
+                    await SendRegistrationMessageAsync(context.UserId, context.Session);
+                }
+
+                return CommandExecutionResult.Handled();
+
+            case CommandStrategy.CommandSelectionAction:
+                var handled = await HandleCommandSelectionActionsAsync(
+                    context.UserId,
+                    context.Username,
+                    context.RawText,
+                    context.Session,
+                    cancellationToken);
+
+                if (handled)
+                {
+                    return CommandExecutionResult.Handled();
+                }
+
+                await HandleSlashCommandAsync(context.Command, context.Message, context.Session, context.Username);
+                return CommandExecutionResult.Handled();
+
+            case CommandStrategy.SlashCommand:
+                await HandleSlashCommandAsync(context.Command, context.Message, context.Session, context.Username);
+                return CommandExecutionResult.Handled();
+
+            default:
+                throw new InvalidOperationException($"Unknown command strategy '{strategy}'.");
+        }
+    }
+
+    private static Task<string?> FormatResponseMessageAsync(CommandExecutionResult result)
+    {
+        return Task.FromResult(result.Status == CommandExecutionStatus.AccessDenied
+            ? "У вас нет доступа. Введите /start для запроса доступа."
+            : null);
+    }
+
+    private async Task SendSafeResponseAsync(long chatId, string? message, UserSession session)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        try
+        {
+            _=await TrackMessageAsync(outputService.SendMessageAsync(chatId, message), session);
+        }
+        catch (ApiRequestException ex)
+        {
+            logger.LogWarning(ex, "Failed to send command response to {ChatId}", chatId);
+        }
+    }
+
+    private Task LogCommandExecutionAsync(
+        UserCommandContext context,
+        CommandStrategy strategy,
+        CommandExecutionResult result)
+    {
+        if (result.Status == CommandExecutionStatus.AccessDenied)
+        {
+            logger.LogWarning(
+                "Command rejected: command={Command}, user={UserId}, reason=access_denied",
+                context.Command,
+                context.UserId);
+        }
+        else
+        {
+            logger.LogDebug(
+                "Command handled: command={Command}, user={UserId}, strategy={Strategy}",
+                context.Command,
+                context.UserId,
+                strategy);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task<BotUser?> RefreshApprovedAdminUserAsync(long userId, string username, BotUser? user)
+    {
+        var adminUser = await userDataService.GetUserAsync(userId);
+        if (adminUser?.Role != UserRole.Admin || adminUser.Status != UserAccessStatus.Approved)
+        {
+            return user;
+        }
+
+        var now = DateTime.UtcNow;
+        await userDataService.UpsertUserAsync(new BotUser
+        {
+            UserId = userId,
+            Username = username,
+            Role = UserRole.Admin,
+            Status = UserAccessStatus.Approved,
+            CreatedAt = user?.CreatedAt ?? now,
+            UpdatedAt = now
+        });
+
+        return await userDataService.GetUserAsync(userId);
+    }
+
+    private static bool IsCommandSelectionAction(string messageText)
+    {
+        return messageText == ButtonTexts.Apply ||
+            messageText == ButtonTexts.Cancel ||
+            messageText == ButtonTexts.Confirm;
     }
 
     private async Task<bool> HandleCommandSelectionActionsAsync(
@@ -537,5 +658,43 @@ public sealed class SlashCommandService(
         }
 
         return [.. files];
+    }
+
+    private enum CommandStrategy
+    {
+        AccessDenied,
+        Start,
+        CommandSelectionAction,
+        SlashCommand
+    }
+
+    private enum CommandExecutionStatus
+    {
+        Handled,
+        AccessDenied
+    }
+
+    private sealed record UserCommandContext(
+        MessageDto Message,
+        UserSession Session,
+        long UserId,
+        long ChatId,
+        string RawText,
+        string Command,
+        string Username,
+        BotUser? User,
+        bool HasAccess);
+
+    private sealed record CommandExecutionResult(CommandExecutionStatus Status)
+    {
+        public static CommandExecutionResult Handled()
+        {
+            return new CommandExecutionResult(CommandExecutionStatus.Handled);
+        }
+
+        public static CommandExecutionResult AccessDenied()
+        {
+            return new CommandExecutionResult(CommandExecutionStatus.AccessDenied);
+        }
     }
 }
