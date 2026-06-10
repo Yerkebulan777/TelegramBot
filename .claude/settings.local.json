@@ -11,7 +11,6 @@
       "Read(//c/Users/y.zhumabayev/.claude//**)",
       "Read(//c/Users/y.zhumabayev/.claude/plugins//**)",
       "Bash(powershell.exe -Command ' *)",
-      "Bash(rtk dotnet *)",
       "Bash(claude plugins *)"
     ]
   },
