@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Threading.Channels;
 using Telegram.Bot;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
@@ -105,8 +106,15 @@ public static class DependencyInjectionExtensions
         });
         _=services.AddSingleton<TelegramUpdateMapper>();
         _=services.AddSingleton<IKeyboardBuilder, KeyboardBuilder>();
+        _=services.AddSingleton(_ => Channel.CreateBounded<NotificationItem>(new BoundedChannelOptions(256)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false
+        }));
         _=services.AddHostedService<TelegramBotHostedService>();
         _=services.AddHostedService<CommandNotificationService>();
+        _=services.AddHostedService<NotificationSenderService>();
 
         return services;
     }
