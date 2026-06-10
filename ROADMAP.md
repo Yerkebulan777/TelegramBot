@@ -269,3 +269,36 @@
 - [README.md](README.md) — обзор проекта (основная документация)
 - [AGENTS.md](AGENTS.md) — руководство для AI-агентов по работе с кодом (RU)
 - [Docs/qodana-setup.md](Docs/qodana-setup.md) — настройка статического анализа Qodana
+
+---
+
+## 🩺 Health checks — предложение к реализации
+
+Ранее health checks для Worker были исключены из roadmap, потому что проект не использовал
+Docker/K8s. Решение стоит пересмотреть: endpoint'ы здоровья полезны не только для Kubernetes,
+но и для systemd/Windows Service, Uptime Kuma, reverse proxy, CI smoke-checks и ручной диагностики.
+
+### Рекомендуемый подход
+- [ ] **Server health endpoints** — добавить встроенные ASP.NET Core Health Checks:
+  - `/health/live` — процесс запущен, без проверки внешних зависимостей.
+  - `/health/ready` — приложение готово принимать нагрузку: PostgreSQL доступен, Telegram API отвечает.
+  - `/health` — подробный JSON-ответ для ручной диагностики.
+- [ ] **PostgreSQL check** — custom `IHealthCheck`, использующий `NpgsqlHelper.CreateOpenConnectionAsync()`
+  и лёгкий запрос к БД.
+- [ ] **Telegram API check** — custom `IHealthCheck` через `ITelegramBotClient.GetMe`, с коротким timeout
+  и кэшированием результата, чтобы мониторинг не создавал лишнюю нагрузку на Telegram API.
+- [ ] **Worker health endpoints** — добавить отдельный HTTP listener/порт для Worker:
+  - `/health/live` — worker-процесс жив.
+  - `/health/ready` — PostgreSQL доступен, worker не находится в фатальном состоянии.
+- [ ] **BIM-зависимости как non-blocking diagnostics** — Revit/Navisworks/registry checks показывать
+  в диагностике, но не делать обязательным условием readiness на первом этапе.
+
+### Альтернативы
+- **Только Server endpoints** — самый простой первый шаг, но падение Worker может остаться незамеченным.
+- **Отдельный watchdog service** — хорошая изоляция, но избыточно для текущей архитектуры.
+- **Heartbeat через PostgreSQL без HTTP** — полезно как дополнение, но хуже подходит для стандартных
+  мониторинговых инструментов.
+
+### Проверка после реализации
+- [ ] `dotnet build TelegramBot.slnx`
+- [ ] Ручная проверка `/health/live`, `/health/ready`, `/health`
