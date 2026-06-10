@@ -187,9 +187,6 @@ dotnet_diagnostic.IDE0022.severity = suggestion
 # -------------------------------------------------------------------
 # File-specific overrides
 # -------------------------------------------------------------------
-[TelegramBot.Server/Services/Application/Handlers/AccessRequestHandler.cs]
-generated_code = true
-
 [*.csproj]
 indent_size = 2
 

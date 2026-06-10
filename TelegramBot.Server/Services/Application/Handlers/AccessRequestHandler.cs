@@ -33,8 +33,8 @@ public sealed class AccessRequestHandler(
         return context.ParsedCallback.Prefix switch
         {
             CallbackPrefixes.RequestAccess => await HandleRequestAccessAsync(context),
-            CallbackPrefixes.ApproveUser   => await HandleApproveAsync(context),
-            CallbackPrefixes.RejectUser    => await HandleRejectAsync(context),
+            CallbackPrefixes.ApproveUser => await HandleApproveAsync(context),
+            CallbackPrefixes.RejectUser => await HandleRejectAsync(context),
             _ => false
         };
     }
