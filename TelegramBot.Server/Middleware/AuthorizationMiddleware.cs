@@ -91,7 +91,9 @@ public sealed class AuthorizationMiddleware(
 
     private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
     {
+#pragma warning disable VSTHRD003 // Foreign Task passed as parameter — intentionally awaited here
         var msg = await task;
+#pragma warning restore VSTHRD003
         if (msg != null)
         {
             var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;

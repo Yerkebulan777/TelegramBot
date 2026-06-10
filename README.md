@@ -62,12 +62,19 @@ TelegramBot.Core   ←──  TelegramBot.Data
 | Сервис | Проект | Роль |
 |--------|--------|------|
 | `TelegramBotHostedService` | Server | Polling-цикл, точка входа |
-| `CommandAppService` | Server | Центральный диспетчер, проверка доступа |
+| `TelegramBotHostedService` | Server | Polling-цикл, точка входа |
+| `CommandAppService` | Server | Центральный диспетчер, проверка доступа, rate limiting |
 | `SlashCommandService` | Server | Обработка текстовых команд |
+| `AuthorizationMiddleware` | Server | Доступ через `IAccessValidator` |
 | `CallbackDispatcher` | Server | Chain-of-responsibility маршрутизация callback-ов |
 | `SessionManager` | Server | In-memory сессии (5 мин timeout) |
 | `FileSystemBrowser` | Server | Навигация по файловой системе |
-| `PostgresDataService` | Data | Вся работа с БД |
+| `KeyboardBuilder` | Server | Построение inline/reply-клавиатур |
+| `RateLimiter` | Core | Sliding window per-user (ConcurrentDictionary + Queue) |
+| `CommandDataService` / `SessionDataService` / `UserDataService` / `MessageTrackingDataService` | Data | Вся работа с БД (разделение по сущностям) |
+| `CommandExecutionService` | Worker | LISTEN/NOTIFY + fallback polling, выполнение Revit/Navisworks/AI |
+| `CommandNotificationService` | Server | LISTEN command_completed → Channel<NotificationItem> |
+| `NotificationSenderService` | Server | Отправка уведомлений из канала в Telegram |
 | `CommandExecutionService` | Worker | Polling очереди, выполнение Revit/Navisworks/AI |
 | `RevitVersionDetector` | Worker/BimLib | Определение версии Revit по .rvt-файлу |
 | `RevitPathResolver` | Worker/BimLib | Поиск Revit.exe через реестр |
@@ -85,9 +92,12 @@ Telegram API → TelegramBotHostedService → TelegramUpdateMapper
 ### Поток задач
 
 ```
-Server создаёт Commands (Status='pending') → PostgreSQL NOTIFY new_tasks
-    → Worker CLAIM (FOR UPDATE SKIP LOCKED) → выполнение → UPDATE Status='Done'/'Failed'
-    → NOTIFY command_completed → Server шлёт сводку пользователю
+Server создаёт Session + Commands (Status='pending') → PostgreSQL NOTIFY new_tasks
+    → Worker LISTEN new_tasks (мгновенно) + fallback polling (5 мин)
+    → CLAIM (FOR UPDATE SKIP LOCKED) → выполнение → UPDATE Status='Done'/'Failed'
+    → NOTIFY command_completed
+    → CommandNotificationService (Server) слушает → Channel<NotificationItem>
+    → NotificationSenderService (Server) шлёт сводку пользователю
 ```
 
 Поддерживается несколько Worker-ов (competing consumers).
@@ -154,17 +164,8 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 ## Docker
 
 ```bash
-# PostgreSQL
-docker run -d \
-  --name telegram-bot-db \
-  -e POSTGRES_DB=telegram_bot \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 5432:5432 \
-  postgres:17
-
-# Server (Windows-контейнер)
-docker build -t telegram-bot-server -f Dockerfile .
-docker run --rm telegram-bot-server
+# PostgreSQL (через docker-compose)
+docker compose up -d
 ```
 
 ## Безопасность

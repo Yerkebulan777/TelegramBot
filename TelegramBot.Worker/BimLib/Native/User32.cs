@@ -29,7 +29,7 @@ internal static class User32
     internal static extern IntPtr GetDlgCtrlID(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
-    internal static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+    internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern IntPtr GetWindow(IntPtr hWnd, int uCmd);

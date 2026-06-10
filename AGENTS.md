@@ -198,9 +198,9 @@ Worker использует `ConcurrentDictionary<int, int> _sessionRemaining` �
 Уведомление отправляется только когда `remaining == 0` и БД подтверждает, что в сессии больше нет `pending`/`processing`.
 Сводка `command_completed` включает длительность сессии (`MIN(StartedAt)` → `MAX(CompletedAt)`) и список ошибочных файлов.
 
-DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker uses `PostgresDataService` registered directly in `Program.cs`.
+DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker registers data services (`UserDataService`, `CommandDataService`, `SessionDataService`, `MessageTrackingDataService`) directly in `Program.cs`.
 
-**Key DI simplification:** `IFileSystemBrowser` and `ITelegramUpdateMapper` interfaces were removed — their consumers now depend on concrete types `FileSystemBrowser` and `TelegramUpdateMapper` directly (no testability requirement for these internal services).
+**Key DI simplification:** `IFileSystemBrowser` and `ITelegramUpdateMapper` interfaces were removed — their consumers now depend on concrete types `FileSystemBrowser` and `TelegramUpdateMapper` directly (no testability requirement for these internal services). `IAccessValidator` was introduced as an interface implemented by `AuthorizationMiddleware` for access checks across command and callback pipelines.
 
 ### Callback Handling — Chain of Responsibility
 
@@ -233,7 +233,7 @@ in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant
 когда команд в сессии > DefaultBatchSize).
 
 Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
-All data access uses **Dapper** (`TelegramBot.Data/PostgresDataService.cs`). Connection creation is unified via `CreateConnectionAsync()` helper (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). SQL constants in `TelegramBot.Data/Sql/` (5 partial files total: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).
+All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.cs`, `SessionDataService.cs`, `UserDataService.cs`, `MessageTrackingDataService.cs`). Connection creation is unified via `CreateOpenConnectionAsync()` helper in `DataAccessBase` (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). A public static `NpgsqlHelper.CreateOpenConnectionAsync()` is also used by `CommandNotificationService` and `NotificationSenderService` on the Server side. SQL constants in `TelegramBot.Data/Sql/` (5 partial files total: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).
 
 ---
 
@@ -299,8 +299,9 @@ Namespaces must match folder structure:
 
 ### Async / Await
 
-- All async methods return `Task` or `Task<T>` — never `async void`
-- Always suffix async methods with `Async`
+- All async methods return `Task` or `Task<T>` — never `async void` (exception: Npgsql event handlers in `CommandNotificationService` — suppressed via `#pragma warning disable VSTHRD100`)
+- Always suffix async methods with `Async` — enforced by `Microsoft.VisualStudio.Threading.Analyzers` (VSTHRD200, `WarningsAsErrors`)
+- `VSTHRD003` (foreign Task), `VSTHRD103` (sync blocking) are also treated as errors — all violations fixed or suppressed with documented pragmas
 - Do **not** use `ConfigureAwait(false)` — this is an application, not a library
 - `CancellationToken` is threaded from `BackgroundService.ExecuteAsync`; inner methods generally do not require it unless doing I/O loops
 
@@ -326,12 +327,13 @@ Namespaces must match folder structure:
 ### Collections & Thread Safety
 
 - `UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`) — follow this pattern for new mutable state
+- `RateLimiter` (Core/Services) uses `ConcurrentDictionary<long, RequestWindow>` with queue-based sliding window per-user
 - Paths in callback data are passed directly (no `PathMap`/tokens) since v1.1 refactoring
 - For new shared dictionaries, prefer `ConcurrentDictionary<,>`
 
 ### SQL / Data Access (TelegramBot.Data)
 
-- Use `await using var conn = await CreateConnectionAsync()` — connection creation is unified via a private helper in `PostgresDataService`
+- Use `await using var conn = await CreateOpenConnectionAsync()` — connection creation is unified via `DataAccessBase.CreateOpenConnectionAsync()` (protected) or `NpgsqlHelper.CreateOpenConnectionAsync()` (static/public)
 - Use **Dapper** for all queries (no raw `NpgsqlCommand`/`NpgsqlDataReader`)
 - SQL statements go in verbatim string literals (`@"..."`)
 - Use parameterized queries — never string-concatenate user input into SQL
@@ -343,9 +345,10 @@ Namespaces must match folder structure:
 
 ### Telegram Messages
 
-- Plain messages: `ParseMode.MarkdownV2` — escape special characters with `MarkdownHelper.EscapeMarkdownV2()`
-- Messages with inline keyboards: `ParseMode.Markdown` — escape with `MarkdownHelper.EscapeMarkdown()`
+- Plain messages sent via `SendMessageAsync`: `ParseMode.MarkdownV2` — escape special characters with `MarkdownHelper.EscapeMarkdownV2()`
+- Messages with inline/reply keyboards: `ParseMode.Markdown` — escape with `MarkdownHelper.EscapeMarkdown()`
 - Do not mix the two parse modes
+- Completion notifications (via `NotificationSenderService`) are sent as **plain text** (no parse mode)
 - All Telegram API methods must be current — do not use deprecated approaches
 
 ### General
@@ -356,12 +359,15 @@ Namespaces must match folder structure:
 - Maintain good code readability and unify methods for easier editing
 - Extract shared static helpers (`HandlerHelpers`, `NpgsqlHelper`) when the same 5+ line pattern appears in multiple files
 - Use `dotnet format --diagnostics IDE0005` to remove unused `using` directives
+- Notification delivery is decoupled via `Channel<NotificationItem>` (256-capacity bounded channel): `CommandNotificationService` enqueues, `NotificationSenderService` dequeues and sends to Telegram.
+- `NpgsqlHelper.CreateOpenConnectionAsync()` (static, in `TelegramBot.Data`) is the public helper for services that don't inherit from `DataAccessBase` (e.g., `CommandNotificationService`, `NotificationSenderService`).
 
 ---
 
 ## Known Issues (Do Not Worsen)
 
-- `.editorconfig` exists with naming rules, formatting preferences, and `generated_code = true` markers for data service and handlers — `dotnet format` respects these
+- `.editorconfig` exists with naming rules, formatting preferences, and `generated_code = true` markers for specific files — `dotnet format --verify-no-changes` passes with **exit code 0** (full compliance)
+- **VSTHRD analyzer** (`Microsoft.VisualStudio.Threading.Analyzers`) is enabled globally via `Directory.Build.props` with `WarningsAsErrors` for 8 codes (VSTHRD002/003/100-104/200). All violations have been fixed or suppressed with justified `#pragma` — `dotnet build` produces **0 VSTHRD errors**
 - CI pipeline exists (`.github/workflows/ci.yml`) — runs `dotnet build` and `dotnet publish` on push/PR. No automated tests — the only verification is a successful `dotnet build`
 - Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
 - PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`

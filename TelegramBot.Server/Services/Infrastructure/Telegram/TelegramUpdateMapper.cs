@@ -37,7 +37,7 @@ public class TelegramUpdateMapper
         };
     }
 
-    public Task<object?> Map(Update update)
+    public Task<object?> MapAsync(Update update)
     {
         if (update.Message?.Text != null && update.Message.From != null)
         {

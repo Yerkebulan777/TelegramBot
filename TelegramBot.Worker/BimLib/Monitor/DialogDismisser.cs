@@ -8,12 +8,12 @@ namespace TelegramBot.Worker.BimLib.Monitor;
 /// </summary>
 public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
 {
-    private static readonly string[] ButtonNameTexts =
+    private static readonly string[] _buttonNameTexts =
         ["OK", "ОК", "Принять", "Accept", "Закрыть", "Close", "Игнорировать", "Ignore",
          "Отмена", "Cancel", "Нет", "No", "Да", "Yes", "Продолжить", "Continue",
          "Не сохранять", "Don't Save", "Сохранить", "Save"];
 
-    private static readonly string[] ExclusionDialogTitles =
+    private static readonly string[] _exclusionDialogTitles =
         ["Информация", "Information", "Справка", "Help"];
 
     /// <summary>
@@ -98,7 +98,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
     /// <summary>Проверяет, исключён ли заголовок диалога из автозакрытия.</summary>
     private static bool IsExcluded(string title)
     {
-        return ExclusionDialogTitles.Any(ex =>
+        return _exclusionDialogTitles.Any(ex =>
             title.Contains(ex, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -122,7 +122,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger)
 
             var cleanText = btnText.Replace("&", "").Trim();
 
-            if (ButtonNameTexts.Any(name =>
+            if (_buttonNameTexts.Any(name =>
                 string.Equals(cleanText, name, StringComparison.OrdinalIgnoreCase)))
             {
                 WindowUtil.SendButtonClick(hwndBtn);

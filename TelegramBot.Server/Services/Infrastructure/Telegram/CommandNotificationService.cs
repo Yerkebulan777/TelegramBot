@@ -64,7 +64,11 @@ public sealed class CommandNotificationService(
         }
     }
 
-    private void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
+    // VSTHRD100 suppression: event handlers must be async void — Npgsql Notification event
+    // does not support async Task handlers. The try/catch inside prevents crashes.
+#pragma warning disable VSTHRD100
+    private async void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
+#pragma warning restore VSTHRD100
     {
         try
         {
@@ -100,7 +104,7 @@ public sealed class CommandNotificationService(
 
             var projectName = parts.Length > 4 ? parts[4] : null;
             var item = new NotificationItem(userId, sessionId, done, total, projectName);
-            notificationChannel.Writer.WriteAsync(item).AsTask().GetAwaiter().GetResult();
+            await notificationChannel.Writer.WriteAsync(item).AsTask();
         }
         catch (Exception ex)
         {

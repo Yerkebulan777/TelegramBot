@@ -50,7 +50,7 @@ public sealed class SessionManagementHandler(
         return true;
     }
 
-    protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
+    protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {

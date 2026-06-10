@@ -106,6 +106,14 @@
   список файлов с ошибками: `\n\nОшибки:\n- file.rvt`.
 - [x] **Timing stats в уведомлениях** — уведомление о завершении содержит длительность сессии,
   рассчитанную по `MIN(StartedAt)` / `MAX(CompletedAt)` из таблицы `Commands`.
+- [x] **Worker LISTEN/NOTIFY new_tasks** — Worker подписан на канал `new_tasks` и мгновенно
+  реагирует на новые задачи. Fallback polling срабатывает раз в 5 минут при потере соединения.
+- [x] **Уведомления через Channel** — `CommandNotificationService` получает NOTIFY и ставит задачу
+  в `Channel<NotificationItem>` (256 capacity); `NotificationSenderService` читает канал и отправляет
+  сообщения в Telegram.
+- [x] **Graceful shutdown Worker** — при остановке Worker логирует активные процессы и даёт им до 30
+  секунд на завершение. Активные Revit/Navisworks не принудительно завершаются — их команды
+  подхватываются при следующем запуске через Crash Recovery (истёкший Lease).
 - [x] **Оптимизация: in-memory счётчик сессий** — удалён per-command `GetSessionProgressAsync`,
   заменён на `ConcurrentDictionary.AddOrUpdate`. Счётчик используется как batch-local оптимизация,
   а финальность сессии подтверждается БД через отсутствие `pending`/`processing`.
@@ -127,6 +135,8 @@
   `CommandNotificationService`.
 - [ ] **Статистика выполнения** — среднее время выполнения, процент успеха/ошибок по типам команд,
   по пользователям.
+- [ ] **Persistent RateLimiter** — перенести хранение окон запросов из `ConcurrentDictionary` в
+  PostgreSQL/Redis для сохранения лимитов после перезагрузки сервера.
 
 ### Открытые вопросы
 - [ ] **Prometheus/Grafana:** нужен отдельный HTTP exporter в Worker/Server или достаточно периодических
@@ -144,8 +154,6 @@
 
 ### Не планируется
 - **Health checks для Worker** — удалено из roadmap: сейчас не используется Docker/K8s, поэтому отдельные `/health`, `/healthz`, `/readyz` не нужны.
-- **`new_command LISTEN/NOTIFY` для Worker** — по текущему решению не требуется; Worker использует
-  polling очереди раз в минуту. `LISTEN/NOTIFY` остаётся только для `command_completed` уведомлений Server-а.
 
 ---
 
@@ -179,14 +187,16 @@
 - [ ] **Свести SQL-операции к сценарным методам** — методы Data-слоя должны отражать бизнес-действия
   (`ClaimPendingCommandsAsync`, `MarkCommandCompletedAsync`, `ScheduleRetryAsync`), а не размазывать
   статусные переходы по сервисам.
-- [ ] **Удалить оставшиеся мёртвые и исторические ветки** — проверить TODO/stale-комментарии,
-  неиспользуемые настройки, устаревшие варианты поведения и документацию, которая описывает
-  уже удалённый код.
+- [x] **Удалить оставшиеся мёртвые и исторические ветки** — проверены TODO/stale-комментарии,
+  удалены `GetCommandStatusAsync`, `SqliteDataService.cs` из `.editorconfig`,
+  исправлена документация, описывавшая уже удалённый код.
 - [ ] **Упростить callback-хендлеры статуса и удаления** — выделить общие операции разбора id,
   формирования сообщений и обновления клавиатур, если повторяется один и тот же 5+ строковый
   шаблон.
-- [ ] **Синхронизировать документацию с реальным алгоритмом** — обновить
-  `Docs/execution-algorithm.md`, `README.md` и `AGENTS.md` после упрощения кода.
+- [x] **Синхронизировать документацию с реальным алгоритмом** — обновлены
+  `Docs/execution-algorithm.md`, `Docs/command-execution-algorithm.md`, `README.md`, `AGENTS.md`, `ROADMAP.md`.
+  Исправлены: LISTEN/NOTIFY new_tasks, graceful shutdown, Channel-уведомления, SQL-запросы (Progress/Result/NextRetryAt),
+  устранены ссылки на `PostgresDataService`.
 
 ---
 

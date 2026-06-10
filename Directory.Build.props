@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <WarningsAsErrors>VSTHRD002;VSTHRD003;VSTHRD100;VSTHRD101;VSTHRD102;VSTHRD103;VSTHRD104;VSTHRD200</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.14.15" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

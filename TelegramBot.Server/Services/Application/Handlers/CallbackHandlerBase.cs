@@ -19,10 +19,10 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
 
     public Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
-        return HandleAsyncInternal(context, cancellationToken);
+        return HandleAsyncInternalAsync(context, cancellationToken);
     }
 
-    protected abstract Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default);
+    protected abstract Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default);
 
     protected void LogInvalidInput(string fieldName, object? value, string? username, long userId)
     {

@@ -49,7 +49,7 @@ public class TelegramBotHostedService(
     {
         try
         {
-            var dto = await inputService.Map(update);
+            var dto = await inputService.MapAsync(update);
             logger.LogDebug("Update received: id={UpdateId}, type={UpdateType}, dto={DtoType}",
                 update.Id, update.Type, dto?.GetType().Name ?? "null");
 

@@ -12,7 +12,7 @@
 | **User** | Пользователь в Telegram |
 | **Server** | `TelegramBotHostedService` — точка входа, polling |
 | **App** | `CommandAppService` + `SlashCommandService` — логика команд |
-| **DB** | PostgreSQL (очередь + LISTEN/NOTIFY) |
+| **DB** | PostgreSQL (очередь, LISTEN/NOTIFY для `new_tasks` и `command_completed`) |
 | **Worker** | `CommandExecutionService` — фоновое выполнение |
 | **Process** | Внешний процесс (Revit / Navisworks / Python) |
 
@@ -47,7 +47,7 @@ User                          Server                    App                     
 
 ---
 
-## 2. Worker просыпается
+## 2. Worker просыпается (LISTEN/NOTIFY + fallback polling)
 
 ```
 DB                          Worker
@@ -59,6 +59,9 @@ DB                          Worker
   │                            │ ProcessBatchAsync()
   │                            │─── (внутренняя обработка) ─────────>│
 ```
+
+При создании сессии Server отправляет `pg_notify('new_tasks', '')` в той же транзакции.
+Worker ожидает уведомления через `WaitAsync()` с 5-минутным таймаутом (fallback polling).
 
 ---
 
@@ -77,7 +80,7 @@ Worker                                              DB
  │                  │   ORDER BY Priority ASC,         │
  │                  │            CreatedAt ASC,        │
  │                  │            CommandId ASC         │
- │                  │   LIMIT 50                       │
+ │                  │   LIMIT @Limit -- на практике DefaultBatchSize = 5                       │
  │                  │   FOR UPDATE SKIP LOCKED         │
  │                  │ )                                │
  │                  │ UPDATE Commands c                │

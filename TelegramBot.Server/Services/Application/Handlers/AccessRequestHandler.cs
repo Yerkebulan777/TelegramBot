@@ -28,7 +28,7 @@ public sealed class AccessRequestHandler(
         CallbackPrefixes.RejectUser
     ];
 
-    protected override async Task<bool> HandleAsyncInternal(CallbackContext context, CancellationToken cancellationToken = default)
+    protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {

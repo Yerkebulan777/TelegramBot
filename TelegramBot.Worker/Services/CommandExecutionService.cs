@@ -20,7 +20,6 @@ namespace TelegramBot.Worker.Services;
 /// Автоматически переподключается при потере соединения.
 /// </summary>
 public sealed class CommandExecutionService(
-    IUserDataService userDataService,
     ISessionDataService sessionDataService,
     ICommandDataService commandDataService,
     INotificationDataService notificationDataService,
@@ -238,10 +237,12 @@ public sealed class CommandExecutionService(
         logger.LogInformation("Worker stopping: activeProcesses={Count}", _activeProcesses.Count);
         await LogActiveProcessesOnShutdownAsync();
 
-        _shutdownCts?.Cancel();
+        if (_shutdownCts != null) await _shutdownCts.CancelAsync();
 
+#pragma warning disable VSTHRD003
         await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task");
         await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task");
+#pragma warning restore VSTHRD003
 
         _shutdownCts?.Dispose();
 
@@ -259,7 +260,9 @@ public sealed class CommandExecutionService(
         }
 
         var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
+#pragma warning disable VSTHRD003
         if (await Task.WhenAny(task, timeout) != task)
+#pragma warning restore VSTHRD003
         {
             logger.LogWarning("{TaskName} did not complete within 15s timeout", taskName);
         }
@@ -559,11 +562,25 @@ public sealed class CommandExecutionService(
         process.BeginErrorReadLine();
 
         var timeoutMs = _workerOptions.ProcessTimeoutSeconds * 1000;
-        var completed = await Task.Run(() => process.WaitForExit(timeoutMs), ct);
+        using var processTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        processTimeoutCts.CancelAfter(timeoutMs);
+
+        bool completed;
+        try
+        {
+#pragma warning disable VSTHRD003
+            await process.WaitForExitAsync(processTimeoutCts.Token);
+#pragma warning restore VSTHRD003
+            completed = true;
+        }
+        catch (OperationCanceledException) when (processTimeoutCts.IsCancellationRequested)
+        {
+            completed = false;
+        }
 
         LogProcessOutput(cmd, outputBuilder, errorBuilder);
 
-        var errorMessage = GetProcessErrorMessage(cmd, process, completed, sw);
+        var errorMessage = await GetProcessErrorMessageAsync(cmd, process, completed, sw);
 
         sw.Stop();
 
@@ -580,15 +597,20 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private string? GetProcessErrorMessage(PendingCommand cmd, Process process, bool completed, Stopwatch sw)
+    private async Task<string?> GetProcessErrorMessageAsync(PendingCommand cmd, Process process, bool completed, Stopwatch sw)
     {
         if (!completed)
         {
+            // VSTHRD103: Kill(entireProcessTree: true) has no async equivalent in .NET
+#pragma warning disable VSTHRD103
             process.Kill(true);
+#pragma warning restore VSTHRD103
             try
             {
                 using var killTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                _=process.WaitForExit(5000);
+#pragma warning disable VSTHRD003
+                try { await process.WaitForExitAsync(killTimeout.Token); } catch (OperationCanceledException) { }
+#pragma warning restore VSTHRD003
             }
             catch (Exception)
             {

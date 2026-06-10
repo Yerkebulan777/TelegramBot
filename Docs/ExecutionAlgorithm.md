@@ -33,7 +33,7 @@
 | **Chain of Responsibility** | Обработка callback-запросов (`CallbackDispatcher`) | Каждый хендлер проверяет, может ли он обработать callback. Если нет — передаёт следующему |
 | **Strategy** | Исполнение команд (`CommandConfig`) | Конфигурация команды определяет, какую стратегию запуска применить (Revit, Navisworks, Python) |
 | **Competing Consumers** | Параллельная обработка (FOR UPDATE SKIP LOCKED) | Несколько Worker-ов конкурируют за команды, каждая выполняется ровно одним |
-| **Polling** | Очередь задач (Task.Delay) | Worker просыпается каждую минуту для проверки новых команд. Server получает уведомления через `command_completed` |
+| **LISTEN/NOTIFY** | Очередь задач (PostgreSQL) | Worker подписан на `new_tasks` и мгновенно реагирует. Fallback polling — раз в 5 мин. Server слушает `command_completed` |
 | **Bulkhead (изоляция)** | Priority-based партиции (`SemaphoreSlim`) | Каждый уровень приоритета имеет изолированный пул слотов |
 | **Recovery loop** | Polling + обработка ошибок batch-а | При временной ошибке Worker логирует сбой и продолжает следующий цикл |
 | **Retry with Exponential Backoff** | Повторные попытки (`MaxRetries=5`) | Задержка растёт экспоненциально: 60s → 120s → 240s → 480s → 960s |
@@ -178,6 +178,7 @@ BimLib — **Windows-only** набор модулей, расположенны�
 > Ранее существовавшие интерфейсы `IRevitPathResolver`, `IRevitProcessTracker`,
 > `INavisworksProcessTracker` удалены — у них не было потребителей вне BimLib.
 > DI-регистрация выполняется напрямую в `Worker/Program.cs` (без `AddBimIntegration()`).
+> AUTORES не использует BimLib для резолвинга — его ExecutablePath = "python" берётся напрямую из конфигурации.
 
 ### Поток использования в Worker
 
@@ -376,11 +377,17 @@ services.AddSingleton<NavisworksProcessTracker>();
 
 **Назначение:** мониторинг PID, диагностика зависаний и принудительное завершение процессов только по бизнес-таймауту команды (`ProcessTimeoutSeconds`).
 
-**Graceful Shutdown не нужен.** При остановке Worker не должен ждать активные Revit/Navisworks-процессы и не должен пытаться завершать их отдельным shutdown-сценарием. Корректность обеспечивают обычные механизмы выполнения: timeout, lease/crash recovery и повторный захват команд после перезапуска.
+**Graceful Shutdown (Worker):** При остановке Worker выполняет `PerformGracefulShutdownAsync()`:
+- Логирует количество активных процессов
+- Ждёт до 30 секунд, давая процессам шанс завершиться самостоятельно
+- Активные Revit/Navisworks-процессы не завершаются принудительно — их команды
+  подхватываются при следующем запуске через Crash Recovery (истёкший Lease)
+- Фоновые задачи (cleanup, health monitoring) ожидаются с таймаутом 15 сек
+- Per-partition пулы освобождаются
 
 **Реализация:**
 ```csharp
-private readonly ConcurrentDictionary<int, Process> _activeProcesses;
+private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
 
 // Перед запуском
 _activeProcesses[cmd.CommandId] = process;
@@ -388,8 +395,15 @@ _activeProcesses[cmd.CommandId] = process;
 // После завершения (в finally)
 _activeProcesses.TryRemove(cmd.CommandId, out _);
 
-// При превышении ProcessTimeoutSeconds процесс завершается обычной timeout-логикой
-// Отдельный graceful shutdown-сценарий не реализуется
+// При остановке
+private async Task PerformGracefulShutdownAsync()
+{
+    logger.LogInformation("Worker stopping: activeProcesses={Count}", _activeProcesses.Count);
+    await LogActiveProcessesOnShutdownAsync();
+    _shutdownCts?.Cancel();
+    await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task");
+    await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task");
+}
 ```
 
 `Process` хранится напрямую, без класса-обёртки. `Stopwatch` и `CommandId` — локальные переменные в `ExecuteOneAsync`.
@@ -675,18 +689,22 @@ race condition с per-command CTS.
          │    command_completed   │                           │
          │    (Done|Total|ProjNm) │                           │
          ├───────────────────────>│                           │
-         │                        │                           │
-         │                        │ 3. Пробуждение            │
-         │                        │    CommandNotificationSvc │
-         │                        ├──────────────────────────>│
-         │                        │                           │
-         │                        │                           │ 4. Запрос Failed-файлов
-         │                        │                           │    (если failed > 0)
-         │                        │<──────────────────────────┤
-         │                        │                           │
-         │                        │                           │ 5. SendMessageAsync
-         │                        │                           │    userId, сводка
-         │                        │                           ├────────> Telegram
+│                        │                           │
+│                        │ 3. Пробуждение            │
+│                        │    CommandNotificationSvc │
+│                        ├──────────────────────────>│
+│                        │                           │
+│                        │                           │ 4. Enqueue в
+│                        │                           │    Channel<NotificationItem>
+│                        │                           │    (256 capacity)
+│                        │                           │
+│                        │                           │ 5. NotificationSenderService
+│                        │                           │    читает канал → запрос
+│                        │                           │    Failed-файлов и длительности
+│                        │                           │
+│                        │                           │ 6. SendMessageAsync
+│                        │                           │    userId, сводка
+│                        │                           ├────────> Telegram
 ```
 
 ### Payload уведомления
@@ -795,13 +813,14 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 - Если в БД нет `pending`/`processing` — запрашивает `GetSessionsStatusAsync` и шлёт `NotifyCommandCompletedAsync`
 - Промежуточные команды и retry не отправляют пользовательских уведомлений
 
-**Сторона Server** (`CommandNotificationService`):
-- `BackgroundService`, подписан на `LISTEN command_completed`
-- При получении NOTIFY парсит payload через `Split('|', 5)`
-- Запрашивает длительность сессии по `MIN(StartedAt)` / `MAX(CompletedAt)`
-- Если `failed > 0` — запрашивает Failed-файлы из БД
-- Отправляет сводку через `ITelegramOutputService.SendMessageAsync()`
-- Markdown-форматирование не используется (plain text)
+**Сторона Server (двухступенчатая обработка):**
+1. `CommandNotificationService`: `BackgroundService`, подписан на `LISTEN command_completed`.
+   При получении NOTIFY парсит payload через `Split('|', 5)` и ставит задачу в `Channel<NotificationItem>` (256 capacity, bounded).
+2. `NotificationSenderService`: `BackgroundService`, читает `Channel<NotificationItem>` через `ReadAllAsync()`.
+   Запрашивает длительность сессии по `MIN(StartedAt)` / `MAX(CompletedAt)`.
+   Если `failed > 0` — запрашивает Failed-файлы из БД через отдельное подключение.
+   Отправляет сводку через `ITelegramOutputService.SendMessageAsync()`.
+   Markdown-форматирование используется (`ParseMode.MarkdownV2` через `EscapeMarkdownV2()`).
 
 ---
 
@@ -933,8 +952,8 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
         │     внутри неё — несколько Команд (Commands)
         │     Статус каждой команды: 'pending' (ждёт очереди)
         ▼
-Шаг 3: Worker просыпается по таймеру
-        │     (раз в минуту проверяет очередь)
+Шаг 3: Worker получает NOTIFY new_tasks (мгновенно)
+        │     или fallback polling раз в 5 минут
         ▼
 Шаг 4: Worker забирает pending-команды себе
         │     Статус: 'processing' (выполняется)
@@ -1051,6 +1070,7 @@ WITH selected AS (
     JOIN "Sessions" s ON s."SessionId" = c."SessionId"
     WHERE c."Status" = 'pending'
       AND s."Status" != 'Deleted'
+      AND (c."NextRetryAt" IS NULL OR c."NextRetryAt" <= NOW())
     ORDER BY c."Priority" ASC, c."CreatedAt" ASC
     LIMIT @Limit
     FOR UPDATE SKIP LOCKED
@@ -1069,15 +1089,18 @@ RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
 ### Обновление статуса
 
 ```sql
-UPDATE "Commands"
-SET "Status" = @Status,
-    "CompletedAt" = CASE 
+UPDATE Commands
+SET Status = @Status,
+    CompletedAt = CASE 
         WHEN @Status IN ('Done', 'Failed') THEN NOW() 
-        ELSE "CompletedAt" 
+        ELSE CompletedAt 
     END,
-    "ProcessId" = @ProcessId,
-    "ErrorMessage" = @ErrorMessage
-WHERE "CommandId" = @CommandId;
+    ProcessId = @ProcessId,
+    ErrorMessage = @ErrorMessage,
+    Progress = COALESCE(@Progress, Progress),
+    Result = COALESCE(@Result, Result)
+WHERE CommandId = @CommandId
+  AND Status != 'Deleted';
 ```
 
 ### Отправка уведомления пользователю (Server)
@@ -1086,7 +1109,7 @@ WHERE "CommandId" = @CommandId;
 NOTIFY command_completed, 'UserId|SessionId|Done|Total|ProjectName';
 ```
 
-Payload генерируется в `PostgresDataService.NotifyCommandCompletedAsync()`.
+Payload генерируется в `SessionDataService.NotifyCommandCompletedAsync()` (реализует `INotificationDataService`).
 
 ### Очистка истёкших Lease (crash recovery)
 
@@ -1147,7 +1170,7 @@ WHERE CommandId = @CommandId
 | **Отказоустойчивость** | Переподключение при потере соединения с БД (5 сек задержка) |
 | **Логирование** | Полное контекстное логирование всех операций и ошибок, включая stdout/stderr процессов |
 | **Изоляция компонентов** | Server и Worker независимы, общаются только через БД |
-| **Shutdown Worker** | Graceful shutdown для внешних процессов не нужен: Worker останавливает основной цикл по `CancellationToken`, а выполнение команд страхуется timeout/lease/crash recovery |
+| **Shutdown Worker** | Worker выполняет `PerformGracefulShutdownAsync()` при остановке: логирует активные процессы, ждёт до 30 сек их завершения, ожидает фоновые задачи (15 сек таймаут). Активные Revit/Navisworks не принудительно завершаются — их команды подхватываются при следующем запуске через Crash Recovery |
 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
 | **Lease (долгий TTL)** | Lease устанавливается на `ProcessTimeoutSeconds + 5 мин`, команда не вернётся в очередь раньше таймаута |
 | **Валидация FilePath** | Проверка существования, расширения (из `AllowedExtensions`) и защита от path traversal перед запуском процесса |
@@ -1406,7 +1429,7 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 | DOC-005 | **Retry logic** — экспоненциальная задержка (base*2^attempt), лимит попыток (MaxRetries=5). Команда возвращается в `pending` с `NextRetryAt` | Самовосстановление при временных ошибках (файл заблокирован, сеть недоступна) | 🟠 MEDIUM | ✅ Реализовано (v1.2) |
 | DOC-006 | **Нет автоматических метрик** (Prometheus/Grafana) — только ручные SQL-запросы | Ограниченный мониторинг в production, сложность-alerting | 🟠 MEDIUM | В планах (v1.2) |
 | DOC-007 | **Координация очистки Lease** — `pg_try_advisory_lock(1234567)` перед каждой очисткой. Только один воркер выполняет `ReleaseExpiredLeasesAsync`/`ReleaseTimeoutCommandsAsync`, остальные пропускают цикл | Снижение нагрузки на БД при нескольких воркерах | 🟡 LOW | ✅ Реализовано (v1.2) |
-| DOC-008 | **Graceful shutdown не нужен** — отдельный shutdown-сценарий для активных Revit/Navisworks-процессов исключён из требований | Риск deadlock на shutdown отсутствует как класс: Worker не ждёт и не убивает процессы при остановке сервиса | 🟢 NONE | Зафиксировано |
+| DOC-008 | **Graceful shutdown реализован** — Worker выполняет `PerformGracefulShutdownAsync()` при остановке: логирует активные процессы, ждёт до 30 сек их завершения, ожидает фоновые задачи (15 сек таймаут). Revit/Navisworks не принудительно завершаются — их команды подхватываются при следующем запуске через Crash Recovery | Риск deadlock на shutdown минимален: процессы не убиваются, но Worker ждёт их естественного завершения | 🟢 NONE | Зафиксировано |
 | DOC-009 | **Нет health checks** для Worker — нет эндпоинтов или механизмов проверки здоровья сервиса | Сложность мониторинга доступности в orchestration-системах | 🟡 LOW | Улучшение |
 | DOC-010 | **Нет ограничения очереди** — не описан лимит на количество pending-команд на пользователя/сессию | Риск разрастания таблицы при аномальной нагрузке | 🟡 LOW | Улучшение |
 | DOC-011 | **Не описаны runbook** для типичных инцидентов (завис процесс, заполнилась очередь, упал Worker) | Увеличенное время восстановления при инцидентах | 🟡 LOW | Улучшение |
