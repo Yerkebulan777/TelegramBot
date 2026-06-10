@@ -41,6 +41,7 @@ public static class Program
 
                     _=services.Configure<WorkerOptions>(context.Configuration.GetSection(WorkerOptions.SectionName));
                     _=services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
+                    _=services.Configure<DialogDismisserOptions>(context.Configuration.GetSection(DialogDismisserOptions.SectionName));
 
                     // BIM-интеграция (Revit + Navisworks)
                     _=services.AddSingleton<IRevitVersionDetector, RevitVersionDetector>();
