@@ -117,8 +117,7 @@ public sealed class ProcessRunner(
         return process;
     }
 
-    /// <summary>
-    /// Ожидает завершения процесса, собирает stdout/stderr.
+    /// <summary>Ожидает завершения процесса, собирает stdout/stderr.
     /// После выхода процесса пробует прочитать result-файл от плагина.
     /// Если файл есть — статус берётся из него. Если нет — fallback на exit code.
     /// </summary>
@@ -127,14 +126,40 @@ public sealed class ProcessRunner(
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
 
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) errorBuilder.AppendLine(e.Data); };
+        using var outputLock = new SemaphoreSlim(1, 1);
+        
+        process.OutputDataReceived += (_, e) => 
+        { 
+            if (e.Data != null) 
+            {
+                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(t => 
+                {
+                    try { outputBuilder.AppendLine(e.Data); } finally { outputLock.Release(); }
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
+        };
+        
+        process.ErrorDataReceived += (_, e) => 
+        { 
+            if (e.Data != null) 
+            {
+                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(t => 
+                {
+                    try { errorBuilder.AppendLine(e.Data); } finally { outputLock.Release(); }
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
+        };
+        
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
 #pragma warning disable VSTHRD003
         await process.WaitForExitAsync(ct);
 #pragma warning restore VSTHRD003
+
+        // Ждем завершения всех операций записи в буферы
+        await outputLock.WaitAsync(TimeSpan.FromSeconds(1), ct);
+        _ = outputLock.Release();
 
         LogProcessOutput(cmd, outputBuilder, errorBuilder);
         sw.Stop();

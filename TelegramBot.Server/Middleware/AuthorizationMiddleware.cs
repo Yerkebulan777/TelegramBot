@@ -9,7 +9,8 @@ namespace TelegramBot.Server.Middleware;
 public sealed class AuthorizationMiddleware(
     UserDataService userDataService,
     MessageTrackingDataService messageTrackingDataService,
-    ITelegramOutputService outputService)
+    ITelegramOutputService outputService,
+    ILogger<AuthorizationMiddleware> logger)
 {
     public async Task<AccessValidationResult> ValidateAsync(long userId)
     {
@@ -44,6 +45,10 @@ public sealed class AuthorizationMiddleware(
         return false;
     }
 
+    /// <summary>
+    /// Безопасно обновляет данные администратора с защитой от race condition.
+    /// Использует optimistic concurrency через UpdatedAt timestamp.
+    /// </summary>
     public async Task<BotUser?> RefreshApprovedAdminUserAsync(long userId, string username, BotUser? user)
     {
         var adminUser = await userDataService.GetUserAsync(userId);
@@ -53,6 +58,14 @@ public sealed class AuthorizationMiddleware(
         }
 
         var now = DateTime.UtcNow;
+        
+        // Проверка на race condition: если пользователь был изменен между чтением и записью
+        if (user != null && adminUser.UpdatedAt > user.UpdatedAt)
+        {
+            logger.LogDebug("Skipping update for admin {UserId}: concurrent modification detected", userId);
+            return adminUser;
+        }
+
         await userDataService.UpsertUserAsync(new BotUser
         {
             UserId = userId,
