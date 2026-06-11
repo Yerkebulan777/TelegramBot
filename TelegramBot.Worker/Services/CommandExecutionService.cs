@@ -13,7 +13,6 @@ namespace TelegramBot.Worker.Services;
 /// Делегирует выполнение специализированным компонентам: PartitionPoolManager, ProcessRunner, SessionCompletionTracker.
 /// </summary>
 public sealed class CommandExecutionService(
-    SessionDataService sessionDataService,
     CommandDataService commandDataService,
     PartitionPoolManager partitionPoolManager,
     ProcessRunner processRunner,
@@ -150,7 +149,6 @@ public sealed class CommandExecutionService(
                 try
                 {
                     await commandDataService.ReleaseExpiredLeasesAsync();
-                    await CleanupInactiveSessionsAsync();
                 }
                 catch (Exception ex)
                 {
@@ -339,23 +337,6 @@ public sealed class CommandExecutionService(
 #pragma warning restore VSTHRD003
         {
             logger.LogWarning("{TaskName} did not complete within 15s timeout", taskName);
-        }
-    }
-
-    private async Task CleanupInactiveSessionsAsync()
-    {
-        if (_workerOptions.CompletedSessionRetentionDays <= 0)
-        {
-            return;
-        }
-
-        var cutoffUtc = DateTime.UtcNow.AddDays(-_workerOptions.CompletedSessionRetentionDays);
-        var deletedCount = await sessionDataService.SoftDeleteInactiveSessionsOlderThanAsync(cutoffUtc);
-        if (deletedCount > 0)
-        {
-            logger.LogInformation(
-                "Inactive session cleanup completed: deleted={Count}, retentionDays={RetentionDays}",
-                deletedCount, _workerOptions.CompletedSessionRetentionDays);
         }
     }
 

@@ -1,5 +1,4 @@
 using TelegramBot.Core.Interfaces;
-using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application;
@@ -19,36 +18,17 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
                 g => g.Key, 
                 g => g.OrderBy(x => x.h.Priority).First().h);
 
-    /// <summary>
-    /// Получает список поддерживаемых префиксов для хендлера.
-    /// Использует reflection-safe вызов CanHandle по всем известным callback-префиксам.
-    /// </summary>
+    /// <summary>Возвращает поддерживаемые префиксы из хендлера.</summary>
     private static IEnumerable<string> GetSupportedPrefixes(ICallbackHandler handler)
     {
-        foreach (var prefix in GetKnownCallbackPrefixes())
+        try
         {
-            bool canHandle;
-            try
-            {
-                canHandle = handler.CanHandle(prefix);
-            }
-            catch
-            {
-                // Игнорируем ошибки при проверке
-                continue;
-            }
-
-            if (canHandle)
-                yield return prefix;
+            return handler.GetSupportedPrefixes();
         }
-    }
-
-    private static IEnumerable<string> GetKnownCallbackPrefixes()
-    {
-        return typeof(CallbackPrefixes)
-            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
-            .Where(field => field.IsLiteral && !field.IsInitOnly && field.FieldType == typeof(string))
-            .Select(field => (string)field.GetRawConstantValue()!);
+        catch
+        {
+            return [];
+        }
     }
 
     /// <summary>

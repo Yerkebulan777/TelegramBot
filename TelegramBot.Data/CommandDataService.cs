@@ -46,52 +46,25 @@ public sealed class CommandDataService(
     /// <summary>Обновляет статус команды.</summary>
     public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null)
     {
-        try
-        {
-            await using var conn = await CreateOpenConnectionAsync();
-            var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateStatus,
-                new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage, Progress = progress, Result = result });
-            return affected > 0;
-        }
-        catch (Exception e)
-        {
-            Logger.LogError(e, "Failed to update status for command {CommandId}", commandId);
-            return false;
-        }
+        return await TryExecuteAsync(commandId, SqlQueries.Commands.UpdateStatus,
+            new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage, Progress = progress, Result = result },
+            "update status");
     }
 
     /// <summary>Обновляет прогресс команды.</summary>
-    public async Task<bool> UpdateCommandProgressAsync(int commandId, int progress)
+    public Task<bool> UpdateCommandProgressAsync(int commandId, int progress)
     {
-        try
-        {
-            await using var conn = await CreateOpenConnectionAsync();
-            var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateProgress,
-                new { CommandId = commandId, Progress = progress });
-            return affected > 0;
-        }
-        catch (Exception e)
-        {
-            Logger.LogError(e, "Failed to update progress for command {CommandId}", commandId);
-            return false;
-        }
+        return TryExecuteAsync(commandId, SqlQueries.Commands.UpdateProgress,
+            new { CommandId = commandId, Progress = progress },
+            "update progress");
     }
 
     /// <summary>Обновляет результат команды.</summary>
-    public async Task<bool> UpdateCommandResultAsync(int commandId, string result)
+    public Task<bool> UpdateCommandResultAsync(int commandId, string result)
     {
-        try
-        {
-            await using var conn = await CreateOpenConnectionAsync();
-            var affected = await conn.ExecuteAsync(SqlQueries.Commands.UpdateResult,
-                new { CommandId = commandId, Result = result });
-            return affected > 0;
-        }
-        catch (Exception e)
-        {
-            Logger.LogError(e, "Failed to update result for command {CommandId}", commandId);
-            return false;
-        }
+        return TryExecuteAsync(commandId, SqlQueries.Commands.UpdateResult,
+            new { CommandId = commandId, Result = result },
+            "update result");
     }
 
     /// <summary>Планирует повторную попытку.</summary>
@@ -163,6 +136,22 @@ public sealed class CommandDataService(
             SqlQueries.Commands.CountDuplicatePairs,
             new { CommandTexts = commandTexts.ToArray(), FilePaths = filePaths.ToArray() });
         return count > 0;
+    }
+
+    /// <summary>Выполняет SQL-команду с обработкой ошибок и возвратом признака успеха.</summary>
+    private async Task<bool> TryExecuteAsync(int commandId, string sql, object parameters, string operation)
+    {
+        try
+        {
+            await using var conn = await CreateOpenConnectionAsync();
+            var affected = await conn.ExecuteAsync(sql, parameters);
+            return affected > 0;
+        }
+        catch (Exception e)
+        {
+            Logger.LogError(e, "Failed to {Operation} for command {CommandId}", operation, commandId);
+            return false;
+        }
     }
 
     private async Task<bool> TryExecuteWithAdvisoryLockAsync(

@@ -15,4 +15,7 @@ public interface ICallbackHandler
 
     /// <summary>Обрабатывает callback асинхронно.</summary>
     Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>Возвращает список callback-префиксов, которые поддерживает этот обработчик.</summary>
+    IEnumerable<string> GetSupportedPrefixes() => [];
 }

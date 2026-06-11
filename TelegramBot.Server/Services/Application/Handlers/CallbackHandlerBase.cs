@@ -17,6 +17,8 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
         return SupportedPrefixes.Count > 0 && SupportedPrefixes.Contains(prefix);
     }
 
+    public virtual IEnumerable<string> GetSupportedPrefixes() => SupportedPrefixes;
+
     public Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return HandleAsyncInternalAsync(context, cancellationToken);
