@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 3,
   "targets": {
     "net10.0": {
       "Dapper/2.1.79": {
@@ -738,7 +738,6 @@
       },
       "frameworks": {
         "net10.0": {
-          "framework": "net10.0",
           "targetAlias": "net10.0",
           "projectReferences": {
             "C:\\Users\\y.zhumabayev\\Repository\\TelegramBot\\TelegramBot.Core\\TelegramBot.Core.csproj": {
@@ -764,7 +763,6 @@
     },
     "frameworks": {
       "net10.0": {
-        "framework": "net10.0",
         "targetAlias": "net10.0",
         "dependencies": {
           "Microsoft.VisualStudio.Threading.Analyzers": {

@@ -143,13 +143,13 @@ services.AddSingleton<SessionCompletionTracker>();
 ```
 
 ### Critical Fixes Applied (v1.3)
-| Bug | Fix |
-|-----|-----|
-| `Process.Dispose()` never called | Added `removedProcess?.Dispose()` in `ProcessRunner.RunAsync` finally block |
-| `PartitionPoolManager.Initialize()` semaphore leak | Dispose old semaphores before `Clear()` |
-| `DialogDismisser._dismissAttempts` leak | Guard `AddOrUpdate` with `MaxDismissAttempts > 0` |
-| `RateLimiter._requests` unbounded growth | `TryComplete()` entry when queue is empty |
-| `Channel<NotificationItem>` deadlock on shutdown | `Writer.TryComplete()` in `NotificationSenderService` finally block |
+| Bug | Fix | Issue |
+|-----|-----|-------|
+| `Process.Dispose()` never called | Added `removedProcess?.Dispose()` in `ProcessRunner.RunAsync` finally block | [#17](https://github.com/Yerkebulan777/TelegramBot/issues/17) |
+| `PartitionPoolManager.Initialize()` semaphore leak | Dispose old semaphores before `Clear()` | [#19](https://github.com/Yerkebulan777/TelegramBot/issues/19) |
+| `DialogDismisser._dismissAttempts` leak | Guard `AddOrUpdate` with `MaxDismissAttempts > 0` | [#16](https://github.com/Yerkebulan777/TelegramBot/issues/16) |
+| `RateLimiter._requests` unbounded growth | `TryComplete()` entry when queue is empty | [#20](https://github.com/Yerkebulan777/TelegramBot/issues/20) |
+| `Channel<NotificationItem>` deadlock on shutdown | `Writer.TryComplete()` in `NotificationSenderService` finally block | [#18](https://github.com/Yerkebulan777/TelegramBot/issues/18) |
 
 ---
 

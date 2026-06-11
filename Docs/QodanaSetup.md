@@ -90,9 +90,12 @@ resharper_use_await_using_highlighting = error
 Qodana успешно интегрирована в репозиторий как отдельный шаг контроля качества кода (workflow `Qodana Code Quality`). Запускается на push в `main`/`master` и каждый PR.
 
 Текущий CI-пайплайн (`.github/workflows/ci.yml`) также включает:
+- **`validate-issue-refs`** — проверка, что `fix #N` в commit messages ссылается на существующий Issue (через `gh issue view`). Запускается **до** сборки (`needs: [validate-issue-refs]`). Если Issue не существует — CI фейлится.
 - `dotnet format --verify-no-changes` — проверка стиля кода и `.editorconfig`
 - `dotnet build` — проверка сборки
 - `dotnet publish` — публикация артефакта
+
+> **Дополнение:** `validate-issue-refs` не относится к Qodana, но является частью общего Quality Gate — гарантирует, что каждый закрытый Issue задокументирован в коммите до того, как код попадёт в `master`.
 
 ## Особенности проекта
 - Тесты в данном проекте отключены согласно [AGENTS.md](../AGENTS.md). Qodana настроена только на анализ статического кода.

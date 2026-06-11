@@ -7,8 +7,89 @@ on:
     branches: [ main, master ]
 
 jobs:
+  # ──────────────────────────────────────────────
+  # Валидация commit messages: fix #N → Issue exists
+  # ──────────────────────────────────────────────
+  validate-issue-refs:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      pull-requests: read
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # полная история для git log на push
+
+    - name: Validate fix #N references existing issues
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # ── 1. Collect commit messages ──
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          # PR: через API (fetch-depth=0 не даёт PR-commits при checkout без ref)
+          echo "📥 Collecting commits from PR #${{ github.event.pull_request.number }}..."
+          COMMITS=$(gh api "${{ github.event.pull_request.commits_url }}" --jq '.[].commit.message' 2>/dev/null)
+        else
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+
+          if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+            # Первый push в ветку — проверяем все коммиты
+            echo "📥 First push to branch — checking all commits..."
+            COMMITS=$(git log --format=%B "$AFTER" 2>/dev/null || true)
+          else
+            echo "📥 Collecting commits from $BEFORE..$AFTER..."
+            COMMITS=$(git log --format=%B "$BEFORE..$AFTER" 2>/dev/null || true)
+          fi
+        fi
+
+        if [[ -z "$COMMITS" ]]; then
+          echo "⚠️  No commits to inspect — skipping validation"
+          exit 0
+        fi
+
+        # ── 2. Extract issue references ──
+        # Паттерны: fix #N, fixes #N, fixed #N, close #N, closes #N, closed #N,
+        #            resolve #N, resolves #N, resolved #N (case-insensitive)
+        ISSUES=$(echo "$COMMITS" | grep -oiP '(?:fix|fixed|fixes|close|closes|closed|resolve|resolves|resolved)\s+#(\d+)' | grep -oP '\d+' | sort -un || true)
+
+        if [[ -z "$ISSUES" ]]; then
+          echo "✅ No issue references (fix #N) found in commit messages — skipping validation"
+          exit 0
+        fi
+
+        # ── 3. Validate each issue exists ──
+        echo ""
+        echo "🔍 Found issue references: $(echo "$ISSUES" | tr '\n' ' ')"
+        echo ""
+
+        FAILED=0
+        for ISSUE in $ISSUES; do
+          if gh issue view "$ISSUE" --repo "${{ github.repository }}" --json number &>/dev/null; then
+            echo "  ✅ #$ISSUE — exists"
+          else
+            echo "  ❌ #$ISSUE — does NOT exist in ${{ github.repository }}"
+            FAILED=1
+          fi
+        done
+
+        echo ""
+        if [[ $FAILED -eq 1 ]]; then
+          echo "❌ Some referenced issues do not exist. Create them or fix commit messages."
+          exit 1
+        fi
+        echo "✅ All referenced issues exist."
+
+  # ──────────────────────────────────────────────
+  # Build & publish
+  # ──────────────────────────────────────────────
   build:
     runs-on: windows-latest  # Worker требует Windows
+    needs: [validate-issue-refs]
 
     steps:
     - uses: actions/checkout@v4
