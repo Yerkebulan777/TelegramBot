@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'C:\\Users\\y.zhumabayev\\Repository\\TelegramBot\\.codex\\hooks\\protect-files.sh'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'C:\\Users\\y.zhumabayev\\Repository\\TelegramBot\\.codex\\hooks\\log-commands.sh'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'CONTEXT REMINDER: This is a C# .NET 8 Telegram Bot project. Build: dotnet build TelegramBotServer/TelegramBotServer.csproj. No tests. Entry point: TelegramBotHostedService → CommandAppService. Do NOT edit appsettings.json or botdata.db. Always communicate in Russian.'"
+          }
+        ]
+      }
+    ]
+  }
+}

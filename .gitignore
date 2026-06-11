@@ -1,0 +1,69 @@
+# ==========================================
+# Build output & NuGet
+# ==========================================
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+publish/
+artifacts/
+*.deps.json
+*.runtimeconfig.dev.json
+*.runtimeconfig.json
+*.AssemblyInfo.cache
+project.assets.json
+project.lock.json
+*.nuget.props
+*.nuget.targets
+
+# ==========================================
+# IDE & Editors (Visual Studio, Rider, VS Code)
+# ==========================================
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.csproj.user
+*.sqlproj.user
+*.pubxml
+*.pubxml.user
+*.DotSettings.user
+
+# ==========================================
+# Debug symbols & Diagnostics
+# ==========================================
+*.pdb
+*.iobj
+*.ipdb
+*.log
+*.tmp
+*.temp
+*.cache
+
+# ==========================================
+# Secrets & Environment Local Configs
+# ==========================================
+appsettings.Local.json
+appsettings.local.json
+*.local.json
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# OS-specific clutter
+# ==========================================
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ==========================================
+# Custom Project Rules
+# ==========================================
+Docs/
+*.dll

@@ -1,0 +1,12 @@
+namespace TelegramBot.Core.Constants;
+
+/// <summary>
+/// Стандартные тексты кнопок.
+/// </summary>
+public static class ButtonTexts
+{
+    public const string Apply = "✅ Применить";
+    public const string Confirm = "✅ Подтвердить";
+    public const string Cancel = "❌ Отмена";
+
+}

@@ -1,0 +1,29 @@
+﻿# Qodana configuration file
+# For more information, see https://www.jetbrains.com/help/qodana/dotnet.html
+
+# The linter to use
+linter: jetbrains/qodana-dotnet:latest
+
+# Project name (optional)
+project: TelegramBot
+
+# Path to the solution or project file
+dotnet:
+  solution: TelegramBot.slnx
+
+# Inspection profile
+profile:
+  name: qodana.recommended
+
+# Severity thresholds — fail build on any issue
+severityThresholds:
+  any: 0
+
+# Exclude directories
+exclude:
+  - name: All
+    paths:
+      - .idea
+      - .git
+      - "**/bin"
+      - "**/obj"

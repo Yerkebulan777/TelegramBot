@@ -1,0 +1,202 @@
+# See https://aka.ms/dotnet/editorconfig
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+charset = utf-8
+trim_trailing_whitespace = false
+insert_final_newline = true
+
+[*.cs]
+
+# -------------------------------------------------------------------
+# New-line preferences
+# -------------------------------------------------------------------
+csharp_new_line_before_open_brace_method = true
+csharp_new_line_before_open_brace_type = true
+csharp_new_line_before_open_brace_namespace = true
+csharp_new_line_before_open_brace_property = true
+csharp_new_line_before_open_brace_event = true
+csharp_new_line_before_open_brace_field = true
+csharp_new_line_before_open_brace_anonymous_methods = true
+csharp_new_line_before_open_brace_anonymous_types = true
+csharp_new_line_before_open_brace_accessors = true
+csharp_new_line_before_open_brace_lambdas = true
+csharp_new_line_before_open_brace_local_functions = true
+csharp_new_line_before_open_brace_control_blocks = true
+
+# -------------------------------------------------------------------
+# Spacing preferences
+# -------------------------------------------------------------------
+csharp_space_after_cast = false
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_space_between_method_declaration_parameter_list_parentheses = false
+csharp_space_between_method_call_name_and_opening_parenthesis = false
+csharp_space_between_parentheses = false
+csharp_space_between_square_brackets = false
+csharp_space_around_binary_operators = ignore
+csharp_space_between_colon_and_case_label = true
+csharp_indent_labels = flush_left
+
+# -------------------------------------------------------------------
+# Block / wrapping preferences
+# -------------------------------------------------------------------
+csharp_preserve_adds_in_argument_lists = false
+csharp_prefer_braces_for_if_else_for_while = true_when_multiline
+csharp_prefer_simple_using_statement = true
+
+# -------------------------------------------------------------------
+# var preferences (implicit typing)
+# -------------------------------------------------------------------
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+
+# -------------------------------------------------------------------
+# Expression-bodied members
+# -------------------------------------------------------------------
+csharp_style_expression_bodied_methods = when_possible:suggestion
+csharp_style_expression_bodied_constructors = when_possible:suggestion
+csharp_style_expression_bodied_operators = when_possible:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_indexers = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+csharp_style_expression_bodied_lambdas = true:suggestion
+csharp_style_expression_bodied_local_functions = true:suggestion
+
+# -------------------------------------------------------------------
+# Pattern matching (C# 10+)
+# -------------------------------------------------------------------
+csharp_style_throw_expression = true:suggestion
+csharp_style_conditional_delegate_call = true:suggestion
+csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
+csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
+csharp_style_prefer_switch_expression = true:suggestion
+csharp_style_prefer_pattern_matching = true:suggestion
+csharp_style_prefer_not_pattern = true:suggestion
+csharp_style_prefer_extended_property_pattern = true:suggestion
+csharp_style_prefer_null_check_over_type_check = true:suggestion
+csharp_style_prefer_tuple_swap = true:suggestion
+csharp_style_prefer_utf8_string_literals = true:suggestion
+csharp_style_unused_value_assignment_preference = discard_variable:suggestion
+
+# -------------------------------------------------------------------
+# Modern C# 12/13/14 features
+# -------------------------------------------------------------------
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_prefer_readonly_struct_members = true:suggestion
+csharp_style_prefer_readonly_struct = true:suggestion
+
+
+# -------------------------------------------------------------------
+# Naming rules — Interfaces: I prefix, PascalCase (required)
+# -------------------------------------------------------------------
+dotnet_naming_rule.interface_should_be_begins_with_i.severity = error
+dotnet_naming_rule.interface_should_be_begins_with_i.symbols = interface
+dotnet_naming_rule.interface_should_be_begins_with_i.style = begins_with_i
+dotnet_naming_symbols.interface.applicable_kinds = interface
+dotnet_naming_symbols.interface.applicable_accessibilities = public, internal, private, protected, protected_internal
+dotnet_naming_style.begins_with_i.required_prefix = I
+dotnet_naming_style.begins_with_i.capitalization = pascal_case
+
+# -------------------------------------------------------------------
+# Naming rules — Types: PascalCase (required)
+# -------------------------------------------------------------------
+dotnet_naming_rule.types_should_be_pascal_case.severity = error
+dotnet_naming_rule.types_should_be_pascal_case.symbols = types
+dotnet_naming_rule.types_should_be_pascal_case.style = pascal_case
+dotnet_naming_symbols.types.applicable_kinds = class, struct, interface, enum, delegate
+dotnet_naming_symbols.types.applicable_accessibilities = public, internal, private, protected, protected_internal
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+# -------------------------------------------------------------------
+# Naming rules — Methods: PascalCase (warning)
+# -------------------------------------------------------------------
+dotnet_naming_rule.methods_should_be_pascal_case.severity = warning
+dotnet_naming_rule.methods_should_be_pascal_case.symbols = methods
+dotnet_naming_rule.methods_should_be_pascal_case.style = pascal_case
+dotnet_naming_symbols.methods.applicable_kinds = method
+dotnet_naming_symbols.methods.applicable_accessibilities = public, internal, private, protected, protected_internal
+
+# -------------------------------------------------------------------
+# Naming rules — Properties: PascalCase (suggestion)
+# -------------------------------------------------------------------
+dotnet_naming_rule.properties_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.properties_should_be_pascal_case.symbols = properties
+dotnet_naming_rule.properties_should_be_pascal_case.style = pascal_case
+dotnet_naming_symbols.properties.applicable_kinds = property
+dotnet_naming_symbols.properties.applicable_accessibilities = public, internal, private, protected, protected_internal
+
+# -------------------------------------------------------------------
+# Naming rules — Parameters: camelCase (no prefix) — prevents false
+# positives from primary constructor parameters being flagged as fields.
+# -------------------------------------------------------------------
+dotnet_naming_rule.parameters_should_be_camel_case.severity = warning
+dotnet_naming_rule.parameters_should_be_camel_case.symbols = parameters
+dotnet_naming_rule.parameters_should_be_camel_case.style = camel_case
+dotnet_naming_symbols.parameters.applicable_kinds = parameter
+dotnet_naming_symbols.parameters.applicable_accessibilities = *
+dotnet_naming_style.camel_case.capitalization = camel_case
+
+# -------------------------------------------------------------------
+# Naming rules — Private fields: _camelCase (suggestion).
+# Set to 'suggestion' to avoid conflict with primary constructor
+# parameters that are implicitly captured as fields (C# 12+).
+# -------------------------------------------------------------------
+dotnet_naming_rule.private_fields_should_begin_with_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_should_begin_with_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_should_begin_with_underscore.style = underscore_prefix
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_prefix.required_prefix = _
+dotnet_naming_style.underscore_prefix.capitalization = camel_case
+
+# -------------------------------------------------------------------
+# Naming rules — Local variables: camelCase (suggestion)
+# -------------------------------------------------------------------
+dotnet_naming_rule.locals_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.locals_should_be_camel_case.symbols = locals
+dotnet_naming_rule.locals_should_be_camel_case.style = camel_case
+dotnet_naming_symbols.locals.applicable_kinds = local
+dotnet_naming_symbols.locals.applicable_accessibilities = *
+
+# -------------------------------------------------------------------
+# Analyzer rules — Async suffix enforcement via
+# Microsoft.VisualStudio.Threading.Analyzers
+# -------------------------------------------------------------------
+dotnet_diagnostic.VSTHRD200.severity = warning
+
+# -------------------------------------------------------------------
+# Analyzer rules — No async void methods (VSTHRD100)
+# Suppressed for CommandNotificationService.cs (legitimate event handler)
+# -------------------------------------------------------------------
+dotnet_diagnostic.VSTHRD100.severity = error
+
+# -------------------------------------------------------------------
+# ReSharper / Qodana — IDisposable resource discipline
+# Все инспекции — ERROR: утечка ресурсов должна блокировать сборку.
+# -------------------------------------------------------------------
+resharper_not_disposed_resource_highlighting = error
+resharper_dispose_on_non_disposable_type_highlighting = error
+resharper_use_await_using_highlighting = error
+
+# -------------------------------------------------------------------
+# Analyzer rules — Prefer primary constructors (IDE0290)
+# -------------------------------------------------------------------
+dotnet_diagnostic.IDE0290.severity = suggestion
+
+# -------------------------------------------------------------------
+# Analyzer rules — Use 'nameof' for symbolic names
+# -------------------------------------------------------------------
+dotnet_diagnostic.IDE0022.severity = suggestion
+
+# -------------------------------------------------------------------
+# File-specific overrides
+# -------------------------------------------------------------------
+[*.csproj]
+indent_size = 2
+
+[*.{json,yml,yaml,md}]
+indent_size = 2
