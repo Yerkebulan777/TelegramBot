@@ -39,26 +39,29 @@ public sealed class CommandNotificationService(
 
         logger.LogInformation("Command notifications listening: channel=command_completed");
 
-        // Держим соединение открытым — WaitAsync блокируется до получения NOTIFY
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            // Держим соединение открытым — WaitAsync блокируется до получения NOTIFY
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await conn.WaitAsync(stoppingToken);
+                try
+                {
+                    await conn.WaitAsync(stoppingToken);
+                }
+                catch (NpgsqlException ex) when (!stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogError(ex, "Command notifications error: source=postgres");
+                    break;
+                }
             }
-            catch (NpgsqlException ex) when (!stoppingToken.IsCancellationRequested)
-            {
-                logger.LogError(ex, "Command notifications error: source=postgres");
-                break;
-            }
+        }
+        finally
+        {
+            conn.Notification -= OnNotificationReceived;
         }
     }
 
-    // VSTHRD100 suppression: event handlers must be async void — Npgsql Notification event
-    // does not support async Task handlers. The try/catch inside prevents crashes.
-#pragma warning disable VSTHRD100
-    private async void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
-#pragma warning restore VSTHRD100
+    private void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
     {
         try
         {
@@ -89,7 +92,13 @@ public sealed class CommandNotificationService(
             }
 
             var item = new NotificationItem(sessionId, correlationId);
-            await notificationChannel.Writer.WriteAsync(item).AsTask();
+            if (!notificationChannel.Writer.TryWrite(item))
+            {
+                logger.LogWarning("Completion notify dropped: reason=notification_channel_full, session={SessionId}, correlationId={CorrelationId}",
+                    sessionId, correlationId);
+                return;
+            }
+
             logger.LogDebug("Completion notify queued: session={SessionId}, correlationId={CorrelationId}",
                 sessionId, correlationId);
         }

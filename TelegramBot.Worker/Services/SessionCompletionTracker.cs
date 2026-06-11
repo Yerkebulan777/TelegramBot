@@ -61,7 +61,13 @@ public sealed class SessionCompletionTracker(
                 return;
             }
 
-            await sessionDataService.NotifySessionCompletedAsync(cmd.SessionId, cmd.CorrelationId);
+            var notified = await sessionDataService.NotifySessionCompletedOnceAsync(cmd.SessionId, cmd.CorrelationId);
+            if (!notified)
+            {
+                logger.LogDebug(
+                    "Session {SessionId}: completion notification already sent or session deleted, correlationId={CorrelationId}",
+                    cmd.SessionId, cmd.CorrelationId);
+            }
         }
         catch (Exception ex)
         {

@@ -149,5 +149,21 @@ internal static partial class SqlQueries
                 RETURNING c.CommandId
             )
             SELECT COUNT(*)::int FROM deleted_sessions;";
+
+        internal const string NotifyCompletionOnce = @"
+            WITH marked AS (
+                UPDATE Sessions
+                SET CompletionNotified = TRUE,
+                    UpdatedAt = NOW()
+                WHERE SessionId = @SessionId
+                  AND CompletionNotified = FALSE
+                  AND Status != 'Deleted'
+                RETURNING SessionId
+            ),
+            notified AS (
+                SELECT pg_notify('command_completed', @Payload)
+                FROM marked
+            )
+            SELECT COUNT(*)::int FROM notified;";
     }
 }

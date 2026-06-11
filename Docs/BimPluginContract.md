@@ -14,7 +14,8 @@ Worker не выполняет экспорт сам. Он:
 4. Запускает внешний процесс по `Worker:Commands:{CommandText}`.
 5. Ждёт завершения процесса.
 6. Сначала пытается прочитать `result_{CommandId}_{AttemptToken}.json`.
-7. Если result-файла нет, использует fallback по exit code процесса.
+7. Если result-файла нет, использует fallback по exit code процесса. Если result-файл есть,
+   но не читается, содержит битый JSON или неизвестный `status`, попытка считается ошибочной.
 8. Удаляет temp-файлы текущей попытки в `finally`.
 
 `AttemptToken` — GUID без дефисов, новый для каждой retry-попытки. Он нужен, чтобы не читать stale-result от прошлой попытки и не конфликтовать при параллельных запусках.
@@ -144,13 +145,14 @@ python ai_agent.py --command "{CommandText}" --file "{FilePath}" --task "{TaskFi
 | Условие | Статус команды |
 |---------|----------------|
 | Есть result JSON и `status = "done"` | `Done` |
-| Есть result JSON и `status = "failed"` | `Failed`, `errorMessage` берётся из файла |
-| Result JSON битый или `status` неизвестен | файл переименовывается в `.bad`, дальше fallback по exit code |
+| Есть result JSON и `status = "failed"` | `Failed` или retry через `ErrorClassifier`, `errorMessage` берётся из файла |
+| Result JSON битый или `status` неизвестен | файл переименовывается в `.bad`, дальше `Failed` или retry через `ErrorClassifier` |
 | Result JSON отсутствует, exit code `0` | `Done` |
 | Result JSON отсутствует, exit code не `0` | `Failed` или retry через `ErrorClassifier` |
 | Таймаут | процесс убивается, команда `Failed` |
 
-Plugin-reported `"failed"` сейчас не проходит через retry-классификацию: Worker сразу пишет `Failed`.
+Plugin-reported `"failed"` проходит через тот же `HandleFailureAsync()`, что и ненулевой exit code.
+Permanent ошибки сразу становятся `Failed`, transient ошибки планируются на retry.
 
 ## Плейсхолдеры ArgumentsTemplate
 

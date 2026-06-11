@@ -14,12 +14,14 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 public sealed class CommandPreparer(
     IOptions<WorkerOptions> workerOptions,
+    IConfiguration configuration,
     CommandDataService commandDataService,
     RevitVersionDetector versionDetector,
     NavisworksPathResolver navisworksPathResolver,
     ILogger<CommandPreparer> logger)
 {
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
+    private readonly string? _fileSystemRoot = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.RootPath)];
 
     /// <summary>
     /// Проверяет команду: тип, файл, BIM-исполняемый файл.
@@ -89,6 +91,13 @@ public sealed class CommandPreparer(
                     cmd.FilePath, cmd.CommandId);
                 return false;
             }
+
+            if (!string.IsNullOrWhiteSpace(_fileSystemRoot) && !IsPathWithinRoot(fullPath, _fileSystemRoot))
+            {
+                logger.LogWarning("Validation failed: path outside configured root '{File}' ({Id}), root='{Root}'",
+                    cmd.FilePath, cmd.CommandId, _fileSystemRoot);
+                return false;
+            }
         }
         catch (Exception ex)
         {
@@ -101,6 +110,22 @@ public sealed class CommandPreparer(
         {
             logger.LogWarning("Validation failed: file not found '{File}' for {Cmd} ({Id})",
                 cmd.FilePath, cmd.CommandText, cmd.CommandId);
+            return false;
+        }
+
+        try
+        {
+            if (File.GetAttributes(cmd.FilePath).HasFlag(FileAttributes.ReparsePoint))
+            {
+                logger.LogWarning("Validation failed: reparse point file is not allowed '{File}' ({Id})",
+                    cmd.FilePath, cmd.CommandId);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Validation failed: cannot read file attributes '{File}' ({Id})",
+                cmd.FilePath, cmd.CommandId);
             return false;
         }
 
@@ -118,6 +143,23 @@ public sealed class CommandPreparer(
         }
 
         return true;
+    }
+
+    private static bool IsPathWithinRoot(string fullPath, string rootPath)
+    {
+        try
+        {
+            var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var candidate = Path.GetFullPath(fullPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>Пытается определить версию Revit/Navisworks через BimLib и вернуть полный путь к исполняемому файлу.</summary>

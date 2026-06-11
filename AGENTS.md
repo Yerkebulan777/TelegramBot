@@ -145,14 +145,17 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 - **`CommandPreparer.CreateTaskFile`** uses atomic write (`.tmp` + `File.Move`) and accepts an `attemptToken` for unique temp-file names per attempt.
 - **`ProcessRunner`** generates a unique `attemptToken` (Guid) per attempt. All temp files include this nonce: `task_{CommandId}_{nonce}.json`, `result_{CommandId}_{nonce}.json`. Temp files are cleaned up in `finally` via `CommandPreparer.CleanupTempFiles`.
 
-**Key behaviour changes (v1.8 — оптимизации и исправления):**
+**Current reliability and runtime behavior:**
 - **`RateLimiter`**: Упрощён до единого `lock` на уровне `RequestWindow`. Очистка и проверка в одной критической секции. Удалён избыточный флаг `CleanupInProgress`.
 - **`SessionManager`**: Безопасное удаление семафоров при `RemoveSession` с проверкой `CurrentCount == 1`. Устранена утечка памяти `_sessionLocks`.
-- **`ProcessRunner`**: Потоковая обработка stdout/stderr через `OutputDataReceived` с лимитом 64KB вместо `BlockingCollection`. Предотвращено переполнение памяти.
-- **`CommandExecutionService`**: Добавлена периодическая очистка `_runningTasks` при превышении 1000 элементов для предотвращения бесконечного роста.
+- **`ProcessRunner`**: Потоковая обработка stdout/stderr через `OutputDataReceived` с лимитом 64KB вместо `BlockingCollection`. Plugin-reported `failed` проходит через `HandleFailureAsync()` и `ErrorClassifier`; битый/unreadable result JSON не падает в fallback по exit code.
+- **`CommandExecutionService`**: `LISTEN new_tasks` выполняется до первого drain; shutdown имеет общий bounded budget, фоновые задачи отменяются в начале, активные процессы завершаются параллельно.
 - **`PartitionPoolManager`**: Исправлена логика приоритетов в `GetThreshold`. Добавлена валидация и логирование переполнения в `ReleaseSlot`.
 - **`CallbackDispatcher`**: Кэшированный словарь `_handlerMap` для поиска обработчиков O(1) вместо линейного перебора O(n).
-- **`SessionCompletionTracker`**: In-memory счётчик `_sessionRemaining` + DB confirmation через `CountPendingProcessingBySessionAsync`, чтобы не отправлять уведомление раньше завершения всей сессии.
+- **`SessionCompletionTracker`**: In-memory счётчик `_sessionRemaining` + DB confirmation через `CountPendingProcessingBySessionAsync`, чтобы не отправлять уведомление раньше завершения всей сессии. `NotifySessionCompletedOnceAsync()` использует `Sessions.CompletionNotified`, чтобы не отправлять дубли в multi-worker сценариях.
+- **`CommandNotificationService`**: Npgsql event handler синхронный и использует `TryWrite()` в bounded notification channel, без `async void` continuations.
+- **`CommandPreparer`**: Worker валидирует `FileSystem:RootPath`, если он задан, и отклоняет reparse point файлы.
+- **`WorkerOptions`**: Валидируется на старте; `AUTORES` явно задаёт `WorkingDirectory = "."`.
 - **Логирование**: Добавлено логирование elapsed time для callback-хендлеров, флаги `truncated` для stdout/stderr, детализация очистки сессий, контекст ошибок (userId, sessionId, attempt).
 - **Мониторинг**: Worker добавляет `/health` checks `bimInstallRoot` и `activeProcesses`. Отдельных `/debug/*` endpoints в текущем коде нет.
 
@@ -219,13 +222,15 @@ services.AddHostedService<SessionCleanupService>();
 4. Исполнитель пишет `result_{CommandId}_{AttemptToken}.json` по указанному `resultFilePath` (рекомендуется: `.tmp` → `File.Move` для атомарности)
 5. Worker читает `result_{CommandId}_{AttemptToken}.json`:
    - Сначала парсит JSON, потом удаляет файл (при битом JSON → переименовывает в `.bad` для диагностики)
-   - Обновляет статус команды в БД
+   - `status = "done"` → `Done`
+   - `status = "failed"` → `HandleFailureAsync()` с retry/error classification
+   - Битый JSON, unreadable file или неизвестный `status` → `.bad` и `HandleFailureAsync()`
 6. Temp-файлы очищаются в `finally` блока `ProcessRunner.RunAsync()`
 
 Исполнитель должен прочитать task-файл, выполнить команду, записать result-файл и завершиться с exit code `0`, если result-файл успешно записан.
 
 Если result-файл не найден — Worker использует fallback по exit code процесса
-(0 = Done, иначе Failed с retry или без).
+(0 = Done, иначе Failed или retry через `ErrorClassifier`).
 
 #### Command-line arguments
 
@@ -272,7 +277,7 @@ The `DialogDismisser` monitors the process and auto-closes modal dialogs (error 
 | NWC, CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
 | AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task` `--result`, fallback to exit code |
 
-**Shutdown behavior:** When Worker shuts down, it **kills all active processes** (`Kill(entireProcessTree: true)`) and waits up to 10 seconds for them to die. No orphaned Revit processes remain on the server. (The 3-hour timeout handle in `HandleTimeoutAsync` also uses `Kill(true)` — processes are always killed, not left running.)
+**Shutdown behavior:** When Worker shuts down, it cancels background loops first, then **kills all active processes** (`Kill(entireProcessTree: true)`) in parallel within the bounded shutdown budget. Each process gets up to 10 seconds inside the shared budget. The timeout handler in `HandleTimeoutAsync` also uses `Kill(true)`.
 
 **Temp-file cleanup (v1.7):** Temp files (`task_*.json`, `result_*.json`) are cleaned up per-attempt in the `finally` block of `ProcessRunner.RunAsync()`. Each attempt uses a unique `attemptToken` (GUID), preventing stale-file conflicts between retries.
 
@@ -336,13 +341,14 @@ SlashCommandService.ConfirmFileSelectionAsync()
 ```
 
 **In-memory счётчик сессий:** вместо per-command SQL запроса `GetSessionProgressAsync`
-Worker использует `ConcurrentDictionary<int, int> _sessionRemaining` как batch-local оптимизацию.
+Worker использует `ConcurrentDictionary<int, int> _sessionRemaining` как batch-local счётчик.
 При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`,
 при каждом выходе захваченной команды из `processing` (Done/Failed/retry) атомарно декрементится через `AddOrUpdate`.
 Уведомление отправляется только когда `remaining == 0` и БД подтверждает, что в сессии больше нет `pending`/`processing`.
-Payload `command_completed` минимальный: `SessionId|CorrelationId`. Сводка сообщения строится на Server через
-`SessionDataService.GetSessionCompletionSummaryAsync()` и включает длительность сессии (`MIN(StartedAt)` → `MAX(CompletedAt)`)
-и список ошибочных файлов.
+Затем `SessionDataService.NotifySessionCompletedOnceAsync()` атомарно выставляет `Sessions.CompletionNotified = TRUE`
+и отправляет `pg_notify('command_completed', 'SessionId|CorrelationId')` только для первой успешной попытки.
+Сводка сообщения строится на Server через `SessionDataService.GetSessionCompletionSummaryAsync()` и включает
+длительность сессии (`MIN(StartedAt)` → `MAX(CompletedAt)`) и список ошибочных файлов.
 
 DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker registers data services (`UserDataService`, `CommandDataService`, `SessionDataService`, `MessageTrackingDataService`) directly in `Program.cs`.
 
@@ -435,8 +441,9 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking 
 
 **`Commands` table includes `Partition` field** — partition threshold для priority-based пулов процессов.
 
-**`Sessions` table now includes `ProjectName TEXT`** — имя проекта записывается при создании сессии,
-отображается в `/status` и в уведомлениях о завершении.
+**`Sessions` table now includes `ProjectName TEXT` and `CompletionNotified BOOLEAN`** — имя проекта записывается
+при создании сессии, отображается в `/status` и в уведомлениях о завершении. `CompletionNotified` делает
+`command_completed` идемпотентным в multi-worker сценариях.
 
 **`GetCommandStatusAsync` removed** — was dead code. Deleted commands never appear as `'pending'`
 in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant.
@@ -517,7 +524,7 @@ Namespaces must match folder structure:
 
 ### Async / Await
 
-- All async methods return `Task` or `Task<T>` — never `async void` (exception: Npgsql event handlers in `CommandNotificationService` — suppressed via `#pragma warning disable VSTHRD100`)
+- All async methods return `Task` or `Task<T>` — never `async void`.
 - Always suffix async methods with `Async` — enforced by `Microsoft.VisualStudio.Threading.Analyzers` (VSTHRD200, `WarningsAsErrors`)
 - `VSTHRD003` (foreign Task), `VSTHRD103` (sync blocking) are also treated as errors — all violations fixed or suppressed with documented pragmas
 - Do **not** use `ConfigureAwait(false)` — this is an application, not a library

@@ -37,7 +37,18 @@ public static class Program
                     _=services.AddSingleton<MessageTrackingDataService>();
                     _=services.AddSingleton<DatabaseInitializerService>();
 
-                    _=services.Configure<WorkerOptions>(context.Configuration.GetSection(WorkerOptions.SectionName));
+                    _=services.AddOptions<WorkerOptions>()
+                        .Bind(context.Configuration.GetSection(WorkerOptions.SectionName))
+                        .Validate(options => options.ProcessTimeoutMinutes > 0, "Worker:ProcessTimeoutMinutes must be greater than 0")
+                        .Validate(options => options.MaxRetries >= 0, "Worker:MaxRetries must be greater than or equal to 0")
+                        .Validate(options => options.RetryDelayBaseSeconds > 0, "Worker:RetryDelayBaseSeconds must be greater than 0")
+                        .Validate(options => options.FallbackPollingIntervalSeconds > 0, "Worker:FallbackPollingIntervalSeconds must be greater than 0")
+                        .Validate(options => options.Partitions.Count > 0, "Worker:Partitions must contain at least one partition")
+                        .Validate(options => options.Partitions.All(p => p.Key >= 0 && p.Value > 0), "Worker:Partitions thresholds must be non-negative and pool sizes must be greater than 0")
+                        .Validate(options => options.Commands.Count > 0, "Worker:Commands must contain at least one command")
+                        .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), "Worker:Commands executable paths are required")
+                        .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ArgumentsTemplate)), "Worker:Commands argument templates are required")
+                        .ValidateOnStart();
                     _=services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
                     _=services.Configure<DialogDismisserOptions>(context.Configuration.GetSection(DialogDismisserOptions.SectionName));
 

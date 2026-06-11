@@ -24,6 +24,7 @@ public sealed class CommandExecutionService(
 {
     private const string ListenChannel = "new_tasks";
     private const int DefaultBatchSize = 5;
+    private const int ShutdownBudgetSeconds = 30;
 
     // Трекинг выполняемых задач для корректного ожидания при shutdown
     private readonly HashSet<Task> _runningTasks = [];
@@ -68,10 +69,6 @@ public sealed class CommandExecutionService(
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
-        await commandDataService.ReleaseExpiredLeasesAsync();
-
-        await DrainPendingCommandsAsync(stoppingToken);
-
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(stoppingToken);
 
@@ -79,6 +76,9 @@ public sealed class CommandExecutionService(
         _ = await cmd.ExecuteNonQueryAsync(stoppingToken);
 
         logger.LogInformation("Listening for notifications on channel '{Channel}'", ListenChannel);
+
+        await commandDataService.ReleaseExpiredLeasesAsync();
+        await DrainPendingCommandsAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -253,30 +253,38 @@ public sealed class CommandExecutionService(
     {
         logger.LogInformation("Worker stopping: initiating graceful shutdown...");
 
-        // Шаг 1: Останавливаем прием новых задач
-        await LogActiveProcessesOnShutdownAsync();
+        using var shutdownBudgetCts = new CancellationTokenSource(TimeSpan.FromSeconds(ShutdownBudgetSeconds));
 
-        // Шаг 2: Принудительно завершаем все активные процессы
-        // Даём процессам до 10 секунд на завершение после Kill
+        if (_shutdownCts != null)
+        {
+            await _shutdownCts.CancelAsync();
+        }
+
+        LogActiveProcessesOnShutdown();
+
+        // Принудительно завершаем все активные процессы параллельно в общем shutdown-бюджете.
         var processesToKill = processRunner.ActiveProcesses.ToList();
-        var killTasks = processesToKill.Select(kvp => KillProcessAsync(kvp.Key, kvp.Value)).ToList();
+        var killTasks = processesToKill.Select(kvp => KillProcessAsync(kvp.Key, kvp.Value, shutdownBudgetCts.Token)).ToList();
         
         if (killTasks.Count > 0)
         {
-            await Task.WhenAll(killTasks);
+            try
+            {
+                await Task.WhenAll(killTasks);
+            }
+            catch (OperationCanceledException) when (shutdownBudgetCts.IsCancellationRequested)
+            {
+                logger.LogWarning("Worker shutdown kill phase exceeded {BudgetSeconds}s budget", ShutdownBudgetSeconds);
+            }
         }
 
-        // Шаг 3: Отменяем фоновые задачи
-        if (_shutdownCts != null) await _shutdownCts.CancelAsync();
-
-        // Шаг 4: Ждем завершения фоновых задач (максимум 15 секунд)
+        // Ждем завершения фоновых задач в оставшемся общем бюджете.
 #pragma warning disable VSTHRD003
-        await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task");
-        await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task");
-        await WaitForRunningTasksCompletionAsync();
+        await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token);
+        await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task", shutdownBudgetCts.Token);
+        await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token);
 #pragma warning restore VSTHRD003
 
-        // Шаг 5: Освобождаем ресурсы
         _shutdownCts?.Dispose();
         _drainGate.Dispose();
         partitionPoolManager.Dispose();
@@ -284,7 +292,7 @@ public sealed class CommandExecutionService(
         logger.LogInformation("Worker shutdown completed");
     }
 
-    private async Task KillProcessAsync(int commandId, Process process)
+    private async Task KillProcessAsync(int commandId, Process process, CancellationToken shutdownToken)
     {
         try
         {
@@ -295,11 +303,16 @@ public sealed class CommandExecutionService(
 
                 process.Kill(entireProcessTree: true);
 
-                // Ждём до 10 секунд, чтобы процесс успел закрыть файлы
-                var exitTask = process.WaitForExitAsync(CancellationToken.None);
-                var timeoutTask = Task.Delay(10_000);
-                
-                await Task.WhenAny(exitTask, timeoutTask);
+                using var perProcessCts = CancellationTokenSource.CreateLinkedTokenSource(shutdownToken);
+                perProcessCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+                try
+                {
+                    await process.WaitForExitAsync(perProcessCts.Token);
+                }
+                catch (OperationCanceledException) when (perProcessCts.IsCancellationRequested)
+                {
+                }
 
                 if (!process.HasExited)
                 {
@@ -325,7 +338,7 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private async Task LogActiveProcessesOnShutdownAsync()
+    private void LogActiveProcessesOnShutdown()
     {
         var activeSnapshot = processRunner.ActiveProcesses.ToList();
 
@@ -335,34 +348,27 @@ public sealed class CommandExecutionService(
             return;
         }
 
-        logger.LogInformation("Worker shutdown: waiting up to 30s for {Count} active processes",
+        logger.LogInformation("Worker shutdown: killing {Count} active process(es)",
             activeSnapshot.Count);
-
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (DateTime.UtcNow < deadline && activeSnapshot.Any(p => !p.Value.HasExited))
-        {
-            await Task.Delay(500);
-        }
-
-        var stillRunning = activeSnapshot.Count(p => !p.Value.HasExited);
-        if (stillRunning > 0)
-        {
-            logger.LogInformation("Worker shutdown: {Count} processes still running after 30s, leaving them",
-                stillRunning);
-        }
 
         foreach (var (commandId, process) in activeSnapshot)
         {
             if (process.HasExited) continue;
-            logger.LogInformation("Process left running: commandId={Id}, pid={Pid}", commandId, process.Id);
+            logger.LogInformation("Active process on shutdown: commandId={Id}, pid={Pid}", commandId, process.Id);
         }
     }
 
-    private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName)
+    private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName, CancellationToken shutdownToken)
     {
         if (task == null) return;
 
-        var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
+        if (shutdownToken.IsCancellationRequested)
+        {
+            logger.LogWarning("{TaskName} skipped: shutdown budget exhausted", taskName);
+            return;
+        }
+
+        var timeout = Task.Delay(TimeSpan.FromSeconds(15), shutdownToken);
 #pragma warning disable VSTHRD003
         if (await Task.WhenAny(task, timeout) != task)
 #pragma warning restore VSTHRD003
@@ -388,7 +394,7 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private async Task WaitForRunningTasksCompletionAsync()
+    private async Task WaitForRunningTasksCompletionAsync(CancellationToken shutdownToken)
     {
         Task[] runningTasks;
         lock (_runningTasksLock)
@@ -401,10 +407,16 @@ public sealed class CommandExecutionService(
             return;
         }
 
+        if (shutdownToken.IsCancellationRequested)
+        {
+            logger.LogWarning("Command task wait skipped: shutdown budget exhausted");
+            return;
+        }
+
         logger.LogInformation("Waiting up to 15s for {Count} command task(s) to stop", runningTasks.Length);
 
         var allTasks = Task.WhenAll(runningTasks);
-        var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
+        var timeout = Task.Delay(TimeSpan.FromSeconds(15), shutdownToken);
 #pragma warning disable VSTHRD003
         if (await Task.WhenAny(allTasks, timeout) != allTasks)
 #pragma warning restore VSTHRD003

@@ -8,7 +8,7 @@
 Server → PostgreSQL (Commands, Status='pending')
     → LISTEN/NOTIFY new_tasks → Worker (мгновенно) + fallback polling (5 мин)
     → FOR UPDATE SKIP LOCKED → выполнение → Done/Failed
-    → NOTIFY command_completed (SessionId|CorrelationId) → Server
+    → idempotent NOTIFY command_completed (SessionId|CorrelationId) → Server
     → SessionDataService.GetSessionCompletionSummaryAsync() → Telegram-уведомление
 ```
 
@@ -81,15 +81,33 @@ WHERE CommandId = @CommandId
   AND Status != 'Deleted';
 ```
 
-### Сигнал завершения сессии (Worker → Server)
+### Идемпотентный сигнал завершения сессии (Worker → Server)
 
 ```sql
-NOTIFY command_completed, 'SessionId|CorrelationId';
+WITH marked AS (
+    UPDATE Sessions
+    SET CompletionNotified = TRUE,
+        UpdatedAt = NOW()
+    WHERE SessionId = @SessionId
+      AND CompletionNotified = FALSE
+      AND Status != 'Deleted'
+    RETURNING SessionId
+),
+notified AS (
+    SELECT pg_notify('command_completed', @Payload)
+    FROM marked
+)
+SELECT COUNT(*)::int FROM notified;
 ```
 
-`command_completed` — только транспортный сигнал. Единственный источник данных для текста
-уведомления — `SessionDataService.GetSessionCompletionSummaryAsync()`, который читает из БД:
-пользователя, проект, total/done/failed, длительность и список failed-файлов.
+`command_completed` — транспортный сигнал. `Sessions.CompletionNotified` защищает от дублей
+при нескольких Worker: только первый успешный `UPDATE ... WHERE CompletionNotified = FALSE`
+отправляет `pg_notify`. Единственный источник данных для текста уведомления —
+`SessionDataService.GetSessionCompletionSummaryAsync()`, который читает из БД пользователя,
+проект, total/done/failed, длительность и список failed-файлов.
+
+Ограничение: `pg_notify` не durable. Если Server не слушал канал в момент отправки, событие
+не будет переиграно без отдельного outbox-механизма.
 
 ### Очистка истёкших Lease (crash recovery)
 
@@ -168,7 +186,9 @@ ORDER BY "Lease" ASC;
 2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.json`.
 3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в `ArgumentsTemplate`.
 4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает `result_{CommandId}_{AttemptToken}.json`.
-5. Если result-файл отсутствует или невалиден, Worker использует fallback по exit code.
+5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл
+   существует, но не читается, содержит битый JSON или неизвестный status, попытка считается
+   ошибочной и проходит через retry/error classification.
 
 Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. Для Navisworks/FileConvert полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может работать только через fallback по exit code.
 
@@ -194,70 +214,3 @@ Revit требует установленный AddIn: `Revit.exe` сам не �
    "Partitions": { "0": 5, "1": 3, "2": 2, "3": 1 }
    ```
 
-## Оптимизации и улучшения (v1.8)
-
-### Критические исправления (v1.8)
-
-#### RateLimiter
-- **Проблема**: Race condition между `CleanupExpired` и `lock`, избыточная сложность с `Interlocked.CompareExchange` + `lock`, удаление из словаря внутри lock другого объекта
-- **Решение**: Упрощена до единого `lock` на уровне `RequestWindow`. Очистка и проверка выполняются в одной критической секции. Удалён флаг `CleanupInProgress`
-- **Файл**: `TelegramBot.Core/Services/RateLimiter.cs`
-
-#### SessionManager  
-- **Проблема**: Утечка памяти `_sessionLocks` — семафоры никогда не удалялись при `RemoveSession`, race condition между проверкой таймаута и `GetOrAdd`, блокировка в `CleanUpExpiredSessionsAsync` могла долго удерживать семафор
-- **Решение**: Безопасное удаление семафоров при `RemoveSession` с проверкой `CurrentCount == 1`. Атомарная проверка и обновление сессии. Улучшено логирование с указанием userId и причины удаления
-- **Файл**: `TelegramBot.Server/Services/Application/SessionManager.cs`
-
-#### ProcessRunner
-- **Проблема**: `BlockingCollection<string>` мог потреблять неограниченную память при большом выводе процесса, отсутствие лимита на размер вывода, `TruncateOutput` обрезал до 4KB но после сбора всего вывода (память уже потрачена)
-- **Решение**: Потоковая обработка stdout/stderr через события `OutputDataReceived` с ограничением 64KB на поток. `StringBuilder` инициализируется с capacity 1024 и растёт только до лимита
-- **Файл**: `TelegramBot.Worker/Services/ProcessRunner.cs`
-
-### Средние улучшения (v1.8)
-
-#### CommandExecutionService
-- **Проблема**: Отсутствие ограничения на размер `_runningTasks` — HashSet мог расти бесконечно при высокой нагрузке. `ContinueWith` без `TaskScheduler` выполнялся на thread pool
-- **Решение**: Добавлена периодическая очистка завершённых задач при превышении 1000 элементов. Освобождение слота пула вынесено в `finally` блок
-- **Файл**: `TelegramBot.Worker/Services/CommandExecutionService.cs`
-
-#### PartitionPoolManager
-- **Проблема**: Некорректная логика приоритетов (комментарий говорил "чем меньше Priority, тем выше приоритет", но код инвертировал логику), отсутствие валидации при `ReleaseSlot` приводило к исключениям
-- **Решение**: Исправлен комментарий и логика `GetThreshold`. Добавлена проверка на переполнение семафора в `ReleaseSlot` с предупреждением в лог
-- **Файл**: `TelegramBot.Worker/Services/PartitionPoolManager.cs`
-
-#### CallbackDispatcher
-- **Проблема**: Линейный поиск обработчиков O(n) при каждом callback, отсутствие кэширования маппинга prefix → handler
-- **Решение**: Создан словарь `_handlerMap` при инициализации для поиска O(1). Группировка по префиксам с выбором хендлера наименьшего приоритета
-- **Файл**: `TelegramBot.Server/Services/Application/CallbackDispatcher.cs`
-
-#### SessionCompletionTracker
-- **Проблема**: Лишний SQL-запрос `CountPendingProcessingBySessionAsync` при каждой завершённой сессии, race condition между decremented счётчиком и проверкой БД
-- **Решение в текущем коде**: in-memory счётчик `_sessionRemaining` сокращает число проверок, а при обнулении batch-счётчика выполняется `CountPendingProcessingBySessionAsync`, чтобы не отправить уведомление раньше завершения всех pending/processing команд
-- **Файл**: `TelegramBot.Worker/Services/SessionCompletionTracker.cs`
-
-#### CommandPreparer
-- **Проблема**: Temp-файлы predictable/stale между retry-попытками
-- **Решение в текущем коде**: имена task/result включают уникальный `AttemptToken`; temp-файлы текущей попытки удаляются в `ProcessRunner.RunAsync()` через `CommandPreparer.CleanupTempFiles`
-- **Файл**: `TelegramBot.Worker/Services/CommandPreparer.cs`
-
-### Улучшения логирования и мониторинга (v1.8)
-
-#### Логирование
-- Добавлено логирование времени выполнения callback-хендлеров с `elapsedMs` и именем хендлера
-- Добавлены флаги `truncated` и `limit` в логи stdout/stderr процессов
-- Добавлено подробное логирование очистки сессий: количество удалённых, возраст, userId
-- Добавлено логирование disposal семафоров сессий с указанием причины (expired/manual removal)
-- Улучшены сообщения об ошибках с контекстом: userId, correlationId, sessionId, elapsed time, attempt number
-- Добавлено логирование переполнения семафоров в `PartitionPoolManager.ReleaseSlot`
-- Добавлено логирование очистки `_runningTasks` в `CommandExecutionService` с количеством удалённых задач
-- Добавлено логирование stdout/stderr внешних процессов с защитой от переполнения логов
-
-#### Мониторинг
-- Health check endpoint `/health` включает базовые checks `database` и `process`.
-- Worker добавляет checks:
-  - `bimInstallRoot` — наличие `BimIntegration:RevitInstallRoot`
-  - `activeProcesses` — количество активных внешних процессов в `ProcessRunner`
-
-#### Диагностика
-- Добавлен SQL-запрос для диагностики зависших команд с истёкшим Lease
-- Отдельных `/debug/sessions`, `/debug/processes` и Prometheus exporter в текущем коде нет

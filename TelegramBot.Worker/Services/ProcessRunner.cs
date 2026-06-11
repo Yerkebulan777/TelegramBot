@@ -204,18 +204,29 @@ public sealed class ProcessRunner(
         sw.Stop();
 
         // Пробуем прочитать result-файл от плагина
-        if (TryReadResultFile(cmd.CommandId, attemptToken, out var result))
+        var resultReadStatus = TryReadResultFile(cmd.CommandId, attemptToken, out var result, out var resultReadError);
+        if (resultReadStatus == ResultFileReadStatus.Valid)
         {
-            var status = result.Status == "done" ? Statuses.Done : Statuses.Failed;
-            var errorMsg = status == Statuses.Failed
-                ? result.ErrorMessage ?? "Plugin reported failure"
-                : null;
+            if (string.Equals(result.Status, "done", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
+                logger.LogInformation(
+                    "Command result from plugin file: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}",
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status);
+                await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+                return;
+            }
 
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, status, errorMessage: errorMsg);
             logger.LogInformation(
                 "Command result from plugin file: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status);
-            await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+            await HandleFailureAsync(cmd, result.ErrorMessage ?? "Plugin reported failure", null, sw);
+            return;
+        }
+
+        if (resultReadStatus == ResultFileReadStatus.Invalid)
+        {
+            await HandleFailureAsync(cmd, resultReadError ?? "Invalid plugin result file", null, sw);
             return;
         }
 
@@ -242,14 +253,19 @@ public sealed class ProcessRunner(
     /// Порядок: сначала парсим, потом удаляем — чтобы при битом JSON
     /// файл остался для диагностики.
     /// </summary>
-    private static bool TryReadResultFile(int commandId, string attemptToken, out ResultFile result)
+    private static ResultFileReadStatus TryReadResultFile(
+        int commandId,
+        string attemptToken,
+        out ResultFile result,
+        out string? errorMessage)
     {
         var path = Path.Combine(Path.GetTempPath(), $"result_{commandId}_{attemptToken}.json");
 
         if (!File.Exists(path))
         {
             result = null!;
-            return false;
+            errorMessage = null;
+            return ResultFileReadStatus.NotFound;
         }
 
         try
@@ -261,29 +277,35 @@ public sealed class ProcessRunner(
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             })!;
 
-            if (result.Status is "done" or "failed")
+            if (result.Status is not null
+                && (result.Status.Equals("done", StringComparison.OrdinalIgnoreCase)
+                    || result.Status.Equals("failed", StringComparison.OrdinalIgnoreCase)))
             {
                 // Удаляем ТОЛЬКО после успешного парсинга
                 File.Delete(path);
-                return true;
+                errorMessage = null;
+                return ResultFileReadStatus.Valid;
             }
 
             // Невалидный status — rename для диагностики
             try { File.Move(path, path + ".bad", overwrite: true); } catch { }
             result = null!;
-            return false;
+            errorMessage = $"Plugin result file has invalid status: {path}";
+            return ResultFileReadStatus.Invalid;
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
             // Битый JSON — rename для диагностики
             try { File.Move(path, path + ".bad", overwrite: true); } catch { }
             result = null!;
-            return false;
+            errorMessage = $"Plugin result file contains invalid JSON: {path}. {ex.Message}";
+            return ResultFileReadStatus.Invalid;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             result = null!;
-            return false;
+            errorMessage = $"Plugin result file cannot be read: {path}. {ex.Message}";
+            return ResultFileReadStatus.Invalid;
         }
     }
 
@@ -382,5 +404,12 @@ public sealed class ProcessRunner(
         return builder.Length > maxLength
             ? builder.ToString(0, maxLength) + $"\n... (truncated for log, total {builder.Length} chars)"
             : builder.ToString(0, builder.Length);
+    }
+
+    private enum ResultFileReadStatus
+    {
+        NotFound,
+        Valid,
+        Invalid,
     }
 }

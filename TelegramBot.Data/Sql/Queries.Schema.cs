@@ -23,6 +23,7 @@ internal static partial class SqlQueries
                 PriorityId INTEGER NOT NULL DEFAULT 0,
                 Status TEXT NOT NULL DEFAULT 'pending',
                 ProjectName TEXT,
+                CompletionNotified BOOLEAN NOT NULL DEFAULT FALSE,
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 FilesAmount INTEGER,
                 UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -34,6 +35,7 @@ internal static partial class SqlQueries
             ADD COLUMN IF NOT EXISTS PriorityId INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS Status TEXT NOT NULL DEFAULT 'pending',
             ADD COLUMN IF NOT EXISTS ProjectName TEXT,
+            ADD COLUMN IF NOT EXISTS CompletionNotified BOOLEAN NOT NULL DEFAULT FALSE,
             ADD COLUMN IF NOT EXISTS FilesAmount INTEGER,
             ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
 

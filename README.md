@@ -15,13 +15,13 @@ Telegram-бот для навигации по файловой системе �
 
 ## Обзор
 
-.NET 10 background service с long-polling (текущая версия: **v1.8** — критические и средние проблемы исправлены, логирование и мониторинг улучшены). Доступные функции:
+.NET 10 background service с long-polling, PostgreSQL-очередью и отдельным Worker для выполнения BIM/AI-задач. Доступные функции:
 
 - Навигация по файловой системе через inline-клавиатуры
 - Экспорт: PDF, DWG, NWC, IFC
 - Автоматизация: BIM-документирование, Clash Reports, AutoResolve
 - Управление сессиями через `/status`
-- Уведомления о завершении сессий: Worker публикует `command_completed`, Server собирает сводку из PostgreSQL
+- Уведомления о завершении сессий: Worker идемпотентно публикует `command_completed`, Server собирает сводку из PostgreSQL
 - Дневной лимит файлов на пользователя
 - Запрос доступа с подтверждением администратором
 - Умный retry: классификация ошибок (InvalidFileError → сразу Failed, ProcessCrashError → retry)

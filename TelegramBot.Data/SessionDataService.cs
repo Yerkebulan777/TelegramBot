@@ -245,19 +245,23 @@ public sealed class SessionDataService(
         }
     }
 
-    /// <summary>Отправляет сигнал о завершении сессии через NOTIFY.</summary>
-    public async Task NotifySessionCompletedAsync(int sessionId, string correlationId)
+    /// <summary>Атомарно отправляет сигнал о завершении сессии не более одного раза.</summary>
+    public async Task<bool> NotifySessionCompletedOnceAsync(int sessionId, string correlationId)
     {
         try
         {
             var payload = $"{sessionId}|{correlationId}";
             await using var conn = await CreateOpenConnectionAsync();
-            _ = await conn.ExecuteAsync("SELECT pg_notify('command_completed', @Payload)", new { Payload = payload });
+            var notified = await conn.ExecuteScalarAsync<int>(
+                SqlQueries.Sessions.NotifyCompletionOnce,
+                new { SessionId = sessionId, Payload = payload });
+            return notified > 0;
         }
         catch (Exception e)
         {
             Logger.LogWarning(e, "Failed to send command_completed NOTIFY for session {SessionId}, correlationId={CorrelationId}",
                 sessionId, correlationId);
+            return false;
         }
     }
 }
