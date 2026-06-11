@@ -126,16 +126,15 @@ public sealed class ProcessRunner(
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
 
-        using var outputLock = new SemaphoreSlim(1, 1);
+        // Используем блокирующую коллекцию для безопасной записи из нескольких потоков
+        var outputQueue = new BlockingCollection<string>();
+        var errorQueue = new BlockingCollection<string>();
         
         process.OutputDataReceived += (_, e) => 
         { 
             if (e.Data != null) 
             {
-                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(t => 
-                {
-                    try { outputBuilder.AppendLine(e.Data); } finally { outputLock.Release(); }
-                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                outputQueue.Add(e.Data);
             }
         };
         
@@ -143,10 +142,7 @@ public sealed class ProcessRunner(
         { 
             if (e.Data != null) 
             {
-                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(t => 
-                {
-                    try { errorBuilder.AppendLine(e.Data); } finally { outputLock.Release(); }
-                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                errorQueue.Add(e.Data);
             }
         };
         
@@ -157,9 +153,20 @@ public sealed class ProcessRunner(
         await process.WaitForExitAsync(ct);
 #pragma warning restore VSTHRD003
 
-        // Ждем завершения всех операций записи в буферы
-        await outputLock.WaitAsync(TimeSpan.FromSeconds(1), ct);
-        _ = outputLock.Release();
+        // Сигнализируем о завершении записи
+        outputQueue.CompleteAdding();
+        errorQueue.CompleteAdding();
+        
+        // Собираем весь вывод
+        foreach (var line in outputQueue.GetConsumingEnumerable())
+        {
+            outputBuilder.AppendLine(line);
+        }
+        
+        foreach (var line in errorQueue.GetConsumingEnumerable())
+        {
+            errorBuilder.AppendLine(line);
+        }
 
         LogProcessOutput(cmd, outputBuilder, errorBuilder);
         sw.Stop();
