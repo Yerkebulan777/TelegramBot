@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
 namespace TelegramBot.Worker.Services;
 
@@ -8,7 +9,7 @@ namespace TelegramBot.Worker.Services;
 /// одновременно выполняемых команд данного уровня приоритета.
 /// Команда попадает в первый threshold >= Priority. Чем меньше Priority, тем выше приоритет.
 /// </summary>
-public sealed class PartitionPoolManager : IDisposable
+public sealed class PartitionPoolManager(ILogger<PartitionPoolManager> logger) : IDisposable
 {
     private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = [];
     private int[] _partitionThresholds = [];
@@ -19,6 +20,21 @@ public sealed class PartitionPoolManager : IDisposable
     /// <summary>Инициализирует пулы из конфигурации партиций.</summary>
     public void Initialize(SortedDictionary<int, int> partitions)
     {
+        // Валидация конфигурации
+        if (partitions == null || partitions.Count == 0)
+        {
+            logger.LogWarning("No partition configuration provided, using default pool of 5");
+            partitions = new SortedDictionary<int, int> { { 0, 5 } };
+        }
+
+        foreach (var (threshold, poolSize) in partitions)
+        {
+            if (poolSize <= 0)
+            {
+                logger.LogWarning("Invalid pool size {PoolSize} for threshold {Threshold}, skipping", poolSize, threshold);
+            }
+        }
+
         // Dispose old semaphores before clearing (безопасно, т.к. Initialize вызывается до старта потоков)
         foreach (var pool in _partitionPools.Values)
         {
@@ -27,7 +43,7 @@ public sealed class PartitionPoolManager : IDisposable
 
         _partitionPools.Clear();
 
-        foreach (var (threshold, poolSize) in partitions)
+        foreach (var (threshold, poolSize) in partitions.Where(p => p.Value > 0))
         {
             _partitionPools[threshold] = new SemaphoreSlim(poolSize, poolSize);
         }
@@ -39,6 +55,8 @@ public sealed class PartitionPoolManager : IDisposable
         }
 
         _partitionThresholds = _partitionPools.Keys.ToArray();
+        
+        logger.LogInformation("Partition pools initialized: {Info}", GetPoolInfo());
     }
 
     /// <summary>Возвращает threshold партиции для указанного приоритета (первый threshold >= priority).</summary>

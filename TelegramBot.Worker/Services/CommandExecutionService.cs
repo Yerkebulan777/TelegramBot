@@ -223,58 +223,76 @@ public sealed class CommandExecutionService(
 
     private async Task PerformGracefulShutdownAsync()
     {
-        logger.LogInformation("Worker stopping: shutting down...");
+        logger.LogInformation("Worker stopping: initiating graceful shutdown...");
 
+        // Шаг 1: Останавливаем прием новых задач
         await LogActiveProcessesOnShutdownAsync();
 
-        // Принудительно завершаем все активные процессы (Revit, Navisworks, python)
-        // Чтобы не копить осиротевшие процессы на сервере после каждого перезапуска.
-        // Даём процессам до 10 секунд на завершение после Kill, иначе — логируем PID.
-        foreach (var (commandId, process) in processRunner.ActiveProcesses.ToList())
+        // Шаг 2: Принудительно завершаем все активные процессы
+        // Даём процессам до 10 секунд на завершение после Kill
+        var processesToKill = processRunner.ActiveProcesses.ToList();
+        var killTasks = processesToKill.Select(kvp => KillProcessAsync(kvp.Key, kvp.Value)).ToList();
+        
+        if (killTasks.Count > 0)
         {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    logger.LogInformation("Killing process on shutdown: commandId={Id}, pid={Pid}",
-                        commandId, process.Id);
-
-                    process.Kill(entireProcessTree: true);
-
-#pragma warning disable VSTHRD003
-                    // Ждём до 10 секунд, чтобы Revit успел закрыть файлы
-                    var killDeadline = Task.Delay(10_000);
-                    await Task.WhenAny(process.WaitForExitAsync(CancellationToken.None), killDeadline);
-#pragma warning restore VSTHRD003
-
-                    if (!process.HasExited)
-                    {
-                        logger.LogWarning(
-                            "Process did not exit after kill: commandId={Id}, pid={Pid}",
-                            commandId, process.Id);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Error killing process on shutdown: commandId={Id}, pid={Pid}",
-                    commandId, process.Id);
-            }
-            finally
-            {
-                process.Dispose();
-            }
+            await Task.WhenAll(killTasks);
         }
 
+        // Шаг 3: Отменяем фоновые задачи
         if (_shutdownCts != null) await _shutdownCts.CancelAsync();
 
+        // Шаг 4: Ждем завершения фоновых задач (максимум 15 секунд)
 #pragma warning disable VSTHRD003
         await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task");
         await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task");
 #pragma warning restore VSTHRD003
 
+        // Шаг 5: Освобождаем ресурсы
         _shutdownCts?.Dispose();
         partitionPoolManager.Dispose();
+        
+        logger.LogInformation("Worker shutdown completed");
+    }
+
+    private async Task KillProcessAsync(int commandId, Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                logger.LogInformation("Killing process on shutdown: commandId={Id}, pid={Pid}",
+                    commandId, process.Id);
+
+                process.Kill(entireProcessTree: true);
+
+                // Ждём до 10 секунд, чтобы процесс успел закрыть файлы
+                var exitTask = process.WaitForExitAsync(CancellationToken.None);
+                var timeoutTask = Task.Delay(10_000);
+                
+                await Task.WhenAny(exitTask, timeoutTask);
+
+                if (!process.HasExited)
+                {
+                    logger.LogWarning(
+                        "Process did not exit after kill: commandId={Id}, pid={Pid}",
+                        commandId, process.Id);
+                }
+                else
+                {
+                    logger.LogInformation("Process killed successfully: commandId={Id}, pid={Pid}",
+                        commandId, process.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Error killing process on shutdown: commandId={Id}, pid={Pid}",
+                commandId, process.Id);
+        }
+        finally
+        {
+            process.Dispose();
+        }
     }
 
     private async Task LogActiveProcessesOnShutdownAsync()

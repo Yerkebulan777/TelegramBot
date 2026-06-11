@@ -21,7 +21,7 @@ public class TelegramOutputService(
     {
         return string.IsNullOrWhiteSpace(message)
             ? null
-            : await ExecuteWithRetryAsync(async () =>
+            : await ExecuteWithCircuitBreakerAsync(async () =>
         {
             var t = await botClient.SendMessage(
                 chatId: new ChatId(userId),
@@ -117,19 +117,19 @@ public class TelegramOutputService(
 
     public async Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
     {
-        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
+        return await ExecuteWithCircuitBreakerAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
     }
 
     public async Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
     {
-        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
+        return await ExecuteWithCircuitBreakerAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown), userId);
     }
 
     public async Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
-        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
+        return await ExecuteWithCircuitBreakerAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
     }
 
@@ -199,13 +199,23 @@ public class TelegramOutputService(
             && ex.Message.Contains("message is not modified", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<Message?> ExecuteWithRetryAsync(Func<Task<Message>> action, long userId)
+    /// <summary>
+    /// Circuit breaker pattern: выполняет действие с retry для rate limit (429),
+    /// но переходит в "open" состояние после нескольких последовательных ошибок.
+    /// </summary>
+    private async Task<Message?> ExecuteWithCircuitBreakerAsync(Func<Task<Message>> action, long userId)
     {
+        const int maxConsecutiveFailures = 5;
+        var consecutiveFailures = 0;
+
         for (var attempt = 0; attempt <= MaxRetries; attempt++)
         {
             try
             {
-                return await action();
+                var result = await action();
+                // Reset failure counter on success
+                consecutiveFailures = 0;
+                return result;
             }
             catch (ApiRequestException ex) when (ex.ErrorCode == 429)
             {
@@ -217,6 +227,7 @@ public class TelegramOutputService(
                 if (attempt < MaxRetries)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(retryAfter));
+                    consecutiveFailures++;
                 }
                 else
                 {
@@ -226,8 +237,27 @@ public class TelegramOutputService(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Failed to send message to {UserId}", userId);
-                return null;
+                consecutiveFailures++;
+                logger.LogWarning(ex, "Failed to send message to {UserId} (failure {Failure}/{MaxFailures})", 
+                    userId, consecutiveFailures, maxConsecutiveFailures);
+
+                if (consecutiveFailures >= maxConsecutiveFailures)
+                {
+                    logger.LogError("Circuit breaker triggered for user {UserId} after {FailureCount} consecutive failures", 
+                        userId, consecutiveFailures);
+                    return null;
+                }
+
+                // Exponential backoff for non-rate-limit errors
+                var backoffDelay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                if (attempt < MaxRetries)
+                {
+                    await Task.Delay(backoffDelay);
+                }
+                else
+                {
+                    return null;
+                }
             }
         }
 

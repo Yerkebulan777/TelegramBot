@@ -1,69 +1,45 @@
-# ==========================================
-# Build output & NuGet
-# ==========================================
-bin/
+```
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
 obj/
-[Bb]in/
-[Oo]bj/
-publish/
-artifacts/
-*.deps.json
-*.runtimeconfig.dev.json
-*.runtimeconfig.json
-*.AssemblyInfo.cache
-project.assets.json
-project.lock.json
-*.nuget.props
-*.nuget.targets
+bin/
+out/
 
-# ==========================================
-# IDE & Editors (Visual Studio, Rider, VS Code)
-# ==========================================
-.vs/
-.idea/
-.vscode/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-*.csproj.user
-*.sqlproj.user
-*.pubxml
-*.pubxml.user
-*.DotSettings.user
+# Dependencies
+node_modules/
+venv/
+.venv/
+.env
+.env.local
+*.env.*
 
-# ==========================================
-# Debug symbols & Diagnostics
-# ==========================================
-*.pdb
-*.iobj
-*.ipdb
+# Logs and temp files
 *.log
 *.tmp
-*.temp
-*.cache
+*.swp
+*.swo
 
-# ==========================================
-# Secrets & Environment Local Configs
-# ==========================================
-appsettings.Local.json
-appsettings.local.json
-*.local.json
-.env
-.env.*
-!.env.example
+# Editors
+.vscode/
+.idea/
+*.userprefs
 
-# ==========================================
-# OS-specific clutter
-# ==========================================
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
+# OS generated files
 .DS_Store
+Thumbs.db
 
-# ==========================================
-# Custom Project Rules
-# ==========================================
-Docs/
-*.dll
+# Build outputs
+dist/
+build/
+target/
+release/
+debug/
+```
