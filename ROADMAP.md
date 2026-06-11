@@ -60,14 +60,13 @@
 - [x] **Валидация FilePath** — проверка существования файла, расширения (из `AllowedExtensions`),
   защита от path traversal (`Path.GetFullPath()`).
 - [x] **Приоритетные партиции (priority-based)** — `SortedDictionary<int, SemaphoreSlim>`:
-  - Critical (Priority 1) → до 3 одновременных процессов
-  - High (Priority 2) → до 5
-  - Medium (Priority 3) → до 3
-  - Low (Priority 4) → до 1
-  - Lowest (Priority 5+) → до 1
+  - Critical (Priority 0) → до 5 одновременных процессов
+  - High (Priority 1) → до 3
+  - Medium (Priority 2) → до 2
+  - Low (Priority 3) → до 1
   - Маршрутизация: первый partition threshold `>= Priority`, иначе последний threshold
-  - Пороги по возрастанию: thresholds `[1, 2, 3, 4, 5]`
-  - Чем меньше Priority, тем выше приоритет (1 = Critical, 5 = Lowest)
+  - Пороги по возрастанию: thresholds `[0, 1, 2, 3]`
+  - Чем меньше Priority, тем выше приоритет (0 = Critical, 3 = Low)
   - Конфигурация через `WorkerOptions.Partitions` + appsettings.json
 - [x] **Retry logic** — экспоненциальная задержка (`base * 2^(attempt-1)`): 60s, 120s, 240s, ...
   Лимит попыток: `MaxRetries=5`. Команда возвращается в `pending` с `NextRetryAt`.

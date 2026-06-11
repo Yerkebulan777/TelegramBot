@@ -48,19 +48,21 @@ public sealed class WorkerOptions
     public int CompletedSessionRetentionDays { get; set; } = 30;
 
     /// <summary>
-    /// Партиции: ключ — максимальный Priority threshold (чем меньше Priority, тем выше приоритет),
-    /// значение — максимальное количество одновременных процессов.
+    /// Партиции приоритетов: ключ — максимальный Priority threshold (чем меньше Priority, тем выше приоритет),
+    /// значение — максимальное количество одновременных процессов (SemaphoreSlim).
     /// Команда попадает в первый threshold >= Priority.
-    /// Пример: { [1] = 3, [2] = 5, [3] = 3, [4] = 1, [5] = 1 } —
-    /// Priority 1 (Critical) — 3 слота, Priority 2 — 5 слотов, Priority 5+ — fallback в последний threshold.
+    /// Конфигурация по умолчанию:
+    /// Priority 0 (Critical) — 5 слотов,
+    /// Priority 1 (High) — 3 слота,
+    /// Priority 2 (Medium) — 2 слота,
+    /// Priority 3 (Low) — 1 слот.
     /// </summary>
     public SortedDictionary<int, int> Partitions { get; set; } = new()
     {
+        [0] = 5,
         [1] = 3,
-        [2] = 5,
-        [3] = 3,
-        [4] = 1,
-        [5] = 1,
+        [2] = 2,
+        [3] = 1,
     };
 
     /// <summary>

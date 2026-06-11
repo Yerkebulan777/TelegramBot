@@ -96,38 +96,40 @@
 │                    Служба выполнения команд                     │
 │                                                                 │
 │  ┌────────────────────┐ ┌──────────────┐ ┌──────────────┐      │
-│  │ Priority 1 (Crit) │ │Priority 2    │ │Priority 3    │      │
-│  │ SemaphoreSlim(3)   │ │SemaphoreSlim(5)│ SemaphoreSlim(3)│   │
-│  │  ┌───┐┌───┐┌───┐  │ │ ┌───┐┌───┐┌───┐┌───┐┌───┐  │      │
-│  │  │ P ││ P ││ P │  │ │ │ P ││ P ││ P ││ P ││ P │  │      │
-│  │  └───┘└───┘└───┘  │ │ └───┘└───┘└───┘└───┘└───┘  │      │
+│  │ Priority 0 (Crit) │ │Priority 1    │ │Priority 2    │      │
+│  │ SemaphoreSlim(5)   │ │SemaphoreSlim(3)│ SemaphoreSlim(2)│   │
+│  │  ┌───┐┌───┐┌───┐  │ │ ┌───┐┌───┐┌───┐  │ │ ┌───┐┌───┐  │      │
+│  │  │ P ││ P ││ P │  │ │ │ P ││ P ││ P │  │ │ │ P ││ P │  │      │
+│  │  └───┘└───┘└───┘  │ │ └───┘└───┘└───┘  │ │ └───┘└───┘  │      │
+│  │  ┌───┐┌───┐       │ │                  │ │              │      │
+│  │  │ P ││ P │       │ │                  │ │              │      │
+│  │  └───┘└───┘       │ │                  │ │              │      │
 │  └────────────────────┘ └──────────────┘ └──────────────┘      │
-│  ┌────────────┐ ┌────────────┐                                  │
-│  │Priority 4  │ │Priority 5+ │                                  │
-│  │Semaphore(1)│ │Semaphore(1)│                                  │
-│  │  ┌───┐     │ │  ┌───┐     │                                  │
-│  │  │ P │     │ │  │ P │     │                                  │
-│  │  └───┘     │ │  └───┘     │                                  │
-│  └────────────┘ └────────────┘                                  │
+│  ┌────────────┐                                                  │
+│  │Priority 3  │                                                  │
+│  │Semaphore(1)│                                                  │
+│  │  ┌───┐     │                                                  │
+│  │  │ P │     │                                                  │
+│  │  └───┘     │                                                  │
+│  └────────────┘                                                  │
 │                           │                                     │
 │                           ▼                                     │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │        Очередь команд (Priority ASC, общая)             │   │
-│  │  [P=1] → [P=1] → [P=2] → [P=3] → [P=4] → ...          │   │
+│  │  [P=0] → [P=0] → [P=1] → [P=2] → [P=3] → ...          │   │
 │  │     (Priority ASC, CreatedAt ASC, CommandId ASC)        │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │  Лимит параллельности (первый threshold >= Priority):          │
-│  Priority 1  → Critical, SemaphoreSlim(3)                      │
-│  Priority 2  → High,     SemaphoreSlim(5)                      │
-│  Priority 3  → Medium,   SemaphoreSlim(3)                      │
-│  Priority 4  → Low,      SemaphoreSlim(1)                      │
-│  Priority 5+ → Lowest,   SemaphoreSlim(1)                      │
+│  Priority 0  → Critical, SemaphoreSlim(5)                      │
+│  Priority 1  → High,     SemaphoreSlim(3)                      │
+│  Priority 2  → Medium,   SemaphoreSlim(2)                      │
+│  Priority 3  → Low,      SemaphoreSlim(1)                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Преимущества priority-based партиций (1 = наивысший приоритет):**
-- Высокоприоритетные команды (Priority=1) имеют выделенные слоты и не ждут за низкоприоритетными
+**Преимущества priority-based партиций (0 = наивысший приоритет):**
+- Высокоприоритетные команды (Priority=0) имеют выделенные слоты и не ждут за низкоприоритетными
 - Гарантированная пропускная способность для критических задач
 - Low-priority команды не блокируют High-priority (даже если очередь забита)
 
@@ -300,7 +302,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 │  - Ожидание слота в своей партиции:                             │
 │    _partitionPools[threshold].WaitAsync()                       │
 │  - Каждая партиция (уровень приоритета) имеет свой лимит       │
-│  - Чем меньше Priority, тем выше приоритет (1=Critical, 5=Lowest)
+│  - Чем меньше Priority, тем выше приоритет (0=Critical, 3=Lowest)
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
@@ -333,19 +335,19 @@ services.AddSingleton<NavisworksProcessTracker>();
 - `SortedDictionary<int, SemaphoreSlim>` — карта threshold приоритета → пул
 - Инициализация из `WorkerOptions.Partitions` при старте воркера
 - Ключ словаря = максимальный `Priority` (threshold), значение = `SemaphoreSlim`
-- **Чем меньше Priority, тем выше приоритет** (1 = Critical, 5 = Lowest)
+- **Чем меньше Priority, тем выше приоритет** (0 = Critical, 3 = Lowest)
 - Перед запуском процесса: `_partitionPools[threshold].WaitAsync(ct)`
 - После завершения (в `finally`): `_partitionPools[threshold].Release()`
 
 **Определение партиции команды (ищем первый threshold, где threshold >= Priority):**
 - `GetPartitionThreshold(priority)` линейно проходит thresholds по возрастанию
-- Thresholds кешируются по возрастанию: `[1, 2, 3, 4, 5]`
-- По умолчанию: Priority 1 → pool(3), Priority 2 → pool(5), Priority 3 → pool(3), Priority 4 → pool(1), Priority 5+ → pool(1)
+- Thresholds кешируются по возрастанию: `[0, 1, 2, 3]`
+- По умолчанию: Priority 0 → pool(5), Priority 1 → pool(3), Priority 2 → pool(2), Priority 3 → pool(1)
 - Если threshold не найден — fallback на последний threshold
 
 **Алгоритм захвата слота:**
-1. `threshold = GetPartitionThreshold(cmd.Priority)` выбирает первый threshold в [1,2,3,4,5], где threshold >= Priority
-2. Если подходящего threshold нет — fallback: `threshold = _partitionThresholds[^1]` (5)
+1. `threshold = GetPartitionThreshold(cmd.Priority)` выбирает первый threshold в [0,1,2,3], где threshold >= Priority
+2. Если подходящего threshold нет — fallback: `threshold = _partitionThresholds[^1]` (3)
 3. `_partitionPools[threshold].WaitAsync()` блокирует поток, пока слот не освободится
 4. При отмене (CancellationToken) выбрасывает `OperationCanceledException`
 
@@ -803,7 +805,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 
 | Параметр | Откуда | Значение по умолч. | Описание |
 |----------|--------|-------------------|----------|
-| `Partitions` | `WorkerOptions.Partitions` | `{1→3, 2→5, 3→3, 4→1, 5→1}` | Priority threshold → макс. процессов. Команда попадает в первый threshold >= Priority. Чем меньше Priority, тем выше приоритет (SortedDictionary) |
+| `Partitions` | `WorkerOptions.Partitions` | `{0→5, 1→3, 2→2, 3→1}` | Priority threshold → макс. процессов. Команда попадает в первый threshold >= Priority. Чем меньше Priority, тем выше приоритет (SortedDictionary) |
 | `ProcessTimeoutMinutes` | `WorkerOptions.ProcessTimeoutMinutes` | 180 (3 часа) | Максимальное время выполнения команды |
 | `MaxRetries` | `WorkerOptions.MaxRetries` | 5 | Максимальное количество попыток retry |
 | `RetryDelayBaseSeconds` | `WorkerOptions.RetryDelayBaseSeconds` | 60 | Базовая задержка для экспоненциального backoff |
@@ -1226,25 +1228,23 @@ private static ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, Comma
 ### Шаг 2: Настроить приоритет (при создании команды)
 
 Приоритет задаётся в момент создания команды через `CommandPriorityMap` в `SlashCommandService.cs`. 
-Если команды нет в мапе — по умолчанию Priority=50 (попадёт в Lowest, т.к. 50 > 5).
+Если команды нет в мапе — по умолчанию Priority=50 (попадёт в последний threshold).
 
-Значение `Priority` (1 = наивысший) определяет, в какую партицию попадёт команда:
-- `Priority 1` → Critical (до 3 одновременных)
-- `Priority 2` → High (до 5)
-- `Priority 3` → Medium (до 3)
-- `Priority 4` → Low (до 1)
-- `Priority 5+` → Lowest (fallback, до 1)
+Значение `Priority` (0 = наивысший) определяет, в какую партицию попадёт команда:
+- `Priority 0` → Critical (до 5 одновременных)
+- `Priority 1` → High (до 3)
+- `Priority 2` → Medium (до 2)
+- `Priority 3` → Low (до 1)
 
 ### Шаг 3 (опционально): Настроить лимиты партиций
 
 Если стандартные лимиты не подходят:
 ```json
 "Partitions": {
-  "1": 3,   // Critical: 3 слота
-  "2": 5,   // High:    5 слотов
-  "3": 3,   // Medium:  3 слота
-  "4": 1,   // Low:     1 слот
-  "5": 1    // Lowest:  1 слот
+  "0": 5,   // Critical: 5 слотов
+  "1": 3,   // High:    3 слота
+  "2": 2,   // Medium:  2 слота
+  "3": 1    // Low:     1 слот
 }
 ```
 
