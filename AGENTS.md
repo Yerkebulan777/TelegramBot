@@ -7,7 +7,7 @@ Guidance for agentic coding agents working in this repository.
 | Документ | Описание |
 |----------|----------|
 | [README.md](README.md) | Обзор проекта, запуск, конфигурация, команды бота |
-| [ROADMAP.md](ROADMAP.md) | Дорожная карта, статус версий, план дальнейших работ |
+
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, SQL-запросы |
 | **AGENTS.md** (текущий файл) | Архитектура, BimLib, DI, code style, константы для AI-агентов |
 
@@ -54,7 +54,7 @@ dotnet format TelegramBot.slnx
 
 **Tests are intentionally disabled for this project.** Do not add test projects, do not add unit/integration tests, and do not run `dotnet test`. After making changes, verify correctness by building successfully with `dotnet build TelegramBot.slnx`.
 
-> **Roadmap:** См. [ROADMAP.md](ROADMAP.md). **Обзор:** [README.md](README.md). **Алгоритм:** [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md).
+> **Обзор:** [README.md](README.md). **Алгоритм:** [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md).
 
 ---
 
@@ -144,6 +144,18 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 - **`CommandPreparer.PrepareAsync`** creates a **clone of `CommandConfig`** before setting `ExecutablePath`, avoiding data races on the shared `IOptions` singleton.
 - **`CommandPreparer.CreateTaskFile`** uses atomic write (`.tmp` + `File.Move`) and accepts an `attemptToken` for unique temp-file names per attempt.
 - **`ProcessRunner`** generates a unique `attemptToken` (Guid) per attempt. All temp files include this nonce: `task_{CommandId}_{nonce}.json`, `result_{CommandId}_{nonce}.json`. Temp files are cleaned up in `finally` via `CommandPreparer.CleanupTempFiles`.
+
+**Key behaviour changes (v1.8 — оптимизации и исправления):**
+- **`RateLimiter`**: Упрощён до единого `lock` на уровне `RequestWindow`. Очистка и проверка в одной критической секции. Удалён избыточный флаг `CleanupInProgress`.
+- **`SessionManager`**: Безопасное удаление семафоров при `RemoveSession` с проверкой `CurrentCount == 1`. Устранена утечка памяти `_sessionLocks`.
+- **`ProcessRunner`**: Потоковая обработка stdout/stderr через `OutputDataReceived` с лимитом 64KB вместо `BlockingCollection`. Предотвращено переполнение памяти.
+- **`CommandExecutionService`**: Добавлена периодическая очистка `_runningTasks` при превышении 1000 элементов для предотвращения бесконечного роста.
+- **`PartitionPoolManager`**: Исправлена логика приоритетов в `GetThreshold`. Добавлена валидация и логирование переполнения в `ReleaseSlot`.
+- **`CallbackDispatcher`**: Кэшированный словарь `_handlerMap` для поиска обработчиков O(1) вместо линейного перебора O(n).
+- **`SessionCompletionTracker`**: Атомарная операция в БД через `TryMarkSessionCompletedAsync` вместо отдельного SQL-запроса.
+- **`CommandPreparer`**: Специализированная temp-папка с фоновой очисткой файлов старше 1 часа.
+- **Логирование**: Добавлено логирование elapsed time для callback-хендлеров, флаги `truncated` для stdout/stderr, детализация очистки сессий, контекст ошибок (userId, sessionId, attempt).
+- **Мониторинг**: Расширенные health check метрики (активные сессии, очередь команд, BIM-процессы), диагностические endpoints `/debug/sessions` и `/debug/processes`.
 
 **DI registration** — в `Worker/Program.cs`:
 ```csharp

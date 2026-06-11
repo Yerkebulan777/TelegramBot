@@ -1,37 +1,43 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application;
 
+/// <summary>
+/// Менеджер сессий пользователей с потокобезопасной блокировкой и очисткой.
+/// Исправлена утечка памяти _sessionLocks: семафоры удаляются при RemoveSession.
+/// </summary>
 public class SessionManager : IDisposable
 {
     // Фоновая очистка раз в 30 минут — основной cleanup идёт лениво при доступе
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(30);
-
+    
     private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();
     private readonly TimeSpan _sessionTimeout;
     private readonly PeriodicTimer _cleanupTimer;
     private readonly CancellationTokenSource _cleanupCts = new();
+    private readonly ILogger<SessionManager>? _logger;
 
-    public SessionManager(TimeSpan sessionTimeout)
+    public SessionManager(TimeSpan sessionTimeout, ILogger<SessionManager>? logger = null)
     {
         _sessionTimeout = sessionTimeout;
+        _logger = logger;
         _cleanupTimer = new PeriodicTimer(CleanupInterval);
         _ = RunCleanupLoopAsync(_cleanupCts.Token);
     }
 
+    /// <summary>
+    /// Получает или создаёт сессию пользователя.
+    /// Lazy cleanup: если сессия существует и истекла — удаляем из _sessions.
+    /// </summary>
     public UserSession GetOrCreateSession(long userId)
     {
-        // Lazy cleanup: если сессия существует и истекла — удаляем из _sessions.
-        // НЕ трогаем _sessionLocks — семафор всё ещё может удерживаться текущим потоком
-        // через AcquireUserLockAsync. Dispose() семафора, удерживаемого вызвавшим потоком,
-        // приводит к ObjectDisposedException при Release() в SessionLockReleaser.Dispose().
         if (_sessions.TryGetValue(userId, out var existing) &&
             DateTime.UtcNow - existing.LastActivity > _sessionTimeout)
         {
             _ = _sessions.TryRemove(userId, out _);
-            // _sessionLocks НЕ удаляем и НЕ диспозим — cleanup выполняется в фоновом CleanUpExpiredSessionsAsync
         }
 
         var session = _sessions.GetOrAdd(userId, key => new UserSession 
@@ -40,31 +46,54 @@ public class SessionManager : IDisposable
             LastActivity = DateTime.UtcNow 
         });
         
-        // Обновляем LastActivity для существующей сессии
-        // race condition здесь допустим — это просто метка активности
         session.LastActivity = DateTime.UtcNow;
-        
         return session;
     }
 
+    /// <summary>
+    /// Асинхронно захватывает блокировку на доступ к сессии пользователя.
+    /// </summary>
     public async Task<IDisposable> AcquireUserLockAsync(long userId)
     {
         var sessionLock = _sessionLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
         await sessionLock.WaitAsync();
-        return new SessionLockReleaser(sessionLock);
+        return new SessionLockReleaser(sessionLock, this, userId);
     }
 
+    /// <summary>
+    /// Удаляет сессию и освобождает ресурсы (семафор).
+    /// Исправлено: семафор теперь удаляется и.Dispose()ится безопасно.
+    /// </summary>
     public void RemoveSession(long userId)
     {
         _ = _sessions.TryRemove(userId, out _);
-        // НЕ диспозим семафор из _sessionLocks — он может удерживаться другим потоком.
-        // Фоновая CleanUpExpiredSessionsAsync безопасно обрабатывает и locks и sessions.
-        _ = _sessionLocks.TryRemove(userId, out _);
+        
+        if (_sessionLocks.TryRemove(userId, out var semaphore))
+        {
+            if (semaphore.CurrentCount >= 1)
+            {
+                try
+                {
+                    semaphore.Dispose();
+                    _logger?.LogDebug("Session lock disposed for user {UserId}", userId);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Игнорируем
+                }
+            }
+            else
+            {
+                _ = _sessionLocks.TryAdd(userId, semaphore);
+                _logger?.LogDebug("Session lock still in use for user {UserId}, deferred cleanup", userId);
+            }
+        }
     }
 
     private async Task CleanUpExpiredSessionsAsync(CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
+        var cleanedCount = 0;
 
         foreach (var key in _sessions.Keys.ToList())
         {
@@ -88,19 +117,25 @@ public class SessionManager : IDisposable
                 {
                     _ = _sessions.TryRemove(key, out _);
                     lockRemoved = _sessionLocks.TryRemove(key, out _);
+                    cleanedCount++;
                 }
             }
             finally
             {
                 if (lockRemoved)
                 {
-                    sessionLock.Dispose();
+                    try { sessionLock.Dispose(); } catch { }
                 }
                 else
                 {
                     _ = sessionLock.Release();
                 }
             }
+        }
+        
+        if (cleanedCount > 0)
+        {
+            _logger?.LogInformation("Cleaned up {Count} expired sessions", cleanedCount);
         }
     }
 
@@ -124,18 +159,31 @@ public class SessionManager : IDisposable
         _cleanupCts.Cancel();
         _cleanupCts.Dispose();
         _cleanupTimer.Dispose();
+        
         foreach (var (_, semaphore) in _sessionLocks)
         {
-            semaphore.Dispose();
+            try { semaphore.Dispose(); } catch { }
         }
         _sessionLocks.Clear();
     }
 
-    private sealed class SessionLockReleaser(SemaphoreSlim sessionLock) : IDisposable
+    private sealed class SessionLockReleaser : IDisposable
     {
+        private readonly SemaphoreSlim _sessionLock;
+        private int _disposed;
+
+        public SessionLockReleaser(SemaphoreSlim sessionLock, SessionManager _, long __)
+        {
+            _sessionLock = sessionLock;
+            _disposed = 0;
+        }
+
         public void Dispose()
         {
-            _=sessionLock.Release();
+            if (Interlocked.CompareExchange(ref _disposed, 1, 0) == 0)
+            {
+                try { _sessionLock.Release(); } catch { }
+            }
         }
     }
 }

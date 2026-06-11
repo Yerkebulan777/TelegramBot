@@ -1,54 +1,57 @@
-```gitignore
+```
+# Dependencies
+node_modules/
+packages/
+
 # Build artifacts
 bin/
 obj/
-*.dll
-*.exe
-*.pdb
-*.so
-*.dylib
-*.jar
-*.war
-*.class
-
-# Dependencies
-packages/
-node_modules/
-venv/
-.venv/
-.env
-.env.local
-*.env.*
+out/
+dist/
+build/
+target/
 
 # Logs
 *.log
+logs/
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Environment
+.env
+.env.local
+.env.*
 
-# IDE specific
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Test and coverage
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
 coverage/
 htmlcov/
 .coverage
-*.tmp
 
-# Distribution / packaging
-dist/
-build/
-target/
-.npm
-.yarn
-
-# Cache directories
+# Python specific
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .Python
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Dotnet specific
+**/bin/
+**/obj/
+**/out/
+*.userprefs
+*.pidb
+*.sln.cache
+*.userosscache
+.vs/
 ```
