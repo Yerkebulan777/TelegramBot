@@ -42,11 +42,22 @@ public sealed class FileSelectionHandler(
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
 
-        var path = context.ParsedCallback.Argument;
-        if (!string.IsNullOrEmpty(path))
+        var path = string.IsNullOrEmpty(context.ParsedCallback.Argument)
+            ? session.CurrentPath
+            : context.ParsedCallback.Argument;
+
+        if (_options.IsPathWithinRoot(path))
         {
             var folderPaths = fileBrowser.GetSectionFolderPaths(path);
             session.AddSelectedFiles(folderPaths);
+        }
+        else
+        {
+            Logger.LogWarning(
+                "Rejected select-all outside root. User={Username} ({UserId}), Path={Path}",
+                context.Username,
+                context.UserId,
+                path);
         }
 
         var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
@@ -61,7 +72,7 @@ public sealed class FileSelectionHandler(
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
 
-        var filePath = context.ParsedCallback.Argument;
+        var filePath = fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
             var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)

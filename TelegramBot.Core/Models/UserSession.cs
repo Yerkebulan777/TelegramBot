@@ -16,7 +16,7 @@ public class UserSession
     private readonly List<string> _pendingCommandName = [];
 
     private readonly object _selectionLock = new();
-    private readonly HashSet<string> _selectedFiles = [];
+    private readonly HashSet<string> _selectedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     // Public read-only wrappers with thread-safe access
     public IReadOnlyList<string> PendingCommand
@@ -45,7 +45,7 @@ public class UserSession
     {
         lock (_selectionLock)
         {
-            return new HashSet<string>(_selectedFiles);
+            return new HashSet<string>(_selectedFiles, StringComparer.OrdinalIgnoreCase);
         }
     }
 

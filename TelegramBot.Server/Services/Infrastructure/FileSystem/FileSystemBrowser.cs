@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
@@ -60,6 +62,26 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         return EnumerateSectionFolders(path).ToList();
     }
 
+    public string? ResolveSelectionPath(string currentPath, string callbackArgument)
+    {
+        if (string.IsNullOrWhiteSpace(callbackArgument))
+        {
+            return null;
+        }
+
+        if (_options.IsPathWithinRoot(callbackArgument))
+        {
+            return callbackArgument;
+        }
+
+        var folders = IsSectionLevel(currentPath)
+            ? EnumerateSectionFolders(currentPath)
+            : EnumerateProjectFolders(currentPath);
+
+        return folders.FirstOrDefault(folder =>
+            string.Equals(CreateSelectionToken(folder), callbackArgument, StringComparison.OrdinalIgnoreCase));
+    }
+
     private InlineKeyboardMarkup BuildProjectKeyboard(UserSession session, string path)
     {
         var selected = session.GetSelectedFiles();
@@ -68,7 +90,7 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         foreach (var dir in EnumerateProjectFolders(path))
         {
             var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{dir}")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(dir)}")]);
         }
 
         return new InlineKeyboardMarkup(buttons);
@@ -82,12 +104,29 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         foreach (var dir in EnumerateSectionFolders(path))
         {
             var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{dir}")]);
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(dir)}")]);
         }
 
-        buttons.Add([InlineKeyboardButton.WithCallbackData("Выбрать все", $"{CallbackPrefixes.SelectAllSectionFolders}{path}")]);
+        buttons.Add([InlineKeyboardButton.WithCallbackData("Выбрать все", CallbackPrefixes.SelectAllSectionFolders)]);
 
         return new InlineKeyboardMarkup(buttons);
+    }
+
+    private bool IsSectionLevel(string path)
+    {
+        return string.Equals(
+            Path.GetFileName(path), _options.ProjectDirectoryName,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CreateSelectionToken(string path)
+    {
+        var normalizedPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .ToUpperInvariant();
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath));
+
+        return Convert.ToHexString(hash)[..16];
     }
 
     private IEnumerable<string> EnumerateProjectFolders(string path)
