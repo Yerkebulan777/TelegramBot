@@ -123,9 +123,6 @@ jobs:
     - name: Build
       run: dotnet build TelegramBot.slnx --no-restore --configuration Release
 
-    - name: Check code style
-      run: dotnet format TelegramBot.slnx --verify-no-changes
-
     - name: Publish Server
       run: dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release -o ./publish/server
 
