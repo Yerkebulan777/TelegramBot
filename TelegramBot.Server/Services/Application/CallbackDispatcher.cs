@@ -21,7 +21,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
 
     /// <summary>
     /// Получает список поддерживаемых префиксов для хендлера.
-    /// Использует reflection-safe вызов CanHandle через тестовые значения.
+    /// Использует reflection-safe вызов CanHandle по всем известным callback-префиксам.
     /// </summary>
     private static IEnumerable<string> GetSupportedPrefixes(ICallbackHandler handler)
     {
