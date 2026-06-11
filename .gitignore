@@ -1,67 +1,31 @@
-```
-# Dependencies
+# Build output
 bin/
 obj/
+
+# C# artifacts
 *.deps.json
 *.runtimeconfig.dev.json
 *.runtimeconfig.json
 *.AssemblyInfo.cache
-*.Cache
-*.gch
-*.pch
-*.ilk
-*.iobj
-*.ipdb
-*.pdb
-*.pgc
-*.pgd
-*.tlog
-*.vspscc
-*.vssscc
-*.modelproj
-*.userossc
-*.scc
+
+# Visual Studio files
 .vs/
 .vscode/
 *.user
-*.userprefs
 *.suo
 *.csproj.user
-*.vbproj.user
-*.fsproj.user
-*.userossc
-*.pidb
-*.snc
-*.syncoptions
-*.db
-*.db-shm
-*.db-wal
+
+# Debug symbols
+*.pdb
+
+# Logs and temp files
 *.log
 *.tmp
 *.temp
 *.cache
-*.lock
-!*.cs
-!*.fs
-!*.js
-!*.ts
-!*.jsx
-!*.tsx
-!*.html
-!*.css
-!*.scss
-!*.sass
-!*.less
-!*.json
-!*.xml
-!*.yml
-!*.yaml
-!*.toml
-!*.md
-!*.txt
-!*.config
-!*.settings
-!*.props
-!*.targets
-!*.nuspec
-```
+
+# Secrets
+appsettings.Local.json
+
+# Docs (generated/local documentation)
+Docs/
