@@ -114,17 +114,6 @@ internal static partial class SqlQueries
               AND Lease IS NOT NULL
               AND Lease < @CurrentTimeSec;";
 
-        internal const string ReleaseTimeoutCommands = @"
-            UPDATE Commands
-            SET Status = 'pending',
-                StartedAt = NULL,
-                CompletedAt = NULL,
-                ProcessId = NULL,
-                ErrorMessage = 'Timeout: process exceeded maximum execution time',
-                Lease = NULL
-            WHERE Status = 'processing'
-              AND StartedAt < NOW() - (@TimeoutSeconds || ' seconds')::INTERVAL;";
-
         internal const string UpdateProgress = @"
             UPDATE Commands
             SET Progress = @Progress,

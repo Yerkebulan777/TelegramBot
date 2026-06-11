@@ -45,16 +45,6 @@ public sealed class CommandDataService(
     }
 
     /// <inheritdoc/>
-    public async Task ReleaseTimeoutCommandsAsync(int timeoutSeconds)
-    {
-        _ = await TryExecuteWithAdvisoryLockAsync(
-            "release timeout commands",
-            conn => conn.ExecuteAsync(
-                SqlQueries.Commands.ReleaseTimeoutCommands,
-                new { TimeoutSeconds = timeoutSeconds }));
-    }
-
-    /// <inheritdoc/>
     public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null)
     {
         try

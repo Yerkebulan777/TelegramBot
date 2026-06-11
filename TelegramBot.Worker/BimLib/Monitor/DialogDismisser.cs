@@ -83,17 +83,23 @@ public sealed class DialogDismisser(
             // Успешно закрыли — сбрасываем счётчик
             _dismissAttempts.TryRemove(processId, out _);
         }
-        else
+        else if (_options.MaxDismissAttempts > 0)
         {
             // Диалоги есть, но закрыть не удалось — учитываем попытку
             var attempts = _dismissAttempts.AddOrUpdate(processId, 1, (_, count) => count + 1);
             logger.LogWarning("Failed to dismiss dialogs for process {ProcessId} (attempt {Attempts}/{Max})",
                 processId, attempts, _options.MaxDismissAttempts);
 
-            if (_options.MaxDismissAttempts > 0 && attempts >= _options.MaxDismissAttempts)
+            if (attempts >= _options.MaxDismissAttempts)
             {
                 KillProcess(processId);
             }
+        }
+        else
+        {
+            // MaxDismissAttempts == 0 — авто-kill отключён, логируем без счётчика
+            logger.LogWarning("Cannot dismiss dialogs for process {ProcessId} (auto-kill disabled)",
+                processId);
         }
 
         return dismissed;

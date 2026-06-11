@@ -4,7 +4,7 @@ using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
-using TelegramBot.Server.Middleware;
+
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
@@ -14,7 +14,6 @@ public sealed class SessionManagementHandler(
     IMessageTrackingDataService messageTrackingDataService,
     IKeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
-    IAccessValidator accessValidator,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
 {
     protected override HashSet<string> SupportedPrefixes { get; } =
@@ -28,39 +27,31 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.ConfirmDeleteSessionByType
     ];
 
-    /// <summary>Проверяет, имеет ли пользователь доступ (все одобренные могут управлять любыми сессиями).</summary>
-    private async Task<bool> CanManageAsync(long userId)
-    {
-        var access = await accessValidator.ValidateAsync(userId);
-        return access.IsActive;
-    }
-
     protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {
-            CallbackPrefixes.SessionDetails => await HandleSessionDetailsAsync(context, cancellationToken),
-            CallbackPrefixes.DeleteSession => await HandleDeleteSessionConfirmationAsync(context, cancellationToken),
-            CallbackPrefixes.DeleteCommand => await HandleDeleteCommandConfirmationAsync(context, cancellationToken),
-            CallbackPrefixes.ConfirmDeleteSession => await HandleDeleteSessionAsync(context, cancellationToken),
-            CallbackPrefixes.ConfirmDeleteCommand => await HandleDeleteCommandAsync(context, cancellationToken),
-            CallbackPrefixes.DeleteSessionByType => await HandleDeleteByTypeConfirmationAsync(context, cancellationToken),
-            CallbackPrefixes.ConfirmDeleteSessionByType => await HandleDeleteByTypeAsync(context, cancellationToken),
+            CallbackPrefixes.SessionDetails => await HandleSessionDetailsAsync(context),
+            CallbackPrefixes.DeleteSession => await HandleDeleteSessionConfirmationAsync(context),
+            CallbackPrefixes.DeleteCommand => await HandleDeleteCommandConfirmationAsync(context),
+            CallbackPrefixes.ConfirmDeleteSession => await HandleDeleteSessionAsync(context),
+            CallbackPrefixes.ConfirmDeleteCommand => await HandleDeleteCommandAsync(context),
+            CallbackPrefixes.DeleteSessionByType => await HandleDeleteByTypeConfirmationAsync(context),
+            CallbackPrefixes.ConfirmDeleteSessionByType => await HandleDeleteByTypeAsync(context),
             _ => false
         };
     }
 
-    private async Task<bool> HandleSessionDetailsAsync(CallbackContext context, CancellationToken cancellationToken)
+    // ────────────────────────── Session Details ──────────────────────────
+
+    private async Task<bool> HandleSessionDetailsAsync(CallbackContext context)
     {
-        var arg = context.ParsedCallback.Argument;
-        var parts = arg.Split(':');
-        if (!int.TryParse(parts[0], out var sessionId) || sessionId <= 0)
+        if (!TryParseCompoundId(context, out var sessionId, out var filter))
         {
-            LogInvalidInput("ID", arg, context.Username, context.UserId);
             return true;
         }
 
-        var filter = parts.Length > 1 ? parts[1] : "ALL";
+        filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
         var session = context.Session;
 
         if (string.Equals(filter, "SUMMARY", StringComparison.OrdinalIgnoreCase))
@@ -71,12 +62,14 @@ public sealed class SessionManagementHandler(
 
             var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
             var keyboard = await keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
+            await outputService.EditMessageTextWithKeyboardAsync(
+                context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;
         }
         else
         {
-            Logger.LogInformation("{Username} view cmds {SessionId} with filter {Filter}", context.Username, sessionId, filter);
+            Logger.LogInformation("{Username} view cmds {SessionId} with filter {Filter}",
+                context.Username, sessionId, filter);
             session.IsInStatusView = true;
             session.SessionId = sessionId;
 
@@ -84,41 +77,93 @@ public sealed class SessionManagementHandler(
             var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
 
             var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter);
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
+            await outputService.EditMessageTextWithKeyboardAsync(
+                context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
             session.StatusMessageId = context.MessageId;
         }
 
         return true;
     }
 
-    private async Task<bool> HandleDeleteSessionConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
+    // ────────────────────── Delete Confirmation dialogs ──────────────────────
+
+    private async Task<bool> HandleDeleteSessionConfirmationAsync(CallbackContext context)
     {
         if (!TryParseId(context, out var sessionId))
         {
             return true;
         }
 
-        Logger.LogInformation("{Username} requested delete confirmation for session {SessionId}", context.Username, sessionId);
+        Logger.LogInformation("{Username} requested delete confirmation for session {SessionId}",
+            context.Username, sessionId);
         context.Session.IsInStatusView = true;
 
-        var keyboard = new InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{CallbackPrefixes.ConfirmDeleteSession}{sessionId}"),
-                InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId}")
-            ]
-        ]);
+        var keyboard = BuildConfirmationKeyboard(
+            CallbackPrefixes.ConfirmDeleteSession, sessionId.ToString(),
+            CallbackPrefixes.SessionDetails, sessionId.ToString());
 
         await outputService.EditMessageTextWithKeyboardAsync(
-            context.UserId,
-            context.MessageId,
-            $"Удалить сессию #{sessionId} и все её команды?",
-            keyboard);
+            context.UserId, context.MessageId,
+            $"Удалить сессию #{sessionId} и все её команды?", keyboard);
 
         return true;
     }
 
-    private async Task<bool> HandleDeleteSessionAsync(CallbackContext context, CancellationToken cancellationToken)
+    private async Task<bool> HandleDeleteCommandConfirmationAsync(CallbackContext context)
+    {
+        if (!TryParseCompoundId(context, out var commandId, out var filter))
+        {
+            return true;
+        }
+
+        filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
+        var sessionId = await ResolveSessionByCommandAsync(context, commandId);
+        if (!sessionId.HasValue)
+        {
+            return true;
+        }
+
+        Logger.LogInformation("{Username} requested delete confirmation for command {CommandId}",
+            context.Username, commandId);
+        context.Session.IsInStatusView = false;
+
+        var keyboard = BuildConfirmationKeyboard(
+            CallbackPrefixes.ConfirmDeleteCommand, $"{commandId}:{filter}",
+            CallbackPrefixes.SessionDetails, $"{sessionId.Value}:{filter}");
+
+        await outputService.EditMessageTextWithKeyboardAsync(
+            context.UserId, context.MessageId,
+            $"Удалить команду #{commandId}?", keyboard);
+
+        return true;
+    }
+
+    private async Task<bool> HandleDeleteByTypeConfirmationAsync(CallbackContext context)
+    {
+        if (!TryParseCompoundId(context, out var sessionId, out var commandType)
+            || string.IsNullOrEmpty(commandType))
+        {
+            LogInvalidInput("ID:Type", context.ParsedCallback.Argument, context.Username, context.UserId);
+            return true;
+        }
+
+        Logger.LogInformation("{Username} requested delete confirmation for type {CommandType} in session {SessionId}",
+            context.Username, commandType, sessionId);
+
+        var keyboard = BuildConfirmationKeyboard(
+            CallbackPrefixes.ConfirmDeleteSessionByType, $"{sessionId}:{commandType}",
+            CallbackPrefixes.SessionDetails, $"{sessionId}:{commandType}");
+
+        await outputService.EditMessageTextWithKeyboardAsync(
+            context.UserId, context.MessageId,
+            $"Удалить все команды типа «{commandType}» из сессии #{sessionId}?", keyboard);
+
+        return true;
+    }
+
+    // ────────────────────── Delete Execution ──────────────────────
+
+    private async Task<bool> HandleDeleteSessionAsync(CallbackContext context)
     {
         if (!TryParseId(context, out var sessionId))
         {
@@ -127,13 +172,11 @@ public sealed class SessionManagementHandler(
 
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
-        var isAdmin = await CanManageAsync(context.UserId);
-        if (!await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
+        if (!await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, IsAdmin))
         {
             return true;
         }
 
-        // Очищаем tracked messages из БД
         await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
 
         context.Session.IsInStatusView = true;
@@ -142,150 +185,91 @@ public sealed class SessionManagementHandler(
         return true;
     }
 
-    private async Task<bool> HandleDeleteCommandConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
+    private async Task<bool> HandleDeleteCommandAsync(CallbackContext context)
     {
-        var arg = context.ParsedCallback.Argument;
-        var parts = arg.Split(':');
-        if (!int.TryParse(parts[0], out var commandId) || commandId <= 0)
+        if (!TryParseCompoundId(context, out var commandId, out var filter))
         {
-            LogInvalidInput("ID", arg, context.Username, context.UserId);
-            return true;
-        }
-        var filter = parts.Length > 1 ? parts[1] : "ALL";
-
-        var isAdmin = await CanManageAsync(context.UserId);
-        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
-        if (!sessionId.HasValue)
-        {
-            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
             return true;
         }
 
-        Logger.LogInformation("{Username} requested delete confirmation for command {CommandId}", context.Username, commandId);
-        context.Session.IsInStatusView = false;
-
-        var keyboard = new InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{CallbackPrefixes.ConfirmDeleteCommand}{commandId}:{filter}"),
-                InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId.Value}:{filter}")
-            ]
-        ]);
-
-        await outputService.EditMessageTextWithKeyboardAsync(
-            context.UserId,
-            context.MessageId,
-            $"Удалить команду #{commandId}?",
-            keyboard);
-
-        return true;
-    }
-
-    private async Task<bool> HandleDeleteCommandAsync(CallbackContext context, CancellationToken cancellationToken)
-    {
-        var arg = context.ParsedCallback.Argument;
-        var parts = arg.Split(':');
-        if (!int.TryParse(parts[0], out var commandId) || commandId <= 0)
-        {
-            LogInvalidInput("ID", arg, context.Username, context.UserId);
-            return true;
-        }
-        var filter = parts.Length > 1 ? parts[1] : "ALL";
-
+        filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
         Logger.LogInformation("{Username} delete cmd {CommandId}", context.Username, commandId);
 
-        var isAdmin = await CanManageAsync(context.UserId);
-        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId, context.UserId, isAdmin);
-        if (!sessionId.HasValue)
-        {
-            Logger.LogWarning("{Username} foreign cmd {CommandId}", context.Username, commandId);
-            return true;
-        }
-
-        if (!await commandDataService.DeleteCommandAsync(commandId, context.UserId, isAdmin))
+        var sessionId = await ResolveSessionByCommandAsync(context, commandId);
+        if (!sessionId.HasValue || !await commandDataService.DeleteCommandAsync(commandId, context.UserId, IsAdmin))
         {
             return true;
         }
 
         context.Session.SessionId = sessionId.Value;
-
-        if (!await sessionDataService.CheckCommandsStatusAsync(sessionId.Value))
-        {
-            // Последняя команда — удаляем сессию и tracked messages
-            if (await sessionDataService.DeleteSessionAsync(sessionId.Value, context.UserId, isAdmin))
-            {
-                await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId.Value);
-                context.Session.IsInStatusView = true;
-                await ShowSessionsListAsync(context);
-            }
-        }
-        else
-        {
-            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId.Value);
-            var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId.Value);
-
-            var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId.Value, filter);
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
-        }
+        await HandlePostDeletionAsync(context, sessionId.Value, filter);
 
         return true;
     }
 
-    private async Task<bool> HandleDeleteByTypeConfirmationAsync(CallbackContext context, CancellationToken cancellationToken)
+    private async Task<bool> HandleDeleteByTypeAsync(CallbackContext context)
     {
-        var arg = context.ParsedCallback.Argument;
-        var parts = arg.Split(':');
-        if (!int.TryParse(parts[0], out var sessionId) || sessionId <= 0 || parts.Length < 2)
+        if (!TryParseCompoundId(context, out var sessionId, out var commandType)
+            || string.IsNullOrEmpty(commandType))
         {
-            LogInvalidInput("ID:Type", arg, context.Username, context.UserId);
+            LogInvalidInput("ID:Type", context.ParsedCallback.Argument, context.Username, context.UserId);
             return true;
         }
 
-        var commandType = parts[1];
-        Logger.LogInformation("{Username} requested delete confirmation for type {CommandType} in session {SessionId}", context.Username, commandType, sessionId);
-
-        var keyboard = new InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{CallbackPrefixes.ConfirmDeleteSessionByType}{sessionId}:{commandType}"),
-                InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId}:{commandType}")
-            ]
-        ]);
-
-        await outputService.EditMessageTextWithKeyboardAsync(
-            context.UserId,
-            context.MessageId,
-            $"Удалить все команды типа «{commandType}» из сессии #{sessionId}?",
-            keyboard);
-
-        return true;
-    }
-
-    private async Task<bool> HandleDeleteByTypeAsync(CallbackContext context, CancellationToken cancellationToken)
-    {
-        var arg = context.ParsedCallback.Argument;
-        var parts = arg.Split(':');
-        if (!int.TryParse(parts[0], out var sessionId) || sessionId <= 0 || parts.Length < 2)
-        {
-            LogInvalidInput("ID:Type", arg, context.Username, context.UserId);
-            return true;
-        }
-
-        var commandType = parts[1];
-        Logger.LogInformation("{Username} delete all commands of type {CommandType} in session {SessionId}", context.Username, commandType, sessionId);
+        Logger.LogInformation("{Username} delete all commands of type {CommandType} in session {SessionId}",
+            context.Username, commandType, sessionId);
 
         var deleted = await commandDataService.DeleteCommandsByTypeAsync(sessionId, commandType);
         if (deleted == 0)
         {
-            Logger.LogWarning("{Username} no commands deleted for type {CommandType} session {SessionId}", context.Username, commandType, sessionId);
+            Logger.LogWarning("{Username} no commands deleted for type {CommandType} session {SessionId}",
+                context.Username, commandType, sessionId);
         }
 
         context.Session.SessionId = sessionId;
-        var isAdmin = await CanManageAsync(context.UserId);
+        await HandlePostDeletionAsync(context, sessionId, "ALL");
 
+        return true;
+    }
+
+    // ────────────────────── Shared Helpers ──────────────────────
+
+    /// <summary>Парсит аргумент вида "id:suffix", возвращает id и suffix.</summary>
+    private bool TryParseCompoundId(CallbackContext context, out int id, out string suffix)
+    {
+        var arg = context.ParsedCallback.Argument;
+        var parts = arg.Split(':', 2);
+        if (!int.TryParse(parts[0], out id) || id <= 0)
+        {
+            LogInvalidInput("ID", arg, context.Username, context.UserId);
+            suffix = "";
+            return false;
+        }
+
+        suffix = parts.Length > 1 ? parts[1] : "";
+        return true;
+    }
+
+    /// <summary>Строит inline-клавиатуру подтверждения: "✅ Да, удалить" + "↩️ Назад".</summary>
+    private static InlineKeyboardMarkup BuildConfirmationKeyboard(
+        string confirmPrefix, string confirmArg, string backPrefix, string backArg)
+    {
+        return new InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{confirmPrefix}{confirmArg}"),
+            InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{backPrefix}{backArg}")
+        ]]);
+    }
+
+    /// <summary>
+    /// После удаления команды(д): если сессия пуста — удаляем её и tracked messages,
+    /// иначе обновляем отображение команд.
+    /// </summary>
+    private async Task HandlePostDeletionAsync(CallbackContext context, int sessionId, string filter)
+    {
         if (!await sessionDataService.CheckCommandsStatusAsync(sessionId))
         {
-            if (await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, isAdmin))
+            if (await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, IsAdmin))
             {
                 await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
                 context.Session.IsInStatusView = true;
@@ -297,20 +281,35 @@ public sealed class SessionManagementHandler(
             var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
             var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
 
-            var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, "ALL");
-            await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
+            var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter);
+            await outputService.EditMessageTextWithKeyboardAsync(
+                context.UserId, context.MessageId,
+                BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
         }
-
-        return true;
     }
+
+    /// <summary>Резолвит SessionId по CommandId с проверкой прав.</summary>
+    private async Task<int?> ResolveSessionByCommandAsync(CallbackContext context, int commandId)
+    {
+        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId, context.UserId, IsAdmin);
+        if (!sessionId.HasValue)
+        {
+            Logger.LogWarning("{Username} foreign or missing cmd {CommandId}", context.Username, commandId);
+        }
+        return sessionId;
+    }
+
+    // Все одобренные пользователи могут управлять любыми сессиями (проверка доступа — в AuthorizationMiddleware).
+    // Для SQL-параметра @IsAdmin достаточно true.
+    private static bool IsAdmin => true;
 
     private async Task ShowSessionsListAsync(CallbackContext context)
     {
         Logger.LogInformation("{Username} view sessions", context.Username);
-
         var sessionsStatus = await sessionDataService.GetSessionsListAsync();
         var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessionsStatus);
-        await outputService.EditMessageTextWithKeyboardAsync(context.UserId, context.MessageId, "Сессии:", keyboard);
+        await outputService.EditMessageTextWithKeyboardAsync(
+            context.UserId, context.MessageId, "Сессии:", keyboard);
         context.Session.StatusMessageId = context.MessageId;
     }
 
@@ -358,5 +357,4 @@ public sealed class SessionManagementHandler(
                $"━━━━━━━━━━━━━━━━━━━━\n" +
                $"{commandsText}";
     }
-
 }

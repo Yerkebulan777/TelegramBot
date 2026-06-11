@@ -52,6 +52,12 @@ public static class Program
                     _=services.AddSingleton<INavisworksPathResolver, NavisworksPathResolver>();
                     _=services.AddSingleton<NavisworksProcessTracker>();
 
+                    // Компоненты выполнения команд (декомпозиция CommandExecutionService)
+                    _=services.AddSingleton<PartitionPoolManager>();
+                    _=services.AddSingleton<CommandPreparer>();
+                    _=services.AddSingleton<SessionCompletionTracker>();
+                    _=services.AddSingleton<ProcessRunner>();
+
                     _=services.AddHostedService<CommandExecutionService>();
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>

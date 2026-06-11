@@ -25,13 +25,13 @@ public sealed class RateLimiter
 
         if (requestWindow.Timestamps.Count > _maxRequests)
         {
-            CleanupExpired(requestWindow, now);
+            CleanupExpired(requestWindow, now, userId);
         }
 
         return requestWindow.Timestamps.Count <= _maxRequests;
     }
 
-    private void CleanupExpired(RequestWindow requestWindow, DateTime now)
+    private void CleanupExpired(RequestWindow requestWindow, DateTime now, long userId)
     {
         if (Interlocked.CompareExchange(ref requestWindow.CleanupInProgress, 1, 0) != 0)
         {
@@ -43,6 +43,14 @@ public sealed class RateLimiter
             while (requestWindow.Timestamps.TryPeek(out var timestamp) && now - timestamp > _window)
             {
                 _ = requestWindow.Timestamps.TryDequeue(out _);
+            }
+
+            // Если очередь пуста — убираем entry из словаря
+            // KeyValuePair.Remove гарантирует, что удаляем только если entry всё ещё принадлежит этому userId
+            if (requestWindow.Timestamps.IsEmpty)
+            {
+                _ = ((ICollection<KeyValuePair<long, RequestWindow>>)_requests).Remove(
+                    new KeyValuePair<long, RequestWindow>(userId, requestWindow));
             }
         }
         finally

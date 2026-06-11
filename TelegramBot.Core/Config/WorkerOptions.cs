@@ -8,12 +8,10 @@ public sealed class WorkerOptions
     /// <summary>Имя секции конфигурации в appsettings.json.</summary>
     public const string SectionName = "Worker";
 
-    /// <summary>Максимальное время выполнения одной команды в секундах (по умолчанию 3 часа).</summary>
-    public int ProcessTimeoutSeconds { get; set; } = 10_800;
-
     /// <summary>
     /// Максимальное время выполнения одной команды в минутах (по умолчанию 180 = 3 часа).
-    /// Используется для timeout всего цикла выполнения (preparation + process start + wait).
+    /// Используется для timeout всего цикла выполнения (preparation + process start + wait),
+    /// а также для расчёта Lease (ProcessTimeoutMinutes + 5 мин буфер для crash recovery).
     /// </summary>
     public int ProcessTimeoutMinutes { get; set; } = 180;
 

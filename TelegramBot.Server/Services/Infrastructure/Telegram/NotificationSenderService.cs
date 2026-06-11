@@ -32,6 +32,11 @@ public sealed class NotificationSenderService(
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
+        finally
+        {
+            // Сигнализируем писателям, что читатель ушёл: blocked writers получат ChannelClosedException
+            notificationChannel.Writer.TryComplete();
+        }
 
         logger.LogInformation("Notification sender stopped");
     }

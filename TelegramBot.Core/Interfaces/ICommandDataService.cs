@@ -13,9 +13,6 @@ public interface ICommandDataService
     /// <summary>Освобождает истёкшие leases.</summary>
     Task ReleaseExpiredLeasesAsync();
 
-    /// <summary>Освобождает команды в timeout.</summary>
-    Task ReleaseTimeoutCommandsAsync(int timeoutSeconds);
-
     /// <summary>Обновляет статус команды.</summary>
     Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null);
 
