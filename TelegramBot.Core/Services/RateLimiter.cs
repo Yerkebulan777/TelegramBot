@@ -34,7 +34,7 @@ public sealed class RateLimiter
             // Очистка expired записей в той же критической секции
             while (requestWindow.Timestamps.TryPeek(out var timestamp) && now - timestamp > _window)
             {
-                _ = requestWindow.Timestamps.TryDequeue();
+                _ = requestWindow.Timestamps.TryDequeue(out _);
             }
 
             // Проверка лимита и добавление нового timestamp

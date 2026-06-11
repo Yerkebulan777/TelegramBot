@@ -32,15 +32,19 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
         
         foreach (var prefix in testPrefixes)
         {
+            bool canHandle;
             try
             {
-                if (handler.CanHandle(prefix))
-                    yield return prefix;
+                canHandle = handler.CanHandle(prefix);
             }
             catch
             {
                 // Игнорируем ошибки при проверке
+                continue;
             }
+
+            if (canHandle)
+                yield return prefix;
         }
     }
 
