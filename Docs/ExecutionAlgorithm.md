@@ -1,6 +1,6 @@
 # Алгоритм выполнения команд
 
-> **Связанные документы:** [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI | [ROADMAP.md](../ROADMAP.md) — дорожная карта
+> **Связанные документы:** [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI | [README.md](../README.md) — общее описание
 
 ## Архитектура
 
@@ -179,3 +179,79 @@ ORDER BY "Lease" ASC;
    ```json
    "Partitions": { "0": 5, "1": 3, "2": 2, "3": 1 }
    ```
+
+## Оптимизации и улучшения (v1.8)
+
+### Критические исправления (v1.8)
+
+#### RateLimiter
+- **Проблема**: Race condition между `CleanupExpired` и `lock`, избыточная сложность с `Interlocked.CompareExchange` + `lock`, удаление из словаря внутри lock другого объекта
+- **Решение**: Упрощена до единого `lock` на уровне `RequestWindow`. Очистка и проверка выполняются в одной критической секции. Удалён флаг `CleanupInProgress`
+- **Файл**: `TelegramBot.Core/Services/RateLimiter.cs`
+
+#### SessionManager  
+- **Проблема**: Утечка памяти `_sessionLocks` — семафоры никогда не удалялись при `RemoveSession`, race condition между проверкой таймаута и `GetOrAdd`, блокировка в `CleanUpExpiredSessionsAsync` могла долго удерживать семафор
+- **Решение**: Безопасное удаление семафоров при `RemoveSession` с проверкой `CurrentCount == 1`. Атомарная проверка и обновление сессии. Улучшено логирование с указанием userId и причины удаления
+- **Файл**: `TelegramBot.Server/Services/Application/SessionManager.cs`
+
+#### ProcessRunner
+- **Проблема**: `BlockingCollection<string>` мог потреблять неограниченную память при большом выводе процесса, отсутствие лимита на размер вывода, `TruncateOutput` обрезал до 4KB но после сбора всего вывода (память уже потрачена)
+- **Решение**: Потоковая обработка stdout/stderr через события `OutputDataReceived` с ограничением 64KB на поток. `StringBuilder` инициализируется с capacity 1024 и растёт только до лимита
+- **Файл**: `TelegramBot.Worker/Services/ProcessRunner.cs`
+
+### Средние улучшения (v1.8)
+
+#### CommandExecutionService
+- **Проблема**: Отсутствие ограничения на размер `_runningTasks` — HashSet мог расти бесконечно при высокой нагрузке. `ContinueWith` без `TaskScheduler` выполнялся на thread pool
+- **Решение**: Добавлена периодическая очистка завершённых задач при превышении 1000 элементов. Освобождение слота пула вынесено в `finally` блок
+- **Файл**: `TelegramBot.Worker/Services/CommandExecutionService.cs`
+
+#### PartitionPoolManager
+- **Проблема**: Некорректная логика приоритетов (комментарий говорил "чем меньше Priority, тем выше приоритет", но код инвертировал логику), отсутствие валидации при `ReleaseSlot` приводило к исключениям
+- **Решение**: Исправлен комментарий и логика `GetThreshold`. Добавлена проверка на переполнение семафора в `ReleaseSlot` с предупреждением в лог
+- **Файл**: `TelegramBot.Worker/Services/PartitionPoolManager.cs`
+
+#### CallbackDispatcher
+- **Проблема**: Линейный поиск обработчиков O(n) при каждом callback, отсутствие кэширования маппинга prefix → handler
+- **Решение**: Создан словарь `_handlerMap` при инициализации для поиска O(1). Группировка по префиксам с выбором хендлера наименьшего приоритета
+- **Файл**: `TelegramBot.Server/Services/Application/CallbackDispatcher.cs`
+
+#### SessionCompletionTracker
+- **Проблема**: Лишний SQL-запрос `CountPendingProcessingBySessionAsync` при каждой завершённой сессии, race condition между decremented счётчиком и проверкой БД
+- **Решение**: Используется атомарная операция в БД через `TryMarkSessionCompletedAsync` для проверки и обновления в одной транзакции
+- **Файл**: `TelegramBot.Worker/Services/SessionCompletionTracker.cs`
+
+#### CommandPreparer
+- **Проблема**: Создание временных файлов в `%TEMP%` без квот и очистки, `File.Move` с `overwrite: true` не атомарно на всех файловых системах
+- **Решение**: Выделена специализированная папка `Path.Combine(Path.GetTempPath(), "telegram_bot_tasks")` с фоновой задачей очистки файлов старше 1 часа
+- **Файл**: `TelegramBot.Worker/Services/CommandPreparer.cs`
+
+### Улучшения логирования и мониторинга (v1.8)
+
+#### Логирование
+- Добавлено логирование времени выполнения callback-хендлеров с `elapsedMs` и именем хендлера
+- Добавлены флаги `truncated` и `limit` в логи stdout/stderr процессов
+- Добавлено подробное логирование очистки сессий: количество удалённых, возраст, userId
+- Добавлено логирование disposal семафоров сессий с указанием причины (expired/manual removal)
+- Улучшены сообщения об ошибках с контекстом: userId, correlationId, sessionId, elapsed time, attempt number
+- Добавлено логирование переполнения семафоров в `PartitionPoolManager.ReleaseSlot`
+- Добавлено логирование очистки `_runningTasks` в `CommandExecutionService` с количеством удалённых задач
+- Добавлено логирование создания и удаления temp-директории в `CommandPreparer`
+
+#### Мониторинг
+- Health check endpoint `/health` теперь включает метрики:
+  - Количество активных сессий в памяти
+  - Размер очереди pending команд
+  - Количество запущенных BIM-процессов
+  - Статус каждого воркера (для распределённой установки)
+- Добавлены счетчики для Prometheus-compatible экспорта (опционально):
+  - `telegram_commands_total{status}` — общее количество команд по статусам
+  - `telegram_sessions_active` — количество активных сессий
+  - `telegram_processes_running{type}` — количество запущенных процессов по типам (Revit, Navisworks, Python)
+  - `telegram_ratelimit_rejections_total` — количество отклонений по rate limit
+
+#### Диагностика
+- Добавлен SQL-запрос для диагностики зависших команд с истёкшим Lease
+- Добавлены диагностические endpoints для отладки:
+  - `GET /debug/sessions` — список активных сессий с metadata
+  - `GET /debug/processes` — список запущенных BIM-процессов с PID и uptime

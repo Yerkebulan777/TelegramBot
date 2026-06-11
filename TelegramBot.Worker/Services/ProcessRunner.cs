@@ -16,6 +16,7 @@ namespace TelegramBot.Worker.Services;
 /// Результат выполнения определяется по exit code процесса.
 /// Если плагин написал <c>result_{{CommandId}}.json</c> — статус берётся из него.
 /// Владеет словарём активных процессов <c>_activeProcesses</c> для health-мониторинга.
+/// Оптимизация: потоковая обработка stdout/stderr с ограничением 64KB для предотвращения переполнения памяти.
 /// </summary>
 public sealed class ProcessRunner(
     CommandPreparer commandPreparer,
@@ -117,35 +118,70 @@ public sealed class ProcessRunner(
         return process;
     }
 
-    /// <summary>Ожидает завершения процесса, собирает stdout/stderr.
+    /// <summary>Ожидает завершения процесса, собирает stdout/stderr с ограничением размера.
+    /// Использует потоковую обработку для предотвращения переполнения памяти.
     /// После выхода процесса пробует прочитать result-файл от плагина.
     /// Если файл есть — статус берётся из него. Если нет — fallback на exit code.
     /// </summary>
     private async Task WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct, string attemptToken)
     {
-        var outputBuilder = new StringBuilder();
-        var errorBuilder = new StringBuilder();
+        const int MaxOutputChars = 64 * 1024; // 64KB лимит на вывод
+        var outputBuilder = new StringBuilder(capacity: 1024);
+        var errorBuilder = new StringBuilder(capacity: 1024);
+        var outputTruncated = false;
+        var errorTruncated = false;
 
-        // Используем блокирующую коллекцию для безопасной записи из нескольких потоков
-        var outputQueue = new BlockingCollection<string>();
-        var errorQueue = new BlockingCollection<string>();
-        
-        process.OutputDataReceived += (_, e) => 
+        // Потоковая обработка stdout/stderr с ограничением размера
+        void OnOutputDataReceived(object? sender, DataReceivedEventArgs e)
         { 
-            if (e.Data != null) 
+            if (e.Data != null && !outputTruncated)
             {
-                outputQueue.Add(e.Data);
+                lock (outputBuilder)
+                {
+                    if (outputBuilder.Length + e.Data.Length + 1 <= MaxOutputChars)
+                    {
+                        outputBuilder.AppendLine(e.Data);
+                    }
+                    else
+                    {
+                        // Дописываем сколько влезает и ставим флаг truncation
+                        var remaining = MaxOutputChars - outputBuilder.Length;
+                        if (remaining > 0)
+                        {
+                            outputBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
+                        }
+                        outputTruncated = true;
+                    }
+                }
             }
         };
         
-        process.ErrorDataReceived += (_, e) => 
+        void OnErrorDataReceived(object? sender, DataReceivedEventArgs e)
         { 
-            if (e.Data != null) 
+            if (e.Data != null && !errorTruncated)
             {
-                errorQueue.Add(e.Data);
+                lock (errorBuilder)
+                {
+                    if (errorBuilder.Length + e.Data.Length + 1 <= MaxOutputChars)
+                    {
+                        errorBuilder.AppendLine(e.Data);
+                    }
+                    else
+                    {
+                        var remaining = MaxOutputChars - errorBuilder.Length;
+                        if (remaining > 0)
+                        {
+                            errorBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
+                        }
+                        errorTruncated = true;
+                    }
+                }
             }
         };
         
+        process.OutputDataReceived += OnOutputDataReceived;
+        process.ErrorDataReceived += OnErrorDataReceived;
+
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -153,22 +189,7 @@ public sealed class ProcessRunner(
         await process.WaitForExitAsync(ct);
 #pragma warning restore VSTHRD003
 
-        // Сигнализируем о завершении записи
-        outputQueue.CompleteAdding();
-        errorQueue.CompleteAdding();
-        
-        // Собираем весь вывод
-        foreach (var line in outputQueue.GetConsumingEnumerable())
-        {
-            outputBuilder.AppendLine(line);
-        }
-        
-        foreach (var line in errorQueue.GetConsumingEnumerable())
-        {
-            errorBuilder.AppendLine(line);
-        }
-
-        LogProcessOutput(cmd, outputBuilder, errorBuilder);
+        LogProcessOutput(cmd, outputBuilder, errorBuilder, outputTruncated, errorTruncated);
         sw.Stop();
 
         // Пробуем прочитать result-файл от плагина
@@ -319,19 +340,27 @@ public sealed class ProcessRunner(
         }
     }
 
-    /// <summary>Логирует stdout и stderr процесса.</summary>
-    private void LogProcessOutput(PendingCommand cmd, StringBuilder outputBuilder, StringBuilder errorBuilder)
+    /// <summary>Логирует stdout и stderr процесса с информацией о truncation.</summary>
+    private void LogProcessOutput(PendingCommand cmd, StringBuilder outputBuilder, StringBuilder errorBuilder, bool outputTruncated, bool errorTruncated)
     {
         if (outputBuilder.Length > 0)
         {
-            logger.LogInformation("Output [{Cmd} {Id} {CorrelationId}]: {Output}",
-                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, TruncateOutput(outputBuilder));
+            var outputInfo = outputTruncated 
+                ? $"{TruncateOutput(outputBuilder)} [TRUNCATED: 64KB limit reached]"
+                : TruncateOutput(outputBuilder);
+            
+            logger.LogInformation("Output [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Output}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, outputTruncated, outputInfo);
         }
 
         if (errorBuilder.Length > 0)
         {
-            logger.LogWarning("Stderr [{Cmd} {Id} {CorrelationId}]: {Error}",
-                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, TruncateOutput(errorBuilder));
+            var errorInfo = errorTruncated 
+                ? $"{TruncateOutput(errorBuilder)} [TRUNCATED: 64KB limit reached]"
+                : TruncateOutput(errorBuilder);
+            
+            logger.LogWarning("Stderr [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Error}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, errorTruncated, errorInfo);
         }
     }
 
@@ -340,7 +369,7 @@ public sealed class ProcessRunner(
     {
         const int maxLength = 4096;
         return builder.Length > maxLength
-            ? builder.ToString(0, maxLength) + $"\n... (truncated, total {builder.Length} chars)"
+            ? builder.ToString(0, maxLength) + $"\n... (truncated for log, total {builder.Length} chars)"
             : builder.ToString(0, builder.Length);
     }
 }

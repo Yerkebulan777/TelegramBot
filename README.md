@@ -10,12 +10,12 @@ Telegram-бот для навигации по файловой системе �
 | Документ | Описание |
 |----------|----------|
 | [AGENTS.md](AGENTS.md) | Архитектура, BimLib, DI, code style, константы |
-| [ROADMAP.md](ROADMAP.md) | Дорожная карта проекта |
+
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы |
 
 ## Обзор
 
-.NET 10 background service с long-polling (текущая версия: **v1.7** — все функциональные версии реализованы). Доступные функции:
+.NET 10 background service с long-polling (текущая версия: **v1.8** — критические и средние проблемы исправлены, логирование и мониторинг улучшены). Доступные функции:
 
 - Навигация по файловой системе через inline-клавиатуры
 - Экспорт: PDF, DWG, NWC, IFC
@@ -25,7 +25,9 @@ Telegram-бот для навигации по файловой системе �
 - Дневной лимит файлов на пользователя
 - Запрос доступа с подтверждением администратором
 - Умный retry: классификация ошибок (InvalidFileError → сразу Failed, ProcessCrashError → retry)
-- Health check endpoints: `/health/live`, `/health/ready`, `/health`
+- Health check endpoints: `/health/live`, `/health/ready`, `/health` с расширенными метриками (активные сессии, очередь команд, BIM-процессы)
+- Диагностика: `/debug/sessions`, `/debug/processes` для отладки
+- Prometheus-compatible метрики (опционально)
 
 ## Технологии
 

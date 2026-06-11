@@ -1,9 +1,9 @@
 using Serilog;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using TelegramBot.Core.Helpers;
 using TelegramBot.Data;
 using TelegramBot.Server.Extensions;
-using TelegramBot.Server.Helpers;
 
 namespace TelegramBot.Server;
 

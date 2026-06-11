@@ -3,58 +3,112 @@ using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application;
 
+/// <summary>
+/// Диспетчер callback-запросов с кэшированным маппингом prefix → handler.
+/// Оптимизация: O(1) поиск вместо линейного перебора всех хендлеров.
+/// </summary>
 public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, ILogger<CallbackDispatcher> logger)
 {
-    private readonly IEnumerable<ICallbackHandler> _handlers = handlers.OrderBy(h => h.Priority).ToList();
+    // Кэш префикс → handler для быстрого поиска (O(1) вместо O(n))
+    private readonly Dictionary<string, ICallbackHandler> _handlerMap = 
+        handlers
+            .SelectMany(h => GetSupportedPrefixes(h).Select(p => (p, h)))
+            .GroupBy(x => x.p)
+            .ToDictionary(
+                g => g.Key, 
+                g => g.OrderBy(x => x.h.Priority).First().h);
 
+    /// <summary>
+    /// Получает список поддерживаемых префиксов для хендлера.
+    /// Использует reflection-safe вызов CanHandle через тестовые значения.
+    /// </summary>
+    private static IEnumerable<string> GetSupportedPrefixes(ICallbackHandler handler)
+    {
+        // Пробуем стандартные префиксы - хендлер сам скажет что поддерживает
+        var testPrefixes = new[] { 
+            "NAVIGATE", "SELECT_FILE", "CONFIRMDELETESESSION", "CONFIRMDELETECOMMAND",
+            "DELETESSESSION", "DELETECOMMAND", "EXPORT", "AUTOMATION"
+        };
+        
+        foreach (var prefix in testPrefixes)
+        {
+            try
+            {
+                if (handler.CanHandle(prefix))
+                    yield return prefix;
+            }
+            catch
+            {
+                // Игнорируем ошибки при проверке
+            }
+        }
+    }
+
+    /// <summary>
+    /// Отправляет callback соответствующему хендлеру.
+    /// Логирование улучшено: добавлены детали о найденном хендлере и времени выполнения.
+    /// </summary>
     public async Task<bool> DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
-        foreach (var handler in _handlers)
+        var prefix = context.ParsedCallback.Prefix;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
+        if (!_handlerMap.TryGetValue(prefix, out var handler))
         {
-            if (handler.CanHandle(context.ParsedCallback.Prefix))
-            {
-                logger.LogDebug(
-                    "Callback dispatch: prefix={Prefix}, handler={HandlerName}, user={UserId}",
-                    context.ParsedCallback.Prefix,
-                    handler.GetType().Name,
-                    context.UserId);
-
-                try
-                {
-                    var handled = await handler.HandleAsync(context, cancellationToken);
-                    if (handled)
-                    {
-                        logger.LogDebug(
-                            "Callback handled: prefix={Prefix}, handler={HandlerName}, user={UserId}",
-                            context.ParsedCallback.Prefix,
-                            handler.GetType().Name,
-                            context.UserId);
-                        return true;
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    logger.LogInformation(
-                        "Callback '{Prefix}' handling was cancelled",
-                        context.ParsedCallback.Prefix);
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex,
-                        "Error in handler {HandlerName} for callback '{Prefix}'",
-                        handler.GetType().Name,
-                        context.ParsedCallback.Prefix);
-                    // Continue processing - don't rethrow to prevent stopping update handling
-                }
-            }
+            logger.LogDebug(
+                "Callback ignored: prefix={Prefix}, user={UserId}, reason=no_handler",
+                prefix,
+                context.UserId);
+            return false;
         }
 
         logger.LogDebug(
-            "Callback ignored: prefix={Prefix}, user={UserId}, reason=no_handler",
-            context.ParsedCallback.Prefix,
+            "Callback dispatch: prefix={Prefix}, handler={HandlerName}, user={UserId}",
+            prefix,
+            handler.GetType().Name,
             context.UserId);
 
-        return false;
+        try
+        {
+            var handled = await handler.HandleAsync(context, cancellationToken);
+            stopwatch.Stop();
+            
+            if (handled)
+            {
+                logger.LogDebug(
+                    "Callback handled: prefix={Prefix}, handler={HandlerName}, user={UserId}, elapsedMs={ElapsedMs}",
+                    prefix,
+                    handler.GetType().Name,
+                    context.UserId,
+                    stopwatch.ElapsedMilliseconds);
+                return true;
+            }
+            
+            logger.LogDebug(
+                "Callback not handled by handler: prefix={Prefix}, handler={HandlerName}, user={UserId}, elapsedMs={ElapsedMs}",
+                prefix,
+                handler.GetType().Name,
+                context.UserId,
+                stopwatch.ElapsedMilliseconds);
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation(
+                "Callback '{Prefix}' handling was cancelled after {ElapsedMs}ms",
+                prefix,
+                stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Error in handler {HandlerName} for callback '{Prefix}' after {ElapsedMs}ms",
+                handler.GetType().Name,
+                prefix,
+                stopwatch.ElapsedMilliseconds);
+            // Continue processing - don't rethrow to prevent stopping update handling
+            return false;
+        }
     }
 }
