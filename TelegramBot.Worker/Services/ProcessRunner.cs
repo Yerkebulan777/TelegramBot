@@ -126,15 +126,15 @@ public sealed class ProcessRunner(
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
 
-        await using var outputLock = new SemaphoreSlim(1, 1);
+        using var outputLock = new SemaphoreSlim(1, 1);
         
         process.OutputDataReceived += (_, e) => 
         { 
             if (e.Data != null) 
             {
-                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(_ => 
+                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(t => 
                 {
-                    try { outputBuilder.AppendLine(e.Data); } finally { _ = outputLock.Release(); }
+                    try { outputBuilder.AppendLine(e.Data); } finally { outputLock.Release(); }
                 }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
         };
@@ -143,9 +143,9 @@ public sealed class ProcessRunner(
         { 
             if (e.Data != null) 
             {
-                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(_ => 
+                _ = outputLock.WaitAsync(CancellationToken.None).ContinueWith(t => 
                 {
-                    try { errorBuilder.AppendLine(e.Data); } finally { _ = outputLock.Release(); }
+                    try { errorBuilder.AppendLine(e.Data); } finally { outputLock.Release(); }
                 }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
         };

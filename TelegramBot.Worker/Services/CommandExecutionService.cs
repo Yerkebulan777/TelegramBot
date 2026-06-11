@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using TelegramBot.Core.Config;
