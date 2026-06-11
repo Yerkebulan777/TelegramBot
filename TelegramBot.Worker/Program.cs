@@ -95,7 +95,7 @@ public static class Program
                     {
                         SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker");
 
-                        // Отдельный файл для BIM-специфичных логов (Revit, Navisworks — TelegramBot.BimLib.*)
+                        // Отдельный файл для BIM-специфичных логов (Revit, Navisworks — TelegramBot.Worker.BimLib.*)
                         var logBasePath = context.Configuration
                             .GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.LogDirectory)];
                         if (string.IsNullOrWhiteSpace(logBasePath))

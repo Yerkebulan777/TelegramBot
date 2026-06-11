@@ -10,8 +10,8 @@ Telegram-бот для навигации по файловой системе �
 | Документ | Описание |
 |----------|----------|
 | [AGENTS.md](AGENTS.md) | Архитектура, BimLib, DI, code style, константы |
-
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы |
+| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
 
 ## Обзор
 
@@ -25,9 +25,7 @@ Telegram-бот для навигации по файловой системе �
 - Дневной лимит файлов на пользователя
 - Запрос доступа с подтверждением администратором
 - Умный retry: классификация ошибок (InvalidFileError → сразу Failed, ProcessCrashError → retry)
-- Health check endpoints: `/health/live`, `/health/ready`, `/health` с расширенными метриками (активные сессии, очередь команд, BIM-процессы)
-- Диагностика: `/debug/sessions`, `/debug/processes` для отладки
-- Prometheus-compatible метрики (опционально)
+- Health check endpoints: `/health/live`, `/health/ready`, `/health`; Worker добавляет checks `bimInstallRoot` и `activeProcesses`
 
 ## Технологии
 
@@ -70,6 +68,27 @@ Telegram-бот для навигации по файловой системе �
 }
 ```
 
+Worker добавляет в `/health` две BIM-проверки:
+
+| Check | Описание |
+|-------|----------|
+| `bimInstallRoot` | Проверяет существование `BimIntegration:RevitInstallRoot` |
+| `activeProcesses` | Показывает количество активных внешних процессов Worker |
+
+Отдельных `/debug/*` endpoints и Prometheus exporter в текущем коде нет.
+
+## BIM-плагины
+
+Worker запускает внешние исполнители и обменивается с ними через JSON-файлы `TaskFile`/`ResultFile`.
+
+| Команды | Исполнитель | Важное |
+|---------|-------------|--------|
+| `PDF`, `DWG`, `IFC`, `BIMDOC` | `Revit.exe` + установленный Revit AddIn | Без AddIn Revit просто откроется как GUI и команда завершится таймаутом |
+| `NWC`, `CLASHREP` | `FileConvert.exe` или Navisworks/обёртка | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
+| `AUTORES` | `python ai_agent.py` | Скрипт должен читать `--task`/`--result` и писать `ResultFile` |
+
+Полный контракт описан в [Docs/BimPluginContract.md](Docs/BimPluginContract.md).
+
 ## Конфигурация
 
 ### Обязательные параметры
@@ -102,7 +121,7 @@ Telegram-бот для навигации по файловой системе �
 %USERPROFILE%\Documents\TelegramBot\Logs\
 ├── Server\log-20260611.txt          # Основной лог Server
 ├── Worker\log-20260611.txt          # Основной лог Worker
-└── Worker\BimLib\log-20260611.txt  # Только события TelegramBot.BimLib.* (Revit/Navisworks)
+└── Worker\BimLib\log-20260611.txt  # BIM-специфичные события Revit/Navisworks
 ```
 
 **Путь можно изменить** через опциональный параметр `FileSystem:LogDirectory`:

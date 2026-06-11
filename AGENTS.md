@@ -7,8 +7,8 @@ Guidance for agentic coding agents working in this repository.
 | Документ | Описание |
 |----------|----------|
 | [README.md](README.md) | Обзор проекта, запуск, конфигурация, команды бота |
-
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, SQL-запросы |
+| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
 | **AGENTS.md** (текущий файл) | Архитектура, BimLib, DI, code style, константы для AI-агентов |
 
 ## Project Overview
@@ -121,11 +121,11 @@ services.AddSingleton<NavisworksProcessTracker>();
 Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 
 **Namespaces:**
-- `TelegramBot.BimLib.Config`
-- `TelegramBot.BimLib.Models`
-- `TelegramBot.BimLib.Monitor`
-- `TelegramBot.BimLib.Native`
-- `TelegramBot.BimLib.Services`
+- `TelegramBot.Worker.BimLib.Config`
+- `TelegramBot.Worker.BimLib.Models`
+- `TelegramBot.Worker.BimLib.Monitor`
+- `TelegramBot.Worker.BimLib.Native`
+- `TelegramBot.Worker.BimLib.Services`
 
 ### Worker Components
 
@@ -152,10 +152,9 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 - **`CommandExecutionService`**: Добавлена периодическая очистка `_runningTasks` при превышении 1000 элементов для предотвращения бесконечного роста.
 - **`PartitionPoolManager`**: Исправлена логика приоритетов в `GetThreshold`. Добавлена валидация и логирование переполнения в `ReleaseSlot`.
 - **`CallbackDispatcher`**: Кэшированный словарь `_handlerMap` для поиска обработчиков O(1) вместо линейного перебора O(n).
-- **`SessionCompletionTracker`**: Атомарная операция в БД через `TryMarkSessionCompletedAsync` вместо отдельного SQL-запроса.
-- **`CommandPreparer`**: Специализированная temp-папка с фоновой очисткой файлов старше 1 часа.
+- **`SessionCompletionTracker`**: In-memory счётчик `_sessionRemaining` + DB confirmation через `CountPendingProcessingBySessionAsync`, чтобы не отправлять уведомление раньше завершения всей сессии.
 - **Логирование**: Добавлено логирование elapsed time для callback-хендлеров, флаги `truncated` для stdout/stderr, детализация очистки сессий, контекст ошибок (userId, sessionId, attempt).
-- **Мониторинг**: Расширенные health check метрики (активные сессии, очередь команд, BIM-процессы), диагностические endpoints `/debug/sessions` и `/debug/processes`.
+- **Мониторинг**: Worker добавляет `/health` checks `bimInstallRoot` и `activeProcesses`. Отдельных `/debug/*` endpoints в текущем коде нет.
 
 **DI registration** — в `Worker/Program.cs`:
 ```csharp
@@ -176,13 +175,9 @@ services.AddHostedService<SessionCleanupService>();
 - `RevitProcessStatus` enum: `Healthy`, `NotResponding`, `Error`.
 - Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete classes only).
 
-### How Revit Commands Actually Work
+### How BIM Command Plugins Actually Work
 
-**The hard truth:** Revit.exe is a GUI application, not a console tool. It does not write to stdout/stderr and does not understand `/command` arguments out of the box. To execute PDF/DWG/IFC/BIMDOC commands, a **custom Revit AddIn (plugin)** must be installed on the server.
-
-#### Plugin API — JSON File Exchange (TaskFile + ResultFile)
-
-Worker и плагин обмениваются данными через JSON-файлы во временной папке:
+Полный контракт исполнителей описан в [Docs/BimPluginContract.md](Docs/BimPluginContract.md). Кратко: Worker запускает внешний процесс и обменивается с ним через JSON-файлы во временной папке:
 
 | Файл | Кто создаёт | Кто читает | Назначение |
 |------|------------|------------|------------|
@@ -219,20 +214,15 @@ Worker и плагин обмениваются данными через JSON-�
 
 Алгоритм работы:
 1. Worker создаёт `task_{CommandId}_{AttemptToken}.json` в `Path.GetTempPath()` (атомарная запись: `.tmp` → `File.Move`)
-2. Worker запускает Revit.exe/Navisworks.exe/python с аргументами командной строки
-   (плагин получает путь к task-файлу как аргумент `{TaskFilePath}`)
-3. Плагин читает `task_{CommandId}_{AttemptToken}.json`, выполняет экспорт
-4. Плагин пишет `result_{CommandId}_{AttemptToken}.json` по указанному `resultFilePath` (рекомендуется: `.tmp` → `File.Move` для атомарности)
+2. Worker запускает `Revit.exe`, `FileConvert.exe`/Navisworks или `python` с аргументами из `ArgumentsTemplate`
+3. Исполнитель читает `task_{CommandId}_{AttemptToken}.json`, выполняет команду
+4. Исполнитель пишет `result_{CommandId}_{AttemptToken}.json` по указанному `resultFilePath` (рекомендуется: `.tmp` → `File.Move` для атомарности)
 5. Worker читает `result_{CommandId}_{AttemptToken}.json`:
    - Сначала парсит JSON, потом удаляет файл (при битом JSON → переименовывает в `.bad` для диагностики)
    - Обновляет статус команды в БД
 6. Temp-файлы очищаются в `finally` блока `ProcessRunner.RunAsync()`
 
-**Плагин должен:
-- Прочитать task-файл при запуске
-- Выполнить команду (PDF, DWG, IFC и т.д.)
-- Записать result-файл в указанный путь
-- Завершить процесс с exit code 0, если result-файл успешно записан**
+Исполнитель должен прочитать task-файл, выполнить команду, записать result-файл и завершиться с exit code `0`, если result-файл успешно записан.
 
 Если result-файл не найден — Worker использует fallback по exit code процесса
 (0 = Done, иначе Failed с retry или без).
@@ -251,8 +241,8 @@ Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_abc123.json"
 | `{CommandText}` | Тип экспорта (PDF, DWG, IFC...) |
 | `{FilePath}` | Полный путь к исходному файлу |
 | `{CommandId}` | ID команды в БД |
-| `{TaskFilePath}` | Полный путь к `task_{CommandId}.json` |
-| `{ResultFilePath}` | Полный путь к `result_{CommandId}.json` |
+| `{TaskFilePath}` | Полный путь к `task_{CommandId}_{AttemptToken}.json` |
+| `{ResultFilePath}` | Полный путь к `result_{CommandId}_{AttemptToken}.json` |
 
 **Рекомендуемый подход:** плагин должен читать task-файл, а не полагаться только
 на аргументы командной строки — JSON содержит полную структурированную информацию.
@@ -262,7 +252,7 @@ Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_abc123.json"
 > процессом (predictable filenames), (2) чтение stale result от предыдущей retry-попытки,
 > (3) конфликты между параллельными выполнениями одной команды.
 
-#### Without a plugin (broken flow):
+#### Revit without AddIn (broken flow):
 
 ```
 Worker → Revit.exe opens as GUI
@@ -272,14 +262,14 @@ Worker → Revit.exe opens as GUI
          3 hours later → Worker kills it → Command timed out → Failed
 ```
 
-The `DialogDismisser` monitors the process and auto-closes modal dialogs (error popups, warnings), but if no plugin is installed, Revit doesn't know what to do with `/command` and just opens normally, ignoring the arguments.
+The `DialogDismisser` monitors the process and auto-closes modal dialogs (error popups, warnings), but if no Revit AddIn is installed, Revit doesn't know what to do with `/command` and just opens normally, ignoring the arguments.
 
 #### Other command types:
 
 | Type | Executable | stdout/stderr | Result mechanism |
 |------|-----------|---------------|------------------|
-| PDF, DWG, IFC, BIMDOC | `Revit.exe` | **No** — GUI app | TaskFile + ResultFile JSON exchange |
-| NWC, CLASHREP | `FileConvert.exe` | **Yes** — console utility | TaskFile + ResultFile, fallback to exit code |
+| PDF, DWG, IFC, BIMDOC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile + ResultFile JSON exchange |
+| NWC, CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
 | AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task` `--result`, fallback to exit code |
 
 **Shutdown behavior:** When Worker shuts down, it **kills all active processes** (`Kill(entireProcessTree: true)`) and waits up to 10 seconds for them to die. No orphaned Revit processes remain on the server. (The 3-hour timeout handle in `HandleTimeoutAsync` also uses `Kill(true)` — processes are always killed, not left running.)
@@ -293,7 +283,7 @@ The `DialogDismisser` monitors the process and auto-closes modal dialogs (error 
 | `HandlerHelpers` | `Server/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — reply-клавиатура + трекинг |
 | `ProcessHealthHelper` | `BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общая для Revit и Navisworks |
 | `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | Единый helper подключения |
-| `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Фильтр логов для `TelegramBot.BimLib.*` |
+| `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Фильтр логов для BIM-событий |
 | `PostgresReconnectLoop` | `TelegramBot.Data/PostgresReconnectLoop.cs` | Outer retry loop для переподключения PostgreSQL (5 сек) |
 | `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | Классификация ошибок: InvalidFileError → сразу Failed, ProcessCrashError → retry |
 | `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Очистка temp-файлов task/result для указанной попытки |

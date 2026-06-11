@@ -1,6 +1,6 @@
 # Алгоритм выполнения команд
 
-> **Связанные документы:** [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI | [README.md](../README.md) — общее описание
+> **Связанные документы:** [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI | [BimPluginContract.md](BimPluginContract.md) — контракт BIM-плагинов | [README.md](../README.md) — общее описание
 
 ## Архитектура
 
@@ -160,6 +160,20 @@ ORDER BY "Lease" ASC;
 
 ## Расширение системы
 
+### Контракт внешнего исполнителя
+
+Для Revit/Navisworks/AI-команд Worker использует один механизм:
+
+1. `ProcessRunner.RunAsync()` генерирует `AttemptToken`.
+2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.json`.
+3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в `ArgumentsTemplate`.
+4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает `result_{CommandId}_{AttemptToken}.json`.
+5. Если result-файл отсутствует или невалиден, Worker использует fallback по exit code.
+
+Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. Для Navisworks/FileConvert полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может работать только через fallback по exit code.
+
+Подробности: [BimPluginContract.md](BimPluginContract.md).
+
 ### Добавление новой команды
 
 1. **Добавить конфигурацию** в `appsettings.json` Worker:
@@ -218,12 +232,12 @@ ORDER BY "Lease" ASC;
 
 #### SessionCompletionTracker
 - **Проблема**: Лишний SQL-запрос `CountPendingProcessingBySessionAsync` при каждой завершённой сессии, race condition между decremented счётчиком и проверкой БД
-- **Решение**: Используется атомарная операция в БД через `TryMarkSessionCompletedAsync` для проверки и обновления в одной транзакции
+- **Решение в текущем коде**: in-memory счётчик `_sessionRemaining` сокращает число проверок, а при обнулении batch-счётчика выполняется `CountPendingProcessingBySessionAsync`, чтобы не отправить уведомление раньше завершения всех pending/processing команд
 - **Файл**: `TelegramBot.Worker/Services/SessionCompletionTracker.cs`
 
 #### CommandPreparer
-- **Проблема**: Создание временных файлов в `%TEMP%` без квот и очистки, `File.Move` с `overwrite: true` не атомарно на всех файловых системах
-- **Решение**: Выделена специализированная папка `Path.Combine(Path.GetTempPath(), "telegram_bot_tasks")` с фоновой задачей очистки файлов старше 1 часа
+- **Проблема**: Temp-файлы predictable/stale между retry-попытками
+- **Решение в текущем коде**: имена task/result включают уникальный `AttemptToken`; temp-файлы текущей попытки удаляются в `ProcessRunner.RunAsync()` через `CommandPreparer.CleanupTempFiles`
 - **Файл**: `TelegramBot.Worker/Services/CommandPreparer.cs`
 
 ### Улучшения логирования и мониторинга (v1.8)
@@ -236,22 +250,14 @@ ORDER BY "Lease" ASC;
 - Улучшены сообщения об ошибках с контекстом: userId, correlationId, sessionId, elapsed time, attempt number
 - Добавлено логирование переполнения семафоров в `PartitionPoolManager.ReleaseSlot`
 - Добавлено логирование очистки `_runningTasks` в `CommandExecutionService` с количеством удалённых задач
-- Добавлено логирование создания и удаления temp-директории в `CommandPreparer`
+- Добавлено логирование stdout/stderr внешних процессов с защитой от переполнения логов
 
 #### Мониторинг
-- Health check endpoint `/health` теперь включает метрики:
-  - Количество активных сессий в памяти
-  - Размер очереди pending команд
-  - Количество запущенных BIM-процессов
-  - Статус каждого воркера (для распределённой установки)
-- Добавлены счетчики для Prometheus-compatible экспорта (опционально):
-  - `telegram_commands_total{status}` — общее количество команд по статусам
-  - `telegram_sessions_active` — количество активных сессий
-  - `telegram_processes_running{type}` — количество запущенных процессов по типам (Revit, Navisworks, Python)
-  - `telegram_ratelimit_rejections_total` — количество отклонений по rate limit
+- Health check endpoint `/health` включает базовые checks `database` и `process`.
+- Worker добавляет checks:
+  - `bimInstallRoot` — наличие `BimIntegration:RevitInstallRoot`
+  - `activeProcesses` — количество активных внешних процессов в `ProcessRunner`
 
 #### Диагностика
 - Добавлен SQL-запрос для диагностики зависших команд с истёкшим Lease
-- Добавлены диагностические endpoints для отладки:
-  - `GET /debug/sessions` — список активных сессий с metadata
-  - `GET /debug/processes` — список запущенных BIM-процессов с PID и uptime
+- Отдельных `/debug/sessions`, `/debug/processes` и Prometheus exporter в текущем коде нет

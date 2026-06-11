@@ -1,9 +1,9 @@
 namespace TelegramBot.Core.Models;
 
 /// <summary>
-/// Файл задания для CAD-плагина. Worker создаёт <c>task_{CommandId}.json</c> во временной папке
+/// Файл задания для CAD-плагина. Worker создаёт <c>task_{CommandId}_{AttemptToken}.json</c> во временной папке
 /// перед запуском процесса. Плагин читает этот файл, получает все параметры команды и после
-/// выполнения пишет результат в <c>result_{CommandId}.json</c>.
+/// выполнения пишет результат в <c>result_{CommandId}_{AttemptToken}.json</c>.
 /// </summary>
 /// <remarks>
 /// Это основной механизм обмена данными между Worker и CAD-плагином.
