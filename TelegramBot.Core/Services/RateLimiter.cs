@@ -21,14 +21,21 @@ public sealed class RateLimiter
         var now = DateTime.UtcNow;
         var requestWindow = _requests.GetOrAdd(userId, static _ => new RequestWindow());
 
-        requestWindow.Timestamps.Enqueue(now);
+        // Сначала очищаем expired записи, прежде чем добавлять новую
+        CleanupExpired(requestWindow, now, userId);
 
-        if (requestWindow.Timestamps.Count > _maxRequests)
+        // Добавляем timestamp только если после очистки есть место
+        // Используем lock-free подход с проверкой через Count после очистки
+        lock (requestWindow.SyncRoot)
         {
-            CleanupExpired(requestWindow, now, userId);
+            if (requestWindow.Timestamps.Count >= _maxRequests)
+            {
+                return false;
+            }
+            
+            requestWindow.Timestamps.Enqueue(now);
+            return true;
         }
-
-        return requestWindow.Timestamps.Count <= _maxRequests;
     }
 
     private void CleanupExpired(RequestWindow requestWindow, DateTime now, long userId)
@@ -63,5 +70,6 @@ public sealed class RateLimiter
     {
         public ConcurrentQueue<DateTime> Timestamps { get; } = new();
         public int CleanupInProgress;
+        public object SyncRoot { get; } = new object();
     }
 }

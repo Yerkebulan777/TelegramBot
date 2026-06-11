@@ -34,8 +34,16 @@ public class SessionManager : IDisposable
             // _sessionLocks НЕ удаляем и НЕ диспозим — cleanup выполняется в фоновом CleanUpExpiredSessionsAsync
         }
 
-        var session = _sessions.GetOrAdd(userId, key => new UserSession { UserId = key });
+        var session = _sessions.GetOrAdd(userId, key => new UserSession 
+        { 
+            UserId = key,
+            LastActivity = DateTime.UtcNow 
+        });
+        
+        // Обновляем LastActivity для существующей сессии
+        // race condition здесь допустим — это просто метка активности
         session.LastActivity = DateTime.UtcNow;
+        
         return session;
     }
 

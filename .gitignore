@@ -1,90 +1,54 @@
-```yaml
-# Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-*.egg-info/
-dist/
-build/
-target/
-.gradle/
-
-# Python
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-.venv/
-venv/
-ENV/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.pytest_cache/
-.mypy_cache/
-
-# Compiled and binary files
-*.class
-*.o
-*.so
-*.a
-*.obj
-*.out
-*.exe
+```gitignore
+# Build artifacts
+bin/
+obj/
 *.dll
+*.exe
+*.pdb
+*.so
 *.dylib
 *.jar
 *.war
-*.zip
-*.tar.gz
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
+*.class
 
-# Editor and IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-*.bak
-*.~
-.DS_Store
-Thumbs.db
-
-# Environment and config
+# Dependencies
+packages/
+node_modules/
+venv/
+.venv/
 .env
 .env.local
 *.env.*
-.env.*
-config.env
 
 # Logs
 *.log
 
-# Coverage and testing
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test and coverage
 coverage/
 htmlcov/
 .coverage
-.coverage.*
+*.tmp
 
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# Distribution / packaging
+dist/
+build/
+target/
+.npm
+.yarn
+
+# Cache directories
+__pycache__/
+*.pyc
+*.pyo
+.Python
 ```
