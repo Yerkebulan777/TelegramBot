@@ -182,12 +182,23 @@ public sealed class ProcessRunner(
         process.OutputDataReceived += OnOutputDataReceived;
         process.ErrorDataReceived += OnErrorDataReceived;
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        try
+        {
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
 
 #pragma warning disable VSTHRD003
-        await process.WaitForExitAsync(ct);
+            await process.WaitForExitAsync(ct);
 #pragma warning restore VSTHRD003
+
+            // Дожидаемся завершения async-обработчиков stdout/stderr после выхода процесса.
+            process.WaitForExit();
+        }
+        finally
+        {
+            process.OutputDataReceived -= OnOutputDataReceived;
+            process.ErrorDataReceived -= OnErrorDataReceived;
+        }
 
         LogProcessOutput(cmd, outputBuilder, errorBuilder, outputTruncated, errorTruncated);
         sw.Stop();

@@ -28,6 +28,7 @@ public sealed class CommandExecutionService(
     // Трекинг выполняемых задач для корректного ожидания при shutdown
     private readonly HashSet<Task> _runningTasks = [];
     private readonly object _runningTasksLock = new();
+    private readonly SemaphoreSlim _drainGate = new(1, 1);
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? DataAccessBase.DefaultConnectionString;
@@ -142,18 +143,32 @@ public sealed class CommandExecutionService(
     {
         return Task.Run(async () =>
         {
+            if (_workerOptions.CleanupIntervalSeconds <= 0)
+            {
+                logger.LogWarning("CleanupIntervalSeconds = {Interval}, lease cleanup disabled",
+                    _workerOptions.CleanupIntervalSeconds);
+                return;
+            }
+
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_workerOptions.CleanupIntervalSeconds));
 
-            while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
+            try
             {
-                try
+                while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
                 {
-                    await commandDataService.ReleaseExpiredLeasesAsync();
+                    try
+                    {
+                        await commandDataService.ReleaseExpiredLeasesAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Error in lease cleanup cycle");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Error in lease cleanup cycle");
-                }
+            }
+            catch (OperationCanceledException) when (_shutdownCts?.IsCancellationRequested == true)
+            {
+                // штатное завершение
             }
         });
     }
@@ -162,18 +177,32 @@ public sealed class CommandExecutionService(
     {
         return Task.Run(async () =>
         {
+            if (_workerOptions.HealthCheckIntervalSeconds <= 0)
+            {
+                logger.LogWarning("HealthCheckIntervalSeconds = {Interval}, process health monitoring disabled",
+                    _workerOptions.HealthCheckIntervalSeconds);
+                return;
+            }
+
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_workerOptions.HealthCheckIntervalSeconds));
 
-            while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
+            try
             {
-                try
+                while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
                 {
-                    CheckProcessesHealth();
+                    try
+                    {
+                        CheckProcessesHealth();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Error in process health check cycle");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Error in process health check cycle");
-                }
+            }
+            catch (OperationCanceledException) when (_shutdownCts?.IsCancellationRequested == true)
+            {
+                // штатное завершение
             }
         });
     }
@@ -244,10 +273,12 @@ public sealed class CommandExecutionService(
 #pragma warning disable VSTHRD003
         await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task");
         await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task");
+        await WaitForRunningTasksCompletionAsync();
 #pragma warning restore VSTHRD003
 
         // Шаг 5: Освобождаем ресурсы
         _shutdownCts?.Dispose();
+        _drainGate.Dispose();
         partitionPoolManager.Dispose();
         
         logger.LogInformation("Worker shutdown completed");
@@ -338,6 +369,64 @@ public sealed class CommandExecutionService(
         {
             logger.LogWarning("{TaskName} did not complete within 15s timeout", taskName);
         }
+        else
+        {
+            try
+            {
+#pragma warning disable VSTHRD003
+                await task;
+#pragma warning restore VSTHRD003
+            }
+            catch (OperationCanceledException)
+            {
+                // штатное завершение фоновой задачи при остановке Worker
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "{TaskName} failed during shutdown", taskName);
+            }
+        }
+    }
+
+    private async Task WaitForRunningTasksCompletionAsync()
+    {
+        Task[] runningTasks;
+        lock (_runningTasksLock)
+        {
+            runningTasks = _runningTasks.ToArray();
+        }
+
+        if (runningTasks.Length == 0)
+        {
+            return;
+        }
+
+        logger.LogInformation("Waiting up to 15s for {Count} command task(s) to stop", runningTasks.Length);
+
+        var allTasks = Task.WhenAll(runningTasks);
+        var timeout = Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None);
+#pragma warning disable VSTHRD003
+        if (await Task.WhenAny(allTasks, timeout) != allTasks)
+#pragma warning restore VSTHRD003
+        {
+            logger.LogWarning("{Count} command task(s) did not complete within 15s timeout",
+                runningTasks.Count(task => !task.IsCompleted));
+        }
+        else
+        {
+            try
+            {
+                await allTasks;
+            }
+            catch (OperationCanceledException)
+            {
+                // штатное завершение command task'ов при остановке Worker
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "One or more command tasks failed during shutdown");
+            }
+        }
     }
 
     /// <summary>
@@ -347,13 +436,27 @@ public sealed class CommandExecutionService(
     /// </summary>
     private async Task DrainPendingCommandsAsync(CancellationToken ct)
     {
+        if (!await _drainGate.WaitAsync(0, ct))
+        {
+            return;
+        }
+
         try
         {
             while (!ct.IsCancellationRequested)
             {
+                PruneCompletedTasks();
+
+                var availableSlots = partitionPoolManager.TotalCapacity - GetRunningTaskCount();
+                if (availableSlots <= 0)
+                {
+                    break;
+                }
+
                 // Lease = ProcessTimeoutMinutes + 5 мин буфер для crash recovery
                 var leaseTimeoutMinutes = _workerOptions.ProcessTimeoutMinutes + 5;
-                var claimed = await commandDataService.ClaimPendingCommandsAsync(DefaultBatchSize, leaseTimeoutMinutes);
+                var claimLimit = Math.Min(DefaultBatchSize, availableSlots);
+                var claimed = await commandDataService.ClaimPendingCommandsAsync(claimLimit, leaseTimeoutMinutes);
 
                 if (claimed.Count == 0)
                 {
@@ -385,6 +488,11 @@ public sealed class CommandExecutionService(
                         {
                             _runningTasks.Remove(completed);
                         }
+
+                        if (!ct.IsCancellationRequested)
+                        {
+                            _ = DrainPendingCommandsAsync(ct);
+                        }
                     }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 }
             }
@@ -394,11 +502,18 @@ public sealed class CommandExecutionService(
         {
             logger.LogError(ex, "Error draining pending commands");
         }
+        finally
+        {
+            _ = _drainGate.Release();
+        }
     }
 
     private async Task ProcessWithPoolAsync(PendingCommand cmd, CancellationToken ct)
     {
+        var slotAcquired = false;
+
         await partitionPoolManager.WaitForSlotAsync(cmd.Priority, ct);
+        slotAcquired = true;
 
         try
         {
@@ -411,7 +526,26 @@ public sealed class CommandExecutionService(
         }
         finally
         {
-            partitionPoolManager.ReleaseSlot(cmd.Priority);
+            if (slotAcquired)
+            {
+                partitionPoolManager.ReleaseSlot(cmd.Priority);
+            }
+        }
+    }
+
+    private int GetRunningTaskCount()
+    {
+        lock (_runningTasksLock)
+        {
+            return _runningTasks.Count;
+        }
+    }
+
+    private void PruneCompletedTasks()
+    {
+        lock (_runningTasksLock)
+        {
+            _runningTasks.RemoveWhere(task => task.IsCompleted);
         }
     }
 }
