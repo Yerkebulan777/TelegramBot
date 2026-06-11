@@ -56,20 +56,51 @@ jobs:
 ```
 
 ## Конфигурация
+
+### qodana.yaml
 Файл `qodana.yaml` в корне проекта содержит основные настройки:
 - **linter**: используемый образ линтера (`jetbrains/qodana-dotnet:latest`).
 - **dotnet**: путь к решению (`TelegramBot.slnx`).
 - **profile**: используемый профиль проверок (`qodana.recommended`).
 
+### .editorconfig — IDisposable инспекции (ERROR level)
+
+Для предотвращения утечек ресурсов в `.editorconfig` явно включены на уровне ERROR три инспекции ReSharper:
+
+```editorconfig
+resharper_not_disposed_resource_highlighting = error
+resharper_dispose_on_non_disposable_type_highlighting = error
+resharper_use_await_using_highlighting = error
+```
+
+| Инспекция | Что проверяет | Пример обнаруженного бага |
+|-----------|---------------|--------------------------|
+| `NotDisposedResource` | Локальная переменная `IDisposable` не диспозится перед выходом из скоупа | `Process` без `Dispose()` в `ProcessRunner` (утечка OS-дескрипторов) |
+| `DisposeOnNonDisposableType` | Класс содержит поля `IDisposable`, но не реализует `IDisposable` сам | — |
+| `UseAwaitUsing` | В асинхронном методе используется `using` вместо `await using` | — |
+
+Эти правила работают как локально (Rider/ReSharper видит `.editorconfig`), так и в CI (Qodana подхватывает те же настройки).
+
+### Качество кода (Quality Gates)
+
+В CI настроен Quality Gate `any: 0` — любой issue блокирует сборку. Это гарантирует, что новая утечка ресурсов будет обнаружена на этапе PR.
+
 ## Интеграция с CI
 
-Qodana успешно интегрирована в репозиторий как отдельный шаг контроля качества кода (workflow `Qodana Code Quality`).
+Qodana успешно интегрирована в репозиторий как отдельный шаг контроля качества кода (workflow `Qodana Code Quality`). Запускается на push в `main`/`master` и каждый PR.
 
 Текущий CI-пайплайн (`.github/workflows/ci.yml`) также включает:
-- `dotnet format --verify-no-changes` — проверка стиля кода
+- `dotnet format --verify-no-changes` — проверка стиля кода и `.editorconfig`
 - `dotnet build` — проверка сборки
 - `dotnet publish` — публикация артефакта
 
 ## Особенности проекта
 - Тесты в данном проекте отключены согласно [AGENTS.md](../AGENTS.md). Qodana настроена только на анализ статического кода.
 - Используется .NET 10. Убедитесь, что используемая версия линтера поддерживает этот SDK.
+
+## Что делать, если Qodana не видит .editorconfig
+
+1. Убедитесь, что `qodana.yaml` содержит `profile: name: qodana.recommended` (он включает все ReSharper инспекции).
+2. Проверьте, что `*.editorconfig*` не исключён в секции `exclude` `qodana.yaml`.
+3. Для верификации локально: `dotnet format --verify-no-changes` проверяет только `.editorconfig`-стиль, но не ReSharper/Qodana инспекции. Для полной проверки используйте `docker run` с Qodana (см. выше).
+4. Если инспекция всё ещё не срабатывает — явно задайте severity в `.editorconfig`: `resharper_<id>_highlighting = error`. Это переопределяет и Qodana, и Rider.

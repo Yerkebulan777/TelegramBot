@@ -123,6 +123,36 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 - `TelegramBot.BimLib.Native`
 - `TelegramBot.BimLib.Services`
 
+### Worker Components (Refactored)
+
+`CommandExecutionService` is now a slim orchestrator. Execution details are delegated:
+
+| Component | Responsibility |
+|-----------|---------------|
+| `PartitionPoolManager` | `SortedDictionary<int, SemaphoreSlim>` — per-priority semaphore pools. Implements `IDisposable`. `Initialize(SortedDictionary)` sets up pools, disposes old ones first. |
+| `CommandPreparer` | Validates FilePath (exists, extension, path traversal), resolves Revit/Navisworks executables via BimLib, creates `ProcessStartInfo` |
+| `ProcessRunner` | Full execution lifecycle: `RunAsync(cmd, ct)` → prepare → start → wait → timeout/retry/fail. Owns `_activeProcesses` dictionary. Disposes `Process` in `finally` on normal completion. |
+| `SessionCompletionTracker` | In-memory `ConcurrentDictionary<int, int>` session counter. `TrackClaimedCommands()`, `OnCommandCompletedAsync()` with DB confirmation. |
+
+**DI registration** — all 4 registered as Singleton in `Worker/Program.cs`:
+```csharp
+services.AddSingleton<PartitionPoolManager>();
+services.AddSingleton<CommandPreparer>();
+services.AddSingleton<ProcessRunner>();
+services.AddSingleton<SessionCompletionTracker>();
+```
+
+### Critical Fixes Applied (v1.3)
+| Bug | Fix |
+|-----|-----|
+| `Process.Dispose()` never called | Added `removedProcess?.Dispose()` in `ProcessRunner.RunAsync` finally block |
+| `PartitionPoolManager.Initialize()` semaphore leak | Dispose old semaphores before `Clear()` |
+| `DialogDismisser._dismissAttempts` leak | Guard `AddOrUpdate` with `MaxDismissAttempts > 0` |
+| `RateLimiter._requests` unbounded growth | `TryComplete()` entry when queue is empty |
+| `Channel<NotificationItem>` deadlock on shutdown | `Writer.TryComplete()` in `NotificationSenderService` finally block |
+
+---
+
 **Important notes for AI agents:**
 - BimLib is `[SupportedOSPlatform("windows")]` — never run or test on non-Windows.
 - OpenMcdf 3.x is used to parse OLE Structured Storage (.rvt files). API: `RootStorage.OpenRead()` → `root.OpenStream()` → `stream.Read()`.

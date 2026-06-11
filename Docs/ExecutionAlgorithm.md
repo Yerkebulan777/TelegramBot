@@ -268,35 +268,15 @@ services.AddSingleton<NavisworksProcessTracker>();
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Очистка истёкших Lease (фоновая задача каждые 5 мин)          │
-│  - ReleaseExpiredLeasesAsync()                                  │
-│  - ReleaseTimeoutCommandsAsync()                                │
+│  - ReleaseExpiredLeasesAsync() — crash recovery                 │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Мониторинг здоровья процессов (фоновая задача 30 сек)          │
+┌─────────────────────────────────────────────────────────────────┐ │  Мониторинг здоровья процессов (фоновая задача 30 сек)          │
 │  - ProcessHealthHelper.CheckHealth()                            │
 │  - DialogDismisser.DismissDialogsForProcess()                   │
 └────────────────────────────┬────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Ожидание уведомлений: LISTEN new_tasks + fallback polling    │
-│  - Worker подписан на канал new_tasks, мгновенно реагирует    │
-│  - Fallback polling (Task.Delay) срабатывает раз в 5 мин       │
-└────────────────────────────┬────────────────────────────────────┘
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Цикл выполнения (фоновая служба)                               │
-└────────────────────────────┬────────────────────────────────────┘
                              │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Очистка истёкших Lease (фоновая задача каждые 5 мин)          │
-│  - ReleaseExpiredLeasesAsync()                                  │
-│  - ReleaseTimeoutCommandsAsync()                                │
-└────────────────────────────┬────────────────────────────────────┘
-                              │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Ожидание уведомлений: LISTEN new_tasks + fallback polling    │
@@ -332,7 +312,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 │  4. Сохранить в _activeProcesses (трекинг)                     │
 │  5. Обновить статус: 'processing', ProcessId = PID             │
 │  6. Асинхронное чтение stdout/stderr (BeginOutputReadLine)     │
-│  7. WaitForExit с таймаутом (ProcessTimeoutSeconds)             │
+│  7. WaitForExitAsync с CancellationToken (ProcessTimeoutMinutes) │
 │  8. Логирование stdout/stderr (обрезка >4KB)                   │
 │  9. Если таймаут → process.Kill(true)                          │
 │  10. Status = 'Done' или 'Failed' (retry если не исчерпаны)    │
@@ -375,7 +355,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 
 ### 4. Трекинг активных процессов
 
-**Назначение:** мониторинг PID, диагностика зависаний и принудительное завершение процессов только по бизнес-таймауту команды (`ProcessTimeoutSeconds`).
+**Назначение:** мониторинг PID, диагностика зависаний и принудительное завершение процессов только по бизнес-таймауту команды (`ProcessTimeoutMinutes`).
 
 **Graceful Shutdown (Worker):** При остановке Worker выполняет `PerformGracefulShutdownAsync()`:
 - Логирует количество активных процессов
@@ -406,7 +386,7 @@ private async Task PerformGracefulShutdownAsync()
 }
 ```
 
-`Process` хранится напрямую, без класса-обёртки. `Stopwatch` и `CommandId` — локальные переменные в `ExecuteOneAsync`.
+`Process` хранится напрямую в `ConcurrentDictionary<int, Process>` внутри `ProcessRunner`. На нормальном завершении (не shutdown) процесс удаляется из `_activeProcesses` и диспозится.
 
 ### 4a. Отмена команд
 
@@ -465,41 +445,25 @@ WHERE Status = 'processing'
 ```
 
 **Параметры:**
-- `Lease` — устанавливается на `ProcessTimeoutSeconds + 5 мин` (долгий TTL), команда не вернётся в очередь раньше таймаута
+- `Lease` — устанавливается на `ProcessTimeoutMinutes + 5 мин` (долгий TTL), команда не вернётся в очередь раньше таймаута
 - `CleanupIntervalSec = 300` — проверка каждые 5 минут (фоновая задача)
 
 ### 2. Таймаут выполнения процесса
 
 **Проблема:** Внешний процесс (Revit/Navisworks) может зависнуть бесконечно.
 
-**Решение:** Принудительное завершение по таймауту:
+**Решение:** Принудительное завершение по таймауту через `CancellationTokenSource.CancelAfter`:
 
 ```csharp
-// Ожидание с таймаутом
-var timeout = TimeSpan.FromSeconds(ProcessTimeoutSec); // 3600 сек = 1 час
-var completed = await Task.Run(() => 
-    process.WaitForExit((int)timeout.TotalMilliseconds), ct);
+using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+timeoutCts.CancelAfter(TimeSpan.FromMinutes(_workerOptions.ProcessTimeoutMinutes));
 
-if (!completed)
-{
-    // Таймаут: убиваем процесс и всё дерево потомков
-    process.Kill(true); // true = kill entire process tree
-    await dataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
-        errorMessage: $"Timeout: process exceeded {ProcessTimeoutSec}s limit");
-}
+await process.WaitForExitAsync(timeoutCts.Token);
 ```
 
-**Дополнительная защита (SQL):**
-```sql
--- Фоновая задача каждые 5 минут
-UPDATE Commands
-SET Status = 'pending',
-    StartedAt = NULL,
-    ProcessId = NULL,
-    ErrorMessage = 'Timeout: process exceeded maximum execution time'
-WHERE Status = 'processing'
-  AND StartedAt < NOW() - INTERVAL '@TimeoutSeconds seconds';
-```
+При таймауте — `process.Kill(entireProcessTree: true)`, статус `Failed`.
+
+*(Избыточный SQL-таймаут удалён: in-process CancellationTokenTimeout ловит таймаут первым, lease покрывает crash recovery.)*
 
 ### 3. Трекинг активных процессов
 
@@ -516,8 +480,25 @@ _activeProcesses[cmd.CommandId] = process;
 // При завершении (в finally)
 _activeProcesses.TryRemove(cmd.CommandId, out _);
 
-// Graceful shutdown не нужен:
-// при остановке Worker не выполняет отдельное ожидание/убийство активных процессов
+// На юрinal shutdown — оставляем в _activeProcesses для отладки
+
+// В ProcessRunner.RunAsync:
+finally
+{
+    if (!ct.IsCancellationRequested)
+    {
+        _activeProcesses.TryRemove(cmd.CommandId, out var removedProcess);
+        removedProcess?.Dispose();  // Process.Dispose на нормальном завершении
+    }
+    // На shutdown процесс остаётся в _activeProcesses для LogActiveProcessesOnShutdownAsync
+}
+
+// В CommandExecutionService.PerformGracefulShutdownAsync:
+// После 30с ожидания — dispose всех оставшихся Process-обёрток
+foreach (var (_, process) in processRunner.ActiveProcesses.ToList())
+{
+    try { process.Dispose(); } catch { }
+}
 ```
 
 ### 4. FOR UPDATE SKIP LOCKED
@@ -547,13 +528,11 @@ RETURNING ...;
 **Преимущества:**
 - Несколько воркеров могут работать параллельно
 - Нет конфликтов блокировок
-- Каждая команда захватывается ровно одним воркером
-
-### 5. Отмена (CancellationToken)
+- Каждая команда захватывается ровно одним воркером### 5. Отмена (CancellationToken)
 
 **Проблема:** Нужно корректно остановить основной цикл Worker при остановке сервиса.
 
-**Решение:** CancellationToken threading без отдельного graceful shutdown для внешних процессов:
+**Решение:** Linked CancellationTokenSource + graceful shutdown:
 
 ```csharp
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -567,20 +546,14 @@ protected override async Task ExecuteAsync(CancellationToken stoppingToken)
             await RunListenerLoopAsync(stoppingToken);
         }
     }
+    finally
+    {
+        await PerformGracefulShutdownAsync();
+    }
 }
 
-private async Task ExecuteOneAsync(PendingCommand cmd, CancellationToken ct)
-{
-    try
-    {
-        // ...
-        var completed = await Task.Run(() => process.WaitForExit(...), ct);
-    }
-    catch (OperationCanceledException) 
-    {
-        throw; 
-    }
-}
+// ProcessRunner.RunAsync — делегирует CommandPreparer (валидация + BIM)
+// и ProcessRunner (запуск процесса + таймаут через CancelAfter)
 ```
 
 ### 6. Валидация FilePath
@@ -806,8 +779,8 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 
 ### Отправка
 
-**Сторона Worker** (`CommandExecutionService.CompleteClaimedCommandAsync`):
-- Вызывается после `Done`, `Failed`, unknown/invalid command и после планирования retry
+**Сторона Worker** (`SessionCompletionTracker.OnCommandCompletedAsync`):
+- Вызывается из `ProcessRunner` после `Done`, `Failed`, timeout и retry
 - Декрементит in-memory счётчик `_sessionRemaining` для текущего claim-а
 - Если `newRemaining == 0` — проверяет `CountPendingProcessingBySessionAsync`
 - Если в БД нет `pending`/`processing` — запрашивает `GetSessionsStatusAsync` и шлёт `NotifyCommandCompletedAsync`
@@ -831,7 +804,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 | Параметр | Откуда | Значение по умолч. | Описание |
 |----------|--------|-------------------|----------|
 | `Partitions` | `WorkerOptions.Partitions` | `{1→3, 2→5, 3→3, 4→1, 5→1}` | Priority threshold → макс. процессов. Команда попадает в первый threshold >= Priority. Чем меньше Priority, тем выше приоритет (SortedDictionary) |
-| `ProcessTimeoutSeconds` | `WorkerOptions.ProcessTimeoutSeconds` | 10800 (3 часа) | Максимальное время выполнения команды |
+| `ProcessTimeoutMinutes` | `WorkerOptions.ProcessTimeoutMinutes` | 180 (3 часа) | Максимальное время выполнения команды |
 | `MaxRetries` | `WorkerOptions.MaxRetries` | 5 | Максимальное количество попыток retry |
 | `RetryDelayBaseSeconds` | `WorkerOptions.RetryDelayBaseSeconds` | 60 | Базовая задержка для экспоненциального backoff |
 | `CompletedSessionRetentionDays` | `WorkerOptions.CompletedSessionRetentionDays` | 30 | Через сколько дней мягко удалять старые сессии без `pending`/`processing`; `0` отключает автоочистку |
@@ -848,7 +821,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
     "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres"
   },
   "Worker": {
-    "ProcessTimeoutSeconds": 10800,
+    "ProcessTimeoutMinutes": 180,
     "CompletedSessionRetentionDays": 30,
     "Partitions": {
       "1": 3,
@@ -884,7 +857,7 @@ WHERE SessionId = @SessionId AND Status = 'Failed';
 }
 ```
 
-**Примечание:** `ProcessTimeoutSeconds` задаётся в секции `Worker`. Если не указан — по умолчанию 10800 сек (3 часа). Каждая команда настраивается отдельно в словаре `Commands` (без привязки к партиции). Партиции настраиваются в секции `Partitions`: ключ — максимальный Priority threshold, значение — макс. процессов. **Чем меньше Priority, тем выше приоритет.** Команда попадает в первый threshold >= Priority.
+**Примечание:** `ProcessTimeoutMinutes` задаётся в секции `Worker`. Если не указан — по умолчанию 180 мин (3 часа). Каждая команда настраивается отдельно в словаре `Commands` (без привязки к партиции). Партиции настраиваются в секции `Partitions`: ключ — максимальный Priority threshold, значение — макс. процессов. **Чем меньше Priority, тем выше приоритет.** Команда попадает в первый threshold >= Priority.
 
 **Приоритеты команд (CommandPriorityMap в `SlashCommandService.cs`):**
 
@@ -1125,21 +1098,6 @@ WHERE "Status" = 'processing'
   AND "Lease" < @CurrentTimeSec;
 ```
 
-### Очистка команд по таймауту
-
-```sql
--- Каждые 5 минут (фоновая задача)
-UPDATE "Commands"
-SET "Status" = 'pending',
-    "StartedAt" = NULL,
-    "CompletedAt" = NULL,
-    "ProcessId" = NULL,
-    "ErrorMessage" = 'Timeout: process exceeded maximum execution time',
-    "Lease" = NULL
-WHERE "Status" = 'processing'
-  AND "StartedAt" < NOW() - INTERVAL '@TimeoutSeconds seconds';
-```
-
 ### Отмена команды пользователем
 
 ```sql
@@ -1165,14 +1123,14 @@ WHERE CommandId = @CommandId
 | **Ограничение нагрузки** | Per-partition пулы процессов (SortedDictionary<int, SemaphoreSlim>) — каждая партиция имеет свой лимит |
 | **Приоритизация** | Высокоприоритетные команды (Priority=1) выполняются первыми (`ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC`) |
 | **Lease-механизм** | Защита от сбоев воркера — команды возвращаются в очередь при истечении TTL |
-| **Таймауты** | Принудительное завершение процессов при превышении лимита времени (`process.Kill(true)`) |
+| **Таймауты** | Принудительное завершение процессов при превышении `ProcessTimeoutMinutes` (`process.Kill(true)` + CancellationToken) |
 | **Трекинг PID** | Сохранение ProcessId для мониторинга и принудительного завершения |
 | **Отказоустойчивость** | Переподключение при потере соединения с БД (5 сек задержка) |
 | **Логирование** | Полное контекстное логирование всех операций и ошибок, включая stdout/stderr процессов |
 | **Изоляция компонентов** | Server и Worker независимы, общаются только через БД |
 | **Shutdown Worker** | Worker выполняет `PerformGracefulShutdownAsync()` при остановке: логирует активные процессы, ждёт до 30 сек их завершения, ожидает фоновые задачи (15 сек таймаут). Активные Revit/Navisworks не принудительно завершаются — их команды подхватываются при следующем запуске через Crash Recovery |
 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
-| **Lease (долгий TTL)** | Lease устанавливается на `ProcessTimeoutSeconds + 5 мин`, команда не вернётся в очередь раньше таймаута |
+| **Lease (долгий TTL)** | Lease устанавливается на `ProcessTimeoutMinutes + 5 мин`, команда не вернётся в очередь раньше таймаута |
 | **Валидация FilePath** | Проверка существования, расширения (из `AllowedExtensions`) и защита от path traversal перед запуском процесса |
 | **Асинхронное чтение stdout/stderr** | Предотвращает deadlock при заполнении буфера вывода (64KB) |
 | **Уведомления пользователей** | Worker шлёт NOTIFY `command_completed`, Server (`CommandNotificationService`) слушает и отправляет Telegram-сообщение через `ITelegramOutputService` с длительностью сессии и списком ошибочных файлов |
@@ -1197,7 +1155,7 @@ WHERE CommandId = @CommandId
 5. **Трекинг** — `_activeProcesses[CommandId] = process`
 6. **Статус** — `UpdateCommandStatus(Processing, ProcessId=PID)`
 7. **stdout/stderr** — асинхронное чтение через `BeginOutputReadLine / BeginErrorReadLine`
-8. **Ожидание** — `WaitForExit(ProcessTimeoutSeconds)`
+8. **Ожидание** — `WaitForExitAsync` с CancellationToken (таймаут `ProcessTimeoutMinutes` через `CancelAfter`)
 9. **Логирование** — stdout/stderr (обрезка >4KB)
 10. **Результат**:
     - Таймаут → `Kill(true)`, статус `Failed`
@@ -1405,7 +1363,7 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 | 1 | **Лимит процессов** | Для каждого уровня приоритета не выполняется более его лимита одновременно (по умолчанию: Critical=1 → 3, High=2 → 5, Medium=3 → 3, Low=4 → 1, Lowest=5+ → 1) |
 | 2 | **Приоритизация** | Высокоприоритетные команды стартуют раньше низкоприоритетных |
 | 3 | **Lease-механизм** | При сбое воркера команда возвращается в очередь после истечения Lease |
-| 4 | **Таймауты** | Процессы, выполняющиеся дольше `ProcessTimeoutSeconds` (по умолчанию 3 часа), принудительно завершаются |
+| 4 | **Таймауты** | Процессы, выполняющиеся дольше `ProcessTimeoutMinutes` (по умолчанию 3 часа), принудительно завершаются через CancellationToken |
 | 5 | **Трекинг PID** | ProcessId сохраняется для мониторинга и принудительного завершения |
 | 6 | **FOR UPDATE SKIP LOCKED** | Несколько воркеров могут работать параллельно без конфликтов |
 | 7 | **Shutdown Worker** | Graceful shutdown для внешних процессов не реализуется; остановка Worker не является отдельным сценарием завершения Revit/Navisworks |
@@ -1428,7 +1386,7 @@ Get-Process Revit* | Select-Object Id, StartTime, CPU
 | DOC-004 | **Партиции (priority-based)** — `SortedDictionary<int, SemaphoreSlim>` с threshold приоритета как ключ. Команды сортируются по `Priority ASC` (1=наивысший). Partition: Critical(1, 3 слота), High(2, 5), Medium(3, 3), Low(4, 1), Lowest(5+, 1) | Высокоприоритетные команды не ждут за низкоприоритетными | 🟠 MEDIUM | ✅ Реализовано (v1.1) |
 | DOC-005 | **Retry logic** — экспоненциальная задержка (base*2^attempt), лимит попыток (MaxRetries=5). Команда возвращается в `pending` с `NextRetryAt` | Самовосстановление при временных ошибках (файл заблокирован, сеть недоступна) | 🟠 MEDIUM | ✅ Реализовано (v1.2) |
 | DOC-006 | **Нет автоматических метрик** (Prometheus/Grafana) — только ручные SQL-запросы | Ограниченный мониторинг в production, сложность-alerting | 🟠 MEDIUM | В планах (v1.2) |
-| DOC-007 | **Координация очистки Lease** — `pg_try_advisory_lock(1234567)` перед каждой очисткой. Только один воркер выполняет `ReleaseExpiredLeasesAsync`/`ReleaseTimeoutCommandsAsync`, остальные пропускают цикл | Снижение нагрузки на БД при нескольких воркерах | 🟡 LOW | ✅ Реализовано (v1.2) |
+| DOC-007 | **Координация очистки Lease** — `pg_try_advisory_lock(1234567)` перед каждой очисткой. Только один воркер выполняет `ReleaseExpiredLeasesAsync`, остальные пропускают цикл | Снижение нагрузки на БД при нескольких воркерах | 🟡 LOW | ✅ Реализовано (v1.2) |
 | DOC-008 | **Graceful shutdown реализован** — Worker выполняет `PerformGracefulShutdownAsync()` при остановке: логирует активные процессы, ждёт до 30 сек их завершения, ожидает фоновые задачи (15 сек таймаут). Revit/Navisworks не принудительно завершаются — их команды подхватываются при следующем запуске через Crash Recovery | Риск deadlock на shutdown минимален: процессы не убиваются, но Worker ждёт их естественного завершения | 🟢 NONE | Зафиксировано |
 | DOC-009 | **Нет health checks** для Worker — нет эндпоинтов или механизмов проверки здоровья сервиса | Сложность мониторинга доступности в orchestration-системах | 🟡 LOW | Улучшение |
 | DOC-010 | **Нет ограничения очереди** — не описан лимит на количество pending-команд на пользователя/сессию | Риск разрастания таблицы при аномальной нагрузке | 🟡 LOW | Улучшение |

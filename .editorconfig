@@ -175,6 +175,14 @@ dotnet_diagnostic.VSTHRD200.severity = warning
 dotnet_diagnostic.VSTHRD100.severity = error
 
 # -------------------------------------------------------------------
+# ReSharper / Qodana — IDisposable resource discipline
+# Все инспекции — ERROR: утечка ресурсов должна блокировать сборку.
+# -------------------------------------------------------------------
+resharper_not_disposed_resource_highlighting = error
+resharper_dispose_on_non_disposable_type_highlighting = error
+resharper_use_await_using_highlighting = error
+
+# -------------------------------------------------------------------
 # Analyzer rules — Prefer primary constructors (IDE0290)
 # -------------------------------------------------------------------
 dotnet_diagnostic.IDE0290.severity = suggestion

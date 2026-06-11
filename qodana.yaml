@@ -15,6 +15,10 @@ dotnet:
 profile:
   name: qodana.recommended
 
+# Severity thresholds — fail build on any issue
+severityThresholds:
+  any: 0
+
 # Exclude directories
 exclude:
   - name: All
