@@ -138,6 +138,22 @@ public sealed class CommandDataService(
         return count > 0;
     }
 
+    /// <summary>Отправляет pg_notify о старте первого процесса сессии.</summary>
+    public async Task NotifySessionStartedAsync(int sessionId, string correlationId, long userId)
+    {
+        try
+        {
+            await using var conn = await CreateOpenConnectionAsync();
+            await conn.ExecuteAsync(
+                "SELECT pg_notify('session_started', @Payload)",
+                new { Payload = $"{sessionId}|{correlationId}|{userId}" });
+        }
+        catch (Exception e)
+        {
+            Logger.LogWarning(e, "Failed to send session_started notify for session {SessionId}", sessionId);
+        }
+    }
+
     /// <summary>Выполняет SQL-команду с обработкой ошибок и возвратом признака успеха.</summary>
     private async Task<bool> TryExecuteAsync(int commandId, string sql, object parameters, string operation)
     {

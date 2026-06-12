@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text;
@@ -278,7 +279,7 @@ public sealed class CommandPreparer(
     /// Если создание не удалось — только логируем предупреждение: плагин может получить
     /// параметры из аргументов командной строки.
     /// </summary>
-    public static void CreateTaskFile(PendingCommand cmd, string attemptToken)
+    public static void CreateTaskFile(PendingCommand cmd, string attemptToken, ILogger logger)
     {
         var (resultFilePath, taskFilePath) = GetTempFilePaths(cmd.CommandId, attemptToken);
 
@@ -306,7 +307,7 @@ public sealed class CommandPreparer(
         catch (Exception ex)
         {
             // Не фатально — плагин может получить данные из аргументов командной строки
-            System.Console.Error.WriteLine($"Warning: failed to create task file '{taskFilePath}': {ex.Message}");
+            logger.LogWarning("Failed to create task file '{TaskFilePath}': {Error}", taskFilePath, ex.Message);
         }
     }
 

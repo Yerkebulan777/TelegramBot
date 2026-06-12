@@ -1,12 +1,13 @@
 using Dapper;
 using Npgsql;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using TelegramBot.Data;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 /// <summary>
-/// Background service: слушает PostgreSQL LISTEN/NOTIFY на канале 'command_completed'.
+/// Background service: слушает PostgreSQL LISTEN/NOTIFY на каналах 'command_completed' и 'session_started'.
 /// При получении уведомления ставит задачу отправки в очередь.
 /// </summary>
 public sealed class CommandNotificationService(
@@ -16,6 +17,9 @@ public sealed class CommandNotificationService(
 {
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? DataAccessBase.DefaultConnectionString;
+
+    // Dedup: одно уведомление о старте на сессию; очищается при завершении
+    private readonly ConcurrentDictionary<int, byte> _startedSessions = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -34,14 +38,13 @@ public sealed class CommandNotificationService(
     {
         await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, stoppingToken);
 
-        _=await conn.ExecuteAsync("LISTEN command_completed;");
+        _=await conn.ExecuteAsync("LISTEN command_completed; LISTEN session_started;");
         conn.Notification += OnNotificationReceived;
 
-        logger.LogInformation("Command notifications listening: channel=command_completed");
+        logger.LogInformation("Command notifications listening: channels=command_completed,session_started");
 
         try
         {
-            // Держим соединение открытым — WaitAsync блокируется до получения NOTIFY
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -65,46 +68,62 @@ public sealed class CommandNotificationService(
     {
         try
         {
-            if (e.Payload == null)
+            if (e.Payload == null) return;
+
+            if (e.Channel == "session_started")
             {
+                OnSessionStarted(e.Payload);
                 return;
             }
 
-            // Payload: SessionId|CorrelationId
+            // command_completed — Payload: SessionId|CorrelationId
             var parts = e.Payload.Split('|', 2);
-            if (parts.Length != 2)
+            if (parts.Length != 2 || !int.TryParse(parts[0], out var sessionId) || string.IsNullOrWhiteSpace(parts[1]))
             {
                 logger.LogWarning("Completion notify ignored: reason=invalid_payload");
                 return;
             }
 
-            if (!int.TryParse(parts[0], out var sessionId))
-            {
-                logger.LogWarning("Completion notify ignored: reason=invalid_session");
-                return;
-            }
+            _startedSessions.TryRemove(sessionId, out _);
 
-            var correlationId = parts[1];
-            if (string.IsNullOrWhiteSpace(correlationId))
-            {
-                logger.LogWarning("Completion notify ignored: reason=invalid_correlation_id");
-                return;
-            }
-
-            var item = new NotificationItem(sessionId, correlationId);
+            var item = new NotificationItem(sessionId, parts[1]);
             if (!notificationChannel.Writer.TryWrite(item))
             {
-                logger.LogWarning("Completion notify dropped: reason=notification_channel_full, session={SessionId}, correlationId={CorrelationId}",
-                    sessionId, correlationId);
+                logger.LogWarning("Completion notify dropped: reason=channel_full, session={SessionId}", sessionId);
                 return;
             }
 
-            logger.LogDebug("Completion notify queued: session={SessionId}, correlationId={CorrelationId}",
-                sessionId, correlationId);
+            logger.LogDebug("Completion notify queued: session={SessionId}, correlationId={CorrelationId}", sessionId, parts[1]);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to enqueue command_completed notification");
+            logger.LogError(ex, "Failed to enqueue notification");
         }
+    }
+
+    private void OnSessionStarted(string payload)
+    {
+        // Payload: SessionId|CorrelationId|UserId
+        var parts = payload.Split('|', 3);
+        if (parts.Length != 3 || !int.TryParse(parts[0], out var sessionId) || !long.TryParse(parts[2], out var userId))
+        {
+            logger.LogWarning("Session started notify ignored: reason=invalid_payload");
+            return;
+        }
+
+        if (!_startedSessions.TryAdd(sessionId, 0))
+        {
+            return; // уже отправляли для этой сессии
+        }
+
+        var item = new NotificationItem(sessionId, parts[1], userId);
+        if (!notificationChannel.Writer.TryWrite(item))
+        {
+            _startedSessions.TryRemove(sessionId, out _);
+            logger.LogWarning("Started notify dropped: reason=channel_full, session={SessionId}", sessionId);
+            return;
+        }
+
+        logger.LogDebug("Started notify queued: session={SessionId}, correlationId={CorrelationId}", sessionId, parts[1]);
     }
 }

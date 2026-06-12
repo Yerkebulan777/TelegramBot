@@ -41,6 +41,14 @@ public sealed class NotificationSenderService(
     {
         try
         {
+            if (item.UserId.HasValue)
+            {
+                await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
+                logger.LogInformation("Session started notify sent: user={UserId}, session={SessionId}, correlationId={CorrelationId}",
+                    item.UserId.Value, item.SessionId, item.CorrelationId);
+                return;
+            }
+
             var session = await sessionDataService.GetSessionCompletionSummaryAsync(item.SessionId);
             var prefix = string.IsNullOrEmpty(session.ProjectName) ? "" : $"{session.ProjectName} — ";
             var durationPrefix = FormatDurationPrefix(session.DurationSeconds);

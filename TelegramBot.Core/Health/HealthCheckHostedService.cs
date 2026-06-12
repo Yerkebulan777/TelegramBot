@@ -51,10 +51,6 @@ public sealed class HealthCheckHostedService(
     {
         var port = _options.Port;
 
-        logger.LogInformation(
-            "Health check server starting on http://localhost:{Port}, service={Service}",
-            port, _options.ServiceName);
-
         var listener = new TcpListener(IPAddress.Loopback, port);
 
         try
@@ -63,13 +59,13 @@ public sealed class HealthCheckHostedService(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to start health check HTTP server on port {Port}", port);
+            logger.LogError(ex, "Health check server failed to start on port {Port}", port);
             return;
         }
 
         logger.LogInformation(
-            "Health check server started: http://localhost:{Port}/health, http://localhost:{Port}/health/live, http://localhost:{Port}/health/ready",
-            port, port, port);
+            "Health check ready: http://localhost:{Port}/health | /live | /ready  ({Service})",
+            port, _options.ServiceName);
 
         try
         {
@@ -223,13 +219,15 @@ public sealed class HealthCheckHostedService(
     /// </summary>
     private async Task<(int statusCode, string contentType, string body)> ServeReadinessAsync(CancellationToken ct)
     {
-        var dbStatus = await CheckDatabaseAsync(ct);
+        var dbOk = await CheckDatabaseAsync(ct);
 
-        if (dbStatus)
+        if (dbOk)
         {
+            logger.LogDebug("Health /ready: OK [db=ok]");
             return (200, "application/json", """{"status":"ready","database":"healthy"}""");
         }
 
+        logger.LogWarning("Health /ready: NOT READY [db=unavailable]");
         return (503, "application/json", """{"status":"not ready","database":"unhealthy"}""");
     }
 
@@ -278,13 +276,22 @@ public sealed class HealthCheckHostedService(
         }
 
         var allHealthy = checks.TrueForAll(c => c.Status == "healthy");
+        var uptime = GetUptime();
+
+        var checksLine = string.Join(", ", checks.Select(c =>
+            c.Status == "healthy" ? $"{c.Name}=ok" : $"{c.Name}=FAIL({c.Status})"));
+
+        if (allHealthy)
+            logger.LogDebug("Health /health: OK [{Checks}] uptime={Uptime}", checksLine, uptime);
+        else
+            logger.LogWarning("Health /health: UNHEALTHY [{Checks}] uptime={Uptime}", checksLine, uptime);
 
         var result = new HealthCheckResult
         {
             Status = allHealthy ? "healthy" : "unhealthy",
             Service = _options.ServiceName,
             Timestamp = DateTime.UtcNow.ToString("O"),
-            Uptime = GetUptime(),
+            Uptime = uptime,
             Version = GetVersion(),
             Checks = checks,
         };

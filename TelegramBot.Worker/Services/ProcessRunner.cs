@@ -94,8 +94,6 @@ public sealed class ProcessRunner(
                 removedProcess?.Dispose();
             }
 
-            logger.LogDebug("Completed: id={Id}, correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}",
-                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);
         }
     }
 
@@ -103,7 +101,7 @@ public sealed class ProcessRunner(
     private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, string attemptToken)
     {
         // Создаём task-файл для CAD-плагина перед запуском процесса
-        CommandPreparer.CreateTaskFile(cmd, attemptToken);
+        CommandPreparer.CreateTaskFile(cmd, attemptToken, logger);
 
         var startInfo = CommandPreparer.CreateProcessStartInfo(cmd, commandCfg, attemptToken);
 
@@ -114,6 +112,7 @@ public sealed class ProcessRunner(
         _ = process.Start();
         _activeProcesses[cmd.CommandId] = process;
         _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Processing, process.Id);
+        _ = commandDataService.NotifySessionStartedAsync(cmd.SessionId, cmd.CorrelationId, cmd.UserId);
 
         return process;
     }
@@ -211,15 +210,15 @@ public sealed class ProcessRunner(
             {
                 _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
                 logger.LogInformation(
-                    "Command result from plugin file: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}",
-                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status);
+                    "Command done (plugin): id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, elapsedMs={ElapsedMs}",
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, sw.ElapsedMilliseconds);
                 await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
                 return;
             }
 
-            logger.LogInformation(
-                "Command result from plugin file: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}",
-                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status);
+            logger.LogWarning(
+                "Command plugin failure: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, elapsedMs={ElapsedMs}, error={Error}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported failure");
             await HandleFailureAsync(cmd, result.ErrorMessage ?? "Plugin reported failure", null, sw);
             return;
         }
@@ -347,8 +346,8 @@ public sealed class ProcessRunner(
         {
             // InvalidFileError → сразу Failed, без retry
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
-            logger.LogError(ex, "Command {Cmd} ({Id}) failed with permanent error (no retry): correlationId={CorrelationId}, exitCode={ExitCode}, error={Msg}",
-                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, exitCode, errorMessage);
+            logger.LogError(ex, "Command {Cmd} ({Id}) failed with permanent error (no retry): correlationId={CorrelationId}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, exitCode, sw.ElapsedMilliseconds, errorMessage);
             await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
         }
         else if (cmd.RetryCount < _workerOptions.MaxRetries)
@@ -358,17 +357,17 @@ public sealed class ProcessRunner(
                 _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
             var newRetryCount = await commandDataService.ScheduleRetryAsync(
                 cmd.CommandId, nextRetryAt, errorMessage);
-            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next}, exitCode={ExitCode}, error={Msg}",
+            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
-                nextRetryAt.ToString("O"), exitCode, errorMessage);
+                nextRetryAt.ToString("O"), exitCode, sw.ElapsedMilliseconds, errorMessage);
             await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
         }
         else
         {
             // Исчерпаны все retry → Failed
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
-            logger.LogError(ex, "Command {Cmd} ({Id}) failed after attempts: correlationId={CorrelationId}, attempt={Attempt}, exitCode={ExitCode}, error={Msg}",
-                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, exitCode, errorMessage);
+            logger.LogError(ex, "Command {Cmd} ({Id}) failed after attempts: correlationId={CorrelationId}, attempt={Attempt}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, exitCode, sw.ElapsedMilliseconds, errorMessage);
             await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
         }
     }
@@ -382,7 +381,7 @@ public sealed class ProcessRunner(
                 ? $"{TruncateOutput(outputBuilder)} [TRUNCATED: 64KB limit reached]"
                 : TruncateOutput(outputBuilder);
             
-            logger.LogInformation("Output [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Output}",
+            logger.LogDebug("Output [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Output}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, outputTruncated, outputInfo);
         }
 
