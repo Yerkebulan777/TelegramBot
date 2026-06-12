@@ -18,4 +18,5 @@ public interface ITelegramOutputService
     Task EditMessageReplyMarkupAsync(long userId, int messageId, InlineKeyboardMarkup keyboard);
     Task EditMessageReplyTextAsync(long userId, int messageId, string message);
     Task EditMessageTextWithKeyboardAsync(long userId, int messageId, string message, InlineKeyboardMarkup keyboard);
+    Task SendChatActionAsync(long userId, CancellationToken cancellationToken = default);
 }

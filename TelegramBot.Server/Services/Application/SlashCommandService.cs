@@ -393,16 +393,15 @@ public sealed partial class SlashCommandService(
             "Job submit: user={UserId}, commands={CommandCount}, sections={SectionCount}",
             userId, session.PendingCommand.Count, selectedSections.Count);
 
-        // Immediate acknowledgment before the slow FS scan + DB work so the user
-        // sees progress and does not re-press Confirm. Tracked, so the cleanup at
-        // the end of this method (and SendWarningAndCleanupAsync on early returns) removes it.
+        // Remove reply keyboard immediately so the user cannot re-press Confirm.
+        // Tracked so ClearChatHistoryAsync removes it together with the rest.
         try
         {
-            _ = await TrackMessageAsync(outputService.SendMessageAsync(userId, "⏳ Обрабатываю запрос…"), session);
+            _ = await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, "…"), session);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to send or track immediate acknowledgment message for user {UserId}", userId);
+            logger.LogWarning(ex, "Failed to remove reply keyboard for user {UserId}", userId);
         }
 
         var commandNames = session.PendingCommandName;
@@ -411,47 +410,79 @@ public sealed partial class SlashCommandService(
             .Select(GetSafePathName)
             .ToArray();
 
-        var filesToProcess = await CollectRvtFilesAsync(selectedSections, cancellationToken);
-        if (filesToProcess.Count == 0)
+        using var typingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var typingTask = TypingLoopAsync(userId, typingCts.Token);
+
+        try
         {
-            logger.LogWarning("Job submit blocked: user={UserId}, reason=no_files_found", userId);
-            await SendWarningAndCleanupAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
-            return;
-        }
+            var filesToProcess = await CollectRvtFilesAsync(selectedSections, cancellationToken);
+            if (filesToProcess.Count == 0)
+            {
+                logger.LogWarning("Job submit blocked: user={UserId}, reason=no_files_found", userId);
+                await SendWarningAndCleanupAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
+                return;
+            }
 
-        if (!await CheckDailyFileLimitAsync(userId, session, filesToProcess.Count))
+            if (!await CheckDailyFileLimitAsync(userId, session, filesToProcess.Count))
+            {
+                return;
+            }
+
+            // Проверяем, нет ли уже таких же (команда + файл) в очереди
+            if (await dataServices.Commands.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
+            {
+                logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
+                await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
+                return;
+            }
+
+            var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
+
+            var priorities = session.PendingCommand
+                .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
+
+            var correlationId = Guid.NewGuid().ToString("N");
+            var sessionId = await dataServices.Sessions.CreateSessionWithCommandsAsync(
+                session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
+            logger.LogInformation(
+                "Job queued: session={SessionId}, correlationId={CorrelationId}, user={UserId}, commands={CommandCount}, files={FileCount}",
+                sessionId, correlationId, userId, session.PendingCommand.Count, filesToProcess.Count);
+
+            session.SessionId = checked((int)sessionId);
+            await outputService.ClearChatHistoryAsync(userId, session);
+
+            session.ResetNavigation(_options.RootPath);
+            session.ClearPendingCommands();
+            session.IsFileSelectionActive = false;
+
+            _ = await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
+        }
+        finally
         {
-            return;
+            await typingCts.CancelAsync();
+            try { await typingTask; } catch (OperationCanceledException) { }
         }
+    }
 
-        // Проверяем, нет ли уже таких же (команда + файл) в очереди
-        if (await dataServices.Commands.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
+    private async Task TypingLoopAsync(long userId, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
         {
-            logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
-            await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
-            return;
+            try
+            {
+                await outputService.SendChatActionAsync(userId, cancellationToken);
+                await Task.Delay(4000, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Typing indicator failed for user {UserId}", userId);
+                return;
+            }
         }
-
-        var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
-
-        var priorities = session.PendingCommand
-            .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
-
-        var correlationId = Guid.NewGuid().ToString("N");
-        var sessionId = await dataServices.Sessions.CreateSessionWithCommandsAsync(
-            session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
-        logger.LogInformation(
-            "Job queued: session={SessionId}, correlationId={CorrelationId}, user={UserId}, commands={CommandCount}, files={FileCount}",
-            sessionId, correlationId, userId, session.PendingCommand.Count, filesToProcess.Count);
-
-        session.SessionId = checked((int)sessionId);
-        await outputService.ClearChatHistoryAsync(userId, session);
-
-        session.ResetNavigation(_options.RootPath);
-        session.ClearPendingCommands();
-        session.IsFileSelectionActive = false;
-
-        _=await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
     }
 
     private async Task<bool> CheckDailyFileLimitAsync(long userId, UserSession session, int newFileCount)
@@ -649,21 +680,22 @@ public sealed partial class SlashCommandService(
         return string.IsNullOrWhiteSpace(name) ? path : name;
     }
 
-    private Task<List<string>> CollectRvtFilesAsync(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
+    private async Task<List<string>> CollectRvtFilesAsync(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
     {
-        return Task.Run(() =>
-        {
-            var allFiles = sectionPaths
-                .Select(_options.GetRvtPath)
-                .Where(Directory.Exists)
-                .AsParallel()
-                .WithCancellation(cancellationToken)
-                .SelectMany(EnumerateValidRvtFiles)
-                .ToList();
+        var rvtDirs = sectionPaths
+            .Select(_options.GetRvtPath)
+            .Where(Directory.Exists)
+            .ToArray();
 
-            return RevitFileDeduplicator.Deduplicate(allFiles);
+        if (rvtDirs.Length == 0)
+            return [];
 
-        }, cancellationToken);
+        var scanTasks = rvtDirs
+            .Select(dir => Task.Run(() => EnumerateValidRvtFiles(dir), cancellationToken));
+
+        var results = await Task.WhenAll(scanTasks);
+        var allFiles = results.SelectMany(f => f).ToList();
+        return RevitFileDeduplicator.Deduplicate(allFiles);
     }
 
     private static IEnumerable<string> EnumerateValidRvtFiles(string rvtDir)

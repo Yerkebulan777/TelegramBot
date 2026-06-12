@@ -193,6 +193,22 @@ public class TelegramOutputService(
         }
     }
 
+    public async Task SendChatActionAsync(long userId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await botClient.SendChatAction(chatId: userId, action: ChatAction.Typing, cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ApiRequestException ex)
+        {
+            logger.LogDebug(ex, "Failed to send chat action to {UserId}", userId);
+        }
+    }
+
     private static bool IsMessageNotModified(ApiRequestException ex)
     {
         return ex.ErrorCode == 400
