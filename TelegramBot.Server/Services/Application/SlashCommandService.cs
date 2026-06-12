@@ -416,7 +416,7 @@ public sealed partial class SlashCommandService(
             if (filesToProcess.Count == 0)
             {
                 logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=no_files_found", username, userId);
-                await RejectAndWarnAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
+                await RejectAndWarnAsync(userId, session, $"⚠️ В выбранных разделах проекта «{projectName}» не найдено файлов для обработки.");
                 return;
             }
 
@@ -429,7 +429,7 @@ public sealed partial class SlashCommandService(
             if (await dataServices.Commands.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
             {
                 logger.LogWarning("Job blocked: user={Username} ({UserId}), reason=duplicate_commands_in_queue", username, userId);
-                await RejectAndWarnAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
+                await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
                 return;
             }
 
