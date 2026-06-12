@@ -356,6 +356,9 @@ public sealed partial class SlashCommandService(
         if (!session.FileSelectionMessageId.HasValue)
         {
             logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=missing_file_selection_message", username, userId);
+            await RemoveReplyKeyboardAsync(userId, session, username);
+            session.IsFileSelectionActive = false;
+            session.ClearPendingCommands();
             await SendWarningAndCleanupAsync(userId, session, "Сообщение выбора файлов не найдено.");
             return;
         }
@@ -383,10 +386,15 @@ public sealed partial class SlashCommandService(
             return;
         }
 
+        // Remove reply keyboard immediately for final confirmation so it doesn't linger in any case.
+        await RemoveReplyKeyboardAsync(userId, session, username);
+        session.IsFileSelectionActive = false;
+
         var selectedSections = session.GetSelectedFiles();
         if (selectedSections.Count == 0)
         {
             logger.LogDebug("Job submit blocked: user={Username} ({UserId}), reason=no_sections_selected", username, userId);
+            session.ClearPendingCommands();
             await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите хотя бы один раздел.");
             return;
         }
@@ -394,17 +402,6 @@ public sealed partial class SlashCommandService(
         logger.LogDebug(
             "Job submit: user={Username} ({UserId}), commands={CommandCount}, sections={SectionCount}",
             username, userId, session.PendingCommand.Count, selectedSections.Count);
-
-        // Remove reply keyboard immediately so the user cannot re-press Confirm.
-        // Tracked so ClearChatHistoryAsync removes it together with the rest.
-        try
-        {
-            _ = await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, "…"), session);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to remove reply keyboard: user={Username} ({UserId})", username, userId);
-        }
 
         var commandNames = session.PendingCommandName;
         var projectName = GetCurrentProjectName(session);
@@ -421,6 +418,7 @@ public sealed partial class SlashCommandService(
             if (filesToProcess.Count == 0)
             {
                 logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=no_files_found", username, userId);
+                session.ClearPendingCommands();
                 await SendWarningAndCleanupAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
                 return;
             }
@@ -434,6 +432,7 @@ public sealed partial class SlashCommandService(
             if (await dataServices.Commands.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
             {
                 logger.LogWarning("Job blocked: user={Username} ({UserId}), reason=duplicate_commands_in_queue", username, userId);
+                session.ClearPendingCommands();
                 await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
                 return;
             }
@@ -511,6 +510,7 @@ public sealed partial class SlashCommandService(
             ? $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. Уже в очереди за 24 часа: {queuedToday}. Можно добавить ещё {remaining}."
             : $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. За последние 24 часа лимит уже исчерпан.";
 
+        session.ClearPendingCommands();
         await SendWarningAndCleanupAsync(userId, session, message);
         return false;
     }
@@ -615,6 +615,18 @@ public sealed partial class SlashCommandService(
             .Select(messageId => messageId!.Value);
 
         await outputService.ClearChatHistoryAsync(userId, session, keepMessageIds);
+    }
+
+    private async Task RemoveReplyKeyboardAsync(long userId, UserSession session, string username)
+    {
+        try
+        {
+            _ = await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, "…"), session);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to remove reply keyboard: user={Username} ({UserId})", username, userId);
+        }
     }
 
     private static string NormalizeCommandText(string text)
