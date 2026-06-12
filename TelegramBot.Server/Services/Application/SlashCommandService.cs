@@ -636,18 +636,23 @@ public sealed partial class SlashCommandService(
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var rvtDir = _options.GetRvtPath(sectionPath);
+
                 if (!Directory.Exists(rvtDir))
                 {
                     logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
                     continue;
                 }
 
-                // FileInfo.Length из WIN32_FIND_DATA — не требует отдельного stat() на каждый файл
                 var sectionFiles = new List<FileInfo>();
-                foreach (var fi in new DirectoryInfo(rvtDir).EnumerateFiles("*.rvt", _rvtEnumOptions))
+
+                var enumeratedFiles = new DirectoryInfo(rvtDir).EnumerateFiles("*.rvt", _rvtEnumOptions);
+
+                foreach (var fi in enumeratedFiles)
                 {
                     if (IsValidRevitFile(fi))
+                    {
                         sectionFiles.Add(fi);
+                    }
                 }
 
                 // Корневые папки приоритетнее вложенных; внутри одного уровня — по имени
@@ -660,11 +665,15 @@ public sealed partial class SlashCommandService(
                 });
 
                 foreach (var fi in sectionFiles)
+                {
                     allFiles.Add(fi.FullName);
+                }
             }
 
             if (allFiles.Count > 10)
+            {
                 allFiles = DeduplicateRevitFiles(allFiles);
+            }
 
             return allFiles;
         }, cancellationToken);
@@ -674,9 +683,20 @@ public sealed partial class SlashCommandService(
     {
         var name = Path.GetFileNameWithoutExtension(fi.Name);
 
-        if (name.Length is <10 or >50) return false;
-        if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase)) return false;
-        if (!RvtSectionPattern().IsMatch(name)) return false;
+        if (name.Length is <10 or >50)
+        {
+            return false;
+        }
+
+        if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!RvtSectionPattern().IsMatch(name))
+        {
+            return false;
+        }
 
         try { return fi.Length > _rvtMinFileSizeBytes; }
         catch (Exception) { return false; }
@@ -687,7 +707,9 @@ public sealed partial class SlashCommandService(
         // Pass 1: точные совпадения имён — берём первый (корень уже приоритетнее)
         var seen = new Dictionary<string, string>(files.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var file in files)
+        {
             _ = seen.TryAdd(Path.GetFileNameWithoutExtension(file)!, file);
+        }
 
         var candidates = new string[seen.Count];
         seen.Values.CopyTo(candidates, 0);
@@ -705,11 +727,17 @@ public sealed partial class SlashCommandService(
 
         for (var i = 0; i < candidates.Length; i++)
         {
-            if (toRemove.Contains(i)) continue;
+            if (toRemove.Contains(i))
+            {
+                continue;
+            }
 
             for (var j = i + 1; j < candidates.Length; j++)
             {
-                if (toRemove.Contains(j)) continue;
+                if (toRemove.Contains(j))
+                {
+                    continue;
+                }
 
                 if (CommonPrefixLength(names[i], names[j]) > 15 && numbers[i].Overlaps(numbers[j]))
                 {
@@ -728,7 +756,9 @@ public sealed partial class SlashCommandService(
         for (var idx = 0; idx < candidates.Length; idx++)
         {
             if (!toRemove.Contains(idx))
+            {
                 result.Add(candidates[idx]);
+            }
         }
 
         return result;
@@ -740,7 +770,9 @@ public sealed partial class SlashCommandService(
         foreach (Match m in RvtNumberPattern().Matches(name))
         {
             if (int.TryParse(m.Value, out var n))
-                result.Add(n);
+            {
+                _=result.Add(n);
+            }
         }
 
         return result;
@@ -751,7 +783,9 @@ public sealed partial class SlashCommandService(
         var len = Math.Min(a.Length, b.Length);
         var i = 0;
         while (i < len && char.ToUpperInvariant(a[i]) == char.ToUpperInvariant(b[i]))
+        {
             i++;
+        }
 
         return i;
     }
