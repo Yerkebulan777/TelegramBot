@@ -8,7 +8,6 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;
-using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
@@ -20,9 +19,7 @@ using Message = Telegram.Bot.Types.Message;
 namespace TelegramBot.Server.Services.Application;
 
 public sealed partial class SlashCommandService(
-    SessionDataService sessionDataService,
-    CommandDataService commandDataService,
-    MessageTrackingDataService messageTrackingDataService,
+    DataServices dataServices,
     ITelegramOutputService outputService,
     KeyboardBuilder keyboardBuilder,
     AuthorizationMiddleware accessValidator,
@@ -93,9 +90,9 @@ public sealed partial class SlashCommandService(
                 session.StatusPage = 1;
 
                 var pageSize = keyboardBuilder.DefaultPageSize;
-                var sessionsStatus = await sessionDataService.GetSessionsListFilteredAsync(
+                var sessionsStatus = await dataServices.Sessions.GetSessionsListFilteredAsync(
                     session.StatusFilter, session.StatusPage, pageSize);
-                var totalCount = await sessionDataService.CountSessionsFilteredAsync(session.StatusFilter);
+                var totalCount = await dataServices.Sessions.CountSessionsFilteredAsync(session.StatusFilter);
                 var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
 
                 var messageText = $"📋 Все сессии — стр. 1/{totalPages} (всего {totalCount})";
@@ -130,14 +127,11 @@ public sealed partial class SlashCommandService(
         }
     }
 
-    private async Task<UserCommandContext> ValidateUserContextAsync(
-        long userId,
-        string command,
-        MessageDto message,
-        UserSession session)
+    private async Task<UserCommandContext> ValidateUserContextAsync(long userId, string command, MessageDto message, UserSession session)
     {
-        var text = NormalizeCommandText(command);
         var username = message.Username!;
+
+        var text = NormalizeCommandText(command);
 
         ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
 
@@ -166,13 +160,16 @@ public sealed partial class SlashCommandService(
 
     private static CommandStrategy ResolveCommandStrategy(UserCommandContext context)
     {
-        return !context.HasAccess
-            ? CommandStrategy.AccessDenied
-            : context.Command == "/start"
-            ? CommandStrategy.Start
-            : IsCommandSelectionAction(context.RawText)
-            ? CommandStrategy.CommandSelectionAction
-            : CommandStrategy.SlashCommand;
+        return context.HasAccess switch
+        {
+            false => CommandStrategy.AccessDenied,
+            true => context.Command switch
+            {
+                "/start" => CommandStrategy.Start,
+                _ when IsCommandSelectionAction(context.RawText) => CommandStrategy.CommandSelectionAction,
+                _ => CommandStrategy.SlashCommand
+            }
+        };
     }
 
     private async Task<CommandExecutionResult> ExecuteBusinessLogicAsync(
@@ -283,35 +280,32 @@ public sealed partial class SlashCommandService(
             ButtonTexts.Confirm;
     }
 
-    private async Task<bool> HandleCommandSelectionActionsAsync(
-        long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
+    private async Task<bool> HandleCommandSelectionActionsAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
     {
-        if (messageText == ButtonTexts.Apply ||
-            (messageText == ButtonTexts.Confirm && !session.IsFileSelectionActive && session.PendingCommand.Count > 0))
+        switch (messageText)
         {
-            await ApplyCommandSelectionAsync(userId, username, session);
-            return true;
+            case ButtonTexts.Apply:
+            case ButtonTexts.Confirm when !session.IsFileSelectionActive && session.PendingCommand.Count > 0:
+                await ApplyCommandSelectionAsync(userId, username, session);
+                return true;
+
+            case ButtonTexts.Confirm when session.IsFileSelectionActive:
+                await ConfirmFileSelectionAsync(userId, username, session, cancellationToken);
+                return true;
+
+            case ButtonTexts.Cancel:
+                logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
+
+                await outputService.ClearChatHistoryAsync(userId, session);
+                session.Reset(_options.RootPath);
+
+                await SendHelpMessageAsync(userId, session);
+
+                return true;
+
+            default:
+                return false;
         }
-
-        if (messageText == ButtonTexts.Confirm && session.IsFileSelectionActive)
-        {
-            await ConfirmFileSelectionAsync(userId, username, session, cancellationToken);
-            return true;
-        }
-
-        if (messageText == ButtonTexts.Cancel)
-        {
-            logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
-
-            await outputService.ClearChatHistoryAsync(userId, session);
-            session.Reset(_options.RootPath);
-
-            await SendHelpMessageAsync(userId, session);
-
-            return true;
-        }
-
-        return false;
     }
 
     private async Task ApplyCommandSelectionAsync(long userId, string username, UserSession session)
@@ -323,10 +317,10 @@ public sealed partial class SlashCommandService(
             return;
         }
 
-        logger.LogDebug("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser",
-            username, userId, string.Join(", ", session.PendingCommand));
+        logger.LogDebug("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser", username, userId, string.Join(", ", session.PendingCommand));
 
         await outputService.ClearChatHistoryAsync(userId, session);
+
         session.CommandSelectionMessageId = null;
         session.CurrentPath = _options.RootPath;
         session.IsFileSelectionActive = true;
@@ -357,10 +351,10 @@ public sealed partial class SlashCommandService(
             }
 
             session.CurrentPath = Path.Combine(selectedProject, _options.ProjectDirectoryName);
+
             session.ClearSelectedFiles();
 
-            logger.LogDebug("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT",
-                username, userId, Path.GetFileName(selectedProject));
+            logger.LogDebug("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT", username, userId, Path.GetFileName(selectedProject));
 
             var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(userId, session);
             await outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
@@ -401,7 +395,7 @@ public sealed partial class SlashCommandService(
         }
 
         // Проверяем, нет ли уже таких же (команда + файл) в очереди
-        if (await commandDataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
+        if (await dataServices.Commands.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
         {
             logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
             await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
@@ -414,7 +408,7 @@ public sealed partial class SlashCommandService(
             .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
 
         var correlationId = Guid.NewGuid().ToString("N");
-        var sessionId = await sessionDataService.CreateSessionWithCommandsAsync(
+        var sessionId = await dataServices.Sessions.CreateSessionWithCommandsAsync(
             session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
         logger.LogInformation(
             "Job queued: session={SessionId}, correlationId={CorrelationId}, user={UserId}, commands={CommandCount}, files={FileCount}",
@@ -438,7 +432,7 @@ public sealed partial class SlashCommandService(
         }
 
         var sinceUtc = DateTime.UtcNow.AddDays(-1);
-        var queuedToday = await sessionDataService.CountQueuedFilesByUserSinceAsync(userId, sinceUtc);
+        var queuedToday = await dataServices.Sessions.CountQueuedFilesByUserSinceAsync(userId, sinceUtc);
         var remaining = _rateLimitOptions.MaxFilesPerUserPerDay - queuedToday;
 
         if (newFileCount <= remaining)
@@ -460,7 +454,7 @@ public sealed partial class SlashCommandService(
 
     private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
     {
-        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingDataService, userId, session,
+        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataServices.MessageTracking, userId, session,
                 _options.IsAtProjectLevel(session.CurrentPath)
                     ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
                     : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
@@ -515,7 +509,7 @@ public sealed partial class SlashCommandService(
         if (msg != null)
         {
             var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await messageTrackingDataService.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
+            await dataServices.MessageTracking.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
         }
         return msg;
     }
@@ -631,42 +625,18 @@ public sealed partial class SlashCommandService(
         {
             var allFiles = new List<string>();
 
-            foreach (var sectionPath in sectionPaths)
+            for (var idx = 0; idx < sectionPaths.Count; idx++)
             {
+                var sectionPath = sectionPaths.ElementAt(idx);
+
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var rvtDir = _options.GetRvtPath(sectionPath);
 
-                if (!Directory.Exists(rvtDir))
+                if (Directory.Exists(rvtDir))
                 {
-                    logger.LogWarning("RVT directory not found: {RvtDir}", rvtDir);
-                    continue;
-                }
-
-                var sectionFiles = new List<FileInfo>();
-
-                var enumeratedFiles = new DirectoryInfo(rvtDir).EnumerateFiles("*.rvt", _rvtEnumOptions);
-
-                foreach (var fi in enumeratedFiles)
-                {
-                    if (IsValidRevitFile(fi))
-                    {
-                        sectionFiles.Add(fi);
-                    }
-                }
-
-                // Корневые папки приоритетнее вложенных; внутри одного уровня — по имени
-                sectionFiles.Sort(static (a, b) =>
-                {
-                    var dirLenA = a.FullName.Length - a.Name.Length;
-                    var dirLenB = b.FullName.Length - b.Name.Length;
-                    var cmp = dirLenA.CompareTo(dirLenB);
-                    return cmp != 0 ? cmp : StringComparer.OrdinalIgnoreCase.Compare(a.FullName, b.FullName);
-                });
-
-                foreach (var fi in sectionFiles)
-                {
-                    allFiles.Add(fi.FullName);
+                    var enumerated = new DirectoryInfo(rvtDir).EnumerateFiles("*.rvt", _rvtEnumOptions);
+                    allFiles.AddRange(enumerated.Where(fi => IsValidRevitFile(fi)).Select(fi => fi.FullName));
                 }
             }
 
@@ -676,6 +646,7 @@ public sealed partial class SlashCommandService(
             }
 
             return allFiles;
+
         }, cancellationToken);
     }
 
@@ -704,60 +675,72 @@ public sealed partial class SlashCommandService(
 
     private static List<string> DeduplicateRevitFiles(List<string> files)
     {
-        // Pass 1: точные совпадения имён — берём первый (корень уже приоритетнее)
-        var seen = new Dictionary<string, string>(files.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var file in files)
+        // Отсекаем точные совпадения имён
+        var exactMatches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Храним: Путь, Имя, и Лениво вычисляемый HashSet чисел
+        var prefixGroups = new Dictionary<string, List<(string Path, string Name, Lazy<HashSet<int>> Numbers)>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in files)
         {
-            _ = seen.TryAdd(Path.GetFileNameWithoutExtension(file)!, file);
-        }
+            var name = Path.GetFileNameWithoutExtension(path)!;
 
-        var candidates = new string[seen.Count];
-        seen.Values.CopyTo(candidates, 0);
-
-        // Предвычисляем имена и числа — избегаем O(n²) пересчёта
-        var names = new string[candidates.Length];
-        var numbers = new HashSet<int>[candidates.Length];
-        for (var k = 0; k < candidates.Length; k++)
-        {
-            names[k] = Path.GetFileNameWithoutExtension(candidates[k])!;
-            numbers[k] = ExtractNumbers(names[k]);
-        }
-
-        var toRemove = new HashSet<int>();
-
-        for (var i = 0; i < candidates.Length; i++)
-        {
-            if (toRemove.Contains(i))
+            // 1. Пропускаем точные дубликаты
+            if (exactMatches.Add(name))
             {
-                continue;
-            }
+                // 2. Находим или создаем корзину
+                var prefix = name.Length > 15 ? name[..15] : name;
 
-            for (var j = i + 1; j < candidates.Length; j++)
-            {
-                if (toRemove.Contains(j))
+                if (!prefixGroups.TryGetValue(prefix, out var group))
                 {
-                    continue;
+                    group = [];
+                    prefixGroups[prefix] = group;
                 }
 
-                if (CommonPrefixLength(names[i], names[j]) > 15 && numbers[i].Overlaps(numbers[j]))
+                // Парсинг чисел отложен до момента реального обращения к .Value
+                var lazyNumbers = new Lazy<HashSet<int>>(() => ExtractNumbers(name));
+
+                var shouldAdd = true;
+
+                // 3. Сравниваем текущий файл с теми, что уже выжили в этой корзине
+                // Идём с конца, чтобы безопасно удалять элементы по индексу
+                for (var i = group.Count - 1; i >= 0; i--)
                 {
-                    if (names[i].Length >= names[j].Length)
+                    var accepted = group[i];
+
+                    // Только здесь мы реально парсим числа (если до этого дошло)
+                    if (lazyNumbers.Value.Overlaps(accepted.Numbers.Value))
                     {
-                        _ = toRemove.Add(i);
-                        break;
+                        // По логике оригинала: оставляем самое короткое имя.
+                        // При равной длине старый код удалял первый элемент (accepted).
+                        if (name.Length <= accepted.Name.Length)
+                        {
+                            // Новый файл лучше — выкидываем старый
+                            group.RemoveAt(i);
+                        }
+                        else
+                        {
+                            // Старый файл лучше — выкидываем новый и прекращаем проверки
+                            shouldAdd = false;
+                            break;
+                        }
                     }
+                }
 
-                    _ = toRemove.Add(j);
+                if (shouldAdd)
+                {
+                    group.Add((path, name, lazyNumbers));
                 }
             }
         }
 
-        var result = new List<string>(candidates.Length - toRemove.Count);
-        for (var idx = 0; idx < candidates.Length; idx++)
+        // 4. Сливаем результаты из всех корзин
+        var result = new List<string>(exactMatches.Count);
+        foreach (var group in prefixGroups.Values)
         {
-            if (!toRemove.Contains(idx))
+            foreach (var item in group)
             {
-                result.Add(candidates[idx]);
+                result.Add(item.Path);
             }
         }
 
@@ -778,24 +761,12 @@ public sealed partial class SlashCommandService(
         return result;
     }
 
-    private static int CommonPrefixLength(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
-    {
-        var len = Math.Min(a.Length, b.Length);
-        var i = 0;
-        while (i < len && char.ToUpperInvariant(a[i]) == char.ToUpperInvariant(b[i]))
-        {
-            i++;
-        }
-
-        return i;
-    }
-
     private enum CommandStrategy
     {
-        AccessDenied,
         Start,
+        AccessDenied,
         CommandSelectionAction,
-        SlashCommand
+        SlashCommand,
     }
 
     private enum CommandExecutionStatus

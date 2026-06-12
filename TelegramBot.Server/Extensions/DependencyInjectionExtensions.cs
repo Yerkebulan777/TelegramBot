@@ -80,6 +80,7 @@ public static class DependencyInjectionExtensions
         _=services.AddSingleton<CommandDataService>();
         _=services.AddSingleton<SessionDataService>();
         _=services.AddSingleton<MessageTrackingDataService>();
+        _=services.AddSingleton<DataServices>();
         _=services.AddSingleton<DatabaseInitializerService>();
         _=services.AddSingleton<FileSystemBrowser>();
 
