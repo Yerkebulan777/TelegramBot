@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using System.Text;
+using System.Text.RegularExpressions;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
@@ -41,6 +42,23 @@ public sealed class SlashCommandService(
 
     private readonly FileSystemOptions _options = fileSystemOptions.Value;
     private readonly RateLimitOptions _rateLimitOptions = rateLimitOptions.Value;
+
+    private static readonly Regex _rvtSectionPattern = new(
+        @"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex _rvtNumberPattern = new(@"\d{2,}", RegexOptions.Compiled);
+
+    private const long _rvtMinFileSizeBytes = 50L * 1024 * 1024;
+
+    private static readonly EnumerationOptions _rvtEnumOptions = new()
+    {
+        RecurseSubdirectories = true,
+        MaxRecursionDepth = 3,
+        IgnoreInaccessible = true,
+        MatchCasing = MatchCasing.CaseInsensitive,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+    };
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
@@ -613,16 +631,15 @@ public sealed class SlashCommandService(
 
     /// <summary>
     /// Асинхронно собирает RVT-файлы из указанных секций.
-    /// Файловое I/O (Directory.EnumerateFiles, Directory.Exists) выполняется
-    /// в пуле потоков через <see cref="Task.Run"/>, чтобы не блокировать
-    /// цикл обработки сообщений Telegram.
+    /// Файловое I/O выполняется в пуле потоков через <see cref="Task.Run"/>.
+    /// Поиск ведётся рекурсивно внутри папки 01_RVT (файлы и вложенные папки).
+    /// Применяются фильтры по размеру, имени, паттерну и дедупликация при >10 файлах.
     /// </summary>
     private Task<List<string>> CollectRvtFilesAsync(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
     {
-        // Offload синхронного файлового I/O в пул потоков
         return Task.Run(() =>
         {
-            var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var allFiles = new List<string>();
 
             foreach (var sectionPath in sectionPaths)
             {
@@ -635,17 +652,112 @@ public sealed class SlashCommandService(
                     continue;
                 }
 
-                foreach (var file in Directory.EnumerateFiles(rvtDir))
-                {
-                    if (_options.IsRevitFile(file))
-                    {
-                        _=files.Add(file);
-                    }
-                }
+                // Поиск до 3 уровней вложенности; inaccessible папки пропускаются
+                var sectionFiles = Directory
+                    .EnumerateFiles(rvtDir, "*.rvt", _rvtEnumOptions)
+                    .Where(IsValidRevitFile)
+                    .Select(f => (File: f, DirLen: Path.GetDirectoryName(f)!.Length))
+                    .OrderBy(x => x.DirLen)
+                    .ThenBy(x => x.File, StringComparer.OrdinalIgnoreCase)
+                    .Select(x => x.File);
+
+                allFiles.AddRange(sectionFiles);
             }
 
-            return files.ToList();
+            if (allFiles.Count > 10)
+                allFiles = DeduplicateRevitFiles(allFiles);
+
+            return allFiles;
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Фильтрует один RVT-файл по всем правилам:
+    /// размер >50 МБ, имя не оканчивается на "отсоединено",
+    /// длина имени 10–50 символов, соответствие основному паттерну секции.
+    /// </summary>
+    private static bool IsValidRevitFile(string filePath)
+    {
+        var name = Path.GetFileNameWithoutExtension(filePath);
+
+        // Дешёвые проверки первыми — до обращения к диску
+        if (name.Length < 10 || name.Length > 50)
+            return false;
+
+        if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (!_rvtSectionPattern.IsMatch(name))
+            return false;
+
+        try
+        {
+            return new FileInfo(filePath).Length > _rvtMinFileSizeBytes;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Убирает дубли при >10 файлах.
+    /// Полное совпадение имён — берём первый по порядку (корневая папка приоритетнее).
+    /// Частичное совпадение (общий префикс >15 симв.) + одинаковое число — берём короткое.
+    /// </summary>
+    private static List<string> DeduplicateRevitFiles(List<string> files)
+    {
+        // Pass 1: точные совпадения имён — берём первый (корень уже приоритетнее)
+        var seen = new Dictionary<string, string>(files.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var file in files)
+            seen.TryAdd(Path.GetFileNameWithoutExtension(file)!, file);
+
+        var candidates = seen.Values.ToArray();
+
+        // Предвычисляем имена и числа — избегаем O(n²) пересчёта
+        var names = Array.ConvertAll(candidates, f => Path.GetFileNameWithoutExtension(f)!);
+        var numbers = Array.ConvertAll(names, ExtractNumbers);
+
+        var toRemove = new HashSet<int>();
+
+        for (var i = 0; i < candidates.Length; i++)
+        {
+            if (toRemove.Contains(i)) continue;
+
+            for (var j = i + 1; j < candidates.Length; j++)
+            {
+                if (toRemove.Contains(j)) continue;
+
+                if (CommonPrefixLength(names[i], names[j]) > 15 && numbers[i].Overlaps(numbers[j]))
+                {
+                    if (names[i].Length >= names[j].Length)
+                    {
+                        toRemove.Add(i);
+                        break; // i помечен — прерываем внутренний цикл
+                    }
+
+                    toRemove.Add(j);
+                }
+            }
+        }
+
+        return candidates
+            .Where((_, idx) => !toRemove.Contains(idx))
+            .ToList();
+    }
+
+    private static HashSet<int> ExtractNumbers(string name) =>
+        new(_rvtNumberPattern.Matches(name)
+            .Select(m => int.TryParse(m.Value, out var n) ? n : -1)
+            .Where(n => n >= 0));
+
+    private static int CommonPrefixLength(string a, string b)
+    {
+        var len = Math.Min(a.Length, b.Length);
+        var i = 0;
+        while (i < len && char.ToUpperInvariant(a[i]) == char.ToUpperInvariant(b[i]))
+            i++;
+        return i;
     }
 
     private enum CommandStrategy
