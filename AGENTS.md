@@ -7,8 +7,9 @@ Guidance for agentic coding agents working in this repository.
 | Документ | Описание |
 |----------|----------|
 | [README.md](README.md) | Обзор проекта, запуск, конфигурация, команды бота |
-| [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, SQL-запросы |
+| [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, схема БД, SQL-запросы |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
+| [Docs/CriticalReview.md](Docs/CriticalReview.md) | Открытые архитектурные проблемы и узкие места |
 | **AGENTS.md** (текущий файл) | Архитектура, BimLib, DI, code style, константы для AI-агентов |
 
 ## Project Overview
@@ -24,7 +25,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
                 └── BimLib/ (BIM-интеграция)
 ```
 
-- **TelegramBot.Core** — Models, DTOs, interfaces, config, constants. Zero Telegram SDK dependency.
+- **TelegramBot.Core** — Models, DTOs, interfaces, config, constants, `RateLimiter`, `HealthCheckHostedService`. Zero Telegram SDK dependency.
 - **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
 - **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Polls PostgreSQL for pending commands. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
@@ -62,9 +63,9 @@ dotnet format TelegramBot.slnx
 
 Подробная конфигурация с примерами — в [README.md](README.md#конфигурация).
 
-- `TelegramBot.Server/appsettings.json` — committed, Serilog, `FileSystem`, `ConnectionStrings:Postgres`
+- `TelegramBot.Server/appsettings.json` — committed, Serilog, `FileSystem`, `ConnectionStrings:Postgres`, `RateLimit`
 - `TelegramBot.Server/appsettings.Local.json` — **gitignored**, secrets (bot token)
-- `TelegramBot.Worker/appsettings.json` — committed, `ConnectionStrings:Postgres`
+- `TelegramBot.Worker/appsettings.json` — committed, `ConnectionStrings:Postgres`, `BimIntegration`, `Worker`, `DialogDismisser`
 - Required keys: `TelegramBot:Token`, `TelegramBot:AdminUserIds`, `FileSystem:RootPath`, `ConnectionStrings:Postgres`, `RateLimit:MaxFilesPerUserPerDay`, `Worker:CompletedSessionRetentionDays`
 - **HealthCheck** section: `Port` (5000 Server / 5001 Worker), `ServiceName`, `CacheSeconds`, `DbCheckTimeoutSeconds`
 
@@ -73,43 +74,95 @@ dotnet format TelegramBot.slnx
 ## Architecture & Request Flow
 
 ```
-Telegram API -> TelegramBotHostedService (polling)
+Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
+             -> Update channel (bounded 200) -> Parallel.ForEachAsync (MaxDegree=10)
              -> TelegramUpdateMapper (Update -> MessageDto | CallbackQueryDto)
+             -> per-user SemaphoreSlim (SessionManager.AcquireUserLockAsync)
              -> CommandAppService.HandleUserCommandAsync (text commands)
                 ├── /start bypasses access check → registration or help
                 └── other commands → BotUsers.Status must be Approved
-             -> CallbackDispatcher.DispatchAsync (inline keyboard callbacks)
+             -> CommandAppService.HandleCallbackAsync (inline keyboard callbacks)
                 ├── REQACCESS/APPROVEUSER/REJECTUSER bypass access check
                 └── all other callbacks → user must be Approved
+                → CallbackDispatcher (O(1) prefix→handler map)
+                   → ICallbackHandler chain
+```
+
+### TelegramBotHostedService — параллельная обработка
+
+`TelegramBotHostedService` использует `Channel<Update>` (capacity 200) и `Parallel.ForEachAsync` с `MaxDegreeOfParallelism = 10`:
+
+- SDK `StartReceiving` кладёт обновления в канал (`HandleUpdateAsync` → `WriteAsync`)
+- `ProcessUpdatesAsync` параллельно читает и обрабатывает (`MaxConcurrentUpdates = 10`)
+- Per-user блокировка через `SessionManager.AcquireUserLockAsync` гарантирует, что обновления одного пользователя обрабатываются последовательно
+
+### Server Components
+
+| Слой | Компонент | Роль |
+|------|-----------|------|
+| Infrastructure | `TelegramBotHostedService` | Long-polling + параллельная обработка + graceful shutdown |
+| Infrastructure | `TelegramUpdateMapper` | `Update` → `MessageDto`/`CallbackQueryDto` |
+| Infrastructure | `TelegramOutputService` | Обёртка над `ITelegramBotClient`: `SendMessageAsync`, `EditMessageReplyMarkupAsync`, `AnswerCallbackAsync`, `SendChatActionAsync`, `SendMessageWithReplyKeyboardAsync`, `RemoveReplyKeyboardAsync`. HTTP 429 retry |
+| Infrastructure | `KeyboardBuilder` | Inline- и reply-клавиатуры: секции, команды, фильтры `/status`, сессии, пагинация. `DefaultPageSize = 10` |
+| Infrastructure | `FileSystemBrowser` | Навигация по `RootPath` → проекты → `01_PROJECT/<project>/<раздел>/` → `01_RVT/*.rvt` |
+| Infrastructure | `CommandNotificationService` | `BackgroundService`: слушает PostgreSQL `LISTEN command_completed` и `LISTEN session_started` (синхронный event handler → `Channel<NotificationItem>.Writer.TryWrite`) |
+| Infrastructure | `NotificationSenderService` | `BackgroundService`: `await foreach` на том же канале, шлёт в Telegram. Формат: "⚙️ Задание запущено" на старте сессии, summary на завершении |
+| Application | `CommandAppService` | Rate-limit → session creation → post-restart cleanup → `SlashCommandService` |
+| Application | `SlashCommandService` | Обработка `/start`/`/export`/`/automation`/`/status`/`/help`, кнопок `Apply`/`Confirm`/`Cancel`. Сканирует `01_RVT/*.rvt` через `RevitFileDeduplicator`, проверяет daily limit, вставляет сессию в БД. Показывает индикатор «печатает…» |
+| Application | `RevitFileDeduplicator` | Удаляет дубликаты RVT-файлов: exact-name dedup + grouping по первым 15 символам имени + numeric-token overlap (короткое имя выигрывает) |
+| Application | `CallbackDispatcher` | O(1) lookup префикса → handler (кэшированный `Dictionary<prefix, handler>`) |
+| Application | `SessionManager` | `ConcurrentDictionary<long, UserSession>`. Per-user `SemaphoreSlim` для сериализации обновлений. Lazy + background cleanup (раз в 30 мин). Безопасное удаление семафоров: проверка `CurrentCount == 1` |
+| Application | `DataServices` | Aggregate-обёртка: `Sessions` / `Commands` / `MessageTracking` — устраняет двойную DI-регистрацию |
+| Application | `DataServices` | Aggregate-обёртка: `Sessions` / `Commands` / `MessageTracking` |
+| Middleware | `AuthorizationMiddleware` | Валидация доступа, `BypassesAccessCheck` для access-related callback-ов, optimistic refresh админа через `UpdatedAt` |
+| Handlers | `AccessRequestHandler` (P=0) | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` — отправляет запрос всем админам |
+| Handlers | `FileNavigationHandler` (P=10) | `GOTOPARENT:` — навигация в выбранную папку с проверкой `IsPathWithinRoot` |
+| Handlers | `FileSelectionHandler` (P=20) | Тоггл выбора файла/папки |
+| Handlers | `CommandToggleHandler` (P=100) | Тоггл выбора команды (`PDF:`, `DWG:`, `IFC:` и т.д.) |
+| Handlers | `SessionManagementHandler` (P=100) | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`, `STATUSPAGE:` |
+| Handlers | `CommandSelectionHandler` (P=100) | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
+| Helpers | `HandlerHelpers` | `SendActionsReplyKeyboardAsync` (общий для SlashCommandService, FileNavigationHandler, CommandSelectionHandler) |
+| Helpers | `MarkdownHelper` | `Escape(text, ParseMode)` для Markdown/MarkdownV2 |
+| Config | `BotCommandsSetup` | `ConfigureAsync` — устанавливает список команд бота через Telegram API |
+
+**DI registration** — в `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`:
+
+```csharp
+.AddCallbackHandlers()      // 6 ICallbackHandler + CallbackDispatcher
+.AddApplicationServices()   // CommandAppService, AuthorizationMiddleware, RateLimiter, SlashCommandService, SessionManager
+.AddInfrastructureServices()// DataServices, DatabaseInitializerService, FileSystemBrowser
+.AddTelegramServices()      // ITelegramBotClient, ITelegramOutputService, TelegramUpdateMapper, KeyboardBuilder, Channel<NotificationItem>, 3 hosted services
+.AddHealthCheckServices()   // HealthCheckHostedService + notificationChannel check
 ```
 
 ### BimLib (BIM Integration) — embedded in Worker
 
-BimLib is a **Windows-only** set of modules located inside the Worker project (`TelegramBot.Worker/BimLib/`). It provides BIM-related infrastructure used by `CommandExecutionService`.
+BimLib is a **Windows-only** set of modules located inside the Worker project (`TelegramBot.Worker/BimLib/`). It provides BIM-related infrastructure used by `CommandExecutionService` and `CommandPreparer`. Marked `[SupportedOSPlatform("windows")]` and assembled via `[assembly: SupportedOSPlatform("windows")]` in `Worker/Program.cs`.
 
 **Structure:**
 
 | Folder | Contents |
 |--------|----------|
-| `Config/` | `BimIntegrationOptions` — min/max supported Revit version, install root path |
-| `Models/` | `RevitDetectedVersion`, `RevitProcessHealth` (status: Healthy/NotResponding/Error) |
-| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `ProcessHealthHelper`, `DialogDismisser`, `WindowUtil`, `WindowInfo` |
-| `Native/` | P/Invoke WinAPI declarations: `User32`, `Win32Consts` |
+| `Config/` | `BimIntegrationOptions` — min/max supported Revit version (default 2018–2026), `RevitInstallRoot`; `DialogDismisserOptions` — `MaxDismissAttempts`, `KnownDialogPatterns`, `CloseButtonTexts`, `ExclusionDialogTitles` |
+| `Models/` | `RevitDetectedVersion` (Year, DisplayName, IsSupported, ExecutablePath), `RevitProcessHealth` (status: `Healthy`/`NotResponding`/`Error`, MemoryMb, Duration) |
+| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `ProcessHealthHelper` (static `CheckHealth`), `DialogDismisser`, `WindowUtil`, `WindowInfo` |
+| `Native/` | P/Invoke WinAPI: `User32`, `Win32Types`, `WinApiHelper` (с настраиваемым `ILogger` для safe error logging) |
 | `Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver` |
+| `Interfaces/` | (пусто) — все интерфейсы удалены в v1.4, остались только concrete-классы |
 
 **Key services:**
 
 | Service | Role |
 |---------|------|
-| `RevitVersionDetector` | Reads OLE stream `BasicFileInfo` from .rvt/.rfa via OpenMcdf to extract `Format: YYYY` |
-| `RevitPathResolver` | Finds `Revit.exe` path via Windows Registry (`HKLM\SOFTWARE\Autodesk\Revit\{version}`) |
-| `NavisworksPathResolver` | Finds `Navisworks.exe`/`FileConvert.exe` via Windows Registry |
-| `RevitProcessTracker` | Monitors Revit processes: responsiveness, dialog dismissal, PID tracking (uses `ProcessHealthHelper`) |
-| `NavisworksProcessTracker` | Monitors Navisworks processes (Roamer, FileConvert) (uses `ProcessHealthHelper`) |
-| `ProcessHealthHelper` | Static helper for `CheckHealth()` — shared between both process trackers |
-| `DialogDismisser` | Auto-closes modal Revit dialogs (#32770) by finding and clicking known buttons |
+| `RevitVersionDetector` | Читает OLE-стрим `BasicFileInfo` из .rvt/.rfa через OpenMcdf, извлекает `Format: YYYY`. Поддерживает `.rvt`, `.rfa`, `.rte`. Возвращает `RevitDetectedVersion` с `Year` (2017–2026 supported) и `ExecutablePath` от `RevitPathResolver` |
+| `RevitPathResolver` | Резолвит `Revit.exe` через реестр Windows: `HKLM\SOFTWARE\Autodesk\Revit\{version}` (fallback `\Revit{version}` и `WOW6432Node`), ищет подраздел с префиксом `REVIT-`, читает `InstallationLocation` |
+| `NavisworksPathResolver` | Резолвит `FileConvert.exe` / `Roamer.exe` / `Navisworks.exe`. Реестр: `HKLM\SOFTWARE\Autodesk\Navisworks\R{year}` или `NavisworksManage\R{year}` |
+| `RevitProcessTracker` | Мониторит Revit-процессы: responsiveness (MainWindowHandle), `DialogDismisser.DismissDialogsForProcess`, PID tracking |
+| `NavisworksProcessTracker` | Мониторит Navisworks-процессы (Roamer, FileConvert) |
+| `ProcessHealthHelper` | Статический `CheckHealth(Process, ILogger, context)`: `RevitingResponseStatus` по IsResponding + memory sampling |
+| `DialogDismisser` | Авто-закрывает модальные окна Revit/Navisworks (#32770): ищет окна по `KnownDialogPatterns`, нажимает кнопки из `CloseButtonTexts`. Исключает информационные диалоги (`ExclusionDialogTitles`) |
 
-**DI registration:** BimLib services are registered directly in `Worker/Program.cs` (no separate `AddBimIntegration()` extension method):
+**DI registration** в `Worker/Program.cs`:
 ```csharp
 services.AddSingleton<RevitVersionDetector>();
 services.AddSingleton<RevitPathResolver>();
@@ -118,7 +171,7 @@ services.AddSingleton<DialogDismisser>();
 services.AddSingleton<NavisworksPathResolver>();
 services.AddSingleton<NavisworksProcessTracker>();
 ```
-Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
+Требует `BimIntegrationOptions` (секция `BimIntegration`) и `DialogDismisserOptions` (секция `DialogDismisser`) в `appsettings.json`.
 
 **Namespaces:**
 - `TelegramBot.Worker.BimLib.Config`
@@ -129,54 +182,55 @@ Requires `BimIntegrationOptions` config section in Worker's `appsettings.json`.
 
 ### Worker Components
 
-`CommandExecutionService` is a slim orchestrator delegating to:
+`CommandExecutionService` — slim orchestrator, делегирующий на:
 
 | Component | Role |
 |-----------|------|
-| `PartitionPoolManager` | Per-priority `SortedDictionary<int, SemaphoreSlim>` pools. `IDisposable`. |
-| `CommandPreparer` | Validates FilePath, resolves BIM executables via BimLib, creates `ProcessStartInfo`. Clones `CommandConfig` before mutating (never mutates shared `IOptions` objects). |
-| `ProcessRunner` | `RunAsync(cmd, ct)`: execute → timeout/retry → dispose. Owns `_activeProcesses`. Uses unique `attemptToken` (GUID) per execution attempt for temp-file isolation. Cleans up temp files in `finally`. |
-| `SessionCompletionTracker` | In-memory `ConcurrentDictionary<int,int>` counter + DB confirmation for notifications |
-| `SessionCleanupService` | `BackgroundService`: soft-deletes inactive sessions older than `CompletedSessionRetentionDays`. `0` disables. |
+| `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `ScheduleRetryAsync` (NextRetryAt + RetryCount), `NotifySessionStartedAsync` (pg_notify), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
+| `PartitionPoolManager` | `SortedDictionary<int, SemaphoreSlim>` по priority. `Initialize(partitions)`, `WaitForSlotAsync(priority)`, `ReleaseSlot(priority)`, `TotalCapacity`. `GetThreshold(priority)` = первый threshold ≥ priority. Over-release guard |
+| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (Revit через BimLib, Navisworks через BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{FilePath}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`), `CleanupTempFiles` |
+| `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс, регистрирует в `_activeProcesses`, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
+| `SessionCompletionTracker` | `ConcurrentDictionary<int, int> _sessionRemaining`. `TrackClaimedCommands(claimed)` (AddOrUpdate с GroupBy SessionId) + `OnCommandCompletedAsync` (AddOrUpdate с -1, при 0 → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `pg_notify('command_completed', SessionId|CorrelationId)`) |
+| `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
 
-**Key behaviour changes (v1.7):**
-- **`CommandExecutionService`** uses a **drain loop** (`DrainPendingCommandsAsync`) instead of blocking `Task.WhenAll`. Commands are fired as background tasks and immediately tries to claim more, eliminating head-of-line blocking. Tracks running tasks via `_runningTasks` (HashSet with lock) for shutdown.
-- **`CommandPreparer.PrepareAsync`** creates a **clone of `CommandConfig`** before setting `ExecutablePath`, avoiding data races on the shared `IOptions` singleton.
-- **`CommandPreparer.CreateTaskFile`** uses atomic write (`.tmp` + `File.Move`) and accepts an `attemptToken` for unique temp-file names per attempt.
-- **`ProcessRunner`** generates a unique `attemptToken` (Guid) per attempt. All temp files include this nonce: `task_{CommandId}_{nonce}.json`, `result_{CommandId}_{nonce}.json`. Temp files are cleaned up in `finally` via `CommandPreparer.CleanupTempFiles`.
+**Drain loop (v1.7):** `CommandExecutionService.DrainPendingCommandsAsync` — claim'ит пачку (`DefaultBatchSize = 5`), запускает каждую команду как background `Task`, сразу пытается claim'ить ещё. Это устраняет head-of-line blocking, когда одна долгая команда (3h Revit timeout) блокирует остальные 4 из батча. Трекинг выполняемых задач через `_runningTasks` (HashSet + lock) для корректного shutdown.
 
-**Current reliability and runtime behavior:**
-- **`RateLimiter`**: Упрощён до единого `lock` на уровне `RequestWindow`. Очистка и проверка в одной критической секции. Удалён избыточный флаг `CleanupInProgress`.
-- **`SessionManager`**: Безопасное удаление семафоров при `RemoveSession` с проверкой `CurrentCount == 1`. Устранена утечка памяти `_sessionLocks`.
-- **`ProcessRunner`**: Потоковая обработка stdout/stderr через `OutputDataReceived` с лимитом 64KB вместо `BlockingCollection`. Plugin-reported `failed` проходит через `HandleFailureAsync()` и `ErrorClassifier`; битый/unreadable result JSON не падает в fallback по exit code.
-- **`CommandExecutionService`**: `LISTEN new_tasks` выполняется до первого drain; shutdown имеет общий bounded budget, фоновые задачи отменяются в начале, активные процессы завершаются параллельно.
-- **`PartitionPoolManager`**: Исправлена логика приоритетов в `GetThreshold`. Добавлена валидация и логирование переполнения в `ReleaseSlot`.
-- **`CallbackDispatcher`**: Кэшированный словарь `_handlerMap` для поиска обработчиков O(1) вместо линейного перебора O(n).
-- **`SessionCompletionTracker`**: In-memory счётчик `_sessionRemaining` + DB confirmation через `CountPendingProcessingBySessionAsync`, чтобы не отправлять уведомление раньше завершения всей сессии. `NotifySessionCompletedOnceAsync()` использует `Sessions.CompletionNotified`, чтобы не отправлять дубли в multi-worker сценариях.
-- **`CommandNotificationService`**: Npgsql event handler синхронный и использует `TryWrite()` в bounded notification channel, без `async void` continuations.
-- **`CommandPreparer`**: Worker валидирует `FileSystem:RootPath`, если он задан, и отклоняет reparse point файлы.
-- **`WorkerOptions`**: Валидируется на старте; `AUTORES` явно задаёт `WorkingDirectory = "."`.
-- **Логирование**: Добавлено логирование elapsed time для callback-хендлеров, флаги `truncated` для stdout/stderr, детализация очистки сессий, контекст ошибок (userId, sessionId, attempt).
-- **Мониторинг**: Worker добавляет `/health` checks `bimInstallRoot` и `activeProcesses`. Отдельных `/debug/*` endpoints в текущем коде нет.
+**Shutdown order (v1.7):**
+1. `_shutdownCts.CancelAsync()` — останавливает background loops
+2. `LogActiveProcessesOnShutdown()` + параллельный `Kill(entireProcessTree: true)` всех активных процессов в общем shutdown-бюджете (`30s`, per-process `10s`)
+3. `WaitForBackgroundTaskCompletionAsync` (cleanup + health tasks, `15s` каждый)
+4. `WaitForRunningTasksCompletionAsync` (`15s`)
+5. Dispose semaphores + `PartitionPoolManager`
 
-**DI registration** — в `Worker/Program.cs`:
+**Корреляция событий:** каждая команда и сессия имеют `CorrelationId` (GUID без дефисов), который проходит через весь pipeline: создание сессии → claim → notify → completion → Telegram. Используется в логах для трассировки.
+
+**DI registration** в `Worker/Program.cs`:
 ```csharp
+services.AddSingleton<UserDataService>();
+services.AddSingleton<CommandDataService>();
+services.AddSingleton<SessionDataService>();
+services.AddSingleton<MessageTrackingDataService>();
+services.AddSingleton<DatabaseInitializerService>();
 services.AddSingleton<PartitionPoolManager>();
 services.AddSingleton<CommandPreparer>();
-services.AddSingleton<ProcessRunner>();
 services.AddSingleton<SessionCompletionTracker>();
+services.AddSingleton<ProcessRunner>();
 services.AddHostedService<CommandExecutionService>();
 services.AddHostedService<SessionCleanupService>();
 ```
 
-
+**DataAccessBase:** общий base-класс для `UserDataService`/`CommandDataService`/`SessionDataService`/`MessageTrackingDataService` с protected `CreateOpenConnectionAsync()`. Public static `NpgsqlHelper.CreateOpenConnectionAsync()` — для `CommandNotificationService` и `NotificationSenderService`, которые НЕ наследуют `DataAccessBase`.
 
 ---
 
-**Important notes for AI agents:**
-- BimLib is `[SupportedOSPlatform("windows")]` — Windows only (Registry + P/Invoke). OpenMcdf 3.x parses .rvt OLE streams.
+## Important notes for AI agents
+
+- BimLib is `[SupportedOSPlatform("windows")]` — Windows only (Registry + P/Invoke). OpenMcdf 3.x парсит .rvt OLE streams. Worker и Server тоже помечены — Server дополнительно делает runtime check `RuntimeInformation.IsOSPlatform(OSPlatform.Windows)`.
+- `RevitDetectedVersion.Year` диапазон: `2017..2026` (константа в `RevitVersionDetector`); `BimIntegrationOptions.MinSupportedVersion`/`MaxSupportedVersion` — default `2018`–`2026`.
 - `RevitProcessStatus` enum: `Healthy`, `NotResponding`, `Error`.
-- Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete classes only).
+- Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete-классы only).
+- Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(50).
+- `SessionManager.GetOrCreateSession()` no longer calls `RemoveSession()` (была race с `AcquireUserLockAsync`). Background `CleanUpExpiredSessionsAsync` безопасно обрабатывает оба dictionary.
 
 ### How BIM Command Plugins Actually Work
 
@@ -184,7 +238,7 @@ services.AddHostedService<SessionCleanupService>();
 
 | Файл | Кто создаёт | Кто читает | Назначение |
 |------|------------|------------|------------|
-| `task_{CommandId}_{AttemptToken}.json` | Worker (`CommandPreparer.CreateTaskFile`) | Плагин | Задание: что и с каким файлом делать |
+| `task_{CommandId}_{AttemptToken}.json` | Worker (`CommandPreparer.CreateTaskFile`, atomic write) | Плагин | Задание: что и с каким файлом делать |
 | `result_{CommandId}_{AttemptToken}.json` | Плагин | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка, выходные файлы |
 
 **TaskFile** (`TelegramBot.Core.Models.TaskFile`):
@@ -193,54 +247,51 @@ services.AddHostedService<SessionCleanupService>();
   "commandId": 42,
   "commandText": "PDF",
   "filePath": "B:\\project.rvt",
-  "resultFilePath": "C:\\Temp\\result_42_abc123.json",
+  "resultFilePath": "C:\\Users\\svc\\AppData\\Local\\Temp\\result_42_6f1c2b3a.json",
   "options": {}
 }
 ```
 - `commandId` — ID команды в БД
-- `commandText` — тип экспорта (PDF, DWG, IFC, BIMDOC, NWC, CLASHREP, AUTORES)
+- `commandText` — тип экспорта (`PDF`, `DWG`, `IFC`, `BIMDOC`, `NWC`, `CLASHREP`, `AUTORES`)
 - `filePath` — полный путь к исходному файлу
 - `resultFilePath` — путь, куда плагин должен записать результат
-- `options` — дополнительные опции (расширяемый словарь)
+- `options` — дополнительные опции (расширяемый словарь; в текущей реализации `CreateTaskFile` не заполняет)
 
 **ResultFile** (`TelegramBot.Core.Models.ResultFile`):
 ```json
 {
   "status": "done",
   "errorMessage": null,
-  "outputFiles": ["B:\\output.pdf"]
+  "outputFiles": ["B:\\project.pdf"]
 }
 ```
-- `status` — `"done"` или `"failed"` (обязательное поле)
-- `errorMessage` — сообщение об ошибке (опционально, при status = "failed")
-- `outputFiles` — список сгенерированных файлов (опционально, при status = "done")
+- `status` — `"done"` или `"failed"` (обязательное поле; иначе файл → `.bad`)
+- `errorMessage` — сообщение об ошибке (при `"failed"`)
+- `outputFiles` — список сгенерированных файлов (при `"done"`)
 
-Алгоритм работы:
-1. Worker создаёт `task_{CommandId}_{AttemptToken}.json` в `Path.GetTempPath()` (атомарная запись: `.tmp` → `File.Move`)
-2. Worker запускает `Revit.exe`, `FileConvert.exe`/Navisworks или `python` с аргументами из `ArgumentsTemplate`
-3. Исполнитель читает `task_{CommandId}_{AttemptToken}.json`, выполняет команду
-4. Исполнитель пишет `result_{CommandId}_{AttemptToken}.json` по указанному `resultFilePath` (рекомендуется: `.tmp` → `File.Move` для атомарности)
-5. Worker читает `result_{CommandId}_{AttemptToken}.json`:
-   - Сначала парсит JSON, потом удаляет файл (при битом JSON → переименовывает в `.bad` для диагностики)
-   - `status = "done"` → `Done`
-   - `status = "failed"` → `HandleFailureAsync()` с retry/error classification
-   - Битый JSON, unreadable file или неизвестный `status` → `.bad` и `HandleFailureAsync()`
-6. Temp-файлы очищаются в `finally` блока `ProcessRunner.RunAsync()`
+**Алгоритм:**
+1. Worker генерирует `attemptToken` (GUID без дефисов) для каждой попытки
+2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.json` в `Path.GetTempPath()` (atomic: `.tmp` → `File.Move(overwrite: true)`)
+3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{FilePath}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`)
+4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.json` (рекомендуется: atomic `.tmp` → `File.Move`)
+5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
+   - Если есть result JSON с `status="done"` → `Done`
+   - Если result JSON с `status="failed"` → `HandleFailureAsync` (retry/error classification)
+   - Битый JSON / unreadable / неизвестный status → rename в `.bad` → `HandleFailureAsync`
+   - Если result JSON отсутствует — fallback по exit code: `0` = `Done`, иначе `HandleFailureAsync`
+6. Temp-файлы очищаются в `finally` блока `ProcessRunner.RunAsync()` (через `CommandPreparer.CleanupTempFiles`)
 
-Исполнитель должен прочитать task-файл, выполнить команду, записать result-файл и завершиться с exit code `0`, если result-файл успешно записан.
-
-Если result-файл не найден — Worker использует fallback по exit code процесса
-(0 = Done, иначе Failed или retry через `ErrorClassifier`).
+Исполнитель должен записать result-файл и завершиться с exit code `0` при успехе. Если result-файл не найден — Worker использует fallback по exit code.
 
 #### Command-line arguments
 
 Плагин получает аргументы командной строки (шаблон `ArgumentsTemplate` в `appsettings.json`):
 
 ```
-Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_abc123.json"
+Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_6f1c2b3a.json"
 ```
 
-Доступные плейсхолдеры в шаблоне:
+Доступные плейсхолдеры:
 | Плейсхолдер | Описание |
 |-------------|----------|
 | `{CommandText}` | Тип экспорта (PDF, DWG, IFC...) |
@@ -249,13 +300,9 @@ Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_abc123.json"
 | `{TaskFilePath}` | Полный путь к `task_{CommandId}_{AttemptToken}.json` |
 | `{ResultFilePath}` | Полный путь к `result_{CommandId}_{AttemptToken}.json` |
 
-**Рекомендуемый подход:** плагин должен читать task-файл, а не полагаться только
-на аргументы командной строки — JSON содержит полную структурированную информацию.
+**Рекомендуемый подход:** плагин должен читать task-файл, а не полагаться только на аргументы командной строки — JSON содержит полную структурированную информацию.
 
-> **Важно (v1.7):** Имена temp-файлов включают уникальный `AttemptToken` (GUID без дефисов)
-> для каждой попытки выполнения. Это предотвращает: (1) подсовывание ложного result локальным
-> процессом (predictable filenames), (2) чтение stale result от предыдущей retry-попытки,
-> (3) конфликты между параллельными выполнениями одной команды.
+> **Важно (v1.7):** Имена temp-файлов включают уникальный `AttemptToken` (GUID без дефисов) для каждой попытки выполнения. Это предотвращает: (1) подсовывание ложного result локальным процессом (predictable filenames), (2) чтение stale result от предыдущей retry-попытки, (3) конфликты между параллельными выполнениями одной команды.
 
 #### Revit without AddIn (broken flow):
 
@@ -267,7 +314,7 @@ Worker → Revit.exe opens as GUI
          3 hours later → Worker kills it → Command timed out → Failed
 ```
 
-The `DialogDismisser` monitors the process and auto-closes modal dialogs (error popups, warnings), but if no Revit AddIn is installed, Revit doesn't know what to do with `/command` and just opens normally, ignoring the arguments.
+`DialogDismisser` только закрывает известные модальные окна Revit/Navisworks. Без Revit AddIn Revit не знает что делать с `/command` и просто открывается GUI, игнорируя аргументы.
 
 #### Other command types:
 
@@ -275,23 +322,22 @@ The `DialogDismisser` monitors the process and auto-closes modal dialogs (error 
 |------|-----------|---------------|------------------|
 | PDF, DWG, IFC, BIMDOC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile + ResultFile JSON exchange |
 | NWC, CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
-| AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task` `--result`, fallback to exit code |
+| AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task`/`--result`, fallback to exit code |
 
-**Shutdown behavior:** When Worker shuts down, it cancels background loops first, then **kills all active processes** (`Kill(entireProcessTree: true)`) in parallel within the bounded shutdown budget. Each process gets up to 10 seconds inside the shared budget. The timeout handler in `HandleTimeoutAsync` also uses `Kill(true)`.
-
-**Temp-file cleanup (v1.7):** Temp files (`task_*.json`, `result_*.json`) are cleaned up per-attempt in the `finally` block of `ProcessRunner.RunAsync()`. Each attempt uses a unique `attemptToken` (GUID), preventing stale-file conflicts between retries.
+**Temp-file cleanup (v1.7):** Temp-файлы (`task_*.json`, `result_*.json`) очищаются per-attempt в `finally` блоке `ProcessRunner.RunAsync()`. Каждая попытка использует уникальный `attemptToken`, предотвращая stale-file конфликты между retry.
 
 ### Shared Static Helpers
 
 | Helper | Location | Purpose |
 |--------|----------|---------|
-| `HandlerHelpers` | `Server/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — reply-клавиатура + трекинг |
-| `ProcessHealthHelper` | `BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общая для Revit и Navisworks |
-| `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | Единый helper подключения |
-| `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Фильтр логов для BIM-событий |
-| `PostgresReconnectLoop` | `TelegramBot.Data/PostgresReconnectLoop.cs` | Outer retry loop для переподключения PostgreSQL (5 сек) |
-| `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | Классификация ошибок: InvalidFileError → сразу Failed, ProcessCrashError → retry |
-| `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Очистка temp-файлов task/result для указанной попытки |
+| `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — общий reply-keyboard + tracking для SlashCommandService, FileNavigationHandler, CommandSelectionHandler |
+| `ProcessHealthHelper` | `Worker/BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общий для Revit и Navisworks process trackers |
+| `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` (public static) — для сервисов, не наследующих `DataAccessBase` (`CommandNotificationService`, `NotificationSenderService`) |
+| `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Serilog filter: события с `SourceContext` начинающимся на `"TelegramBot.Worker.BimLib` → отдельный rolling file |
+| `PostgresReconnectLoop` | `TelegramBot.Data/PostgresReconnectLoop.cs` | Outer retry loop для переподключения PostgreSQL (5 сек); используется в `CommandExecutionService` и `CommandNotificationService` |
+| `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | `IsPermanentFailure(message, exitCode, codes)`, `IsPermanentException(ex)`: классификация ошибок → `InvalidFileError` (Failed без retry) vs `ProcessCrashError` (retry) |
+| `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Best-effort удаление `task_{CommandId}_{token}.json` и `result_{CommandId}_{token}.json` для указанной попытки |
+| `DataAccessBase` | `TelegramBot.Data/DataAccessBase.cs` | Base-класс с protected `CreateOpenConnectionAsync()`, `DefaultConnectionString` |
 
 ---
 
@@ -301,18 +347,22 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 
 | File | Purpose | Key Constants |
 |------|---------|---------------|
-| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`, `SessionDetails`, `DeleteSession`, `RequestAccess`, etc. |
+| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `StatusPage`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
 | `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |
-| `Statuses.cs` | Entity statuses (commands/sessions) | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses`, `ActiveStatuses` |
-| `CommandPriorities.cs` | Worker queue priority levels | `Critical`, `High`, `Medium`, `Low`, `Default` |
-| `ButtonTexts.cs` | Reply keyboard button labels | `Apply`, `Confirm`, `Cancel` |
+| `Statuses.cs` | Entity statuses (commands/sessions) | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses` (set), `ActiveStatuses` (set) |
+| `CommandPriorities.cs` | Worker queue priority levels | `Critical`=1, `High`=2, `Medium`=3, `Low`=4, `Lowest`=5, `Default`=50 |
+| `ButtonTexts.cs` | Reply keyboard button labels | `Apply` ("✅ Применить"), `Confirm` ("✅ Подтвердить"), `Cancel` ("❌ Отмена") |
+
+**Server-only constants** (`TelegramBot.Server/Constants/`):
+- `HandlerPriorities.cs` — `AccessRequest` (0), `FileNavigation` (10), `FileSelection` (20), `CommandToggle` (100), `SessionManagement` (100), `CommandSelection` (100), `Default` (1000)
 
 **Important notes:**
 - All callback prefixes end with `:` (colon) for data concatenation
-- `Statuses.FinalStatuses` includes `Done`, `Failed`, `Deleted` — used to check if an entity is terminal
-- `Statuses.ActiveStatuses` includes `Pending`, `Processing` — used to find uncompleted entities
+- `Statuses.FinalStatuses` = `{Done, Failed, Deleted}` — терминальные статусы
+- `Statuses.ActiveStatuses` = `{Pending, Processing}` — активные статусы
 - Command codes match callback prefix names (e.g., `CommandCodes.Pdf` = `"PDF"`, `CallbackPrefixes.Pdf` = `"PDF:"`)
-- Button texts include emoji and are used with reply keyboards (not inline keyboards)
+- Button texts include emoji и используются с reply keyboards (не inline)
+- `CommandPriorities.Critical` (1) выше `High` (2) и т.д.; **меньше значение = выше приоритет**
 
 ### Task Execution Flow (Server → PostgreSQL → Worker)
 
@@ -321,38 +371,43 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 ```
 SlashCommandService.ConfirmFileSelectionAsync()
     │
-    ├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Commands (ProjectName)
+    ├── RevitFileDeduplicator.Deduplicate()  // exact-name + 15-char prefix group + numeric-token overlap
+    ├── RateLimiter (CheckDailyFileLimitAsync: CountQueuedFilesByUserSinceAsync)
+    ├── CommandDataService.HasDuplicateCommandsAsync (active queue dedup)
+    ├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Sessions + Commands + pg_notify('new_tasks', correlationId)
     │
     ▼
-    CommandExecutionService (Worker)
-        LISTEN/NOTIFY new_tasks (мгновенная реакция) + fallback polling (5 мин)
-        dataService.ClaimPendingCommandsAsync() -- FOR UPDATE SKIP LOCKED
-        ExecuteOneAsync(cmd) -- запуск Revit/Navisworks/AI
-        dataService.UpdateCommandStatusAsync() -- UPDATE Status='Done'/'Failed'
-        CompleteClaimedCommandAsync() -- декремент batch-счётчика + проверка финальности по БД
-            └── dataService.NotifySessionCompletedAsync() -- NOTIFY command_completed
-                                                              │
-                   ┌──────────────────────────────────────────┘
-                   ▼
-    CommandNotificationService (Server)
-        Получает NOTIFY → парсит payload (SessionId|CorrelationId)
-        → NotificationSenderService вызывает SessionDataService.GetSessionCompletionSummaryAsync()
-        → telegramOutput.SendMessageAsync() со сводкой по сессии
+CommandNotificationService (Server) ── LISTEN session_started ──▶ Channel<NotificationItem> ──▶ NotificationSenderService ──▶ "⚙️ Задание запущено" пользователю
+
+CommandExecutionService (Worker)
+    LISTEN/NOTIFY new_tasks (мгновенная реакция) + fallback polling (5 мин)
+    DrainPendingCommandsAsync:
+        ClaimPendingCommandsAsync(limit) -- FOR UPDATE SKIP LOCKED + Lease
+        ProcessWithPoolAsync(cmd):
+            PartitionPoolManager.WaitForSlotAsync(priority)
+            ProcessRunner.RunAsync(cmd):
+                CommandPreparer.PrepareAsync (validation + BimLib path resolution + Config clone)
+                CreateTaskFile (atomic write)
+                StartProcessAsync (process start + UpdateStatus=processing + NotifySessionStartedAsync → pg_notify('session_started'))
+                WaitAndHandleResultAsync (OutputDataReceived 64KB + TryReadResultFile):
+                    status="done" → UpdateStatus=Done
+                    status="failed" / битый / нет файла + exit != 0 → ErrorClassifier → permanent (Failed) / transient (ScheduleRetry)
+                    exit=0 без файла → Done
+            PartitionPoolManager.ReleaseSlot(priority)
+            SessionCompletionTracker.OnCommandCompletedAsync:
+                AddOrUpdate(_sessionRemaining, -1) → 0 → CountPendingProcessingBySessionAsync (DB confirm) → NotifySessionCompletedOnceAsync → pg_notify('command_completed', SessionId|CorrelationId)
+    CleanupTempFiles in finally (per-attempt)
+
+CommandNotificationService (Server) ── LISTEN command_completed ──▶ Channel<NotificationItem> ──▶ NotificationSenderService ──▶ SessionDataService.GetSessionCompletionSummaryAsync() ──▶ SendMessageAsync (project name, done/failed counts, duration, failed file names)
 ```
 
-**In-memory счётчик сессий:** вместо per-command SQL запроса `GetSessionProgressAsync`
-Worker использует `ConcurrentDictionary<int, int> _sessionRemaining` как batch-local счётчик.
-При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`,
-при каждом выходе захваченной команды из `processing` (Done/Failed/retry) атомарно декрементится через `AddOrUpdate`.
-Уведомление отправляется только когда `remaining == 0` и БД подтверждает, что в сессии больше нет `pending`/`processing`.
-Затем `SessionDataService.NotifySessionCompletedOnceAsync()` атомарно выставляет `Sessions.CompletionNotified = TRUE`
-и отправляет `pg_notify('command_completed', 'SessionId|CorrelationId')` только для первой успешной попытки.
-Сводка сообщения строится на Server через `SessionDataService.GetSessionCompletionSummaryAsync()` и включает
-длительность сессии (`MIN(StartedAt)` → `MAX(CompletedAt)`) и список ошибочных файлов.
+**In-memory счётчик сессий:** `SessionCompletionTracker._sessionRemaining` (`ConcurrentDictionary<int, int>`) как batch-local счётчик. При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`, при каждом выходе захваченной команды из `processing` (Done/Failed/retry) атомарно декрементится через `AddOrUpdate`. Уведомление отправляется только когда `remaining == 0` И БД подтверждает отсутствие `pending`/`processing` (`CountPendingProcessingBySessionAsync`).
 
-DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker registers data services (`UserDataService`, `CommandDataService`, `SessionDataService`, `MessageTrackingDataService`) directly in `Program.cs`.
+**Идемпотентность через `Sessions.CompletionNotified`:** `SessionDataService.NotifySessionCompletedOnceAsync` атомарно выставляет `CompletionNotified = TRUE` и отправляет `pg_notify('command_completed', SessionId|CorrelationId)` только для первой успешной попытки (`UPDATE ... WHERE CompletionNotified = FALSE RETURNING SessionId`).
 
-**Key DI simplification:** All single-implementation interfaces have been removed — consumers now depend on concrete types directly:
+DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker registers data services напрямую в `Program.cs`.
+
+**Key DI simplification (v1.4):** все single-implementation интерфейсы удалены — consumers зависят от concrete-классов напрямую:
 - `IFileSystemBrowser` → `FileSystemBrowser`
 - `ITelegramUpdateMapper` → `TelegramUpdateMapper`
 - `ICallbackDispatcher` → `CallbackDispatcher`
@@ -367,15 +422,15 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 
 ### Health Check Endpoints
 
-Оба приложения (Server и Worker) запускают `HealthCheckHostedService` — минимальный HTTP-сервер на `TcpListener`:
+Оба приложения запускают `HealthCheckHostedService` — минимальный HTTP-сервер на `TcpListener`:
 
 | Endpoint | Описание |
 |----------|----------|
 | `GET /health/live` | Liveness — процесс жив (всегда 200) |
 | `GET /health/ready` | Readiness — проверка PostgreSQL (200 или 503) |
-| `GET /health` | Подробный JSON: статус, checks (database, process), uptime, версия |
+| `GET /health` | Подробный JSON: статус, checks, uptime, версия |
 
-**Конфигурация** (секция `HealthCheck` в appsettings.json):
+**Конфигурация** (секция `HealthCheck` в `appsettings.json`):
 
 ```json
 "HealthCheck": {
@@ -386,74 +441,88 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 }
 ```
 
-**Server** — порт 5000, регистрация в `DependencyInjectionExtensions.AddHealthCheckServices()`.
-**Worker** — порт 5001, регистрация в `Program.cs`.
+- **Server** — порт 5000, регистрация в `DependencyInjectionExtensions.AddHealthCheckServices()`. Доп. check: `notificationChannel` (health=healthy если `Channel<NotificationItem>.Reader.Completion` не completed).
+- **Worker** — порт 5001, регистрация в `Program.cs`.
 
-**Namespace:** `TelegramBot.Core.Health` (`HealthCheckHostedService`, `HealthCheckResult`, `HealthComponent`).
+**Namespace:** `TelegramBot.Core.Health` (`HealthCheckHostedService`, `HealthCheckResult`, `HealthComponent`, `HealthCheckServiceFactory`).
 **Config:** `TelegramBot.Core.Config.HealthCheckOptions` (секция `"HealthCheck"`).
 
-Результат `/health` кэшируется на `CacheSeconds` секунд. Readiness проверяет PostgreSQL через `NpgsqlHelper`.
-Поддерживает расширение через `AdditionalChecks` dict для добавления компонентов в отчёт.
+Результат `/health` кэшируется на `CacheSeconds` секунд. Readiness проверяет PostgreSQL через `NpgsqlHelper`. Поддерживает расширение через `AdditionalChecks` dict.
 
 **Worker-specific checks** (регистрируются в `Program.cs`):
 
-| Проверка (`AdditionalChecks` key) | Описание | Статус unhealthy |
-|-----------------------------------|----------|------------------|
+| Check (`AdditionalChecks` key) | Описание | Unhealthy |
+|-----------------------------------|----------|-----------|
 | `bimInstallRoot` | Проверяет существование `BimIntegration.RevitInstallRoot` | Директория не найдена |
-| `activeProcesses` | Количество активных внешних процессов | Всегда `healthy` (информационно) |
+| `activeProcesses` | Количество активных внешних процессов (informational) | Всегда `healthy` |
 
 ### Smart Retry — ErrorClassifier
 
-`ProcessRunner.HandleFailureAsync` использует `ErrorClassifier` для классификации ошибок при выполнении команд:
+`ProcessRunner.HandleFailureAsync` использует `ErrorClassifier` для классификации ошибок:
 
 | Тип | Поведение | Примеры |
 |-----|-----------|--------|
-| `InvalidFileError` (permanent) | сразу `Failed`, без retry | Файл не найден, нет доступа, неверный формат |
-| `ProcessCrashError` (transient) | retry с экспоненциальной задержкой (`60s * 2^(attempt-1)`) | Процесс упал с общим кодом ошибки |
+| `InvalidFileError` (permanent) | Сразу `Failed`, без retry | Файл не найден, нет доступа, неверный формат, invalid path |
+| `ProcessCrashError` (transient) | retry с экспоненциальной задержкой (`RetryDelayBaseSeconds * 2^(attempt-1)`, default 60s → 120s → 240s → 480s → 960s) | Процесс упал с неспецифичным кодом ошибки |
 
 **Критерии permanent:**
-1. **По тексту ошибки** — паттерны: `"not found"`, `"access denied"`, `"invalid file"`, `"permission denied"`, `"cannot open file"` и др.
-2. **По exit code** — если входит в `WorkerOptions.PermanentFailureExitCodes` (настраивается в `appsettings.json`, по умолчанию пусто)
+1. **По тексту ошибки** — паттерны (EN+RU): `"not found"`, `"no such file"`, `"cannot open file"`, `"access denied"`, `"access is denied"`, `"invalid file"`, `"permission denied"`, `"path not found"`, `"no such directory"`, `"cannot access"`, `"файл не найден"`, `"путь не найден"`, `"отказано в доступе"`, `"доступ запрещен"`, `"нет доступа"`, `"недопустимый файл"`, `"неверный формат файла"`, `"невозможно открыть файл"`
+2. **По exit code** — если входит в `WorkerOptions.PermanentFailureExitCodes` (HashSet, по умолчанию пуст)
 3. **По типу исключения** — `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `PathTooLongException`
 
-**Config:** `WorkerOptions.PermanentFailureExitCodes` (`HashSet<int>`, по умолчанию пустой).
+**Config:** `WorkerOptions.PermanentFailureExitCodes` (`HashSet<int>`, по умолчанию пуст).
+**MaxRetries:** `WorkerOptions.MaxRetries` (default 5) — после исчерпания → `Failed`.
 **Namespace:** `TelegramBot.Worker.Services.ErrorClassifier`.
 
 ### Callback Handling — Chain of Responsibility
 
-`CallbackDispatcher` routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (sorted by `Priority`, lower = first). All handlers extend `CallbackHandlerBase`.
+`CallbackDispatcher` routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (сортировка по `Priority`, lower = first). O(1) lookup через кэшированный `_handlerMap` (`Dictionary<prefix, handler>`), построенный в конструкторе из `handlers.GetSupportedPrefixes()`. Все handlers extend `CallbackHandlerBase`.
 
-Handler hierarchy: `AccessRequestHandler` (Priority 0) > `FileNavigationHandler` (10) > `FileSelectionHandler` (20) > `CommandToggleHandler`, `SessionManagementHandler`, `CommandSelectionHandler` (100).
+Handler hierarchy:
+- `AccessRequestHandler` (Priority 0) — `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:`
+- `FileNavigationHandler` (Priority 10) — `GOTOPARENT:`
+- `FileSelectionHandler` (Priority 20) — file/folder toggle
+- `CommandToggleHandler` (Priority 100) — `PDF:`, `DWG:`, `IFC:`, `BIMDOC:`, `NWC:`, `CLASHREP:`, `AUTORES:`
+- `CommandSelectionHandler` (Priority 100) — `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`
+- `SessionManagementHandler` (Priority 100) — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`, `STATUSPAGE:`
 
-**Error handling:** `CallbackHandlerBase.HandleAsync()` does NOT catch exceptions — they propagate to `CallbackDispatcher.DispatchAsync()`, which catches `Exception`, logs it, and continues to the next handler. This eliminates double logging.
+**Error handling:** `CallbackHandlerBase.HandleAsync()` **НЕ ловит** исключения — они пропагируются в `CallbackDispatcher.DispatchAsync()`, который ловит `Exception`, логирует с `elapsedMs`/handlerName и возвращает `false` (исключая double logging). `OperationCanceledException` пробрасывается наверх.
 
-Callback prefixes are constants in `CallbackPrefixes` (`TelegramBot.Core/Constants/CallbackPrefixes.cs`). Command codes in `TelegramBot.Core/Constants/CommandCodes.cs`. Use `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) to get a `ParsedCallback`, then match with `parsed.Is(CallbackPrefixes.GoToParent)`. 
+**Log instrumentation:** `CallbackDispatcher` логирует dispatch (debug), handled/not-handled (debug с `elapsedMs`), error (error с `elapsedMs`), ignored (debug с reason=no_handler).
 
-> **SessionManagementHandler** manages `/status` actions via `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, and `CONFIRMDELETECOMMAND:`. Delete buttons first show a confirmation dialog; the «⛔ Отменить» button for a running command uses the same soft-delete path as command deletion: `Status = 'Deleted'`.
+Callback prefixes — константы в `CallbackPrefixes` (`TelegramBot.Core/Constants/CallbackPrefixes.cs`). Command codes — в `CommandCodes` (`TelegramBot.Core/Constants/CommandCodes.cs`). Используй `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) для получения `ParsedCallback`, затем match через `parsed.Is(CallbackPrefixes.GoToParent)`.
 
-> **Race condition fix (v1.7):** `SessionManager.GetOrCreateSession()` no longer calls `RemoveSession()` (which could `Dispose()` a `SemaphoreSlim` currently held by the calling thread via `AcquireUserLockAsync`). Session expiry now only removes the entry from `_sessions` without touching `_sessionLocks`. Background `CleanUpExpiredSessionsAsync` safely handles both `_sessions` and `_sessionLocks` disposal.
+> **SessionManagementHandler** управляет `/status` actions. Delete buttons сначала показывают confirmation dialog («✅ Да, удалить» / «↩️ Назад»). Поддерживает фильтры (`ALL`/`ACTIVE`/`DONE`/`FAILED`) и пагинацию (`STATUSPAGE:N`). Удаление команды (включая running) → `Status = 'Deleted'` (soft-delete). При удалении последней команды в сессии — удаляется и сама сессия + tracked messages (`DeleteSessionAndMessagesAsync`).
 
 For Markdown escaping, use `MarkdownHelper.Escape()` from `TelegramBot.Server/Helpers/`.
 
 ### Database
 
-Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Message tracking is fully DB-backed — no in-memory state. Soft-delete only — set `Status = 'Deleted'`, never `DELETE FROM`. Worker auto-cleanup also uses soft-delete for inactive sessions older than `Worker:CompletedSessionRetentionDays`.
+Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Все запросы — DB-backed. Soft-delete only — `Status = 'Deleted'`, никогда `DELETE FROM`. Worker auto-cleanup (`SessionCleanupService`) тоже soft-delete для сессий старше `Worker:CompletedSessionRetentionDays` без pending/processing.
 
-**`Commands` table includes `Partition` field** — partition threshold для priority-based пулов процессов.
+**Schemas** (см. [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md#схема-базы-данных) для полной версии):
 
-**`Sessions` table now includes `ProjectName TEXT` and `CompletionNotified BOOLEAN`** — имя проекта записывается
-при создании сессии, отображается в `/status` и в уведомлениях о завершении. `CompletionNotified` делает
-`command_completed` идемпотентным в multi-worker сценариях.
+- **BotUsers** — `UserId BIGINT PK`, `Username TEXT`, `Role INTEGER` (`UserRole` enum: `User=0`, `Admin=1`), `Status INTEGER` (`UserAccessStatus` enum: `Pending=0`, `Approved=1`, `Rejected=2`, `Blocked=3`), `CreatedAt/UpdatedAt TIMESTAMPTZ`
+- **Sessions** — `SessionId SERIAL PK`, `UserId BIGINT`, `Username TEXT`, `CorrelationId TEXT NOT NULL`, `PriorityId INTEGER` (default 0), `Status TEXT` (`'pending'`/`'Done'`/`'Failed'`/`'Deleted'`), `ProjectName TEXT`, `FilesAmount INTEGER`, `CompletionNotified BOOLEAN` (default FALSE; защита от дублей в multi-worker), `CreatedAt/UpdatedAt TIMESTAMPTZ`
+- **Commands** — `CommandId SERIAL PK`, `SessionId INT REFERENCES Sessions`, `CommandText TEXT`, `FilePath TEXT`, `ExecutionOrder INT`, `Status TEXT` (default `'pending'`), `CreatedAt/StartedAt/CompletedAt TIMESTAMPTZ`, `GUID TEXT`, `Lease INT` (Unix seconds), `Partition TEXT`, `Priority INT` (default 50), `ProcessId INT`, `ErrorMessage TEXT`, `RetryCount INT` (default 0), `NextRetryAt TIMESTAMPTZ`, `Progress INT` (default 0), `Result TEXT`, `UpdatedAt TIMESTAMPTZ`
+- **TrackedMessages** — `MessageId SERIAL PK`, `SessionId INT REFERENCES Sessions (nullable)`, `ChatId BIGINT`, `MessageIdPg INT`, `CreatedAt TIMESTAMPTZ` (для DB-backed message tracking + cleanup на session delete)
 
-**`GetCommandStatusAsync` removed** — was dead code. Deleted commands never appear as `'pending'`
-in `ClaimPendingCommandsAsync`, so the separate cancellation check was redundant.
+**Indexes:** `idx_commands_status`, `idx_commands_session`, `idx_commands_status_lease` (partial WHERE Status='processing'), `idx_sessions_user_created`, `idx_sessions_correlation_id`, `idx_commands_pending_priority` (partial WHERE Status='pending'), `idx_commands_partition_status`, `idx_commands_unique` (UNIQUE on SessionId+CommandText+FilePath), `idx_tracked_messages_session`, `idx_tracked_messages_chat`, `idx_commands_updated_at`.
 
-**`CountPendingProcessingBySessionAsync` added** — используется в `CompleteClaimedCommandAsync`
-для проверки, не осталось ли ещё pending/processing команд в БД (корректно обрабатывает случай,
-когда команд в сессии > DefaultBatchSize).
+**Команды — soft-delete flow:** `CommandDataService.DeleteCommandAsync` → `Status = 'Deleted'` с проверкой `UserId`/`IsAdmin`. `DeleteCommandsByTypeAsync` → soft-delete by `SessionId+CommandType` (исключает уже `Deleted` и `processing`).
 
-Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()`.
-All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.cs`, `SessionDataService.cs`, `UserDataService.cs`, `MessageTrackingDataService.cs`). Connection creation is unified via `CreateOpenConnectionAsync()` helper in `DataAccessBase` (replaces ~15 manual `new NpgsqlConnection + OpenAsync` patterns). A public static `NpgsqlHelper.CreateOpenConnectionAsync()` is also used by `CommandNotificationService` and `NotificationSenderService` on the Server side. SQL constants in `TelegramBot.Data/Sql/` (5 partial files total: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).
+**Sessions — soft-delete flow:** `SessionDataService.DeleteSessionAsync` (UserId/IsAdmin) → `Status = 'Deleted'` + soft-delete всех команд. `SoftDeleteInactiveSessionsOlderThanAsync` (cutoff timestamp) → `Status = 'Deleted'` для сессий без `pending`/`processing` команд + cascade soft-delete команд.
+
+**Idempotent completion notification:** `SessionDataService.NotifySessionCompletedOnceAsync(sessionId, correlationId)` → atomic `UPDATE Sessions SET CompletionNotified=TRUE WHERE SessionId=@Id AND CompletionNotified=FALSE AND Status!='Deleted' RETURNING SessionId` → `pg_notify('command_completed', SessionId|CorrelationId)` (только для returned rows).
+
+**Session completion summary:** `SessionDataService.GetSessionCompletionSummaryAsync` → UserId/Username/SessionId/CorrelationId/ProjectName + TotalFiles/DoneFiles/FailedFiles + `DurationSeconds = EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))` + `FailedFilePaths` (list).
+
+**`CountPendingProcessingBySessionAsync` (v1.7):** корректно обрабатывает случай, когда команд в сессии > `DefaultBatchSize` (5) или несколько воркеров. `SessionCompletionTracker` использует для DB confirmation после обнуления in-memory счётчика.
+
+**Advisory lock** для `ReleaseExpiredLeasesAsync`: `pg_try_advisory_lock(1234567)` — namespace `telegram_bot_lease_cleanup`. Предотвращает race между несколькими воркерами, освобождающими истёкшие Lease.
+
+Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()` (Server only).
+All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.cs`, `SessionDataService.cs`, `UserDataService.cs`, `MessageTrackingDataService.cs`). Connection creation is unified via `CreateOpenConnectionAsync()` helper in `DataAccessBase`. SQL constants в `TelegramBot.Data/Sql/` (5 partial files: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).
 
 ---
 
@@ -472,7 +541,7 @@ All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.
 | Element | Convention | Example |
 |---|---|---|
 | Classes | `PascalCase` | `CommandAppService` |
-| Interfaces | `I` + `PascalCase` | `IDataService` |
+| Interfaces | `I` + `PascalCase` | `ICallbackHandler` |
 | Methods | `PascalCase` | `HandleCallbackAsync` |
 | Async methods | suffix `Async` | `InitializeDatabaseAsync` |
 | Private fields | `_camelCase` | `_logger`, `_sessionManager` |
@@ -483,10 +552,11 @@ All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.
 ### Namespace Conventions
 
 Namespaces must match folder structure:
-- `TelegramBot.Core.Models`, `TelegramBot.Core.DTOs`, `TelegramBot.Core.Interfaces`, `TelegramBot.Core.Config`, `TelegramBot.Core.Constants`
+- `TelegramBot.Core.Models`, `TelegramBot.Core.DTOs`, `TelegramBot.Core.Interfaces`, `TelegramBot.Core.Config`, `TelegramBot.Constants`
+- `TelegramBot.Core.Health`, `TelegramBot.Core.Helpers`, `TelegramBot.Core.Services`
 - `TelegramBot.Data`
-- `TelegramBot.Server.Services.Application`, `TelegramBot.Server.Services.Infrastructure.Telegram`, `TelegramBot.Server.Helpers`
-- `TelegramBot.Worker.Services`
+- `TelegramBot.Server.Services.Application`, `TelegramBot.Server.Services.Application.Handlers`, `TelegramBot.Server.Services.Infrastructure.Telegram`, `TelegramBot.Server.Services.Infrastructure.FileSystem`, `TelegramBot.Server.Middleware`, `TelegramBot.Server.Helpers`, `TelegramBot.Server.Constants`
+- `TelegramBot.Worker.Services`, `TelegramBot.Worker.BimLib.{Config,Models,Monitor,Native,Services}`
 
 ### Imports / Using Directives
 
@@ -537,8 +607,8 @@ Namespaces must match folder structure:
 - `TelegramOutputService` has retry logic for HTTP 429 (rate limiting) via `ExecuteWithRetryAsync`
 - Do not swallow unknown exceptions — log at `LogError` or rethrow
 - Avoid empty `catch` blocks
-- Callback exceptions: `CallbackDispatcher` catches + logs; **`CallbackHandlerBase` does not** (no double logging)
-- Worker: outer retry loop reconnects on PostgreSQL connection loss (5 sec delay)
+- Callback exceptions: `CallbackDispatcher` catches + logs with `elapsedMs`; **`CallbackHandlerBase` does not** (no double logging)
+- Worker: outer retry loop reconnects on PostgreSQL connection loss (5 sec delay, `PostgresReconnectLoop`)
 
 ### Logging
 
@@ -548,13 +618,15 @@ Namespaces must match folder structure:
   _logger.LogInformation("Received command '{Command}' from {UserId}", command, userId);
   ```
 - Log levels: `LogDebug` for diagnostics, `LogInformation` for normal flow, `LogWarning` for recoverable issues, `LogError` / `Log.Fatal` for failures
+- BimLib-специфичные логи автоматически идут в отдельный файл (`Worker\BimLib\log-{date}.txt`) через `BimLibLogFilter`
 
 ### Collections & Thread Safety
 
 - `UserSession` uses fine-grained locks (`_commandLock`, `_selectionLock`) — follow this pattern for new mutable state
-- `RateLimiter` (Core/Services) uses `ConcurrentDictionary<long, RequestWindow>` with queue-based sliding window per-user
+- `RateLimiter` (`Core/Services`) uses `ConcurrentDictionary<long, RequestWindow>` с queue-based sliding window per-user (single lock на уровне `RequestWindow`, без флага `CleanupInProgress`)
 - Paths in callback data are passed directly (no `PathMap`/tokens) since v1.1 refactoring
 - For new shared dictionaries, prefer `ConcurrentDictionary<,>`
+- `SemaphoreSlim` — `SessionManager` хранит per-user `_sessionLocks` (безопасно удаляются с проверкой `CurrentCount == 1`)
 
 ### SQL / Data Access (TelegramBot.Data)
 
@@ -566,25 +638,25 @@ Namespaces must match folder structure:
 - For transactions, use `conn.BeginTransactionAsync()`
 - Use `RETURNING` clause for INSERT to get generated IDs (not `last_insert_rowid()`)
 - Use `ON CONFLICT DO NOTHING / DO UPDATE` for upserts (not `INSERT OR IGNORE/REPLACE`)
-- PostgreSQL data types: `TIMESTAMPTZ` for dates, `SERIAL` for auto-increment, `BIGINT` for user IDs
+- PostgreSQL data types: `TIMESTAMPTZ` for dates, `SERIAL` for auto-increment, `BIGINT` for user IDs, `INTEGER` for enums, `TEXT` for free-form
 
 ### Telegram Messages
 
-- Plain messages sent via `SendMessageAsync`: `ParseMode.MarkdownV2` — escape special characters with `MarkdownHelper.Escape(text, ParseMode.MarkdownV2)`
-- Messages with inline/reply keyboards: `ParseMode.Markdown` — escape with `MarkdownHelper.Escape(text, ParseMode.Markdown)`
+- Plain messages via `SendMessageAsync`: `ParseMode.MarkdownV2` — escape via `MarkdownHelper.Escape(text, ParseMode.MarkdownV2)`
+- Messages with inline/reply keyboards: `ParseMode.Markdown` — escape via `MarkdownHelper.Escape(text, ParseMode.Markdown)`
 - Do not mix the two parse modes
-- Completion notifications (via `NotificationSenderService`) are sent as **plain text** (no parse mode)
-- All Telegram API methods must be current — do not use deprecated approaches
+- Completion notifications (via `NotificationSenderService`) отправляются plain text (без parse mode)
+- All Telegram API methods must be current — no deprecated approaches
 
 ### TelegramBotHostedService — Graceful Shutdown
 
-**Graceful drain (v1.7):** `_processingCts` is **not** linked to `stoppingToken` (was `CreateLinkedTokenSource(stoppingToken)`). This fix ensures buffered updates in the channel (up to 200) are processed before shutdown. Correct shutdown order:
-1. `stoppingToken` cancels → `StartReceiving` stops polling.
-2. `_updateChannel.Writer.TryComplete()` — no more updates enter the channel.
-3. Await `processingTask` with 10s timeout — remaining updates are drained.
-4. `_processingCts.CancelAsync()` — only if reader still active.
+**Graceful drain:** `_processingCts` is **NOT linked to `stoppingToken`** (was `CreateLinkedTokenSource(stoppingToken)`). Это гарантирует что буферизованные обновления (до 200 в `Channel<Update>`) обрабатываются до shutdown. Правильный порядок:
+1. `stoppingToken` cancels → `StartReceiving` останавливает polling
+2. `_updateChannel.Writer.TryComplete()` — новые обновления больше не попадают в канал
+3. `await processingTask` с 10s timeout — оставшиеся в буфере обновления дренятся
+4. `_processingCts.CancelAsync()` — останавливает reader (только если ещё работает)
 
-Previously, the linked CTS caused `ReadAllAsync(ct)` to stop immediately on shutdown, losing buffered updates.
+Previously, linked CTS вызывал немедленное прерывание `ReadAllAsync(ct)` на shutdown и потерю буферизованных обновлений.
 
 ### General
 
@@ -594,8 +666,8 @@ Previously, the linked CTS caused `ReadAllAsync(ct)` to stop immediately on shut
 - Maintain good code readability and unify methods for easier editing
 - Extract shared static helpers (`HandlerHelpers`, `NpgsqlHelper`) when the same 5+ line pattern appears in multiple files
 - Use `dotnet format --diagnostics IDE0005` to remove unused `using` directives
-- Notification delivery is decoupled via `Channel<NotificationItem>` (256-capacity bounded channel): `CommandNotificationService` enqueues, `NotificationSenderService` dequeues and sends to Telegram.
-- `NpgsqlHelper.CreateOpenConnectionAsync()` (static, in `TelegramBot.Data`) is the public helper for services that don't inherit from `DataAccessBase` (e.g., `CommandNotificationService`, `NotificationSenderService`).
+- Notification delivery decoupled via `Channel<NotificationItem>` (256-capacity bounded channel): `CommandNotificationService` enqueues, `NotificationSenderService` dequeues and sends to Telegram
+- `NpgsqlHelper.CreateOpenConnectionAsync()` (static, in `TelegramBot.Data`) — public helper for services that don't inherit from `DataAccessBase`
 
 ### Optimization Principles
 
@@ -603,17 +675,24 @@ Previously, the linked CTS caused `ReadAllAsync(ct)` to stop immediately on shut
 - ✅ `SendErrorAsync`/`SendNotificationAsync` — удалены
 - ✅ `DefaultConnectionString` — вынесен в `DataAccessBase`
 - ✅ Reconnect-циклы — вынесены в `PostgresReconnectLoop`
-- ✅ `SessionDataService`/`CommandDataService` — двойная DI-регистрация (упрощена в v1.4)
+- ✅ `SessionDataService`/`CommandDataService` — единая DI-регистрация (обёрнуты в `DataServices` на Server)
+- ✅ `_handlerMap` в `CallbackDispatcher` — O(1) lookup вместо O(n) линейного перебора
+- ✅ `RevitFileDeduplicator` — extracted из `SlashCommandService` (тестируемо, переиспользуемо)
 
 #### Производительность
-- ✅ **Batch-обработка Telegram:** заменить последовательный цикл на `Parallel.ForEachAsync`
-- ✅ Markdown-экранирование: `Regex.Replace`
-- ✅ Кэширование ФС: TTL-кэш (5 сек)
-- ✅ Очистка сессий: lazy при доступе + фоновая раз в 30 мин
+- ✅ **Batch-обработка Telegram:** `Parallel.ForEachAsync` с `MaxDegreeOfParallelism=10` + bounded `Channel<Update>` (200)
+- ✅ **Drain loop** в `CommandExecutionService` — устраняет head-of-line blocking в Worker
+- ✅ **stdout/stderr** через `OutputDataReceived` (lock + 64KB limit + `truncated` flag) — без `BlockingCollection`
+- ✅ **Parallel** scan `01_RVT/*.rvt` — `Task.WhenAll` по секциям в `SlashCommandService.CollectRvtFilesAsync`
+- ✅ **Markdown-экранирование:** `Regex.Replace`
+- ✅ **FS-caching:** TTL-кэш в `FileSystemBrowser` (5 сек)
+- ✅ **Session cleanup:** lazy при доступе + фоновая раз в 30 мин
+- ✅ **Atomic writes** для task/result JSON: `.tmp` → `File.Move(overwrite: true)`
+- ✅ **`sessionRemaining`** — in-memory счётчик, уменьшает SQL-запросы
 
 #### Интерфейсы
-- ✅ Все single-implementation удалены (кроме `ITelegramOutputService`, data services)
-- Не создавай новый интерфейс, если не планируется ≥2 реализаций.
+- ✅ Все single-implementation удалены (кроме `ICallbackHandler` и `ITelegramOutputService`, data services)
+- Не создавай новый интерфейс, если не планируется ≥2 реализаций
 
 ---
 
@@ -624,7 +703,15 @@ Previously, the linked CTS caused `ReadAllAsync(ct)` to stop immediately on shut
 - CI pipeline exists (`.github/workflows/ci.yml`) — runs `dotnet build` and `dotnet publish` on push/PR. No automated tests — the only verification is a successful `dotnet build`
 - Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
 - PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`
-- **Interfaces remaining:** `ITelegramOutputService` — sole consumer interface.
+- **Interfaces remaining:** `ICallbackHandler` (6 implementations), `ITelegramOutputService` (sole consumer interface)
+
+---
+
+## Open architectural concerns
+
+См. подробности в [Docs/CriticalReview.md](Docs/CriticalReview.md):
+- **Durable completion notifications** — `pg_notify('command_completed')` is not durable; нужен outbox-механизм для guaranteed delivery при downtime Server'а
+- **Single-Writer assumption на Server** — в multi-instance сценарии потребуется distributed lock для `pg_notify` sender'а
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
@@ -655,7 +742,7 @@ This project is indexed by GitNexus as **TelegramBot** (1228 symbols, 3219 relat
 | `gitnexus://repo/TelegramBot/context` | Codebase overview, check index freshness |
 | `gitnexus://repo/TelegramBot/clusters` | All functional areas |
 | `gitnexus://repo/TelegramBot/processes` | All execution flows |
-| `gitnexus://repo/TelegramBot/process/{name}` | Step-by-step execution trace |
+| `process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
