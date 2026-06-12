@@ -44,8 +44,9 @@ public sealed class NotificationSenderService(
             if (item.UserId.HasValue)
             {
                 _=await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
-                logger.LogInformation("Session started notify sent: user={UserId}, session={SessionId}, correlationId={CorrelationId}",
-                    item.UserId.Value, item.SessionId, item.CorrelationId);
+                var startedUsername = await sessionDataService.GetSessionUsernameAsync(item.SessionId) ?? "(unnamed)";
+                logger.LogInformation("Session started notify sent: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}",
+                    startedUsername, item.UserId.Value, item.SessionId, item.CorrelationId);
                 return;
             }
 
@@ -68,8 +69,8 @@ public sealed class NotificationSenderService(
             }
 
             _=await telegramOutput.SendMessageAsync(session.UserId, summary.ToString());
-            logger.LogInformation("Session completed: user={UserId}, session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
-                session.UserId, item.SessionId, item.CorrelationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
+            logger.LogInformation("Session completed: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+                session.Username ?? "(unnamed)", session.UserId, item.SessionId, item.CorrelationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
         }
         catch (Exception ex)
         {

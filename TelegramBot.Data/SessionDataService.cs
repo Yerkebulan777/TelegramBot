@@ -118,6 +118,15 @@ public sealed class SessionDataService(
             new { UserId = userId, SinceUtc = sinceUtc });
     }
 
+    /// <summary>Возвращает имя пользователя по ID сессии.</summary>
+    public async Task<string?> GetSessionUsernameAsync(int sessionId)
+    {
+        await using var conn = await CreateOpenConnectionAsync();
+        return await conn.QuerySingleOrDefaultAsync<string>(
+            "SELECT Username FROM Sessions WHERE SessionId = @SessionId",
+            new { SessionId = sessionId });
+    }
+
     /// <summary>Возвращает статус сессии.</summary>
     public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId)
     {

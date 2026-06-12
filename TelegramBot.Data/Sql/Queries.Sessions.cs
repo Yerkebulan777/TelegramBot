@@ -108,6 +108,7 @@ internal static partial class SqlQueries
         internal const string GetCompletionSummary = @"
             SELECT
                 s.UserId,
+                s.Username,
                 s.SessionId,
                 s.CorrelationId,
                 s.ProjectName,

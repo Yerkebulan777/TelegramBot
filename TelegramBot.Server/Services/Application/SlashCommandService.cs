@@ -132,7 +132,7 @@ public sealed partial class SlashCommandService(
 
         ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
 
-        logger.LogDebug("Command received: command={Command}, user={UserId}", text, userId);
+        logger.LogDebug("Command received: command={Command}, user={Username} ({UserId})", text, username, userId);
 
         var access = await accessValidator.ValidateAsync(userId);
         var user = access.User;
@@ -254,15 +254,17 @@ public sealed partial class SlashCommandService(
         if (result.Status == CommandExecutionStatus.AccessDenied)
         {
             logger.LogWarning(
-                "Command rejected: command={Command}, user={UserId}, reason=access_denied",
+                "Command rejected: command={Command}, user={Username} ({UserId}), reason=access_denied",
                 context.Command,
+                context.Username,
                 context.UserId);
         }
         else
         {
             logger.LogDebug(
-                "Command handled: command={Command}, user={UserId}, strategy={Strategy}",
+                "Command handled: command={Command}, user={Username} ({UserId}), strategy={Strategy}",
                 context.Command,
+                context.Username,
                 context.UserId,
                 strategy);
         }
@@ -353,7 +355,7 @@ public sealed partial class SlashCommandService(
     {
         if (!session.FileSelectionMessageId.HasValue)
         {
-            logger.LogWarning("Job submit blocked: user={UserId}, reason=missing_file_selection_message", userId);
+            logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=missing_file_selection_message", username, userId);
             await SendWarningAndCleanupAsync(userId, session, "Сообщение выбора файлов не найдено.");
             return;
         }
@@ -363,7 +365,7 @@ public sealed partial class SlashCommandService(
             var selectedProject = session.GetSelectedFiles().FirstOrDefault();
             if (selectedProject == null)
             {
-                logger.LogDebug("Project confirm blocked: user={UserId}, reason=no_project_selected", userId);
+                logger.LogDebug("Project confirm blocked: user={Username} ({UserId}), reason=no_project_selected", username, userId);
                 await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите проект.");
                 return;
             }
@@ -384,14 +386,14 @@ public sealed partial class SlashCommandService(
         var selectedSections = session.GetSelectedFiles();
         if (selectedSections.Count == 0)
         {
-            logger.LogDebug("Job submit blocked: user={UserId}, reason=no_sections_selected", userId);
+            logger.LogDebug("Job submit blocked: user={Username} ({UserId}), reason=no_sections_selected", username, userId);
             await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите хотя бы один раздел.");
             return;
         }
 
         logger.LogDebug(
-            "Job submit: user={UserId}, commands={CommandCount}, sections={SectionCount}",
-            userId, session.PendingCommand.Count, selectedSections.Count);
+            "Job submit: user={Username} ({UserId}), commands={CommandCount}, sections={SectionCount}",
+            username, userId, session.PendingCommand.Count, selectedSections.Count);
 
         // Remove reply keyboard immediately so the user cannot re-press Confirm.
         // Tracked so ClearChatHistoryAsync removes it together with the rest.
@@ -401,7 +403,7 @@ public sealed partial class SlashCommandService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to remove reply keyboard for user {UserId}", userId);
+            logger.LogWarning(ex, "Failed to remove reply keyboard: user={Username} ({UserId})", username, userId);
         }
 
         var commandNames = session.PendingCommandName;
@@ -418,12 +420,12 @@ public sealed partial class SlashCommandService(
             var filesToProcess = await CollectRvtFilesAsync(selectedSections, cancellationToken);
             if (filesToProcess.Count == 0)
             {
-                logger.LogWarning("Job submit blocked: user={UserId}, reason=no_files_found", userId);
+                logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=no_files_found", username, userId);
                 await SendWarningAndCleanupAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
                 return;
             }
 
-            if (!await CheckDailyFileLimitAsync(userId, session, filesToProcess.Count))
+            if (!await CheckDailyFileLimitAsync(userId, username, session, filesToProcess.Count))
             {
                 return;
             }
@@ -431,7 +433,7 @@ public sealed partial class SlashCommandService(
             // Проверяем, нет ли уже таких же (команда + файл) в очереди
             if (await dataServices.Commands.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
             {
-                logger.LogWarning("Job blocked: user={UserId}, reason=duplicate_commands_in_queue", userId);
+                logger.LogWarning("Job blocked: user={Username} ({UserId}), reason=duplicate_commands_in_queue", username, userId);
                 await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
                 return;
             }
@@ -445,8 +447,8 @@ public sealed partial class SlashCommandService(
             var sessionId = await dataServices.Sessions.CreateSessionWithCommandsAsync(
                 session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
             logger.LogInformation(
-                "Job queued: session={SessionId}, correlationId={CorrelationId}, user={UserId}, commands={CommandCount}, files={FileCount}",
-                sessionId, correlationId, userId, session.PendingCommand.Count, filesToProcess.Count);
+                "Job queued: session={SessionId}, correlationId={CorrelationId}, user={Username} ({UserId}), commands={CommandCount}, files={FileCount}",
+                sessionId, correlationId, username, userId, session.PendingCommand.Count, filesToProcess.Count);
 
             session.SessionId = checked((int)sessionId);
             await outputService.ClearChatHistoryAsync(userId, session);
@@ -485,7 +487,7 @@ public sealed partial class SlashCommandService(
         }
     }
 
-    private async Task<bool> CheckDailyFileLimitAsync(long userId, UserSession session, int newFileCount)
+    private async Task<bool> CheckDailyFileLimitAsync(long userId, string username, UserSession session, int newFileCount)
     {
         if (_rateLimitOptions.MaxFilesPerUserPerDay <= 0)
         {
@@ -502,8 +504,8 @@ public sealed partial class SlashCommandService(
         }
 
         logger.LogWarning(
-            "Job submit blocked: user={UserId}, reason=daily_file_limit, queued={Queued}, requested={Requested}, limit={Limit}",
-            userId, queuedToday, newFileCount, _rateLimitOptions.MaxFilesPerUserPerDay);
+            "Job submit blocked: user={Username} ({UserId}), reason=daily_file_limit, queued={Queued}, requested={Requested}, limit={Limit}",
+            username, userId, queuedToday, newFileCount, _rateLimitOptions.MaxFilesPerUserPerDay);
 
         var message = remaining > 0
             ? $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. Уже в очереди за 24 часа: {queuedToday}. Можно добавить ещё {remaining}."

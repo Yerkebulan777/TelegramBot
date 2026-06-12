@@ -43,16 +43,18 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
         if (!_handlerMap.TryGetValue(prefix, out var handler))
         {
             logger.LogDebug(
-                "Callback ignored: prefix={Prefix}, user={UserId}, reason=no_handler",
+                "Callback ignored: prefix={Prefix}, user={Username} ({UserId}), reason=no_handler",
                 prefix,
+                context.Username,
                 context.UserId);
             return false;
         }
 
         logger.LogDebug(
-            "Callback dispatch: prefix={Prefix}, handler={HandlerName}, user={UserId}",
+            "Callback dispatch: prefix={Prefix}, handler={HandlerName}, user={Username} ({UserId})",
             prefix,
             handler.GetType().Name,
+            context.Username,
             context.UserId);
 
         try
@@ -63,18 +65,20 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
             if (handled)
             {
                 logger.LogDebug(
-                    "Callback handled: prefix={Prefix}, handler={HandlerName}, user={UserId}, elapsedMs={ElapsedMs}",
+                    "Callback handled: prefix={Prefix}, handler={HandlerName}, user={Username} ({UserId}), elapsedMs={ElapsedMs}",
                     prefix,
                     handler.GetType().Name,
+                    context.Username,
                     context.UserId,
                     stopwatch.ElapsedMilliseconds);
                 return true;
             }
 
             logger.LogDebug(
-                "Callback not handled by handler: prefix={Prefix}, handler={HandlerName}, user={UserId}, elapsedMs={ElapsedMs}",
+                "Callback not handled by handler: prefix={Prefix}, handler={HandlerName}, user={Username} ({UserId}), elapsedMs={ElapsedMs}",
                 prefix,
                 handler.GetType().Name,
+                context.Username,
                 context.UserId,
                 stopwatch.ElapsedMilliseconds);
             return false;

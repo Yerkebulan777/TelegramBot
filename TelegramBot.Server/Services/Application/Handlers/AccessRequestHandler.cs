@@ -116,7 +116,7 @@ public sealed class AccessRequestHandler(
         var access = await accessValidator.ValidateAsync(context.UserId);
         if (!access.IsAdmin)
         {
-            Logger.LogWarning("Access decision rejected: user={UserId}, reason=not_admin", context.UserId);
+            Logger.LogWarning("Access decision rejected: user={Username} ({UserId}), reason=not_admin", context.Username, context.UserId);
             await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Недостаточно прав.");
             return true;
         }

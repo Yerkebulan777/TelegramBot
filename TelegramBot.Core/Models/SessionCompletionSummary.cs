@@ -4,6 +4,7 @@ namespace TelegramBot.Core.Models;
 public sealed class SessionCompletionSummary
 {
     public long UserId { get; set; }
+    public string? Username { get; set; }
     public int SessionId { get; set; }
     public string CorrelationId { get; set; } = string.Empty;
     public string? ProjectName { get; set; }

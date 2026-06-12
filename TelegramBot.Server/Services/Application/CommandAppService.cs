@@ -63,7 +63,7 @@ public sealed class CommandAppService(
         if (!accessValidator.BypassesAccessCheck(parsed.Prefix) &&
             !await accessValidator.EnsureActiveOrNotifyAsync(callback.UserId, session))
         {
-            logger.LogWarning("Callback rejected: prefix={Prefix}, user={UserId}, reason=access_denied", parsed.Prefix, callback.UserId);
+            logger.LogWarning("Callback rejected: prefix={Prefix}, user={Username} ({UserId}), reason=access_denied", parsed.Prefix, callback.Username, callback.UserId);
             return;
         }
 
