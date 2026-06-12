@@ -625,7 +625,7 @@ public sealed partial class SlashCommandService(
     {
         try
         {
-            _ = await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, "…"), session);
+            _ = await TrackMessageAsync(outputService.RemoveReplyKeyboardAsync(userId, "Готово"), session);
         }
         catch (Exception ex)
         {
