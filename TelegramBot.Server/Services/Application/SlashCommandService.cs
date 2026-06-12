@@ -290,6 +290,27 @@ public sealed partial class SlashCommandService(
                 await ConfirmFileSelectionAsync(userId, username, session, cancellationToken);
                 return true;
 
+            // Stale/duplicate Confirm press: first press already reset session state
+            // (IsFileSelectionActive=false, PendingCommand empty). The press still arrives
+            // as a tracked user text message but matches no action above. Delete it so it
+            // does not leak in the UI, instead of falling through to default (returns false,
+            // no cleanup).
+            case ButtonTexts.Confirm:
+                logger.LogDebug("Stale Confirm press from {Username} ({UserId}); cleaning orphaned message", username, userId);
+                if (session.LastUserMessageId.HasValue)
+                {
+                    try
+                    {
+                        await outputService.DeleteMessageAsync(userId, session.LastUserMessageId.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to delete stale Confirm message for user {UserId}", userId);
+                    }
+                    session.LastUserMessageId = null;
+                }
+                return true;
+
             case ButtonTexts.Cancel:
                 logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
 
@@ -371,6 +392,18 @@ public sealed partial class SlashCommandService(
         logger.LogDebug(
             "Job submit: user={UserId}, commands={CommandCount}, sections={SectionCount}",
             userId, session.PendingCommand.Count, selectedSections.Count);
+
+        // Immediate acknowledgment before the slow FS scan + DB work so the user
+        // sees progress and does not re-press Confirm. Tracked, so the cleanup at
+        // the end of this method (and SendWarningAndCleanupAsync on early returns) removes it.
+        try
+        {
+            _ = await TrackMessageAsync(outputService.SendMessageAsync(userId, "⏳ Обрабатываю запрос…"), session);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to send or track immediate acknowledgment message for user {UserId}", userId);
+        }
 
         var commandNames = session.PendingCommandName;
         var projectName = GetCurrentProjectName(session);
