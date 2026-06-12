@@ -679,7 +679,7 @@ public sealed partial class SlashCommandService(
         if (!RvtSectionPattern().IsMatch(name)) return false;
 
         try { return fi.Length > _rvtMinFileSizeBytes; }
-        catch { return false; }
+        catch (Exception) { return false; }
     }
 
     private static List<string> DeduplicateRevitFiles(List<string> files)
