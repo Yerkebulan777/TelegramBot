@@ -55,8 +55,6 @@ public class UserSession
     /// <summary>Текущий фильтр в /status: ALL, ACTIVE, DONE, FAILED.</summary>
     public string StatusFilter { get; set; } = "ALL";
 
-    /// <summary>Текущая страница в /status.</summary>
-    public int StatusPage { get; set; } = 1;
     /// <summary>False after server restart — set to true on first slash command to suppress stale-message detection.</summary>
     public bool Initialized { get; set; }
     public int SessionId { get; set; }
@@ -162,7 +160,6 @@ public class UserSession
         SessionId = 0;
         LastUserMessageId = null;
         StatusFilter = "ALL";
-        StatusPage = 1;
     }
 
     /// <summary>

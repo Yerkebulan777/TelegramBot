@@ -14,6 +14,7 @@ public sealed class SessionManagementHandler(
     MessageTrackingDataService messageTrackingDataService,
     KeyboardBuilder keyboardBuilder,
     ITelegramOutputService outputService,
+    SessionsListRenderer sessionsListRenderer,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
 {
     protected override HashSet<string> SupportedPrefixes { get; } =
@@ -25,8 +26,7 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.ConfirmDeleteCommand,
         CallbackPrefixes.DeleteSessionByType,
         CallbackPrefixes.ConfirmDeleteSessionByType,
-        CallbackPrefixes.StatusFilter,
-        CallbackPrefixes.StatusPage
+        CallbackPrefixes.StatusFilter
     ];
 
     protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -41,35 +41,19 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.DeleteSessionByType => await HandleDeleteByTypeConfirmationAsync(context),
             CallbackPrefixes.ConfirmDeleteSessionByType => await HandleDeleteByTypeAsync(context),
             CallbackPrefixes.StatusFilter => await HandleStatusFilterAsync(context),
-            CallbackPrefixes.StatusPage => await HandleStatusPageAsync(context),
             _ => false
         };
     }
 
-    // ────────────────────────── Filter & Pagination ──────────────────────────
+    // ────────────────────────── Filter ──────────────────────────
 
     private async Task<bool> HandleStatusFilterAsync(CallbackContext context)
     {
-        var filter = context.ParsedCallback.Argument;
-        if (string.IsNullOrEmpty(filter))
-        {
-            filter = "ALL";
-        }
+        var filter = string.IsNullOrEmpty(context.ParsedCallback.Argument)
+            ? StatusFilters.All
+            : context.ParsedCallback.Argument;
 
         context.Session.StatusFilter = filter;
-        context.Session.StatusPage = 1;
-        await ShowSessionsListAsync(context);
-        return true;
-    }
-
-    private async Task<bool> HandleStatusPageAsync(CallbackContext context)
-    {
-        if (!int.TryParse(context.ParsedCallback.Argument, out var page) || page < 1)
-        {
-            return true;
-        }
-
-        context.Session.StatusPage = page;
         await ShowSessionsListAsync(context);
         return true;
     }
@@ -346,47 +330,10 @@ public sealed class SessionManagementHandler(
     private async Task ShowSessionsListAsync(CallbackContext context)
     {
         var session = context.Session;
-        Logger.LogInformation("{Username} view sessions — filter={Filter}, page={Page}",
-            context.Username, session.StatusFilter, session.StatusPage);
-
-        var pageSize = keyboardBuilder.DefaultPageSize;
-        var sessionsStatus = await sessionDataService.GetSessionsListFilteredAsync(
-            session.StatusFilter, session.StatusPage, pageSize);
-        var totalCount = await sessionDataService.CountSessionsFilteredAsync(session.StatusFilter);
-        var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
-
-        // Корректируем страницу, если вышли за пределы
-        if (session.StatusPage > totalPages)
-        {
-            session.StatusPage = totalPages;
-            sessionsStatus = await sessionDataService.GetSessionsListFilteredAsync(
-                session.StatusFilter, session.StatusPage, pageSize);
-        }
-
-        var statusText = session.StatusFilter switch
-        {
-            "ACTIVE" => "🔄 Активные",
-            "DONE" => "✅ Завершённые",
-            "FAILED" => "❌ С ошибками",
-            _ => "📋 Все сессии"
-        };
-
-        var messageText = $"{statusText} — стр. {session.StatusPage}/{totalPages} (всего {totalCount})";
-
-        var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(
-            sessionsStatus, session.StatusFilter, session.StatusPage, totalPages);
-
-        if (session.StatusMessageId.HasValue)
-        {
-            await outputService.EditMessageTextWithKeyboardAsync(
-                context.UserId, session.StatusMessageId.Value, messageText, keyboard);
-        }
-        else
-        {
-            await outputService.EditMessageTextWithKeyboardAsync(
-                context.UserId, context.MessageId, messageText, keyboard);
-            session.StatusMessageId = context.MessageId;
-        }
+        var targetMessageId = session.StatusMessageId ?? context.MessageId;
+        await sessionsListRenderer.EditExistingAsync(
+            context.UserId, targetMessageId, session.StatusFilter, context.Username);
+        session.StatusMessageId ??= context.MessageId;
     }
 
     private static string BuildStatusReply(SessionStatus sessionStatus, List<SessionCommands>? sessionCommands = null)

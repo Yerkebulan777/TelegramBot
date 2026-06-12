@@ -89,18 +89,17 @@ public sealed class SessionDataService(
         return result.ToList();
     }
 
-    /// <summary>Возвращает отфильтрованный список сессий с пагинацией.</summary>
-    public async Task<List<SessionsList>> GetSessionsListFilteredAsync(string filter, int page, int pageSize)
+    /// <summary>Возвращает отфильтрованный список сессий.</summary>
+    public async Task<List<SessionsList>> GetSessionsListFilteredAsync(string filter)
     {
-        var offset = (page - 1) * pageSize;
         await using var conn = await CreateOpenConnectionAsync();
         var result = await conn.QueryAsync<SessionsList>(
             SqlQueries.Sessions.GetListFiltered,
-            new { Filter = filter, PageSize = pageSize, Offset = offset });
+            new { Filter = filter });
         return result.ToList();
     }
 
-    /// <summary>Считает количество сессий по фильтру для пагинации.</summary>
+    /// <summary>Считает количество сессий по фильтру (для счётчика «(всего N)» в заголовке /status).</summary>
     public async Task<int> CountSessionsFilteredAsync(string filter)
     {
         await using var conn = await CreateOpenConnectionAsync();

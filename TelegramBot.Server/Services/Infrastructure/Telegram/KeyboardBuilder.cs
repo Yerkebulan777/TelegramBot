@@ -8,8 +8,6 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 {
-    private const int PageSize = 10;
-
     public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
     {
         return fileNavigationService.GetSectionsViewAsync(userId, session.CurrentPath);
@@ -34,80 +32,41 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
     }
 
-    public int DefaultPageSize => PageSize;
-
-    /// <summary>Строит клавиатуру списка сессий с фильтрами и пагинацией.</summary>
+    /// <summary>Строит клавиатуру списка сессий с фильтрами.</summary>
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(
-        List<SessionsList> sessionsList, string currentFilter, int currentPage, int totalPages)
+        List<SessionsList> sessionsList, string currentFilter)
     {
-        var buttons = new List<List<InlineKeyboardButton>>();
+        var buttons = new List<List<InlineKeyboardButton>>
+        {
+            StatusFilters.AllDescriptors
+                .Select(f => InlineKeyboardButton.WithCallbackData(
+                    FilterLabel(f.Title, currentFilter, f.Key),
+                    $"{CallbackPrefixes.StatusFilter}{f.Key}"))
+                .ToList()
+        };
 
-        // ── Ряд фильтров: Все / Активные / Завершённые / С ошибками ──
-        var filterRow = new List<InlineKeyboardButton>();
-        AddFilterButton(filterRow, "📋 Все", "ALL", currentFilter);
-        AddFilterButton(filterRow, "🔄 Активные", "ACTIVE", currentFilter);
-        AddFilterButton(filterRow, "✅ Завершённые", "DONE", currentFilter);
-        AddFilterButton(filterRow, "❌ Ошибки", "FAILED", currentFilter);
-        buttons.Add(filterRow);
-
-        // ── Сессии ──
         foreach (var session in sessionsList)
         {
-            var statusIcon = GetSessionStatusIcon(session.Status, session.ActiveCommands);
+            var finished = session.DoneCommands + session.FailedCommands == session.TotalCommands;
+            var progressIcon = finished ? "✅" : "🔄";
+            var errorInfo = session.FailedCommands > 0 ? $" ⚠️{session.FailedCommands}" : "";
             var projectName = string.IsNullOrEmpty(session.ProjectName) ? "" : $" {session.ProjectName}";
-
-            var progressIcon = session.DoneCommands + session.FailedCommands == session.TotalCommands
-                ? "✅"
-                : "🔄";
-
-            var errorInfo = session.FailedCommands > 0
-                ? $" ⚠️{session.FailedCommands}"
-                : "";
 
             buttons.Add(
             [
                 InlineKeyboardButton.WithCallbackData(
-                    $"{statusIcon}{projectName} 👤{session.Username} 📅{session.Date:dd.MM.yy} ({session.DoneCommands}/{session.TotalCommands}){progressIcon}{errorInfo}",
+                    $"{projectName} 👤{session.Username} 📅{session.Date:dd.MM.yy} ({session.DoneCommands}/{session.TotalCommands}){progressIcon}{errorInfo}",
                     $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
             ]);
-        }
-
-        // ── Пагинация ──
-        if (totalPages > 1)
-        {
-            var pageRow = new List<InlineKeyboardButton>();
-
-            if (currentPage > 1)
-            {
-                pageRow.Add(InlineKeyboardButton.WithCallbackData(
-                    "◀️ Пред.",
-                    $"{CallbackPrefixes.StatusPage}{currentPage - 1}"));
-            }
-
-            pageRow.Add(InlineKeyboardButton.WithCallbackData(
-                $"📄 {currentPage}/{totalPages}",
-                $"{CallbackPrefixes.StatusPage}{currentPage}"));
-
-            if (currentPage < totalPages)
-            {
-                pageRow.Add(InlineKeyboardButton.WithCallbackData(
-                    "След. ▶️",
-                    $"{CallbackPrefixes.StatusPage}{currentPage + 1}"));
-            }
-
-            buttons.Add(pageRow);
         }
 
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
-    /// <summary>Добавляет кнопку фильтра с пометкой активного.</summary>
-    private static void AddFilterButton(List<InlineKeyboardButton> row, string label, string filterValue, string currentFilter)
-    {
-        var isActive = string.Equals(filterValue, currentFilter, StringComparison.OrdinalIgnoreCase);
-        var displayLabel = isActive ? $"🔹 {label}" : label;
-        row.Add(InlineKeyboardButton.WithCallbackData(displayLabel, $"{CallbackPrefixes.StatusFilter}{filterValue}"));
-    }
+    private static string FilterLabel(string title, string currentFilter, string filterKey) =>
+        string.Equals(filterKey, currentFilter, StringComparison.OrdinalIgnoreCase)
+            ? $"🔹 {title}"
+            : title;
 
     public Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
     {
@@ -208,19 +167,6 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             "Deleted" => "🗑",
             _ => "❓"
         };
-    }
-
-    private static string GetSessionStatusIcon(string status, int activeCommands)
-    {
-        return activeCommands > 0
-            ? "🔄"
-            : status switch
-            {
-                "Done" => "✅",
-                "Failed" => "❌",
-                "Deleted" => "🗑",
-                _ => "📋"
-            };
     }
 
     private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(

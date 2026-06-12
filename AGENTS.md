@@ -103,7 +103,7 @@ Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
 | Infrastructure | `TelegramBotHostedService` | Long-polling + параллельная обработка + graceful shutdown |
 | Infrastructure | `TelegramUpdateMapper` | `Update` → `MessageDto`/`CallbackQueryDto` |
 | Infrastructure | `TelegramOutputService` | Обёртка над `ITelegramBotClient`: `SendMessageAsync`, `EditMessageReplyMarkupAsync`, `AnswerCallbackAsync`, `SendChatActionAsync`, `SendMessageWithReplyKeyboardAsync`, `RemoveReplyKeyboardAsync`. HTTP 429 retry |
-| Infrastructure | `KeyboardBuilder` | Inline- и reply-клавиатуры: секции, команды, фильтры `/status`, сессии, пагинация. `DefaultPageSize = 10` |
+| Infrastructure | `KeyboardBuilder` | Inline- и reply-клавиатуры: секции, команды, фильтры `/status`, сессии |
 | Infrastructure | `FileSystemBrowser` | Навигация по `RootPath` → проекты → `01_PROJECT/<project>/<раздел>/` → `01_RVT/*.rvt` |
 | Infrastructure | `CommandNotificationService` | `BackgroundService`: слушает PostgreSQL `LISTEN command_completed` и `LISTEN session_started` (синхронный event handler → `Channel<NotificationItem>.Writer.TryWrite`) |
 | Infrastructure | `NotificationSenderService` | `BackgroundService`: `await foreach` на том же канале, шлёт в Telegram. Формат: "⚙️ Задание запущено" на старте сессии, summary на завершении |
@@ -119,7 +119,7 @@ Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
 | Handlers | `FileNavigationHandler` (P=10) | `GOTOPARENT:` — навигация в выбранную папку с проверкой `IsPathWithinRoot` |
 | Handlers | `FileSelectionHandler` (P=20) | Тоггл выбора файла/папки |
 | Handlers | `CommandToggleHandler` (P=100) | Тоггл выбора команды (`PDF:`, `DWG:`, `IFC:` и т.д.) |
-| Handlers | `SessionManagementHandler` (P=100) | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`, `STATUSPAGE:` |
+| Handlers | `SessionManagementHandler` (P=100) | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:` |
 | Handlers | `CommandSelectionHandler` (P=100) | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
 | Helpers | `HandlerHelpers` | `SendActionsReplyKeyboardAsync` (общий для SlashCommandService, FileNavigationHandler, CommandSelectionHandler) |
 | Helpers | `MarkdownHelper` | `Escape(text, ParseMode)` для Markdown/MarkdownV2 |
@@ -347,7 +347,7 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 
 | File | Purpose | Key Constants |
 |------|---------|---------------|
-| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `StatusPage`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
+| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
 | `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |
 | `Statuses.cs` | Entity statuses (commands/sessions) | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses` (set), `ActiveStatuses` (set) |
 | `CommandPriorities.cs` | Worker queue priority levels | `Critical`=1, `High`=2, `Medium`=3, `Low`=4, `Lowest`=5, `Default`=50 |
@@ -484,7 +484,7 @@ Handler hierarchy:
 - `FileSelectionHandler` (Priority 20) — file/folder toggle
 - `CommandToggleHandler` (Priority 100) — `PDF:`, `DWG:`, `IFC:`, `BIMDOC:`, `NWC:`, `CLASHREP:`, `AUTORES:`
 - `CommandSelectionHandler` (Priority 100) — `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`
-- `SessionManagementHandler` (Priority 100) — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`, `STATUSPAGE:`
+- `SessionManagementHandler` (Priority 100) — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`
 
 **Error handling:** `CallbackHandlerBase.HandleAsync()` **НЕ ловит** исключения — они пропагируются в `CallbackDispatcher.DispatchAsync()`, который ловит `Exception`, логирует с `elapsedMs`/handlerName и возвращает `false` (исключая double logging). `OperationCanceledException` пробрасывается наверх.
 
@@ -492,7 +492,7 @@ Handler hierarchy:
 
 Callback prefixes — константы в `CallbackPrefixes` (`TelegramBot.Core/Constants/CallbackPrefixes.cs`). Command codes — в `CommandCodes` (`TelegramBot.Core/Constants/CommandCodes.cs`). Используй `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) для получения `ParsedCallback`, затем match через `parsed.Is(CallbackPrefixes.GoToParent)`.
 
-> **SessionManagementHandler** управляет `/status` actions. Delete buttons сначала показывают confirmation dialog («✅ Да, удалить» / «↩️ Назад»). Поддерживает фильтры (`ALL`/`ACTIVE`/`DONE`/`FAILED`) и пагинацию (`STATUSPAGE:N`). Удаление команды (включая running) → `Status = 'Deleted'` (soft-delete). При удалении последней команды в сессии — удаляется и сама сессия + tracked messages (`DeleteSessionAndMessagesAsync`).
+> **SessionManagementHandler** управляет `/status` actions. Delete buttons сначала показывают confirmation dialog («✅ Да, удалить» / «↩️ Назад»). Поддерживает фильтры (`ALL`/`ACTIVE`/`DONE`/`FAILED`). Удаление команды (включая running) → `Status = 'Deleted'` (soft-delete). При удалении последней команды в сессии — удаляется и сама сессия + tracked messages (`DeleteSessionAndMessagesAsync`).
 
 For Markdown escaping, use `MarkdownHelper.Escape()` from `TelegramBot.Server/Helpers/`.
 

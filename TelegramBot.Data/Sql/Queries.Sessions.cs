@@ -58,8 +58,7 @@ internal static partial class SqlQueries
                    OR (@Filter = 'ACTIVE' AND COALESCE(stats.ActiveCount, 0) > 0)
                    OR (@Filter = 'DONE' AND COALESCE(stats.ActiveCount, 0) = 0 AND COALESCE(stats.FailedCount, 0) = 0 AND COALESCE(stats.DoneCount, 0) > 0)
                    OR (@Filter = 'FAILED' AND COALESCE(stats.FailedCount, 0) > 0))
-            ORDER BY s.CreatedAt DESC
-            LIMIT @PageSize OFFSET @Offset;";
+            ORDER BY s.CreatedAt DESC;";
 
         internal const string CountFiltered = @"
             WITH session_stats AS (

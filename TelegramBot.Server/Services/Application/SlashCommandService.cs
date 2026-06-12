@@ -23,6 +23,7 @@ public sealed partial class SlashCommandService(
     ITelegramOutputService outputService,
     KeyboardBuilder keyboardBuilder,
     AuthorizationMiddleware accessValidator,
+    SessionsListRenderer sessionsListRenderer,
     IOptions<FileSystemOptions> fileSystemOptions,
     IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger)
@@ -83,20 +84,11 @@ public sealed partial class SlashCommandService(
                 logger.LogDebug("Executing /status for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 session.IsInStatusView = true;
-                session.StatusFilter = "ALL";
-                session.StatusPage = 1;
+                session.StatusFilter = StatusFilters.All;
 
-                var pageSize = keyboardBuilder.DefaultPageSize;
-                var sessionsStatus = await dataServices.Sessions.GetSessionsListFilteredAsync(
-                    session.StatusFilter, session.StatusPage, pageSize);
-                var totalCount = await dataServices.Sessions.CountSessionsFilteredAsync(session.StatusFilter);
-                var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
-
-                var messageText = $"📋 Все сессии — стр. 1/{totalPages} (всего {totalCount})";
-                var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(
-                    sessionsStatus, session.StatusFilter, session.StatusPage, totalPages);
-                var statusMessage = await TrackMessageAsync(outputService.SendMessageWithKeyboardAsync(userId, messageText, keyboard), session);
-                session.StatusMessageId = statusMessage?.Id;
+                var sent = await sessionsListRenderer.SendNewAsync(userId, session.StatusFilter);
+                var tracked = await TrackMessageAsync(Task.FromResult(sent), session);
+                session.StatusMessageId = tracked?.Id;
                 break;
 
             case "/automation":

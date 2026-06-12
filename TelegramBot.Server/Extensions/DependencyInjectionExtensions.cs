@@ -69,6 +69,7 @@ public static class DependencyInjectionExtensions
         _=services.AddSingleton<AuthorizationMiddleware>();
         _=services.AddSingleton<RateLimiter>();
         _=services.AddSingleton<SlashCommandService>();
+        _=services.AddSingleton<SessionsListRenderer>();
         _=services.AddSingleton<SessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
         return services;
