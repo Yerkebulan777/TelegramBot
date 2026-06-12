@@ -204,12 +204,10 @@ public sealed class SessionManagementHandler(
 
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
-        if (!await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, IsAdmin))
+        if (!await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
         {
             return true;
         }
-
-        await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
 
         context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
@@ -266,6 +264,15 @@ public sealed class SessionManagementHandler(
 
     // ────────────────────── Shared Helpers ──────────────────────
 
+    private async Task<bool> DeleteSessionAndMessagesAsync(int sessionId, long userId)
+    {
+        if (!await sessionDataService.DeleteSessionAsync(sessionId, userId, IsAdmin))
+            return false;
+
+        await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
+        return true;
+    }
+
     /// <summary>Парсит аргумент вида "id:suffix", возвращает id и suffix.</summary>
     private bool TryParseCompoundId(CallbackContext context, out int id, out string suffix)
     {
@@ -301,9 +308,8 @@ public sealed class SessionManagementHandler(
     {
         if (!await sessionDataService.CheckCommandsStatusAsync(sessionId))
         {
-            if (await sessionDataService.DeleteSessionAsync(sessionId, context.UserId, IsAdmin))
+            if (await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
             {
-                await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
                 context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
