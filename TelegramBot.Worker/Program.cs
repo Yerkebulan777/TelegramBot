@@ -1,9 +1,9 @@
+using Microsoft.Extensions.Options;
 using Serilog;
 using System.Runtime.Versioning;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Health;
 using TelegramBot.Core.Helpers;
-using Microsoft.Extensions.Options;
 using TelegramBot.Data;
 using TelegramBot.Worker.BimLib.Config;
 using TelegramBot.Worker.BimLib.Monitor;
@@ -72,7 +72,7 @@ public static class Program
                     // Health check HTTP-сервер
                     _=services.AddOptions<HealthCheckOptions>()
                         .Bind(context.Configuration.GetSection(HealthCheckOptions.SectionName))
-                        .Validate(options => options.Port > 0 && options.Port <= 65535, "Port must be between 1 and 65535");
+                        .Validate(options => options.Port is >0 and <=65535, "Port must be between 1 and 65535");
 
                     var connectionString = context.Configuration.GetConnectionString("Postgres") ?? DataAccessBase.DefaultConnectionString;
                     _=services.AddHostedService(sp =>
@@ -110,7 +110,9 @@ public static class Program
                         var logBasePath = context.Configuration
                             .GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.LogDirectory)];
                         if (string.IsNullOrWhiteSpace(logBasePath))
+                        {
                             logBasePath = null;
+                        }
 
                         _=loggerConfiguration.WriteTo.Logger(lc => lc
                             .MinimumLevel.Information()

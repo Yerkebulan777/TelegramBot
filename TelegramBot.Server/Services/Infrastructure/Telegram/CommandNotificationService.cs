@@ -68,7 +68,10 @@ public sealed class CommandNotificationService(
     {
         try
         {
-            if (e.Payload == null) return;
+            if (e.Payload == null)
+            {
+                return;
+            }
 
             if (e.Channel == "session_started")
             {
@@ -84,7 +87,7 @@ public sealed class CommandNotificationService(
                 return;
             }
 
-            _startedSessions.TryRemove(sessionId, out _);
+            _=_startedSessions.TryRemove(sessionId, out _);
 
             var item = new NotificationItem(sessionId, parts[1]);
             if (!notificationChannel.Writer.TryWrite(item))
@@ -119,7 +122,7 @@ public sealed class CommandNotificationService(
         var item = new NotificationItem(sessionId, parts[1], userId);
         if (!notificationChannel.Writer.TryWrite(item))
         {
-            _startedSessions.TryRemove(sessionId, out _);
+            _=_startedSessions.TryRemove(sessionId, out _);
             logger.LogWarning("Started notify dropped: reason=channel_full, session={SessionId}", sessionId);
             return;
         }

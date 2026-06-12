@@ -1,5 +1,4 @@
 using TelegramBot.Core.Constants;
-using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Models;
 

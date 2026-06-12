@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.RegularExpressions;
 using Telegram.Bot.Exceptions;
@@ -11,14 +12,14 @@ using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
-using TelegramBot.Server.Services.Infrastructure.Telegram;
 using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Application.Handlers;
+using TelegramBot.Server.Services.Infrastructure.Telegram;
 using Message = Telegram.Bot.Types.Message;
 
 namespace TelegramBot.Server.Services.Application;
 
-public sealed class SlashCommandService(
+public sealed partial class SlashCommandService(
     SessionDataService sessionDataService,
     CommandDataService commandDataService,
     MessageTrackingDataService messageTrackingDataService,
@@ -29,25 +30,26 @@ public sealed class SlashCommandService(
     IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger)
 {
-    private static readonly Dictionary<string, int> _commandPriorityMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["PDF"] = CommandPriorities.Critical,
-        ["DWG"] = CommandPriorities.High,
-        ["NWC"] = CommandPriorities.Medium,
-        ["IFC"] = CommandPriorities.Medium,
-        ["BIMDOC"] = CommandPriorities.Medium,
-        ["CLASHREP"] = CommandPriorities.Medium,
-        ["AUTORES"] = CommandPriorities.Low,
-    };
+    private static readonly FrozenDictionary<string, int> _commandPriorityMap =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PDF"] = CommandPriorities.Critical,
+            ["DWG"] = CommandPriorities.High,
+            ["NWC"] = CommandPriorities.Medium,
+            ["IFC"] = CommandPriorities.Medium,
+            ["BIMDOC"] = CommandPriorities.Medium,
+            ["CLASHREP"] = CommandPriorities.Medium,
+            ["AUTORES"] = CommandPriorities.Low,
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private readonly FileSystemOptions _options = fileSystemOptions.Value;
     private readonly RateLimitOptions _rateLimitOptions = rateLimitOptions.Value;
 
-    private static readonly Regex _rvtSectionPattern = new(
-        @"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    [GeneratedRegex(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase)]
+    private static partial Regex RvtSectionPattern();
 
-    private static readonly Regex _rvtNumberPattern = new(@"\d{2,}", RegexOptions.Compiled);
+    [GeneratedRegex(@"\d{2,}")]
+    private static partial Regex RvtNumberPattern();
 
     private const long _rvtMinFileSizeBytes = 50L * 1024 * 1024;
 
@@ -63,7 +65,7 @@ public sealed class SlashCommandService(
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
         var context = await ValidateUserContextAsync(message.UserId, message.Text!, message, session);
-        var strategy = await ResolveCommandStrategyAsync(context);
+        var strategy = ResolveCommandStrategy(context);
         var result = await ExecuteBusinessLogicAsync(context, strategy, cancellationToken);
         var responseMessage = await FormatResponseMessageAsync(result);
 
@@ -162,21 +164,15 @@ public sealed class SlashCommandService(
             text == "/start" || access.HasAccess);
     }
 
-    private Task<CommandStrategy> ResolveCommandStrategyAsync(UserCommandContext context)
+    private static CommandStrategy ResolveCommandStrategy(UserCommandContext context)
     {
-        if (!context.HasAccess)
-        {
-            return Task.FromResult(CommandStrategy.AccessDenied);
-        }
-
-        if (context.Command == "/start")
-        {
-            return Task.FromResult(CommandStrategy.Start);
-        }
-
-        return Task.FromResult(IsCommandSelectionAction(context.RawText)
+        return !context.HasAccess
+            ? CommandStrategy.AccessDenied
+            : context.Command == "/start"
+            ? CommandStrategy.Start
+            : IsCommandSelectionAction(context.RawText)
             ? CommandStrategy.CommandSelectionAction
-            : CommandStrategy.SlashCommand);
+            : CommandStrategy.SlashCommand;
     }
 
     private async Task<CommandExecutionResult> ExecuteBusinessLogicAsync(
@@ -282,9 +278,9 @@ public sealed class SlashCommandService(
 
     private static bool IsCommandSelectionAction(string messageText)
     {
-        return messageText == ButtonTexts.Apply ||
-            messageText == ButtonTexts.Cancel ||
-            messageText == ButtonTexts.Confirm;
+        return messageText is ButtonTexts.Apply or
+            ButtonTexts.Cancel or
+            ButtonTexts.Confirm;
     }
 
     private async Task<bool> HandleCommandSelectionActionsAsync(
@@ -629,12 +625,6 @@ public sealed class SlashCommandService(
         return string.IsNullOrWhiteSpace(name) ? path : name;
     }
 
-    /// <summary>
-    /// Асинхронно собирает RVT-файлы из указанных секций.
-    /// Файловое I/O выполняется в пуле потоков через <see cref="Task.Run"/>.
-    /// Поиск ведётся рекурсивно внутри папки 01_RVT (файлы и вложенные папки).
-    /// Применяются фильтры по размеру, имени, паттерну и дедупликация при >10 файлах.
-    /// </summary>
     private Task<List<string>> CollectRvtFilesAsync(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
     {
         return Task.Run(() =>
@@ -652,16 +642,25 @@ public sealed class SlashCommandService(
                     continue;
                 }
 
-                // Поиск до 3 уровней вложенности; inaccessible папки пропускаются
-                var sectionFiles = Directory
-                    .EnumerateFiles(rvtDir, "*.rvt", _rvtEnumOptions)
-                    .Where(IsValidRevitFile)
-                    .Select(f => (File: f, DirLen: Path.GetDirectoryName(f)!.Length))
-                    .OrderBy(x => x.DirLen)
-                    .ThenBy(x => x.File, StringComparer.OrdinalIgnoreCase)
-                    .Select(x => x.File);
+                // FileInfo.Length из WIN32_FIND_DATA — не требует отдельного stat() на каждый файл
+                var sectionFiles = new List<FileInfo>();
+                foreach (var fi in new DirectoryInfo(rvtDir).EnumerateFiles("*.rvt", _rvtEnumOptions))
+                {
+                    if (IsValidRevitFile(fi))
+                        sectionFiles.Add(fi);
+                }
 
-                allFiles.AddRange(sectionFiles);
+                // Корневые папки приоритетнее вложенных; внутри одного уровня — по имени
+                sectionFiles.Sort(static (a, b) =>
+                {
+                    var dirLenA = a.FullName.Length - a.Name.Length;
+                    var dirLenB = b.FullName.Length - b.Name.Length;
+                    var cmp = dirLenA.CompareTo(dirLenB);
+                    return cmp != 0 ? cmp : StringComparer.OrdinalIgnoreCase.Compare(a.FullName, b.FullName);
+                });
+
+                foreach (var fi in sectionFiles)
+                    allFiles.Add(fi.FullName);
             }
 
             if (allFiles.Count > 10)
@@ -671,52 +670,36 @@ public sealed class SlashCommandService(
         }, cancellationToken);
     }
 
-    /// <summary>
-    /// Фильтрует один RVT-файл по всем правилам:
-    /// размер >50 МБ, имя не оканчивается на "отсоединено",
-    /// длина имени 10–50 символов, соответствие основному паттерну секции.
-    /// </summary>
-    private static bool IsValidRevitFile(string filePath)
+    private static bool IsValidRevitFile(FileInfo fi)
     {
-        var name = Path.GetFileNameWithoutExtension(filePath);
+        var name = Path.GetFileNameWithoutExtension(fi.Name);
 
-        // Дешёвые проверки первыми — до обращения к диску
-        if (name.Length < 10 || name.Length > 50)
-            return false;
+        if (name.Length is <10 or >50) return false;
+        if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!RvtSectionPattern().IsMatch(name)) return false;
 
-        if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (!_rvtSectionPattern.IsMatch(name))
-            return false;
-
-        try
-        {
-            return new FileInfo(filePath).Length > _rvtMinFileSizeBytes;
-        }
-        catch
-        {
-            return false;
-        }
+        try { return fi.Length > _rvtMinFileSizeBytes; }
+        catch (Exception) { return false; }
     }
 
-    /// <summary>
-    /// Убирает дубли при >10 файлах.
-    /// Полное совпадение имён — берём первый по порядку (корневая папка приоритетнее).
-    /// Частичное совпадение (общий префикс >15 симв.) + одинаковое число — берём короткое.
-    /// </summary>
     private static List<string> DeduplicateRevitFiles(List<string> files)
     {
         // Pass 1: точные совпадения имён — берём первый (корень уже приоритетнее)
         var seen = new Dictionary<string, string>(files.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var file in files)
-            seen.TryAdd(Path.GetFileNameWithoutExtension(file)!, file);
+            _ = seen.TryAdd(Path.GetFileNameWithoutExtension(file)!, file);
 
-        var candidates = seen.Values.ToArray();
+        var candidates = new string[seen.Count];
+        seen.Values.CopyTo(candidates, 0);
 
         // Предвычисляем имена и числа — избегаем O(n²) пересчёта
-        var names = Array.ConvertAll(candidates, f => Path.GetFileNameWithoutExtension(f)!);
-        var numbers = Array.ConvertAll(names, ExtractNumbers);
+        var names = new string[candidates.Length];
+        var numbers = new HashSet<int>[candidates.Length];
+        for (var k = 0; k < candidates.Length; k++)
+        {
+            names[k] = Path.GetFileNameWithoutExtension(candidates[k])!;
+            numbers[k] = ExtractNumbers(names[k]);
+        }
 
         var toRemove = new HashSet<int>();
 
@@ -732,31 +715,44 @@ public sealed class SlashCommandService(
                 {
                     if (names[i].Length >= names[j].Length)
                     {
-                        toRemove.Add(i);
-                        break; // i помечен — прерываем внутренний цикл
+                        _ = toRemove.Add(i);
+                        break;
                     }
 
-                    toRemove.Add(j);
+                    _ = toRemove.Add(j);
                 }
             }
         }
 
-        return candidates
-            .Where((_, idx) => !toRemove.Contains(idx))
-            .ToList();
+        var result = new List<string>(candidates.Length - toRemove.Count);
+        for (var idx = 0; idx < candidates.Length; idx++)
+        {
+            if (!toRemove.Contains(idx))
+                result.Add(candidates[idx]);
+        }
+
+        return result;
     }
 
-    private static HashSet<int> ExtractNumbers(string name) =>
-        new(_rvtNumberPattern.Matches(name)
-            .Select(m => int.TryParse(m.Value, out var n) ? n : -1)
-            .Where(n => n >= 0));
+    private static HashSet<int> ExtractNumbers(string name)
+    {
+        var result = new HashSet<int>();
+        foreach (Match m in RvtNumberPattern().Matches(name))
+        {
+            if (int.TryParse(m.Value, out var n))
+                result.Add(n);
+        }
 
-    private static int CommonPrefixLength(string a, string b)
+        return result;
+    }
+
+    private static int CommonPrefixLength(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
     {
         var len = Math.Min(a.Length, b.Length);
         var i = 0;
         while (i < len && char.ToUpperInvariant(a[i]) == char.ToUpperInvariant(b[i]))
             i++;
+
         return i;
     }
 

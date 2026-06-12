@@ -15,8 +15,10 @@ public sealed class CommandToggleHandler(
         return CommandCatalog.TryGetByPrefix(prefix, out _);
     }
 
-    public override IEnumerable<string> GetSupportedPrefixes() =>
-        CommandCatalog.All.Select(c => c.Prefix);
+    public override IEnumerable<string> GetSupportedPrefixes()
+    {
+        return CommandCatalog.All.Select(c => c.Prefix);
+    }
 
     protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {

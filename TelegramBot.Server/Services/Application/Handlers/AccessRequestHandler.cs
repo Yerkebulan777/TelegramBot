@@ -83,7 +83,7 @@ public sealed class AccessRequestHandler(
 
         foreach (var adminId in _adminIds)
         {
-            await outputService.SendMessageWithKeyboardAsync(adminId,
+            _=await outputService.SendMessageWithKeyboardAsync(adminId,
                 $"Запрос доступа от {displayName} (ID: {context.UserId})",
                 keyboard);
         }
@@ -92,16 +92,20 @@ public sealed class AccessRequestHandler(
     }
 
     private Task<bool> HandleApproveAsync(CallbackContext context)
-        => HandleAccessDecisionAsync(context,
-            UserAccessStatus.Approved,
-            displayName => $"✅ Пользователь {displayName} одобрен.",
-            "Доступ предоставлен! Введите /help для просмотра доступных команд.");
+    {
+        return HandleAccessDecisionAsync(context,
+                UserAccessStatus.Approved,
+                displayName => $"✅ Пользователь {displayName} одобрен.",
+                "Доступ предоставлен! Введите /help для просмотра доступных команд.");
+    }
 
     private Task<bool> HandleRejectAsync(CallbackContext context)
-        => HandleAccessDecisionAsync(context,
-            UserAccessStatus.Rejected,
-            displayName => $"❌ Пользователь {displayName} отклонён.",
-            "Ваш запрос на доступ отклонён. Обратитесь к администратору.");
+    {
+        return HandleAccessDecisionAsync(context,
+                UserAccessStatus.Rejected,
+                displayName => $"❌ Пользователь {displayName} отклонён.",
+                "Ваш запрос на доступ отклонён. Обратитесь к администратору.");
+    }
 
     private async Task<bool> HandleAccessDecisionAsync(
         CallbackContext context,
@@ -117,7 +121,7 @@ public sealed class AccessRequestHandler(
             return true;
         }
 
-        if (!long.TryParse(context.ParsedCallback.Argument, out long targetUserId))
+        if (!long.TryParse(context.ParsedCallback.Argument, out var targetUserId))
         {
             LogInvalidInput("user ID", context.ParsedCallback.Argument, context.Username, context.UserId);
             return true;
@@ -136,7 +140,7 @@ public sealed class AccessRequestHandler(
 
         var displayName = string.IsNullOrEmpty(user.Username) ? targetUserId.ToString() : $"@{user.Username}";
         await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));
-        await outputService.SendMessageAsync(targetUserId, userMessage);
+        _=await outputService.SendMessageAsync(targetUserId, userMessage);
 
         return true;
     }

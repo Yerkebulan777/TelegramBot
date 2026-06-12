@@ -10,12 +10,12 @@ namespace TelegramBot.Server.Services.Application;
 public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, ILogger<CallbackDispatcher> logger)
 {
     // Кэш префикс → handler для быстрого поиска (O(1) вместо O(n))
-    private readonly Dictionary<string, ICallbackHandler> _handlerMap = 
+    private readonly Dictionary<string, ICallbackHandler> _handlerMap =
         handlers
             .SelectMany(h => GetSupportedPrefixes(h).Select(p => (p, h)))
             .GroupBy(x => x.p)
             .ToDictionary(
-                g => g.Key, 
+                g => g.Key,
                 g => g.OrderBy(x => x.h.Priority).First().h);
 
     /// <summary>Возвращает поддерживаемые префиксы из хендлера.</summary>
@@ -39,7 +39,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
     {
         var prefix = context.ParsedCallback.Prefix;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        
+
         if (!_handlerMap.TryGetValue(prefix, out var handler))
         {
             logger.LogDebug(
@@ -59,7 +59,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
         {
             var handled = await handler.HandleAsync(context, cancellationToken);
             stopwatch.Stop();
-            
+
             if (handled)
             {
                 logger.LogDebug(
@@ -70,7 +70,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
                     stopwatch.ElapsedMilliseconds);
                 return true;
             }
-            
+
             logger.LogDebug(
                 "Callback not handled by handler: prefix={Prefix}, handler={HandlerName}, user={UserId}, elapsedMs={ElapsedMs}",
                 prefix,

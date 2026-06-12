@@ -31,7 +31,7 @@ public sealed class NotificationSenderService(
         finally
         {
             // Сигнализируем писателям, что читатель ушёл: blocked writers получат ChannelClosedException
-            notificationChannel.Writer.TryComplete();
+            _=notificationChannel.Writer.TryComplete();
         }
 
         logger.LogInformation("Notification sender stopped");
@@ -43,7 +43,7 @@ public sealed class NotificationSenderService(
         {
             if (item.UserId.HasValue)
             {
-                await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
+                _=await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
                 logger.LogInformation("Session started notify sent: user={UserId}, session={SessionId}, correlationId={CorrelationId}",
                     item.UserId.Value, item.SessionId, item.CorrelationId);
                 return;
@@ -78,8 +78,10 @@ public sealed class NotificationSenderService(
         }
     }
 
-    private static string FormatDurationPrefix(int? durationSeconds) =>
-        durationSeconds is > 0 ? $"{FormatDuration(durationSeconds.Value)} — " : "";
+    private static string FormatDurationPrefix(int? durationSeconds)
+    {
+        return durationSeconds is > 0 ? $"{FormatDuration(durationSeconds.Value)} — " : "";
+    }
 
     private static string FormatDuration(int totalSeconds)
     {

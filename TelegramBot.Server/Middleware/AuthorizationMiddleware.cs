@@ -58,7 +58,7 @@ public sealed class AuthorizationMiddleware(
         }
 
         var now = DateTime.UtcNow;
-        
+
         // Проверка на race condition: если пользователь был изменен между чтением и записью
         if (user != null && adminUser.UpdatedAt > user.UpdatedAt)
         {

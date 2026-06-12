@@ -76,7 +76,10 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(GetWindowText), $"hWnd={hWnd}", error);
+                }
+
                 return null;
             }
 
@@ -86,7 +89,10 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(GetWindowText), $"hWnd={hWnd}", error);
+                }
+
                 return null;
             }
 
@@ -110,7 +116,10 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(GetClassName), $"hWnd={hWnd}", error);
+                }
+
                 return null;
             }
 
@@ -147,7 +156,10 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(EnumWindows), $"lParam={lParam}", error);
+                }
+
                 return false;
             }
 
@@ -169,7 +181,10 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(EnumChildWindows), $"parent={hWndParent}, lParam={lParam}", error);
+                }
+
                 return false;
             }
 
@@ -192,7 +207,9 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(GetDlgCtrlID), $"hWnd={hWnd}", error);
+                }
             }
 
             return result.ToInt32();
@@ -221,7 +238,9 @@ internal static class User32
                     {
                         var error = Marshal.GetLastWin32Error();
                         if (error != 0)
+                        {
                             WinApiHelper.LogWarning(nameof(SendMessage), $"msg=0x{msg:X}, hWnd={hWnd}", error);
+                        }
                     }
 
                     return result;
@@ -246,7 +265,9 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(GetWindow), $"hWnd={hWnd}, cmd={uCmd}", error);
+                }
             }
 
             return result;
@@ -268,7 +289,9 @@ internal static class User32
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error != 0)
+                {
                     WinApiHelper.LogWarning(nameof(GetParent), $"hWnd={hWnd}", error);
+                }
             }
 
             return result;

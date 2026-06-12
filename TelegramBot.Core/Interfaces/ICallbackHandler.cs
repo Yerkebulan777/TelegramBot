@@ -17,5 +17,8 @@ public interface ICallbackHandler
     Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Возвращает список callback-префиксов, которые поддерживает этот обработчик.</summary>
-    IEnumerable<string> GetSupportedPrefixes() => [];
+    IEnumerable<string> GetSupportedPrefixes()
+    {
+        return [];
+    }
 }

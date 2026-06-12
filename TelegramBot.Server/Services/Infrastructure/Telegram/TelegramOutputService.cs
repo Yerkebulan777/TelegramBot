@@ -238,12 +238,12 @@ public class TelegramOutputService(
             catch (Exception ex)
             {
                 consecutiveFailures++;
-                logger.LogWarning(ex, "Failed to send message to {UserId} (failure {Failure}/{MaxFailures})", 
+                logger.LogWarning(ex, "Failed to send message to {UserId} (failure {Failure}/{MaxFailures})",
                     userId, consecutiveFailures, maxConsecutiveFailures);
 
                 if (consecutiveFailures >= maxConsecutiveFailures)
                 {
-                    logger.LogError("Circuit breaker triggered for user {UserId} after {FailureCount} consecutive failures", 
+                    logger.LogError("Circuit breaker triggered for user {UserId} after {FailureCount} consecutive failures",
                         userId, consecutiveFailures);
                     return null;
                 }

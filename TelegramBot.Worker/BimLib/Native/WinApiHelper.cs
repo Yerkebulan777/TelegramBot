@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using Microsoft.Extensions.Logging;
 
 namespace TelegramBot.Worker.BimLib.Native;
 
@@ -29,14 +28,20 @@ internal static class WinApiHelper
     internal static void LogWarning(string method, string details, int errorCode = 0)
     {
         if (_logger == null)
+        {
             return;
+        }
 
         if (errorCode != 0)
+        {
             _logger.LogWarning(
                 "WinAPI {Method} failed [error={Error}]: {Details}",
                 method, errorCode, details);
+        }
         else
+        {
             _logger.LogWarning("WinAPI {Method}: {Details}", method, details);
+        }
     }
 
     /// <summary>Logs a WinAPI exception with context.</summary>
@@ -63,7 +68,9 @@ internal static class WinApiHelper
             var task = Task.Run(operation);
 #pragma warning disable VSTHRD002 // Deliberate blocking: thread-pool timeout protection for WinAPI calls
             if (task.Wait(timeout))
+            {
                 return task.Result;
+            }
 #pragma warning restore VSTHRD002
 
             LogWarning(operationName, $"Timed out after {timeout.TotalSeconds:F1}s");

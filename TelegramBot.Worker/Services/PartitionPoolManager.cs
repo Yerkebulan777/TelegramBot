@@ -1,6 +1,3 @@
-using System.Collections.Concurrent;
-using Microsoft.Extensions.Logging;
-
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
@@ -14,13 +11,12 @@ public sealed class PartitionPoolManager(ILogger<PartitionPoolManager> logger) :
     private readonly SortedDictionary<int, SemaphoreSlim> _partitionPools = [];
     private readonly SortedDictionary<int, int> _partitionCapacities = [];
     private int[] _partitionThresholds = [];
-    private int _totalCapacity;
 
     /// <summary>Количество пулов.</summary>
     public int PoolCount => _partitionPools.Count;
 
     /// <summary>Общая ёмкость всех пулов. Используется Worker'ом для ограничения in-flight задач.</summary>
-    public int TotalCapacity => _totalCapacity;
+    public int TotalCapacity { get; private set; }
 
     /// <summary>Инициализирует пулы из конфигурации партиций.</summary>
     public void Initialize(SortedDictionary<int, int> partitions)
@@ -48,13 +44,13 @@ public sealed class PartitionPoolManager(ILogger<PartitionPoolManager> logger) :
 
         _partitionPools.Clear();
         _partitionCapacities.Clear();
-        _totalCapacity = 0;
+        TotalCapacity = 0;
 
         foreach (var (threshold, poolSize) in partitions.Where(p => p.Value > 0))
         {
             _partitionPools[threshold] = new SemaphoreSlim(poolSize, poolSize);
             _partitionCapacities[threshold] = poolSize;
-            _totalCapacity += poolSize;
+            TotalCapacity += poolSize;
         }
 
         // Гарантируем хотя бы один пул
@@ -62,11 +58,11 @@ public sealed class PartitionPoolManager(ILogger<PartitionPoolManager> logger) :
         {
             _partitionPools[0] = new SemaphoreSlim(5, 5);
             _partitionCapacities[0] = 5;
-            _totalCapacity = 5;
+            TotalCapacity = 5;
         }
 
         _partitionThresholds = _partitionPools.Keys.ToArray();
-        
+
         logger.LogInformation("Partition pools initialized: {Info}", GetPoolInfo());
     }
 
@@ -125,6 +121,6 @@ public sealed class PartitionPoolManager(ILogger<PartitionPoolManager> logger) :
 
         _partitionPools.Clear();
         _partitionCapacities.Clear();
-        _totalCapacity = 0;
+        TotalCapacity = 0;
     }
 }

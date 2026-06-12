@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
@@ -265,7 +265,7 @@ public sealed class CommandExecutionService(
         // Принудительно завершаем все активные процессы параллельно в общем shutdown-бюджете.
         var processesToKill = processRunner.ActiveProcesses.ToList();
         var killTasks = processesToKill.Select(kvp => KillProcessAsync(kvp.Key, kvp.Value, shutdownBudgetCts.Token)).ToList();
-        
+
         if (killTasks.Count > 0)
         {
             try
@@ -288,7 +288,7 @@ public sealed class CommandExecutionService(
         _shutdownCts?.Dispose();
         _drainGate.Dispose();
         partitionPoolManager.Dispose();
-        
+
         logger.LogInformation("Worker shutdown completed");
     }
 
@@ -353,14 +353,21 @@ public sealed class CommandExecutionService(
 
         foreach (var (commandId, process) in activeSnapshot)
         {
-            if (process.HasExited) continue;
+            if (process.HasExited)
+            {
+                continue;
+            }
+
             logger.LogInformation("Active process on shutdown: commandId={Id}, pid={Pid}", commandId, process.Id);
         }
     }
 
     private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName, CancellationToken shutdownToken)
     {
-        if (task == null) return;
+        if (task == null)
+        {
+            return;
+        }
 
         if (shutdownToken.IsCancellationRequested)
         {
@@ -417,9 +424,7 @@ public sealed class CommandExecutionService(
 
         var allTasks = Task.WhenAll(runningTasks);
         var timeout = Task.Delay(TimeSpan.FromSeconds(15), shutdownToken);
-#pragma warning disable VSTHRD003
         if (await Task.WhenAny(allTasks, timeout) != allTasks)
-#pragma warning restore VSTHRD003
         {
             logger.LogWarning("{Count} command task(s) did not complete within 15s timeout",
                 runningTasks.Count(task => !task.IsCompleted));
@@ -498,7 +503,7 @@ public sealed class CommandExecutionService(
                     {
                         lock (_runningTasksLock)
                         {
-                            _runningTasks.Remove(completed);
+                            _=_runningTasks.Remove(completed);
                         }
 
                         if (!ct.IsCancellationRequested)
@@ -522,11 +527,8 @@ public sealed class CommandExecutionService(
 
     private async Task ProcessWithPoolAsync(PendingCommand cmd, CancellationToken ct)
     {
-        var slotAcquired = false;
-
         await partitionPoolManager.WaitForSlotAsync(cmd.Priority, ct);
-        slotAcquired = true;
-
+        var slotAcquired = true;
         try
         {
             await processRunner.RunAsync(cmd, ct);
@@ -557,7 +559,7 @@ public sealed class CommandExecutionService(
     {
         lock (_runningTasksLock)
         {
-            _runningTasks.RemoveWhere(task => task.IsCompleted);
+            _=_runningTasks.RemoveWhere(task => task.IsCompleted);
         }
     }
 }
