@@ -51,25 +51,16 @@ public sealed class FileNavigationHandler(
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
-            _options.IsAtProjectLevel(context.Session.CurrentPath)
-                ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
-                : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
+            keyboardBuilder.GetFileActionsReplyKeyboardAsync);
 
         return true;
     }
 
-    private async Task SendErrorWithKeyboardAsync(CallbackContext context, string message)
+    private Task SendErrorWithKeyboardAsync(CallbackContext context, string message)
     {
-        var session = context.Session;
-        var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
-            ? await keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
-            : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
-        var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
-            context.UserId, message, replyKeyboard);
-        if (errorMessage != null)
-        {
-            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await messageTrackingService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
-        }
+        return HandlerHelpers.SendWarningWithReplyKeyboardAsync(
+            outputService, messageTrackingService,
+            context.UserId, context.Session, message,
+            keyboardBuilder.GetFileActionsReplyKeyboardAsync);
     }
 }

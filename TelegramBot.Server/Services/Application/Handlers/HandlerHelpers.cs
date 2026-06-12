@@ -1,3 +1,4 @@
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
@@ -49,5 +50,27 @@ internal static class HandlerHelpers
         Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
     {
         return SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context.UserId, context.Session, keyboardFactory);
+    }
+
+    /// <summary>
+    /// Отправляет warning/error сообщение с reply-клавиатурой и трекает его.
+    /// Используется вместо дублирующихся блоков в FileSelectionHandler, FileNavigationHandler и SlashCommandService.
+    /// </summary>
+    public static async Task<Message?> SendWarningWithReplyKeyboardAsync(
+        ITelegramOutputService outputService,
+        MessageTrackingDataService messageTrackingService,
+        long userId,
+        UserSession session,
+        string message,
+        Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
+    {
+        var replyKeyboard = await keyboardFactory();
+        var sentMessage = await outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard);
+        if (sentMessage != null)
+        {
+            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
+            await messageTrackingService.TrackMessageAsync(userId, sentMessage.Id, sessionId);
+        }
+        return sentMessage;
     }
 }

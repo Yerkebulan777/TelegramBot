@@ -25,12 +25,11 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Apply, ButtonTexts.Cancel));
     }
 
-    public Task<ReplyKeyboardMarkup> GetProjectActionsReplyKeyboardAsync()
-    {
-        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
-    }
-
-    public Task<ReplyKeyboardMarkup> GetSectionActionsReplyKeyboardAsync()
+    /// <summary>
+    /// Reply-клавиатура действий при выборе файлов/разделов (Confirm + Cancel).
+    /// Используется и на уровне проекта, и на уровне разделов — набор кнопок идентичен.
+    /// </summary>
+    public Task<ReplyKeyboardMarkup> GetFileActionsReplyKeyboardAsync()
     {
         return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
     }

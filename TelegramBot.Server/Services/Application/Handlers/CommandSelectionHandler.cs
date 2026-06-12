@@ -60,7 +60,7 @@ public sealed class CommandSelectionHandler(
     private Task SendActionsReplyKeyboardAsync(CallbackContext context)
     {
         return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
-                keyboardBuilder.GetProjectActionsReplyKeyboardAsync);
+                keyboardBuilder.GetFileActionsReplyKeyboardAsync);
     }
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)

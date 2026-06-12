@@ -75,17 +75,11 @@ public sealed class FileSelectionHandler(
         var filePath = fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
-            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
-                ? await keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
-                : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
-            var errorMessage = await outputService.SendMessageWithReplyKeyboardAsync(
-                context.UserId, "⚠ Error: File not found.", replyKeyboard);
-            if (errorMessage != null)
-            {
-                var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-                await messageTrackingService.TrackMessageAsync(context.UserId, errorMessage.Id, sessionId);
-            }
-
+            await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
+                outputService, messageTrackingService,
+                context.UserId, context.Session,
+                "⚠ Error: File not found.",
+                keyboardBuilder.GetFileActionsReplyKeyboardAsync);
             return true;
         }
 

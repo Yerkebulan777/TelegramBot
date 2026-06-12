@@ -358,8 +358,7 @@ public sealed partial class SlashCommandService(
             logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=missing_file_selection_message", username, userId);
             await RemoveReplyKeyboardAsync(userId, session, username);
             session.IsFileSelectionActive = false;
-            session.ClearPendingCommands();
-            await SendWarningAndCleanupAsync(userId, session, "Сообщение выбора файлов не найдено.");
+            await RejectAndWarnAsync(userId, session, "Сообщение выбора файлов не найдено.");
             return;
         }
 
@@ -394,8 +393,7 @@ public sealed partial class SlashCommandService(
         if (selectedSections.Count == 0)
         {
             logger.LogDebug("Job submit blocked: user={Username} ({UserId}), reason=no_sections_selected", username, userId);
-            session.ClearPendingCommands();
-            await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите хотя бы один раздел.");
+            await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один раздел.");
             return;
         }
 
@@ -418,8 +416,7 @@ public sealed partial class SlashCommandService(
             if (filesToProcess.Count == 0)
             {
                 logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=no_files_found", username, userId);
-                session.ClearPendingCommands();
-                await SendWarningAndCleanupAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
+                await RejectAndWarnAsync(userId, session, "⚠️ В выбранных разделах не найдены файлы для обработки.");
                 return;
             }
 
@@ -432,8 +429,7 @@ public sealed partial class SlashCommandService(
             if (await dataServices.Commands.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
             {
                 logger.LogWarning("Job blocked: user={Username} ({UserId}), reason=duplicate_commands_in_queue", username, userId);
-                session.ClearPendingCommands();
-                await SendWarningAndCleanupAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
+                await RejectAndWarnAsync(userId, session, "⚠️ Эти файлы уже в очереди выполнения.");
                 return;
             }
 
@@ -510,17 +506,14 @@ public sealed partial class SlashCommandService(
             ? $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. Уже в очереди за 24 часа: {queuedToday}. Можно добавить ещё {remaining}."
             : $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. За последние 24 часа лимит уже исчерпан.";
 
-        session.ClearPendingCommands();
-        await SendWarningAndCleanupAsync(userId, session, message);
+        await RejectAndWarnAsync(userId, session, message);
         return false;
     }
 
     private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
     {
         return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, dataServices.MessageTracking, userId, session,
-                _options.IsAtProjectLevel(session.CurrentPath)
-                    ? keyboardBuilder.GetProjectActionsReplyKeyboardAsync
-                    : keyboardBuilder.GetSectionActionsReplyKeyboardAsync);
+                keyboardBuilder.GetFileActionsReplyKeyboardAsync);
     }
 
     private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
@@ -577,21 +570,32 @@ public sealed partial class SlashCommandService(
         return msg;
     }
 
+    /// <summary>
+    /// Сбрасывает pending-команды (поскольку дальнейшее выполнение не предполагается) и отправляет warning.
+    /// </summary>
+    private async Task RejectAndWarnAsync(long userId, UserSession session, string message)
+    {
+        session.ClearPendingCommands();
+        await SendWarningAndCleanupAsync(userId, session, message);
+    }
+
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
     {
         Message? warning;
 
         if (session.IsFileSelectionActive)
         {
-            var replyKeyboard = _options.IsAtProjectLevel(session.CurrentPath)
-                ? await keyboardBuilder.GetProjectActionsReplyKeyboardAsync()
-                : await keyboardBuilder.GetSectionActionsReplyKeyboardAsync();
-            warning = await TrackMessageAsync(outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard), session);
+            warning = await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
+                outputService, dataServices.MessageTracking,
+                userId, session, message,
+                keyboardBuilder.GetFileActionsReplyKeyboardAsync);
         }
         else if (session.CommandSelectionMessageId.HasValue || session.PendingCommand.Count > 0)
         {
-            var replyKeyboard = await keyboardBuilder.GetCommandActionsReplyKeyboardAsync();
-            warning = await TrackMessageAsync(outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard), session);
+            warning = await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
+                outputService, dataServices.MessageTracking,
+                userId, session, message,
+                keyboardBuilder.GetCommandActionsReplyKeyboardAsync);
         }
         else
         {
