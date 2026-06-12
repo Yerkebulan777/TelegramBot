@@ -45,9 +45,6 @@ public sealed partial class SlashCommandService(
     [GeneratedRegex(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase)]
     private static partial Regex RvtSectionPattern();
 
-    [GeneratedRegex(@"\d{2,}")]
-    private static partial Regex RvtNumberPattern();
-
     private const long _rvtMinFileSizeBytes = 50L * 1024 * 1024;
 
     private static readonly EnumerationOptions _rvtEnumOptions = new()
@@ -623,31 +620,37 @@ public sealed partial class SlashCommandService(
     {
         return Task.Run(() =>
         {
-            var allFiles = new List<string>();
+            var allFiles = sectionPaths
+                .Select(_options.GetRvtPath)
+                .Where(Directory.Exists)
+                .AsParallel()
+                .WithCancellation(cancellationToken)
+                .SelectMany(EnumerateValidRvtFiles)
+                .ToList();
 
-            for (var idx = 0; idx < sectionPaths.Count; idx++)
-            {
-                var sectionPath = sectionPaths.ElementAt(idx);
-
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var rvtDir = _options.GetRvtPath(sectionPath);
-
-                if (Directory.Exists(rvtDir))
-                {
-                    var enumerated = new DirectoryInfo(rvtDir).EnumerateFiles("*.rvt", _rvtEnumOptions);
-                    allFiles.AddRange(enumerated.Where(fi => IsValidRevitFile(fi)).Select(fi => fi.FullName));
-                }
-            }
-
-            if (allFiles.Count > 10)
-            {
-                allFiles = DeduplicateRevitFiles(allFiles);
-            }
-
-            return allFiles;
+            return RevitFileDeduplicator.Deduplicate(allFiles);
 
         }, cancellationToken);
+    }
+
+    private static IEnumerable<string> EnumerateValidRvtFiles(string rvtDir)
+    {
+        try
+        {
+            return new DirectoryInfo(rvtDir)
+                .EnumerateFiles("*.rvt", _rvtEnumOptions)
+                .Where(IsValidRevitFile)
+                .Select(fi => fi.FullName)
+                .ToArray();
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     private static bool IsValidRevitFile(FileInfo fi)
@@ -669,96 +672,18 @@ public sealed partial class SlashCommandService(
             return false;
         }
 
-        try { return fi.Length > _rvtMinFileSizeBytes; }
-        catch (Exception) { return false; }
-    }
-
-    private static List<string> DeduplicateRevitFiles(List<string> files)
-    {
-        // Отсекаем точные совпадения имён
-        var exactMatches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Храним: Путь, Имя, и Лениво вычисляемый HashSet чисел
-        var prefixGroups = new Dictionary<string, List<(string Path, string Name, Lazy<HashSet<int>> Numbers)>>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var path in files)
+        try
         {
-            var name = Path.GetFileNameWithoutExtension(path)!;
-
-            // 1. Пропускаем точные дубликаты
-            if (exactMatches.Add(name))
-            {
-                // 2. Находим или создаем корзину
-                var prefix = name.Length > 15 ? name[..15] : name;
-
-                if (!prefixGroups.TryGetValue(prefix, out var group))
-                {
-                    group = [];
-                    prefixGroups[prefix] = group;
-                }
-
-                // Парсинг чисел отложен до момента реального обращения к .Value
-                var lazyNumbers = new Lazy<HashSet<int>>(() => ExtractNumbers(name));
-
-                var shouldAdd = true;
-
-                // 3. Сравниваем текущий файл с теми, что уже выжили в этой корзине
-                // Идём с конца, чтобы безопасно удалять элементы по индексу
-                for (var i = group.Count - 1; i >= 0; i--)
-                {
-                    var accepted = group[i];
-
-                    // Только здесь мы реально парсим числа (если до этого дошло)
-                    if (lazyNumbers.Value.Overlaps(accepted.Numbers.Value))
-                    {
-                        // По логике оригинала: оставляем самое короткое имя.
-                        // При равной длине старый код удалял первый элемент (accepted).
-                        if (name.Length <= accepted.Name.Length)
-                        {
-                            // Новый файл лучше — выкидываем старый
-                            group.RemoveAt(i);
-                        }
-                        else
-                        {
-                            // Старый файл лучше — выкидываем новый и прекращаем проверки
-                            shouldAdd = false;
-                            break;
-                        }
-                    }
-                }
-
-                if (shouldAdd)
-                {
-                    group.Add((path, name, lazyNumbers));
-                }
-            }
+            return fi.Length > _rvtMinFileSizeBytes;
         }
-
-        // 4. Сливаем результаты из всех корзин
-        var result = new List<string>(exactMatches.Count);
-        foreach (var group in prefixGroups.Values)
+        catch (IOException)
         {
-            foreach (var item in group)
-            {
-                result.Add(item.Path);
-            }
+            return false;
         }
-
-        return result;
-    }
-
-    private static HashSet<int> ExtractNumbers(string name)
-    {
-        var result = new HashSet<int>();
-        foreach (Match m in RvtNumberPattern().Matches(name))
+        catch (UnauthorizedAccessException)
         {
-            if (int.TryParse(m.Value, out var n))
-            {
-                _=result.Add(n);
-            }
+            return false;
         }
-
-        return result;
     }
 
     private enum CommandStrategy
