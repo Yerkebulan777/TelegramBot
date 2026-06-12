@@ -47,7 +47,9 @@ public static class SerilogSetup
     {
         var logBasePath = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.LogDirectory)];
         if (string.IsNullOrWhiteSpace(logBasePath))
+        {
             logBasePath = null;
+        }
 
         _=loggerConfiguration
             .ReadFrom.Configuration(configuration)

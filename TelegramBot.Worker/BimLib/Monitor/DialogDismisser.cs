@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
 using TelegramBot.Worker.BimLib.Config;
 using TelegramBot.Worker.BimLib.Native;
 
@@ -35,7 +35,7 @@ public sealed class DialogDismisser(
         if (dialogs.Count == 0)
         {
             // Диалогов нет — сбрасываем счётчик попыток
-            _dismissAttempts.TryRemove(processId, out _);
+            _=_dismissAttempts.TryRemove(processId, out _);
             return false;
         }
 
@@ -81,7 +81,7 @@ public sealed class DialogDismisser(
         if (dismissed)
         {
             // Успешно закрыли — сбрасываем счётчик
-            _dismissAttempts.TryRemove(processId, out _);
+            _=_dismissAttempts.TryRemove(processId, out _);
         }
         else if (_options.MaxDismissAttempts > 0)
         {
@@ -153,7 +153,7 @@ public sealed class DialogDismisser(
 
         // Фильтруем: оставляем только enabled окна
         return found
-            .Where(hwnd => User32.IsWindowEnabledSafe(hwnd))
+            .Where(User32.IsWindowEnabledSafe)
             .OrderBy(WindowUtil.GetWindowTitle)
             .ToList();
     }
@@ -234,7 +234,7 @@ public sealed class DialogDismisser(
         }
         finally
         {
-            _dismissAttempts.TryRemove(processId, out _);
+            _=_dismissAttempts.TryRemove(processId, out _);
         }
     }
 }

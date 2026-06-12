@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text;
@@ -331,8 +330,15 @@ public sealed class CommandPreparer(
         try
         {
             var (resultFilePath, taskFilePath) = GetTempFilePaths(commandId, attemptToken);
-            if (File.Exists(taskFilePath)) File.Delete(taskFilePath);
-            if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
+            if (File.Exists(taskFilePath))
+            {
+                File.Delete(taskFilePath);
+            }
+
+            if (File.Exists(resultFilePath))
+            {
+                File.Delete(resultFilePath);
+            }
         }
         catch (Exception)
         {

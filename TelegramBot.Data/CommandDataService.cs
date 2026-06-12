@@ -144,7 +144,7 @@ public sealed class CommandDataService(
         try
         {
             await using var conn = await CreateOpenConnectionAsync();
-            await conn.ExecuteAsync(
+            _=await conn.ExecuteAsync(
                 "SELECT pg_notify('session_started', @Payload)",
                 new { Payload = $"{sessionId}|{correlationId}|{userId}" });
         }

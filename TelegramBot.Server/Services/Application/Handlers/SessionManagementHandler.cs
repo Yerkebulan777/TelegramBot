@@ -267,7 +267,9 @@ public sealed class SessionManagementHandler(
     private async Task<bool> DeleteSessionAndMessagesAsync(int sessionId, long userId)
     {
         if (!await sessionDataService.DeleteSessionAsync(sessionId, userId, IsAdmin))
+        {
             return false;
+        }
 
         await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
         return true;
@@ -418,9 +420,18 @@ public sealed class SessionManagementHandler(
                 var filesLabel = totalInGroup == 1 ? "файл" : "файлов";
 
                 var groupStatusIcon = "⏳";
-                if (doneInGroup == totalInGroup) groupStatusIcon = "✅";
-                else if (failedInGroup > 0) groupStatusIcon = "❌";
-                else if (processingInGroup > 0) groupStatusIcon = "🔄";
+                if (doneInGroup == totalInGroup)
+                {
+                    groupStatusIcon = "✅";
+                }
+                else if (failedInGroup > 0)
+                {
+                    groupStatusIcon = "❌";
+                }
+                else if (processingInGroup > 0)
+                {
+                    groupStatusIcon = "🔄";
+                }
 
                 return $"📦 *{group.Key}* ({doneInGroup}/{totalInGroup}) {groupStatusIcon} · {totalInGroup} {filesLabel}";
             });

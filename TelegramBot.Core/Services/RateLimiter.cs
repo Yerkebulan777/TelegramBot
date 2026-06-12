@@ -42,16 +42,16 @@ public sealed class RateLimiter
             {
                 return false;
             }
-            
+
             requestWindow.Timestamps.Enqueue(now);
-            
+
             // Удаляем entry из словаря, если очередь пуста (оптимизация памяти)
             if (requestWindow.Timestamps.IsEmpty)
             {
                 _ = ((ICollection<KeyValuePair<long, RequestWindow>>)_requests).Remove(
                     new KeyValuePair<long, RequestWindow>(userId, requestWindow));
             }
-            
+
             return true;
         }
     }

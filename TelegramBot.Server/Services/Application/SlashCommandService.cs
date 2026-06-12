@@ -65,7 +65,7 @@ public sealed partial class SlashCommandService(
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
         var context = await ValidateUserContextAsync(message.UserId, message.Text!, message, session);
-        var strategy = await ResolveCommandStrategyAsync(context);
+        var strategy = ResolveCommandStrategy(context);
         var result = await ExecuteBusinessLogicAsync(context, strategy, cancellationToken);
         var responseMessage = await FormatResponseMessageAsync(result);
 
@@ -164,15 +164,15 @@ public sealed partial class SlashCommandService(
             text == "/start" || access.HasAccess);
     }
 
-    private Task<CommandStrategy> ResolveCommandStrategyAsync(UserCommandContext context)
+    private static CommandStrategy ResolveCommandStrategy(UserCommandContext context)
     {
         return !context.HasAccess
-            ? Task.FromResult(CommandStrategy.AccessDenied)
+            ? CommandStrategy.AccessDenied
             : context.Command == "/start"
-            ? Task.FromResult(CommandStrategy.Start)
-            : Task.FromResult(IsCommandSelectionAction(context.RawText)
+            ? CommandStrategy.Start
+            : IsCommandSelectionAction(context.RawText)
             ? CommandStrategy.CommandSelectionAction
-            : CommandStrategy.SlashCommand);
+            : CommandStrategy.SlashCommand;
     }
 
     private async Task<CommandExecutionResult> ExecuteBusinessLogicAsync(
@@ -678,7 +678,8 @@ public sealed partial class SlashCommandService(
         if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase)) return false;
         if (!RvtSectionPattern().IsMatch(name)) return false;
 
-        return fi.Length > _rvtMinFileSizeBytes;
+        try { return fi.Length > _rvtMinFileSizeBytes; }
+        catch { return false; }
     }
 
     private static List<string> DeduplicateRevitFiles(List<string> files)

@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Microsoft.Extensions.Logging;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application;
@@ -12,7 +11,7 @@ public class SessionManager : IDisposable
 {
     // Фоновая очистка раз в 30 минут — основной cleanup идёт лениво при доступе
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(30);
-    
+
     private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _sessionLocks = new();
     private readonly TimeSpan _sessionTimeout;
@@ -40,12 +39,12 @@ public class SessionManager : IDisposable
             _ = _sessions.TryRemove(userId, out _);
         }
 
-        var session = _sessions.GetOrAdd(userId, key => new UserSession 
-        { 
+        var session = _sessions.GetOrAdd(userId, key => new UserSession
+        {
             UserId = key,
-            LastActivity = DateTime.UtcNow 
+            LastActivity = DateTime.UtcNow
         });
-        
+
         session.LastActivity = DateTime.UtcNow;
         return session;
     }
@@ -67,7 +66,7 @@ public class SessionManager : IDisposable
     public void RemoveSession(long userId)
     {
         _ = _sessions.TryRemove(userId, out _);
-        
+
         if (_sessionLocks.TryRemove(userId, out var semaphore))
         {
             if (semaphore.CurrentCount >= 1)
@@ -100,10 +99,14 @@ public class SessionManager : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
 
             if (!_sessions.TryGetValue(key, out var session))
+            {
                 continue;
+            }
 
             if (now - session.LastActivity <= _sessionTimeout)
+            {
                 continue;
+            }
 
             if (!_sessionLocks.TryGetValue(key, out var sessionLock) || !await sessionLock.WaitAsync(0, cancellationToken))
             {
@@ -132,7 +135,7 @@ public class SessionManager : IDisposable
                 }
             }
         }
-        
+
         if (cleanedCount > 0)
         {
             _logger?.LogInformation("Cleaned up {Count} expired sessions", cleanedCount);
@@ -159,7 +162,7 @@ public class SessionManager : IDisposable
         _cleanupCts.Cancel();
         _cleanupCts.Dispose();
         _cleanupTimer.Dispose();
-        
+
         foreach (var (_, semaphore) in _sessionLocks)
         {
             try { semaphore.Dispose(); } catch { }
@@ -182,7 +185,7 @@ public class SessionManager : IDisposable
         {
             if (Interlocked.CompareExchange(ref _disposed, 1, 0) == 0)
             {
-                try { _sessionLock.Release(); } catch { }
+                try { _=_sessionLock.Release(); } catch { }
             }
         }
     }

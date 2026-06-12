@@ -156,7 +156,7 @@ internal static class WindowUtil
             }
 
             // Fallback: имитация нажатия (с таймаутами)
-            _ = User32.SendMessageSafe(hwndButton, Win32Consts.BmSetState, (IntPtr)1, IntPtr.Zero);
+            _ = User32.SendMessageSafe(hwndButton, Win32Consts.BmSetState, 1, IntPtr.Zero);
             _ = User32.SendMessageSafe(hwndButton, Win32Consts.WmLButtonDown, IntPtr.Zero, IntPtr.Zero);
             _ = User32.SendMessageSafe(hwndButton, Win32Consts.WmLButtonUp, IntPtr.Zero, IntPtr.Zero);
         }

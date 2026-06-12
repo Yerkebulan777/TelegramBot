@@ -87,16 +87,14 @@ public class TelegramBotHostedService(
         }
 
         // Шаг 1: завершаем writer — новые обновления больше не попадут в канал
-        _updateChannel.Writer.TryComplete();
+        _=_updateChannel.Writer.TryComplete();
 
         // Шаг 2: ждём, пока ProcessUpdatesAsync дочитает оставшиеся в буфере обновления
         // processingTask НЕ отменён (processingToken не cancelled), поэтому ReadAllAsync
         // будет читать до Completion (пока writer не завершён).
         try
         {
-#pragma warning disable VSTHRD003
-            await Task.WhenAny(processingTask, Task.Delay(TimeSpan.FromSeconds(10)));
-#pragma warning restore VSTHRD003
+            _=await Task.WhenAny(processingTask, Task.Delay(TimeSpan.FromSeconds(10)));
         }
         catch (OperationCanceledException)
         {

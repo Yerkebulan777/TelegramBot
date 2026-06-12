@@ -32,5 +32,7 @@ public abstract class DataAccessBase
     /// Создаёт и открывает подключение к PostgreSQL.
     /// </summary>
     protected Task<NpgsqlConnection> CreateOpenConnectionAsync()
-        => NpgsqlHelper.CreateOpenConnectionAsync(_connectionString);
+    {
+        return NpgsqlHelper.CreateOpenConnectionAsync(_connectionString);
+    }
 }

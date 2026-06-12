@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -5,9 +8,6 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 
 namespace TelegramBot.Core.Health;
@@ -45,7 +45,7 @@ public sealed class HealthCheckHostedService(
     /// Дополнительные проверки для расширенного отчёта /health.
     /// Ключ — название проверки, значение — асинхронная функция, возвращающая true/false.
     /// </summary>
-    public Dictionary<string, Func<CancellationToken, Task<HealthComponentStatus>>> AdditionalChecks { get; set; } = new();
+    public Dictionary<string, Func<CancellationToken, Task<HealthComponentStatus>>> AdditionalChecks { get; set; } = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -113,7 +113,9 @@ public sealed class HealthCheckHostedService(
                 var bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, ct);
 
                 if (bytesRead == 0)
+                {
                     return;
+                }
 
                 var request = Encoding.ASCII.GetString(buffer, 0, bytesRead);
                 var requestLine = ParseHttpRequestLine(request);
@@ -179,22 +181,13 @@ public sealed class HealthCheckHostedService(
 
             var path = requestLine.Path;
 
-            if (path == _liveEndpoint || path == _liveEndpoint + "/")
-            {
-                return ServeLiveness();
-            }
-
-            if (path == _readyEndpoint || path == _readyEndpoint + "/")
-            {
-                return await ServeReadinessAsync(ct);
-            }
-
-            if (path == _healthEndpoint || path == _healthEndpoint + "/" || path == "" || path == "/")
-            {
-                return await ServeDetailedAsync(ct);
-            }
-
-            return (404, "text/plain", "Not Found");
+            return path == _liveEndpoint || path == _liveEndpoint + "/"
+                ? ServeLiveness()
+                : path == _readyEndpoint || path == _readyEndpoint + "/"
+                ? await ServeReadinessAsync(ct)
+                : path == _healthEndpoint || path == _healthEndpoint + "/" || path == "" || path == "/"
+                ? await ServeDetailedAsync(ct)
+                : ((int statusCode, string contentType, string body))(404, "text/plain", "Not Found");
         }
         catch (Exception ex)
         {
@@ -282,9 +275,13 @@ public sealed class HealthCheckHostedService(
             c.Status == "healthy" ? $"{c.Name}=ok" : $"{c.Name}=FAIL({c.Status})"));
 
         if (allHealthy)
+        {
             logger.LogDebug("Health /health: OK [{Checks}] uptime={Uptime}", checksLine, uptime);
+        }
         else
+        {
             logger.LogWarning("Health /health: UNHEALTHY [{Checks}] uptime={Uptime}", checksLine, uptime);
+        }
 
         var result = new HealthCheckResult
         {
@@ -308,7 +305,9 @@ public sealed class HealthCheckHostedService(
     private async Task<bool> CheckDatabaseAsync(CancellationToken ct)
     {
         if (DatabaseCheckAsync == null)
+        {
             return true; // Нет функции проверки — считаем, что БД доступна
+        }
 
         try
         {
@@ -341,12 +340,14 @@ public sealed class HealthCheckHostedService(
     }
 
     /// <summary>Экранирует строку для JSON.</summary>
-    private static string JsonEscape(string value) =>
-        value.Replace("\\", "\\\\")
+    private static string JsonEscape(string value)
+    {
+        return value.Replace("\\", "\\\\")
              .Replace("\"", "\\\"")
              .Replace("\n", "\\n")
              .Replace("\r", "\\r")
              .Replace("\t", "\\t");
+    }
 }
 
 internal readonly record struct HealthHttpRequestLine(string Method, string Path);

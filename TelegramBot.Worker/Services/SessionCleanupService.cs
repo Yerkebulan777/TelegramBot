@@ -35,7 +35,7 @@ public sealed class SessionCleanupService(
         {
             try
             {
-                await timer.WaitForNextTickAsync(stoppingToken);
+                _=await timer.WaitForNextTickAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -52,7 +52,9 @@ public sealed class SessionCleanupService(
         {
             var retentionDays = _options.CompletedSessionRetentionDays;
             if (retentionDays <= 0)
+            {
                 return;
+            }
 
             var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
             var deleted = await sessionDataService.SoftDeleteInactiveSessionsOlderThanAsync(cutoff);

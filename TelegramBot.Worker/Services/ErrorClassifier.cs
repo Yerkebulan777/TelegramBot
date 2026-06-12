@@ -56,23 +56,28 @@ public static class ErrorClassifier
     {
         // Проверка по exit code: если код в списке постоянных — сразу permanent
         if (exitCode.HasValue && permanentExitCodes?.Contains(exitCode.Value) == true)
+        {
             return true;
+        }
 
         // Проверка по тексту ошибки: ищем характерные паттерны
         var message = errorMessage?.ToLowerInvariant() ?? string.Empty;
-        return PermanentFailurePatterns.Any(pattern => message.Contains(pattern));
+        return PermanentFailurePatterns.Any(message.Contains);
     }
 
     /// <summary>
     /// Определяет, является ли исключение признаком постоянной ошибки
     /// (файл не найден, нет доступа и т.п.).
     /// </summary>
-    public static bool IsPermanentException(Exception? ex) => ex switch
+    public static bool IsPermanentException(Exception? ex)
     {
-        FileNotFoundException => true,
-        DirectoryNotFoundException => true,
-        UnauthorizedAccessException => true,
-        PathTooLongException => true,
-        _ => false,
-    };
+        return ex switch
+        {
+            FileNotFoundException => true,
+            DirectoryNotFoundException => true,
+            UnauthorizedAccessException => true,
+            PathTooLongException => true,
+            _ => false,
+        };
+    }
 }

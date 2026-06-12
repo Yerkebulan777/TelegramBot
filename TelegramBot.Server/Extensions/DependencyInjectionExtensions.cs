@@ -45,7 +45,7 @@ public static class DependencyInjectionExtensions
 
         _=services.AddOptions<HealthCheckOptions>()
             .Bind(configuration.GetSection(HealthCheckOptions.SectionName))
-            .Validate(options => options.Port > 0 && options.Port <= 65535, "Port must be between 1 and 65535");
+            .Validate(options => options.Port is >0 and <=65535, "Port must be between 1 and 65535");
 
         return services;
     }

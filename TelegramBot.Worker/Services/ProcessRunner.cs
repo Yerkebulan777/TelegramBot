@@ -132,14 +132,14 @@ public sealed class ProcessRunner(
 
         // Потоковая обработка stdout/stderr с ограничением размера
         void OnOutputDataReceived(object? sender, DataReceivedEventArgs e)
-        { 
+        {
             if (e.Data != null && !outputTruncated)
             {
                 lock (outputBuilder)
                 {
                     if (outputBuilder.Length + e.Data.Length + 1 <= MaxOutputChars)
                     {
-                        outputBuilder.AppendLine(e.Data);
+                        _=outputBuilder.AppendLine(e.Data);
                     }
                     else
                     {
@@ -147,37 +147,39 @@ public sealed class ProcessRunner(
                         var remaining = MaxOutputChars - outputBuilder.Length;
                         if (remaining > 0)
                         {
-                            outputBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
+                            _=outputBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
                         }
                         outputTruncated = true;
                     }
                 }
             }
-        };
-        
+        }
+        ;
+
         void OnErrorDataReceived(object? sender, DataReceivedEventArgs e)
-        { 
+        {
             if (e.Data != null && !errorTruncated)
             {
                 lock (errorBuilder)
                 {
                     if (errorBuilder.Length + e.Data.Length + 1 <= MaxOutputChars)
                     {
-                        errorBuilder.AppendLine(e.Data);
+                        _=errorBuilder.AppendLine(e.Data);
                     }
                     else
                     {
                         var remaining = MaxOutputChars - errorBuilder.Length;
                         if (remaining > 0)
                         {
-                            errorBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
+                            _=errorBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
                         }
                         errorTruncated = true;
                     }
                 }
             }
-        };
-        
+        }
+        ;
+
         process.OutputDataReceived += OnOutputDataReceived;
         process.ErrorDataReceived += OnErrorDataReceived;
 
@@ -185,10 +187,7 @@ public sealed class ProcessRunner(
         {
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-
-#pragma warning disable VSTHRD003
             await process.WaitForExitAsync(ct);
-#pragma warning restore VSTHRD003
 
             // Дожидаемся завершения async-обработчиков stdout/stderr после выхода процесса.
             process.WaitForExit();
@@ -377,20 +376,20 @@ public sealed class ProcessRunner(
     {
         if (outputBuilder.Length > 0)
         {
-            var outputInfo = outputTruncated 
+            var outputInfo = outputTruncated
                 ? $"{TruncateOutput(outputBuilder)} [TRUNCATED: 64KB limit reached]"
                 : TruncateOutput(outputBuilder);
-            
+
             logger.LogDebug("Output [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Output}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, outputTruncated, outputInfo);
         }
 
         if (errorBuilder.Length > 0)
         {
-            var errorInfo = errorTruncated 
+            var errorInfo = errorTruncated
                 ? $"{TruncateOutput(errorBuilder)} [TRUNCATED: 64KB limit reached]"
                 : TruncateOutput(errorBuilder);
-            
+
             logger.LogWarning("Stderr [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Error}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, errorTruncated, errorInfo);
         }
