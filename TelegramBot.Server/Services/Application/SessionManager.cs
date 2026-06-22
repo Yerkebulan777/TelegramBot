@@ -61,7 +61,6 @@ public class SessionManager : IDisposable
 
     /// <summary>
     /// Удаляет сессию и освобождает ресурсы (семафор).
-    /// Исправлено: семафор теперь удаляется и.Dispose()ится безопасно.
     /// </summary>
     public void RemoveSession(long userId)
     {
@@ -78,7 +77,7 @@ public class SessionManager : IDisposable
                 }
                 catch (ObjectDisposedException)
                 {
-                    // Игнорируем
+                    _logger?.LogTrace("Session lock already disposed for user {UserId}", userId);
                 }
             }
             else
@@ -127,11 +126,29 @@ public class SessionManager : IDisposable
             {
                 if (lockRemoved)
                 {
-                    try { sessionLock.Dispose(); } catch { }
+                    try
+                    {
+                        sessionLock.Dispose();
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        _logger?.LogTrace(ex, "Session lock already disposed during cleanup for user {UserId}", key);
+                    }
                 }
                 else
                 {
-                    _ = sessionLock.Release();
+                    try
+                    {
+                        _ = sessionLock.Release();
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        _logger?.LogTrace(ex, "Session lock already disposed on release for user {UserId}", key);
+                    }
+                    catch (SemaphoreFullException ex)
+                    {
+                        _logger?.LogTrace(ex, "Session lock already at max count for user {UserId}", key);
+                    }
                 }
             }
         }
@@ -163,9 +180,16 @@ public class SessionManager : IDisposable
         _cleanupCts.Dispose();
         _cleanupTimer.Dispose();
 
-        foreach (var (_, semaphore) in _sessionLocks)
+        foreach (var (userId, semaphore) in _sessionLocks)
         {
-            try { semaphore.Dispose(); } catch { }
+            try
+            {
+                semaphore.Dispose();
+            }
+            catch (ObjectDisposedException ex)
+            {
+                _logger?.LogTrace(ex, "Session lock already disposed for user {UserId} during shutdown", userId);
+            }
         }
         _sessionLocks.Clear();
     }
@@ -185,7 +209,19 @@ public class SessionManager : IDisposable
         {
             if (Interlocked.CompareExchange(ref _disposed, 1, 0) == 0)
             {
-                try { _=_sessionLock.Release(); } catch { }
+                try
+                {
+                    _ = _sessionLock.Release();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Семафор уже Disposed (shutdown снёс его в SessionManager.Dispose).
+                }
+                catch (SemaphoreFullException)
+                {
+                    // Release() вызван повторно — для SemaphoreSlim не должно случаться,
+                    // но на всякий случай проглатываем как уже-учтённое.
+                }
             }
         }
     }

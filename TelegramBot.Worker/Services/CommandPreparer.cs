@@ -170,8 +170,10 @@ public sealed class CommandPreparer(
                 || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
                 || candidate.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException or System.Security.SecurityException)
         {
+            // Path.GetFullPath бросает конкретные типы при невалидном пути.
+            // Трактовка: путь за пределами root (defensive default для security-check).
             return false;
         }
     }
@@ -180,12 +182,12 @@ public sealed class CommandPreparer(
     private async Task<(string? resolvedPath, string? errorMessage)> ResolveExecutablePathAsync(
         PendingCommand cmd, string configuredPath, string commandText, CancellationToken ct)
     {
-        if (commandText is "PDF" or "DWG" or "IFC" or "BIMDOC")
+        if (commandText is CommandCodes.Pdf or CommandCodes.Dwg or CommandCodes.Ifc or CommandCodes.BimDoc)
         {
             return await ResolveRevitPathAsync(cmd, commandText, ct) ?? (configuredPath, null);
         }
 
-        if (commandText is "NWC" or "CLASHREP")
+        if (commandText is CommandCodes.Nwc or CommandCodes.ClashRep)
         {
             return ResolveNavisworksPath(commandText) ?? (configuredPath, null);
         }
@@ -352,9 +354,11 @@ public sealed class CommandPreparer(
                 File.Delete(resultFilePath);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Best effort — не должны падать из-за ошибки очистки
+            logger.LogDebug(ex, "Failed to clean up temp files for command {CommandId} (attempt {Token})",
+                commandId, attemptToken);
         }
     }
 }

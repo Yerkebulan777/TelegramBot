@@ -11,7 +11,9 @@ internal sealed class NavisworksProcessTracker(
 {
     private static readonly string[] _navisworksProcessNames = ["Roamer", "FileConvert", "NWD"];
 
-    /// <summary>Возвращает список всех активных (не завершённых) процессов Navisworks (Roamer, FileConvert, NWD).</summary>
+    /// <summary>Возвращает список всех активных (не завершённых) процессов Navisworks (Roamer, FileConvert, NWD).
+    /// Возвращённые <see cref="Process"/> экземпляры должны быть Disposed вызывающей стороной.
+    /// Каждый Process из Process.GetProcessesByName требует явного Dispose для освобождения native handle.</summary>
     public IReadOnlyList<Process> GetAllProcesses()
     {
         var result = new List<Process>();
@@ -20,12 +22,19 @@ internal sealed class NavisworksProcessTracker(
         {
             try
             {
-                result.AddRange(Process.GetProcessesByName(processName)
-                    .Where(p =>
+                var snapshot = Process.GetProcessesByName(processName);
+                foreach (var p in snapshot)
+                {
+                    try
                     {
-                        try { return !p.HasExited; }
-                        catch { return false; }
-                    }));
+                        if (!p.HasExited) result.Add(p);
+                        else p.Dispose();
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        p.Dispose();
+                    }
+                }
             }
             catch (Exception ex)
             {

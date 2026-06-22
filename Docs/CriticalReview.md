@@ -26,3 +26,5 @@
 
 - [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI, code style
 - [ExecutionAlgorithm.md](./ExecutionAlgorithm.md) — спецификация алгоритма выполнения команд
+
+

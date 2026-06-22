@@ -11,16 +11,26 @@ internal sealed class RevitProcessTracker(
     DialogDismisser dialogDismisser,
     ILogger<RevitProcessTracker> logger)
 {
-    /// <summary>Возвращает список всех активных (не завершённых) процессов Revit.</summary>
+    /// <summary>Возвращает список всех активных (не завершённых) процессов Revit.
+    /// Возвращённые <see cref="Process"/> экземпляры должны быть Disposed вызывающей стороной.
+    /// Каждый Process из Process.GetProcessesByName требует явного Dispose для освобождения native handle.</summary>
     public IReadOnlyList<Process> GetAllRevitProcesses()
     {
-        return Process.GetProcessesByName("Revit")
-            .Where(p =>
+        var snapshot = Process.GetProcessesByName("Revit");
+        var active = new List<Process>(snapshot.Length);
+        foreach (var p in snapshot)
+        {
+            try
             {
-                try { return !p.HasExited; }
-                catch { return false; }
-            })
-            .ToList();
+                if (!p.HasExited) active.Add(p);
+                else p.Dispose();
+            }
+            catch (InvalidOperationException)
+            {
+                p.Dispose();
+            }
+        }
+        return active;
     }
 
     public RevitProcessHealth CheckHealth(Process process)

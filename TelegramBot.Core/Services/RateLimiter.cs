@@ -37,6 +37,15 @@ public sealed class RateLimiter
                 _ = requestWindow.Timestamps.TryDequeue(out _);
             }
 
+            // Если все записи истекли и пользователь не превысил лимит — словарь нам больше не нужен.
+            // Удаляем entry ДО проверки лимита, чтобы избежать утечки памяти под нагрузкой
+            // (предыдущая версия проверяла IsEmpty после Enqueue — ветка была мёртвой).
+            if (requestWindow.Timestamps.IsEmpty)
+            {
+                _ = ((ICollection<KeyValuePair<long, RequestWindow>>)_requests).Remove(
+                    new KeyValuePair<long, RequestWindow>(userId, requestWindow));
+            }
+
             // Проверка лимита и добавление нового timestamp
             if (requestWindow.Timestamps.Count >= _maxRequests)
             {
@@ -44,13 +53,6 @@ public sealed class RateLimiter
             }
 
             requestWindow.Timestamps.Enqueue(now);
-
-            // Удаляем entry из словаря, если очередь пуста (оптимизация памяти)
-            if (requestWindow.Timestamps.IsEmpty)
-            {
-                _ = ((ICollection<KeyValuePair<long, RequestWindow>>)_requests).Remove(
-                    new KeyValuePair<long, RequestWindow>(userId, requestWindow));
-            }
 
             return true;
         }

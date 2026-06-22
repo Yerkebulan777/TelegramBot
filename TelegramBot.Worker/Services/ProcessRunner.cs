@@ -31,6 +31,8 @@ public sealed class ProcessRunner(
     // Трекинг активных процессов для health-мониторинга и graceful shutdown
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
 
+    private const int PerProcessKillTimeoutSeconds = 10;
+
     /// <summary>Снимок активных процессов для health-мониторинга.</summary>
     public IEnumerable<KeyValuePair<int, Process>> ActiveProcesses => _activeProcesses;
 
@@ -110,7 +112,18 @@ public sealed class ProcessRunner(
             cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        _ = process.Start();
+        try
+        {
+            _ = process.Start();
+        }
+        catch (Exception)
+        {
+            // Process.Start() бросает Win32Exception при отсутствии exe / access denied.
+            // Disposed, чтобы Process не утекал: outer finally в RunAsync() увидит process == null
+            // и ничего не dispose'нет — поэтому освобождаем здесь.
+            process.Dispose();
+            throw;
+        }
         _activeProcesses[cmd.CommandId] = process;
         _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Processing, process.Id);
         _ = commandDataService.NotifySessionStartedAsync(cmd.SessionId, cmd.CorrelationId, cmd.UserId);
@@ -304,7 +317,8 @@ public sealed class ProcessRunner(
             }
 
             // Невалидный status — rename для диагностики
-            try { File.Move(path, path + ".bad", overwrite: true); } catch { }
+            try { File.Move(path, path + ".bad", overwrite: true); }
+            catch (Exception ex) { logger.LogWarning(ex, "Failed to rename invalid result file to .bad: {Path}", path); }
             result = null!;
             errorMessage = $"Plugin result file has invalid status: {path}";
             return ResultFileReadStatus.Invalid;
@@ -312,7 +326,8 @@ public sealed class ProcessRunner(
         catch (JsonException ex)
         {
             // Битый JSON — rename для диагностики
-            try { File.Move(path, path + ".bad", overwrite: true); } catch { }
+            try { File.Move(path, path + ".bad", overwrite: true); }
+            catch (Exception moveEx) { logger.LogWarning(moveEx, "Failed to rename invalid JSON result file to .bad: {Path}", path); }
             result = null!;
             errorMessage = $"Plugin result file contains invalid JSON: {path}. {ex.Message}";
             return ResultFileReadStatus.Invalid;
@@ -335,7 +350,24 @@ public sealed class ProcessRunner(
             logger.LogWarning("Killing timed-out process: commandId={Id}, correlationId={CorrelationId}, pid={Pid}, elapsed={Elapsed:F1}s",
                 cmd.CommandId, cmd.CorrelationId, process.Id, sw.Elapsed.TotalSeconds);
             process.Kill(entireProcessTree: true);
-            try { await process.WaitForExitAsync(CancellationToken.None); } catch { }
+
+            // Ограниченное ожидание выхода после Kill — иначе Worker может зависнуть
+            // на не отвечающем процессе (см. CommandExecutionService.KillProcessAsync для аналогии).
+            try
+            {
+                using var killCts = new CancellationTokenSource(PerProcessKillTimeoutSeconds * 1000);
+                await process.WaitForExitAsync(killCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogWarning("Process did not exit within {Timeout}s after Kill: commandId={Id}, pid={Pid}",
+                    PerProcessKillTimeoutSeconds, cmd.CommandId, process.Id);
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "WaitForExitAsync after Kill failed: commandId={Id}, pid={Pid}",
+                    cmd.CommandId, process.Id);
+            }
         }
 
         logger.LogError("Command {CommandId} ({Cmd}) timed out: correlationId={CorrelationId}, timeout={Timeout} min, elapsed={Elapsed:F1}s",
