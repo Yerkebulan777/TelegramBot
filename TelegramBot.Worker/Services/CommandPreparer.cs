@@ -318,11 +318,7 @@ public sealed class CommandPreparer(
 
         try
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(task, new System.Text.Json.JsonSerializerOptions
-            {
-                WriteIndented = true,
-                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
-            });
+            var json = System.Text.Json.JsonSerializer.Serialize(task, JsonOptions.CamelCase);
 
             // Atomic write: пишем во временный файл, затем переименовываем
             var tmpPath = taskFilePath + ".tmp";

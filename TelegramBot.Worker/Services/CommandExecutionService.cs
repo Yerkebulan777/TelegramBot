@@ -5,6 +5,7 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Worker.BimLib.Monitor;
+using TelegramBot.Worker.Helpers;
 
 namespace TelegramBot.Worker.Services;
 
@@ -143,50 +144,46 @@ public sealed class CommandExecutionService(
 
     private Task StartCleanupTaskAsync()
     {
-        return Task.Run(async () =>
-        {
-            if (_workerOptions.CleanupIntervalSeconds <= 0)
-            {
-                logger.LogWarning("CleanupIntervalSeconds = {Interval}, lease cleanup disabled",
-                    _workerOptions.CleanupIntervalSeconds);
-                return;
-            }
-
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_workerOptions.CleanupIntervalSeconds));
-
-            try
-            {
-                while (await timer.WaitForNextTickAsync(_shutdownCts!.Token))
-                {
-                    try
-                    {
-                        await commandDataService.ReleaseExpiredLeasesAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Error in lease cleanup cycle");
-                    }
-                }
-            }
-            catch (OperationCanceledException) when (_shutdownCts?.IsCancellationRequested == true)
-            {
-                // штатное завершение
-            }
-        });
+        return StartPeriodicBackgroundTaskAsync(
+            intervalSeconds: _workerOptions.CleanupIntervalSeconds,
+            disabledMessage: interval => $"CleanupIntervalSeconds = {interval}, lease cleanup disabled",
+            cycleName: "lease cleanup cycle",
+            cycle: () => commandDataService.ReleaseExpiredLeasesAsync());
     }
 
     private Task StartHealthMonitoringTaskAsync()
     {
+        return StartPeriodicBackgroundTaskAsync(
+            intervalSeconds: _workerOptions.HealthCheckIntervalSeconds,
+            disabledMessage: interval => $"HealthCheckIntervalSeconds = {interval}, process health monitoring disabled",
+            cycleName: "process health check cycle",
+            cycle: () =>
+            {
+                CheckProcessesHealth();
+                return Task.CompletedTask;
+            });
+    }
+
+    /// <summary>
+    /// Универсальный каркас для фоновых циклов на <see cref="PeriodicTimer"/>:
+    /// disabled-проверка, повтор с подавлением ошибок итерации, штатное завершение по shutdown-токену.
+    /// ponytail: добавление CancellationToken в data-сервисы — отдельный PR, контракт пока не меняем.
+    /// </summary>
+    private Task StartPeriodicBackgroundTaskAsync(
+        int intervalSeconds,
+        Func<int, string> disabledMessage,
+        string cycleName,
+        Func<Task> cycle)
+    {
         return Task.Run(async () =>
         {
-            if (_workerOptions.HealthCheckIntervalSeconds <= 0)
+            if (intervalSeconds <= 0)
             {
-                logger.LogWarning("HealthCheckIntervalSeconds = {Interval}, process health monitoring disabled",
-                    _workerOptions.HealthCheckIntervalSeconds);
+                logger.LogWarning("{Msg}", disabledMessage(intervalSeconds));
                 return;
             }
 
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_workerOptions.HealthCheckIntervalSeconds));
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(intervalSeconds));
 
             try
             {
@@ -194,11 +191,11 @@ public sealed class CommandExecutionService(
                 {
                     try
                     {
-                        CheckProcessesHealth();
+                        await cycle();
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Error in process health check cycle");
+                        logger.LogError(ex, "Error in {Cycle}", cycleName);
                     }
                 }
             }
@@ -303,26 +300,10 @@ public sealed class CommandExecutionService(
                 logger.LogInformation("Killing process on shutdown: commandId={Id}, pid={Pid}",
                     commandId, process.Id);
 
-                process.Kill(entireProcessTree: true);
+                var exited = await ProcessKillHelper.KillAsync(
+                    process, TimeSpan.FromSeconds(10), logger, commandId, shutdownToken);
 
-                using var perProcessCts = CancellationTokenSource.CreateLinkedTokenSource(shutdownToken);
-                perProcessCts.CancelAfter(TimeSpan.FromSeconds(10));
-
-                try
-                {
-                    await process.WaitForExitAsync(perProcessCts.Token);
-                }
-                catch (OperationCanceledException) when (perProcessCts.IsCancellationRequested)
-                {
-                }
-
-                if (!process.HasExited)
-                {
-                    logger.LogWarning(
-                        "Process did not exit after kill: commandId={Id}, pid={Pid}",
-                        commandId, process.Id);
-                }
-                else
+                if (exited)
                 {
                     logger.LogInformation("Process killed successfully: commandId={Id}, pid={Pid}",
                         commandId, process.Id);

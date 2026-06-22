@@ -3,11 +3,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
+using TelegramBot.Worker.Helpers;
 
 namespace TelegramBot.Worker.Services;
 
@@ -301,11 +301,7 @@ public sealed class ProcessRunner(
         {
             var json = File.ReadAllText(path);
 
-            result = JsonSerializer.Deserialize<ResultFile>(json, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-            })!;
+            result = JsonSerializer.Deserialize<ResultFile>(json, JsonOptions.CamelCase)!;
 
             // Status — enum (Done/Failed/Cancelled). required поле → если десериализация прошла, status всегда валиден.
             if (Enum.IsDefined(result.Status))
@@ -349,25 +345,7 @@ public sealed class ProcessRunner(
         {
             logger.LogWarning("Killing timed-out process: commandId={Id}, correlationId={CorrelationId}, pid={Pid}, elapsed={Elapsed:F1}s",
                 cmd.CommandId, cmd.CorrelationId, process.Id, sw.Elapsed.TotalSeconds);
-            process.Kill(entireProcessTree: true);
-
-            // Ограниченное ожидание выхода после Kill — иначе Worker может зависнуть
-            // на не отвечающем процессе (см. CommandExecutionService.KillProcessAsync для аналогии).
-            try
-            {
-                using var killCts = new CancellationTokenSource(PerProcessKillTimeoutSeconds * 1000);
-                await process.WaitForExitAsync(killCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                logger.LogWarning("Process did not exit within {Timeout}s after Kill: commandId={Id}, pid={Pid}",
-                    PerProcessKillTimeoutSeconds, cmd.CommandId, process.Id);
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "WaitForExitAsync after Kill failed: commandId={Id}, pid={Pid}",
-                    cmd.CommandId, process.Id);
-            }
+            await ProcessKillHelper.KillAsync(process, TimeSpan.FromSeconds(PerProcessKillTimeoutSeconds), logger, cmd.CommandId);
         }
 
         logger.LogError("Command {CommandId} ({Cmd}) timed out: correlationId={CorrelationId}, timeout={Timeout} min, elapsed={Elapsed:F1}s",
