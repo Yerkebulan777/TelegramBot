@@ -3,22 +3,56 @@ using System.Text.Json.Serialization;
 namespace TelegramBot.Core.Models;
 
 /// <summary>
-/// Результат от CAD-плагина. Плагин пишет <c>result_{CommandId}_{AttemptToken}.json</c> во временную папку.
+/// Статус выполнения BIM-команды в result-файле.
+/// Сериализуется в camelCase (done/failed/cancelled) через <see cref="JsonStringEnumConverter"/>.
+/// </summary>
+public enum ResultStatus
+{
+    /// <summary>Команда выполнена успешно.</summary>
+    Done,
+
+    /// <summary>Команда завершилась с ошибкой (permanent или transient — определяет <c>ErrorClassifier</c>).</summary>
+    Failed,
+
+    /// <summary>Команда была отменена (пользователем или системой). Трактовать как permanent failure без retry.</summary>
+    Cancelled,
+}
+
+/// <summary>
+/// Результат от BIM-плагина. Плагин пишет <c>result_{CommandId}_{AttemptToken}.json</c> в TaskDirectory.
 /// Worker читает после завершения процесса. Если файла нет — статус определяется по exit code.
 /// </summary>
+/// <remarks>
+/// Формат полностью соответствует <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> и
+/// JSON-схеме <c>…\RevitBIMFusion\Docs\ResultFile.schema.json</c>.
+/// </remarks>
 public sealed class ResultFile
 {
     /// <summary>
-    /// Статус: <c>"done"</c> или <c>"failed"</c>.
+    /// Статус выполнения команды. Сериализуется как camelCase-строка (<c>"done"</c> / <c>"failed"</c> / <c>"cancelled"</c>)
+    /// через <see cref="JsonStringEnumConverter"/>.
     /// </summary>
     [JsonPropertyName("status")]
-    public required string Status { get; set; }
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public required ResultStatus Status { get; set; }
 
-    /// <summary>Сообщение об ошибке (при status = "failed").</summary>
+    /// <summary>
+    /// Краткое сообщение об ошибке при <see cref="Status"/> = <c>Failed</c>. <c>null</c> при <c>Done</c>.
+    /// </summary>
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 
-    /// <summary>Список сгенерированных файлов (при status = "done").</summary>
+    /// <summary>
+    /// Полный stack trace / диагностика при неожиданных исключениях. <c>null</c> при <c>Done</c> и для ожидаемых сбоев.
+    /// Worker логирует это поле при наличии для отладки.
+    /// </summary>
+    [JsonPropertyName("errorDetails")]
+    public string? ErrorDetails { get; set; }
+
+    /// <summary>
+    /// Список созданных файлов при <see cref="Status"/> = <c>Done</c>. Может быть пустым или <c>null</c>.
+    /// Сериализуется как JSON-массив строк (<c>string[]</c>) или <c>null</c>.
+    /// </summary>
     [JsonPropertyName("outputFiles")]
-    public List<string> OutputFiles { get; set; } = [];
+    public string[]? OutputFiles { get; set; }
 }

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
@@ -85,7 +86,7 @@ public sealed class ProcessRunner(
         finally
         {
             // Очищаем temp-файлы этой попытки
-            CommandPreparer.CleanupTempFiles(cmd.CommandId, attemptToken);
+            commandPreparer.CleanupTempFiles(cmd.CommandId, attemptToken);
 
             // На shutdown не удаляем процесс из tracking'а — пусть LogActiveProcessesOnShutdownAsync его увидит.
             if (!ct.IsCancellationRequested)
@@ -101,9 +102,9 @@ public sealed class ProcessRunner(
     private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, string attemptToken)
     {
         // Создаём task-файл для CAD-плагина перед запуском процесса
-        CommandPreparer.CreateTaskFile(cmd, attemptToken, logger);
+        commandPreparer.CreateTaskFile(cmd, attemptToken);
 
-        var startInfo = CommandPreparer.CreateProcessStartInfo(cmd, commandCfg, attemptToken);
+        var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg, attemptToken);
 
         logger.LogInformation("Command start: id={Id}, correlationId={CorrelationId}, command={Cmd}, attempt={Attempt}",
             cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
@@ -205,19 +206,36 @@ public sealed class ProcessRunner(
         var resultReadStatus = TryReadResultFile(cmd.CommandId, attemptToken, out var result, out var resultReadError);
         if (resultReadStatus == ResultFileReadStatus.Valid)
         {
-            if (string.Equals(result.Status, "done", StringComparison.OrdinalIgnoreCase))
+            if (result.Status == ResultStatus.Done)
             {
                 _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
                 logger.LogInformation(
-                    "Command done (plugin): id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, elapsedMs={ElapsedMs}",
-                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, sw.ElapsedMilliseconds);
+                    "Command done (plugin): id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, outputFiles={OutputCount}, elapsedMs={ElapsedMs}",
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles?.Length ?? 0, sw.ElapsedMilliseconds);
                 await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
                 return;
             }
 
-            logger.LogWarning(
-                "Command plugin failure: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, elapsedMs={ElapsedMs}, error={Error}",
-                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported failure");
+            // Failed или Cancelled. Cancelled — permanent failure (без retry), как и Failed через ErrorClassifier.
+            if (result.Status == ResultStatus.Cancelled)
+            {
+                logger.LogInformation(
+                    "Command cancelled by plugin: id={Id}, correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}, error={Error}",
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported cancellation");
+            }
+            else
+            {
+                logger.LogWarning(
+                    "Command plugin failure: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, elapsedMs={ElapsedMs}, error={Error}",
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported failure");
+            }
+
+            // Логируем stack trace при наличии (errorDetails — поле для диагностики, см. BimPluginContract).
+            if (!string.IsNullOrWhiteSpace(result.ErrorDetails))
+            {
+                logger.LogDebug("Plugin errorDetails for id={Id}: {Details}", cmd.CommandId, result.ErrorDetails);
+            }
+
             await HandleFailureAsync(cmd, result.ErrorMessage ?? "Plugin reported failure", null, sw);
             return;
         }
@@ -246,18 +264,18 @@ public sealed class ProcessRunner(
     }
 
     /// <summary>
-    /// Пробует прочитать result-файл из временной папки.
+    /// Пробует прочитать result-файл из TaskDirectory (настраивается через <c>FileSystem:TaskDirectory</c>).
     /// Возвращает true, если файл существует и успешно распарсен.
     /// Порядок: сначала парсим, потом удаляем — чтобы при битом JSON
     /// файл остался для диагностики.
     /// </summary>
-    private static ResultFileReadStatus TryReadResultFile(
+    private ResultFileReadStatus TryReadResultFile(
         int commandId,
         string attemptToken,
         out ResultFile result,
         out string? errorMessage)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"result_{commandId}_{attemptToken}.json");
+        var (path, _) = commandPreparer.GetTaskFilePaths(commandId, attemptToken);
 
         if (!File.Exists(path))
         {
@@ -273,11 +291,11 @@ public sealed class ProcessRunner(
             result = JsonSerializer.Deserialize<ResultFile>(json, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
             })!;
 
-            if (result.Status is not null
-                && (result.Status.Equals("done", StringComparison.OrdinalIgnoreCase)
-                    || result.Status.Equals("failed", StringComparison.OrdinalIgnoreCase)))
+            // Status — enum (Done/Failed/Cancelled). required поле → если десериализация прошла, status всегда валиден.
+            if (Enum.IsDefined(result.Status))
             {
                 // Удаляем ТОЛЬКО после успешного парсинга
                 File.Delete(path);

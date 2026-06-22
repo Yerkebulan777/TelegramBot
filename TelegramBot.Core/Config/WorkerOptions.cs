@@ -78,12 +78,15 @@ public sealed class WorkerOptions
     /// </summary>
     public Dictionary<string, CommandConfig> Commands { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["PDF"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{FilePath}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["DWG"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{FilePath}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["IFC"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{FilePath}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["BIMDOC"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{FilePath}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["NWC"] = new() { ExecutablePath = "FileConvert.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{FilePath}\" \"{TaskFilePath}\"", AllowedExtensions = [".nwc", ".nwd", ".nwf"] },
-        ["CLASHREP"] = new() { ExecutablePath = "FileConvert.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{FilePath}\" \"{TaskFilePath}\"", AllowedExtensions = [".nwc", ".nwd", ".nwf"] },
-        ["AUTORES"] = new() { ExecutablePath = "python", ArgumentsTemplate = "ai_agent.py --command \"{CommandText}\" --file \"{FilePath}\" --task \"{TaskFilePath}\" --result \"{ResultFilePath}\"", AllowedExtensions = [".rvt", ".ifc", ".nwc"], WorkingDirectory = "." },
+        // Шаблоны аргументов НЕ передают {FilePath} в CLI — путь к исходному файлу передаётся только в TaskFile.filePath.
+        // Это гарантирует, что плагин (AddIn/wrapper) сам откроет файл с правильными OpenOptions (Audit=true, DetachFromCentral).
+        // См. …\RevitBIMFusion\Docs\BimPluginContract.md §CLI Arguments.
+        ["PDF"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
+        ["DWG"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
+        ["IFC"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
+        ["BIMDOC"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".rfa"] },
+        ["NWC"] = new() { ExecutablePath = "FileConvert.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".nwc", ".nwd", ".nwf"] },
+        ["CLASHREP"] = new() { ExecutablePath = "FileConvert.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".nwc", ".nwd", ".nwf"] },
+        ["AUTORES"] = new() { ExecutablePath = "python", ArgumentsTemplate = "ai_agent.py --command \"{CommandText}\" --task \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".ifc", ".nwc"], WorkingDirectory = "." },
     };
 }

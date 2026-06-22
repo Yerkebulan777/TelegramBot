@@ -188,7 +188,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `ScheduleRetryAsync` (NextRetryAt + RetryCount), `NotifySessionStartedAsync` (pg_notify), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
 | `PartitionPoolManager` | `SortedDictionary<int, SemaphoreSlim>` по priority. `Initialize(partitions)`, `WaitForSlotAsync(priority)`, `ReleaseSlot(priority)`, `TotalCapacity`. `GetThreshold(priority)` = первый threshold ≥ priority. Over-release guard |
-| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (Revit через BimLib, Navisworks через BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{FilePath}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`), `CleanupTempFiles` |
+| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (Revit через BimLib, Navisworks через BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
 | `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс, регистрирует в `_activeProcesses`, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `ConcurrentDictionary<int, int> _sessionRemaining`. `TrackClaimedCommands(claimed)` (AddOrUpdate с GroupBy SessionId) + `OnCommandCompletedAsync` (AddOrUpdate с -1, при 0 → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `pg_notify('command_completed', SessionId|CorrelationId)`) |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
@@ -234,12 +234,20 @@ services.AddHostedService<SessionCleanupService>();
 
 ### How BIM Command Plugins Actually Work
 
-Полный контракт исполнителей описан в [Docs/BimPluginContract.md](Docs/BimPluginContract.md). Кратко: Worker запускает внешний процесс и обменивается с ним через JSON-файлы во временной папке:
+Полный контракт исполнителей описан в [Docs/BimPluginContract.md](Docs/BimPluginContract.md).
+
+> ⚠️ **CANONICAL CONTRACT (эталон)** находится в:
+> `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md`
+> + JSON-схемы `TaskFile.schema.json` / `ResultFile.schema.json` рядом с ним.
+>
+> [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — **worker-side отражение** этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
+
+Кратко: Worker запускает внешний процесс и обменивается с ним через JSON-файлы в **TaskDirectory** (по умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`, настраивается через `FileSystem:TaskDirectory`):
 
 | Файл | Кто создаёт | Кто читает | Назначение |
 |------|------------|------------|------------|
 | `task_{CommandId}_{AttemptToken}.json` | Worker (`CommandPreparer.CreateTaskFile`, atomic write) | Плагин | Задание: что и с каким файлом делать |
-| `result_{CommandId}_{AttemptToken}.json` | Плагин | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка, выходные файлы |
+| `result_{CommandId}_{AttemptToken}.json` | Плагин (atomic write) | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка/отмена + выходные файлы |
 
 **TaskFile** (`TelegramBot.Core.Models.TaskFile`):
 ```json
@@ -247,39 +255,42 @@ services.AddHostedService<SessionCleanupService>();
   "commandId": 42,
   "commandText": "PDF",
   "filePath": "B:\\project.rvt",
-  "resultFilePath": "C:\\Users\\svc\\AppData\\Local\\Temp\\result_42_6f1c2b3a.json",
-  "options": {}
+  "resultFilePath": "C:\\Users\\svc\\Documents\\TelegramBot\\TaskDirectory\\result_42_6f1c2b3a.json",
+  "options": null
 }
 ```
 - `commandId` — ID команды в БД
 - `commandText` — тип экспорта (`PDF`, `DWG`, `IFC`, `BIMDOC`, `NWC`, `CLASHREP`, `AUTORES`)
-- `filePath` — полный путь к исходному файлу
-- `resultFilePath` — путь, куда плагин должен записать результат
-- `options` — дополнительные опции (расширяемый словарь; в текущей реализации `CreateTaskFile` не заполняет)
+- `filePath` — полный путь к исходному файлу. AddIn открывает его сам через `OpenOptions { Audit = true, DetachAndPreserveWorksets }`. **Не передаётся в CLI args** (только в TaskFile).
+- `resultFilePath` — путь в **TaskDirectory**, куда плагин должен записать результат
+- `options` — `JsonElement?` (closed whitelist; поддерживается только `continueOnError` для PDF/DWG)
 
 **ResultFile** (`TelegramBot.Core.Models.ResultFile`):
 ```json
 {
   "status": "done",
   "errorMessage": null,
+  "errorDetails": null,
   "outputFiles": ["B:\\project.pdf"]
 }
 ```
-- `status` — `"done"` или `"failed"` (обязательное поле; иначе файл → `.bad`)
-- `errorMessage` — сообщение об ошибке (при `"failed"`)
-- `outputFiles` — список сгенерированных файлов (при `"done"`)
+- `status` — enum `ResultStatus { Done, Failed, Cancelled }`, сериализуется camelCase через `JsonStringEnumConverter`
+- `errorMessage` — короткое сообщение об ошибке (при `failed`/`cancelled`)
+- `errorDetails` — полный stack trace (для неожиданных исключений)
+- `outputFiles` — `string[]?` (список созданных файлов при `done`)
 
 **Алгоритм:**
 1. Worker генерирует `attemptToken` (GUID без дефисов) для каждой попытки
-2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.json` в `Path.GetTempPath()` (atomic: `.tmp` → `File.Move(overwrite: true)`)
-3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{FilePath}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`)
-4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.json` (рекомендуется: atomic `.tmp` → `File.Move`)
+2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.json` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
+3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{TaskFilePath}`/`{ResultFilePath}`). **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile (см. эталон §CLI Arguments).
+4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.json` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
 5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
-   - Если есть result JSON с `status="done"` → `Done`
-   - Если result JSON с `status="failed"` → `HandleFailureAsync` (retry/error classification)
+   - `status="done"` → `Done`
+   - `status="failed"` → `HandleFailureAsync` (retry/error classification); `errorMessage` в лог, `errorDetails` в Debug-лог
+   - `status="cancelled"` → permanent `Failed` без retry
    - Битый JSON / unreadable / неизвестный status → rename в `.bad` → `HandleFailureAsync`
-   - Если result JSON отсутствует — fallback по exit code: `0` = `Done`, иначе `HandleFailureAsync`
-6. Temp-файлы очищаются в `finally` блока `ProcessRunner.RunAsync()` (через `CommandPreparer.CleanupTempFiles`)
+   - result JSON отсутствует — fallback по exit code: `0` = `Done`, иначе `HandleFailureAsync`
+6. Файлы текущей попытки очищаются в `finally` блока `ProcessRunner.RunAsync()` (через `CommandPreparer.CleanupTempFiles`)
 
 Исполнитель должен записать result-файл и завершиться с exit code `0` при успехе. Если result-файл не найден — Worker использует fallback по exit code.
 

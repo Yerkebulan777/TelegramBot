@@ -51,6 +51,7 @@ public static class Program
                         .ValidateOnStart();
                     _=services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
                     _=services.Configure<DialogDismisserOptions>(context.Configuration.GetSection(DialogDismisserOptions.SectionName));
+                    _=services.Configure<FileSystemOptions>(context.Configuration.GetSection(FileSystemOptions.SectionName));
 
                     // BIM-интеграция (Revit + Navisworks)
                     _=services.AddSingleton<RevitVersionDetector>();
@@ -127,6 +128,21 @@ public static class Program
             // Initialize WinApiHelper logger for safe P/Invoke error logging
             var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
             WinApiHelper.SetLogger(loggerFactory.CreateLogger("TelegramBot.Worker.BimLib.Native.WinApiHelper"));
+
+            // Гарантируем, что TaskDirectory существует — иначе первая же команда упадёт при записи task_*.json.
+            // Путь настраивается через FileSystem:TaskDirectory; по умолчанию %USERPROFILE%\Documents\TelegramBot\TaskDirectory.
+            var fileSystemOptions = host.Services.GetRequiredService<IOptions<FileSystemOptions>>().Value;
+            var taskDir = fileSystemOptions.GetEffectiveTaskDirectory();
+            try
+            {
+                Directory.CreateDirectory(taskDir);
+                Log.Information("TaskDirectory ready: {Path}", taskDir);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Failed to create TaskDirectory '{Path}'. Command execution will likely fail.", taskDir);
+                throw;
+            }
 
             await host.InitializeDatabaseAsync();
             await host.RunAsync();

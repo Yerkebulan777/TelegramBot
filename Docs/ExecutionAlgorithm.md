@@ -487,8 +487,9 @@ ORDER BY s.CreatedAt DESC;
 3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в `ArgumentsTemplate`.
 4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает `result_{CommandId}_{AttemptToken}.json`.
 5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл
-   существует, но не читается, содержит битый JSON или неизвестный status, попытка считается
-   ошибочной и проходит через `ErrorClassifier` (permanent → `Failed`, transient → `ScheduleRetry`).
+   существует, но не читается или содержит битый JSON, попытка считается ошибочной и проходит
+   через `ErrorClassifier` (permanent → `Failed`, transient → `ScheduleRetry`). `status` —
+   обязательное enum-поле (`done`/`failed`/`cancelled`), `cancelled` трактуется как permanent failure без retry.
 
 Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. Для Navisworks/FileConvert полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может работать только через fallback по exit code.
 

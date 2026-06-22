@@ -14,6 +14,7 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 public sealed class CommandPreparer(
     IOptions<WorkerOptions> workerOptions,
+    IOptions<FileSystemOptions> fileSystemOptions,
     IConfiguration configuration,
     CommandDataService commandDataService,
     RevitVersionDetector versionDetector,
@@ -21,7 +22,20 @@ public sealed class CommandPreparer(
     ILogger<CommandPreparer> logger)
 {
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
+    private readonly string _taskDirectory = fileSystemOptions.Value.GetEffectiveTaskDirectory();
     private readonly string? _fileSystemRoot = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.RootPath)];
+
+    /// <summary>
+    /// Возвращает пути к task-файлу и result-файлу для указанной команды и попытки.
+    /// Используется как CommandPreparer'ом при записи task-файла и ProcessRunner'ом при чтении result-файла,
+    /// чтобы оба компонента использовали одну и ту же директорию (настраиваемую через <c>FileSystem:TaskDirectory</c>).
+    /// </summary>
+    public (string resultFilePath, string taskFilePath) GetTaskFilePaths(int commandId, string attemptToken)
+    {
+        var resultFilePath = Path.Combine(_taskDirectory, $"result_{commandId}_{attemptToken}.json");
+        var taskFilePath = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptToken}.json");
+        return (resultFilePath, taskFilePath);
+    }
 
     /// <summary>
     /// Проверяет команду: тип, файл, BIM-исполняемый файл.
@@ -240,9 +254,9 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>Создаёт ProcessStartInfo из конфигурации команды.</summary>
-    public static ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, CommandConfig cfg, string attemptToken)
+    public ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, CommandConfig cfg, string attemptToken)
     {
-        var (resultFilePath, taskFilePath) = GetTempFilePaths(cmd.CommandId, attemptToken);
+        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, attemptToken);
 
         var args = cfg.ArgumentsTemplate
             .Replace("{CommandText}", cmd.CommandText)
@@ -278,9 +292,19 @@ public sealed class CommandPreparer(
     /// Если создание не удалось — только логируем предупреждение: плагин может получить
     /// параметры из аргументов командной строки.
     /// </summary>
-    public static void CreateTaskFile(PendingCommand cmd, string attemptToken, ILogger logger)
+    public void CreateTaskFile(PendingCommand cmd, string attemptToken)
     {
-        var (resultFilePath, taskFilePath) = GetTempFilePaths(cmd.CommandId, attemptToken);
+        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, attemptToken);
+
+        try
+        {
+            // Гарантируем, что директория существует (best effort — может быть заполнена или read-only).
+            Directory.CreateDirectory(_taskDirectory);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("Failed to create task directory '{Dir}': {Error}", _taskDirectory, ex.Message);
+        }
 
         var task = new TaskFile
         {
@@ -311,25 +335,13 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>
-    /// Возвращает пути к временным файлам task-файла и result-файла для указанной команды.
-    /// Уникальный attemptToken предотвращает конфликты между retry-попытками одной команды
-    /// и атаки с предсказуемыми именами файлов.
-    /// </summary>
-    private static (string resultFilePath, string taskFilePath) GetTempFilePaths(int commandId, string attemptToken)
-    {
-        var resultFilePath = Path.Combine(Path.GetTempPath(), $"result_{commandId}_{attemptToken}.json");
-        var taskFilePath = Path.Combine(Path.GetTempPath(), $"task_{commandId}_{attemptToken}.json");
-        return (resultFilePath, taskFilePath);
-    }
-
-    /// <summary>
     /// Очищает временные файлы task и result для указанной попытки.
     /// </summary>
-    public static void CleanupTempFiles(int commandId, string attemptToken)
+    public void CleanupTempFiles(int commandId, string attemptToken)
     {
         try
         {
-            var (resultFilePath, taskFilePath) = GetTempFilePaths(commandId, attemptToken);
+            var (resultFilePath, taskFilePath) = GetTaskFilePaths(commandId, attemptToken);
             if (File.Exists(taskFilePath))
             {
                 File.Delete(taskFilePath);

@@ -11,7 +11,7 @@ Telegram-бот для навигации по файловой системе �
 |----------|----------|
 | [AGENTS.md](AGENTS.md) | Архитектура, BimLib, DI, code style, константы |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
-| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
+| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Worker-side отражение контракта BIM-плагинов (полное соответствие эталону в `RevitBIMFusion/Docs/`) |
 | [Docs/CriticalReview.md](Docs/CriticalReview.md) | Открытые архитектурные проблемы и узкие места |
 
 ## Обзор
@@ -100,9 +100,11 @@ Worker запускает внешние исполнители и обмени�
 |---------|-------------|---------------|--------|
 | `PDF`, `DWG`, `IFC`, `BIMDOC` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Без AddIn Revit просто откроется как GUI и команда завершится таймаутом. Worker определяет версию файла через OLE-стрим `BasicFileInfo` (OpenMcdf) и ищет соответствующий `Revit.exe` в реестре Windows |
 | `NWC`, `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
-| `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task`/`--result` и писать `ResultFile` |
+| `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task` и писать `ResultFile` |
 
-Полный контракт описан в [Docs/BimPluginContract.md](Docs/BimPluginContract.md).
+> ⚠️ **Эталонный контракт** (всегда проверять при изменениях) живёт в `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + JSON-схемы `TaskFile.schema.json` / `ResultFile.schema.json`.
+>
+> Наш [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — worker-side отражение этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
 
 ## Конфигурация
 
@@ -129,6 +131,7 @@ Worker запускает внешние исполнители и обмени�
 | `FileSystem` | `RevitFileExtension` | Расширение (default `.rvt`) |
 | `FileSystem` | `SectionFolderPattern` | Regex для папок-разделов (default `^(\d{2}|\d{3}\|I{1,3})_`) |
 | `FileSystem` | `LogDirectory` | Опционально: путь к логам (default `%USERPROFILE%\Documents\TelegramBot\Logs`) |
+| `FileSystem` | `TaskDirectory` | Опционально: папка для task/result JSON (default `%USERPROFILE%\Documents\TelegramBot\TaskDirectory`). **Только Worker** |
 | `HealthCheck` | `Port` / `ServiceName` / `CacheSeconds` / `DbCheckTimeoutSeconds` | Health-сервер (default `5000` / `TelegramBot.Server` / `10` / `5`) |
 
 ### Worker — `TelegramBot.Worker/appsettings.json`
@@ -189,6 +192,36 @@ Worker запускает внешние исполнители и обмени�
 
 Если `LogDirectory` не задан или `null` — используется дефолтный путь.
 Параметр применяется ко всем проектам (Server, Worker, BimLib).
+
+### TaskDirectory — обмен с BIM-исполнителями
+
+Worker обменивается JSON (`task_*.json` / `result_*.json`) с CAD-плагинами через **выделенную папку**, а не через `Path.GetTempPath()` — иначе Windows/system-cleaner'ы могут удалить файлы во время длительной команды (Revit-экспорт до 3 часов). Папка намеренно находится **рядом с логами**, чтобы админ мог открыть её вручную и проверить активные попытки.
+
+**Дефолтный путь:** `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`
+
+```text
+%USERPROFILE%\Documents\TelegramBot\
+├── Logs\
+│   ├── Server\
+│   └── Worker\
+│       ├── BimLib\
+│       └── (Serilog-логи Worker)
+└── TaskDirectory\           ← task_{CommandId}_{token}.json + result_{CommandId}_{token}.json
+```
+
+**Override** через опциональный параметр `FileSystem:TaskDirectory` (только Worker):
+
+```json
+{
+  "FileSystem": {
+    "TaskDirectory": "D:\\TelegramBot\\Worker\\TaskDirectory"
+  }
+}
+```
+
+Если `TaskDirectory` не задан или `null` — используется дефолтный путь. Worker создаёт папку автоматически на старте; если создать не удалось — процесс падает с понятной ошибкой.
+
+**Важно:** BIM-плагин (Revit AddIn, Navisworks wrapper, python agent) должен писать result-файл по пути из task-файла (`resultFilePath`), а не по своему `Path.GetTempPath()` — иначе Worker не найдёт файл и отработает только по exit code. Полный контракт — в [Docs/BimPluginContract.md](Docs/BimPluginContract.md#расположение-файлов-taskdirectory).
 
 Полный список параметров — `appsettings.json` в проектах Server и Worker.
 

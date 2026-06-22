@@ -29,6 +29,32 @@ public sealed class FileSystemOptions
     /// </summary>
     public string? LogDirectory { get; set; }
 
+    /// <summary>
+    /// Путь к директории для TaskFile/ResultFile JSON-обмена между Worker и BIM-исполнителями.
+    /// Если не задан (null или пусто), используется дефолтный путь:
+    /// <c>%USERPROFILE%\Documents\TelegramBot\TaskDirectory</c> — на одном уровне с <c>Logs\</c>,
+    /// чтобы админ мог открыть папку вручную и проверить активные task/result JSON-файлы.
+    /// </summary>
+    public string? TaskDirectory { get; set; }
+
+    /// <summary>
+    /// Возвращает эффективный путь к TaskDirectory: значение из конфига или дефолт.
+    /// Используется Worker'ом и любым другим кодом, который пишет/читает task/result JSON.
+    /// </summary>
+    public string GetEffectiveTaskDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(TaskDirectory))
+        {
+            return TaskDirectory;
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Documents",
+            "TelegramBot",
+            "TaskDirectory");
+    }
+
     /// <summary>Возвращает полный путь к RVT-директории для раздела.</summary>
     public string GetRvtPath(string sectionPath)
     {
