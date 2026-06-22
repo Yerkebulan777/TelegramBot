@@ -100,9 +100,10 @@ public sealed class CommandExecutionService(
 
     private async Task<bool> WaitForNotificationAsync(NpgsqlConnection conn, TimeSpan timeout, CancellationToken ct)
     {
+        // Используем overload WaitAsync(TimeSpan, CancellationToken) — устраняет per-call
+        // аллокацию CancellationTokenSource (CreateLinkedTokenSource + CancelAfter),
+        // т.к. фреймворк сам обрабатывает таймаут внутри WaitAsync.
         var notificationReceived = false;
-        var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(timeout);
 
         void OnNotification(object? sender, NpgsqlNotificationEventArgs e)
         {
@@ -116,15 +117,17 @@ public sealed class CommandExecutionService(
 
         try
         {
-            await conn.WaitAsync(timeoutCts.Token);
+            await conn.WaitAsync(timeout, ct);
             return notificationReceived;
         }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            // Таймаут истёк до получения уведомления — fallback polling сработает.
             return false;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            // Shutdown — пробрасываем наверх.
             throw;
         }
         catch (Exception ex)
@@ -135,7 +138,6 @@ public sealed class CommandExecutionService(
         finally
         {
             conn.Notification -= OnNotification;
-            timeoutCts.Dispose();
         }
     }
 

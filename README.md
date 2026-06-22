@@ -33,7 +33,7 @@ Telegram-бот для навигации по файловой системе �
 
 ## Технологии
 
-.NET 10, Telegram.Bot 22.x, PostgreSQL (Npgsql + Dapper), Serilog (Console + Seq + rolling file), OpenMcdf (OLE-потоки .rvt/.rfa).
+.NET 10, Telegram.Bot 22.x, **PostgreSQL 18** (Npgsql + Dapper), Serilog (Console + Seq + rolling file), OpenMcdf (OLE-потоки .rvt/.rfa).
 
 ⚠️ **Windows only** — использует Windows Registry и P/Invoke WinAPI.
 
@@ -228,7 +228,7 @@ Worker обменивается JSON (`task_*.json` / `result_*.json`) с CAD-п
 ## Запуск
 
 ```bash
-# PostgreSQL через Docker
+# PostgreSQL 18 через Docker
 docker compose up -d
 
 # Сборка
@@ -241,7 +241,9 @@ dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 ```
 
-Server и Worker используют одну и ту же PostgreSQL БД, но **независимые процессы** — могут запускаться на разных машинах.
+Server и Worker используют одну и ту же **PostgreSQL 18** БД, но **независимые процессы** — могут запускаться на разных машинах.
+
+> ⚠️ **При первом запуске после обновления версии PostgreSQL** (например, с 17 на 18) Docker-образ не сможет прочитать данные из существующего volume `pgdata` из-за несовместимости major-версий. Если в volume уже есть данные, удалите его: `docker compose down -v` (потеря данных) или выполните миграцию через `pg_upgrade` отдельно. Для свежей установки этот шаг не нужен.
 
 ## CI/CD
 

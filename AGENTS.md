@@ -26,7 +26,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 ```
 
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants, `RateLimiter`, `HealthCheckHostedService`. Zero Telegram SDK dependency.
-- **TelegramBot.Data** — PostgreSQL persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
+- **TelegramBot.Data** — **PostgreSQL 18** persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
 - **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Polls PostgreSQL for pending commands. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
 
@@ -532,7 +532,7 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Все запро
 
 **Advisory lock** для `ReleaseExpiredLeasesAsync`: `pg_try_advisory_lock(1234567)` — namespace `telegram_bot_lease_cleanup`. Предотвращает race между несколькими воркерами, освобождающими истёкшие Lease.
 
-Database: **PostgreSQL** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()` (Server only).
+Database: **PostgreSQL 18** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()` (Server only).
 All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.cs`, `SessionDataService.cs`, `UserDataService.cs`, `MessageTrackingDataService.cs`). Connection creation is unified via `CreateOpenConnectionAsync()` helper in `DataAccessBase`. SQL constants в `TelegramBot.Data/Sql/` (5 partial files: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).
 
 ---
@@ -714,6 +714,7 @@ Previously, linked CTS вызывал немедленное прерывани�
 - CI pipeline exists (`.github/workflows/ci.yml`) — runs `dotnet build` and `dotnet publish` on push/PR. No automated tests — the only verification is a successful `dotnet build`
 - Keep secrets out of committed config files — use `TelegramBot.Server/appsettings.Local.json` (gitignored) or env var `TelegramBot__Token`; never hardcode tokens
 - PostgreSQL connection string in committed `appsettings.json` uses default `postgres/postgres` credentials — override via `appsettings.Local.json` or env var `ConnectionStrings__Postgres`
+- **PostgreSQL major-version upgrades** (e.g. 17 → 18 in `docker-compose.yml`) требуют `docker compose down -v` для volume `pgdata` либо отдельной миграции через `pg_upgrade` — данные из старой major-версии не читаются новой. Перед изменением `image: postgres:*` в compose — предупреди пользователя о потере данных.
 - **Interfaces remaining:** `ICallbackHandler` (6 implementations), `ITelegramOutputService` (sole consumer interface)
 
 ---

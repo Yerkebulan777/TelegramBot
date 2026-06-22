@@ -10,7 +10,15 @@ namespace TelegramBot.Data;
 public abstract class DataAccessBase
 {
     /// <summary>Строка подключения по умолчанию.</summary>
-    public const string DefaultConnectionString = "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres";
+    /// <remarks>
+    /// <c>Minimum Pool Size=2</c> — держит 2 подключения «тёплыми» для снижения latency на cold-start.
+    /// <c>Connection Idle Lifetime=300</c> — закрывает idle-подключения старше 5 минут.
+    /// <c>Max Pool Size</c> намеренно не задан (default=100 достаточно для текущей нагрузки:
+    /// Server: Parallel.ForEachAsync DOP=10 + notification; Worker: drain loop + cleanup + health).
+    /// <c>Multiplexing</c> не задан (default=true в Npgsql 6+).
+    /// </remarks>
+    public const string DefaultConnectionString =
+        "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Minimum Pool Size=2;Connection Idle Lifetime=300";
 
     private readonly string _connectionString;
 
