@@ -289,23 +289,34 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>
-    /// Создаёт файл задания <c>task_{CommandId}_{attemptToken}.json</c> для CAD-плагина.
-    /// Плагин читает этот файл, чтобы получить параметры команды.
-    /// Если создание не удалось — только логируем предупреждение: плагин может получить
-    /// параметры из аргументов командной строки.
+    /// Создаёт файл задания <c>task_{CommandId}_{attemptToken}.json</c> для BIM-плагина (контракт
+    /// <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> §TaskFile Location). Плагин читает этот файл,
+    /// чтобы получить <c>filePath</c> и <c>resultFilePath</c>. <c>commandText</c> плагин также получает
+    /// из CLI args, но <c>filePath</c> намеренно НЕ передаётся в CLI (контракт §CLI Arguments) —
+    /// плагин открывает .rvt сам с <c>Audit=true</c>/<c>DetachAndPreserveWorksets</c>.
+    /// Поэтому если запись task-файла провалилась — AddIn не сможет корректно выполнить команду.
     /// </summary>
-    public void CreateTaskFile(PendingCommand cmd, string attemptToken)
+    /// <returns>
+    /// <c>true</c> если task-файл успешно записан, <c>false</c> если запись не удалась (директория
+    /// не создана, .tmp не записан, или rename не прошёл). В последнем случае вызывающая сторона
+    /// может решить — стартовать процесс всё равно или прервать выполнение.
+    /// </returns>
+    public bool CreateTaskFile(PendingCommand cmd, string attemptToken)
     {
         var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, attemptToken);
 
         try
         {
-            // Гарантируем, что директория существует (best effort — может быть заполнена или read-only).
+            // Гарантируем, что директория существует.
             Directory.CreateDirectory(_taskDirectory);
         }
         catch (Exception ex)
         {
-            logger.LogWarning("Failed to create task directory '{Dir}': {Error}", _taskDirectory, ex.Message);
+            logger.LogError(ex,
+                "Failed to create task directory '{Dir}' for command {Id} (correlationId={CorrelationId}, command={Cmd}). " +
+                "AddIn will not be able to read the task file. Process start will likely fail or produce wrong results.",
+                _taskDirectory, cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
+            return false;
         }
 
         var task = new TaskFile
@@ -324,11 +335,19 @@ public sealed class CommandPreparer(
             var tmpPath = taskFilePath + ".tmp";
             File.WriteAllText(tmpPath, json);
             File.Move(tmpPath, taskFilePath, overwrite: true);
+            return true;
         }
         catch (Exception ex)
         {
-            // Не фатально — плагин может получить данные из аргументов командной строки
-            logger.LogWarning("Failed to create task file '{TaskFilePath}': {Error}", taskFilePath, ex.Message);
+            // Запись task-файла не удалась. AddIn не получит filePath (контракт §CLI Arguments запрещает
+            // передачу .rvt-пути в CLI args), поэтому команда почти наверняка упадёт. Логируем громко
+            // с correlationId, чтобы в случае end-to-end проблем можно было быстро найти эту запись.
+            logger.LogError(ex,
+                "Failed to create task file '{TaskFilePath}' for command {Id} (correlationId={CorrelationId}, command={Cmd}). " +
+                "AddIn will not receive filePath; result file will likely not be written. " +
+                "Check FileSystem:TaskDirectory permissions, disk space, and antivirus interference.",
+                taskFilePath, cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
+            return false;
         }
     }
 

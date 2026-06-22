@@ -103,8 +103,18 @@ public sealed class ProcessRunner(
     /// <summary>Запускает процесс по конфигурации команды.</summary>
     private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, string attemptToken)
     {
-        // Создаём task-файл для CAD-плагина перед запуском процесса
-        commandPreparer.CreateTaskFile(cmd, attemptToken);
+        // Создаём task-файл для CAD-плагина перед запуском процесса.
+        // Если запись не удалась — AddIn не получит filePath (контракт BimPluginContract §CLI Arguments
+        // запрещает передачу .rvt-пути в CLI args), и команда гарантированно упадёт. Fail-fast
+        // с IOException, чтобы ErrorClassifier пометил это как permanent failure без retry:
+        // проблема инфраструктурная (TaskDirectory недоступен/переполнен/заблокирован антивирусом),
+        // повторная попытка ничего не даст.
+        if (!commandPreparer.CreateTaskFile(cmd, attemptToken))
+        {
+            throw new IOException(
+                $"Failed to write task file in TaskDirectory '{commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken).taskFilePath}'. " +
+                $"AddIn cannot proceed without the task file. Check FileSystem:TaskDirectory permissions, disk space, and antivirus.");
+        }
 
         var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg, attemptToken);
 
@@ -223,8 +233,8 @@ public sealed class ProcessRunner(
             {
                 _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
                 logger.LogInformation(
-                    "Command done (plugin): id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, outputFiles={OutputCount}, elapsedMs={ElapsedMs}",
-                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles?.Length ?? 0, sw.ElapsedMilliseconds);
+                    "Command done (plugin): id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, outputPath={OutputPath}, elapsedMs={ElapsedMs}",
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles ?? "<none>", sw.ElapsedMilliseconds);
                 await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
                 return;
             }
@@ -262,6 +272,18 @@ public sealed class ProcessRunner(
         // Fallback: exit code (для команд без плагина, который пишет result-файл)
         if (process.ExitCode == 0)
         {
+            // Процесс завершился с кодом 0, но result-файл не был найден и не распарсен.
+            // Это типичный симптом нарушения контракта BimPlugin со стороны AddIn: он
+            // получил CLI args, но TaskFilePathResolver не нашёл task-файл по args[4]
+            // (например, AddIn ожидает args[5], а Worker передаёт 4 аргумента), и
+            // вернул Result.Cancelled без записи ResultFile. Логируем громко с
+            // подсказкой — это ускоряет диагностику, когда плагин «молча» падает.
+            logger.LogWarning(
+                "Process exited cleanly (exitCode=0) but no result file was written for command {Id} (correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}). " +
+                "Possible causes: AddIn's TaskFilePathResolver did not match the CLI args layout, or AddIn wrote ResultFile to a different path. " +
+                "Verify the AddIn version matches the ArgumentsTemplate in appsettings.json.",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);
+
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
             logger.LogInformation("Command done: id={Id}, correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);

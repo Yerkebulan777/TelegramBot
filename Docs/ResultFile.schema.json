@@ -4,7 +4,7 @@
   "title": "ResultFile",
   "description": "Выходной result-файл BIM-Worker контракта. AddIn пишет атомарно в TaskFile.resultFilePath.",
   "type": "object",
-  "required": ["status", "outputFiles"],
+  "required": ["status"],
   "properties": {
     "status": {
       "type": "string",
@@ -22,29 +22,24 @@
       "default": null
     },
     "outputFiles": {
-      "type": "array",
-      "description": "Список созданных файлов при status=done. Может быть пустым.",
-      "items": {
-        "type": "string"
-      },
-      "default": []
+      "type": ["string", "null"],
+      "description": "Несмотря на множественное число в имени, это одна строка, не массив: ResultFile.OutputFiles в коде — string?. Для PDF/NWC — путь к единственному файлу. Для DWG (один .dwg на лист) — путь к папке экспорта, а не список файлов листов. Поле опускается из JSON при null (WhenWritingNull).",
+      "default": null
     }
   },
   "examples": [
     {
       "status": "done",
-      "outputFiles": ["C:/Export/Sheet-A1.pdf"]
+      "outputFiles": "C:/Export/building.pdf"
     },
     {
       "status": "failed",
-      "errorMessage": "Document is not saved",
-      "outputFiles": []
+      "errorMessage": "Document is not saved"
     },
     {
       "status": "failed",
       "errorMessage": "AddIn failed: Object reference not set to an instance of an object.",
-      "errorDetails": "System.NullReferenceException: ...\n   at WorkerBridge.Commands.WorkerCommandHandler.Execute ...",
-      "outputFiles": []
+      "errorDetails": "System.NullReferenceException: ...\n   at WorkerBridge.Commands.WorkerCommandHandler.Execute ..."
     }
   ]
 }

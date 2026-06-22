@@ -1,10 +1,16 @@
 # Как работает Worker
 
-Worker — это отдельный .NET-процесс (`TelegramBot.Worker`), который забирает BIM/AI-задачи из общей PostgreSQL-БД и запускает их. Server кладёт команды в таблицу `Commands`, Worker их подхватывает, исполняет и пишет результат обратно. Windows-only (использует реестр и P/Invoke).
+Worker — это отдельный .NET-процесс (`TelegramBot.Worker`), который забирает BIM/AI-задачи из общей
+PostgreSQL-БД и запускает их. Server кладёт команды в таблицу `Commands`, Worker их подхватывает, исполняет
+и пишет результат обратно. Windows-only (использует реестр и P/Invoke).
 
 ## Архитектура в одном абзаце
 
-Worker — событийный orchestrator поверх PostgreSQL-очереди. `LISTEN/NOTIFY` будит drain-loop, который параллельно claim'ит до 5 команд и раскидывает их по приоритетным пулам семафоров. `ProcessRunner` запускает внешние BIM-процессы, обмениваясь с ними JSON-файлами в `TaskDirectory`. Результат классифицируется через `ErrorClassifier` (permanent → Failed, transient → retry с экспонентой), а `SessionCompletionTracker` пачкой уведомляет Server о завершении сессии через durable `NotificationOutbox`.
+Worker — событийный orchestrator поверх PostgreSQL-очереди. `LISTEN/NOTIFY` будит drain-loop, который
+параллельно claim'ит до 5 команд и раскидывает их по приоритетным пулам семафоров. `ProcessRunner` запускает
+внешние BIM-процессы, обмениваясь с ними JSON-файлами в `TaskDirectory`. Результат классифицируется через
+`ErrorClassifier` (permanent → Failed, transient → retry с экспонентой), а `SessionCompletionTracker` пачкой
+уведомляет Server о завершении сессии через durable `NotificationOutbox`.
 
 ---
 
@@ -12,11 +18,15 @@ Worker — событийный orchestrator поверх PostgreSQL-очере�
 
 `ExecuteAsync` запускает три параллельных потока:
 
-1. **Listener loop** — слушает PostgreSQL-канал `new_tasks` через `LISTEN`. Когда Server делает `pg_notify('new_tasks', correlationId)`, Worker мгновенно просыпается.
-2. **Cleanup loop** — каждые 5 минут освобождает «протухшие» Lease. Если Worker упал с активной командой, lease истечёт через `ProcessTimeoutMinutes + 5 мин`, и другой воркер заберёт команду.
-3. **Health loop** — каждые 30 сек проверяет здоровье активных процессов (`ProcessHealthHelper`) и автоматически закрывает модальные окна Revit/Navisworks (`DialogDismisser`).
+1. **Listener loop** — слушает PostgreSQL-канал `new_tasks` через `LISTEN`. Когда Server делает
+   `pg_notify('new_tasks', correlationId)`, Worker мгновенно просыпается.
+2. **Cleanup loop** — каждые 5 минут освобождает «протухшие» Lease. Если Worker упал с активной командой,
+   lease истечёт через `ProcessTimeoutMinutes + 5 мин`, и другой воркер заберёт команду.
+3. **Health loop** — каждые 30 сек проверяет здоровье активных процессов (`ProcessHealthHelper`) и
+   автоматически закрывает модальные окна Revit/Navisworks (`DialogDismisser`).
 
-**Fallback polling** каждые 5 минут на случай потери `NOTIFY` (если связь с PostgreSQL восстановилась без активного соединения).
+**Fallback polling** каждые 5 минут на случай потери `NOTIFY` (если связь с PostgreSQL восстановилась без
+активного соединения).
 
 ---
 
@@ -33,9 +43,13 @@ while (есть свободные слоты):
     продолжить цикл, claim'нуть ещё
 ```
 
-Батч из 5 команд запускается **параллельно как фоновые `Task`**, drain сразу пытается взять следующую пачку. До v1.7 одна долгая команда (3 часа Revit-экспорта) блокировала обработку остальных 4 из батча. Сейчас — все 5 стартуют сразу (если хватает слотов в пуле), а после завершения каждой `ContinueWith` будит drain снова.
+Батч из 5 команд запускается **параллельно как фоновые `Task`**, drain сразу пытается взять следующую
+пачку. До v1.7 одна долгая команда (3 часа Revit-экспорта) блокировала обработку остальных 4 из батча.
+Сейчас — все 5 стартуют сразу (если хватает слотов в пуле), а после завершения каждой `ContinueWith` будит
+drain снова.
 
-`_drainGate` (SemaphoreSlim) защищает от повторного входа drain, `_runningTasks` (HashSet под lock) — для корректного ожидания при shutdown.
+`_drainGate` (SemaphoreSlim) защищает от повторного входа drain, `_runningTasks` (HashSet под lock) — для
+корректного ожидания при shutdown.
 
 ---
 
@@ -50,7 +64,8 @@ while (есть свободные слоты):
 | `NWC`, `IFC`, `BIMDOC`, `CLASHREP` | 3 (Medium) | 2 |
 | `AUTORES` | 4 (Low) | 1 |
 
-Команда попадает в первый порог `≥ Priority`. Priority берётся из `SlashCommandService._commandPriorityMap` на стороне Server.
+Команда попадает в первый порог `≥ Priority`. Priority берётся из `SlashCommandService._commandPriorityMap`
+на стороне Server.
 
 **Over-release guard** защищает от двойного `ReleaseSlot`. `GetThreshold(priority)` находит нужный пул.
 
@@ -105,7 +120,9 @@ while (есть свободные слоты):
 
 ### Стриминг stdout/stderr
 
-`OutputDataReceived`/`ErrorDataReceived` с lock и лимитом 64KB на каждый канал. При превышении лимита ставится флаг `truncated`, в лог пишется `[TRUNCATED: 64KB limit reached]`. Это предотвращает OOM, если плагин начнёт лить бесконечный вывод.
+`OutputDataReceived`/`ErrorDataReceived` с lock и лимитом 64KB на каждый канал. При превышении лимита
+ставится флаг `truncated`, в лог пишется `[TRUNCATED: 64KB limit reached]`. Это предотвращает OOM, если
+плагин начнёт лить бесконечный вывод.
 
 ### stdout/stderr в зависимости от типа команды
 
@@ -134,9 +151,12 @@ OnCommandCompletedAsync(cmd):
         → NotifySessionCompletedOnceAsync
 ```
 
-**Зачем in-memory счётчик:** позволяет не делать SQL-запрос после каждой команды для проверки «а все ли команды сессии завершены?». Счётчик обнуляется ровно один раз — идемпотентность через `Sessions.CompletionNotified` + INSERT в `NotificationOutbox` + `pg_notify('command_completed')`.
+**Зачем in-memory счётчик:** позволяет не делать SQL-запрос после каждой команды для проверки «а все ли
+команды сессии завершены?». Счётчик обнуляется ровно один раз — идемпотентность через
+`Sessions.CompletionNotified` + INSERT в `NotificationOutbox` + `pg_notify('command_completed')`.
 
-Durable outbox нужен на случай, если Server упадёт между `pg_notify` и реальной отправкой в Telegram — после restart `NotificationSenderService` подхватит все неотправленные события.
+Durable outbox нужен на случай, если Server упадёт между `pg_notify` и реальной отправкой в Telegram — после
+restart `NotificationSenderService` подхватит все неотправленные события.
 
 ---
 
@@ -145,12 +165,14 @@ Durable outbox нужен на случай, если Server упадёт меж
 При получении `stoppingToken`:
 
 1. `_shutdownCts.CancelAsync()` — останавливает background loops
-2. **Параллельный** `Kill(entireProcessTree: true)` всех активных процессов в общем shutdown-бюджете **30 сек** (per-process 10 сек через `ProcessKillHelper.KillAsync`)
+2. **Параллельный** `Kill(entireProcessTree: true)` всех активных процессов в общем shutdown-бюджете
+   **30 сек** (per-process 10 сек через `ProcessKillHelper.KillAsync`)
 3. Wait for cleanup + health tasks (15 сек каждый)
 4. Wait for running tasks (15 сек)
 5. Dispose семафоров и `PartitionPoolManager`
 
-Важно: при shutdown процессы **не удаляются** из `_activeProcesses` сразу — `LogActiveProcessesOnShutdownAsync` должен увидеть все активные процессы до остановки.
+Важно: при shutdown процессы **не удаляются** из `_activeProcesses` сразу — `LogActiveProcessesOnShutdownAsync`
+должен увидеть все активные процессы до остановки.
 
 ---
 
@@ -166,15 +188,20 @@ Durable outbox нужен на случай, если Server упадёт меж
 | `DialogDismisser` | Находит модальные окна Revit через `EnumWindows` (класс `#32770`) и кликает «OK»/«Close»/«Cancel» по тексту. Исключает информационные диалоги через `ExclusionDialogTitles` |
 | `ProcessHealthHelper` | `CheckHealth(Process, logger, context)`: `Healthy` / `NotResponding` / `Error` по `IsResponding` + memory sampling |
 
-Логи BimLib идут в отдельный файл `Worker/BimLib/log-{date}.txt` через `BimLibLogFilter` (фильтр по `SourceContext` начинающемуся на `TelegramBot.Worker.BimLib`).
+Логи BimLib идут в отдельный файл `Worker/BimLib/log-{date}.txt` через `BimLibLogFilter` (фильтр по
+`SourceContext` начинающемуся на `TelegramBot.Worker.BimLib`).
 
-Помечено `[SupportedOSPlatform("windows")]` — Windows-only. Worker тоже помечен, плюс `RuntimeInformation.IsOSPlatform(OSPlatform.Windows)` runtime check.
+Помечено `[SupportedOSPlatform("windows")]` — Windows-only. Worker тоже помечен, плюс
+`RuntimeInformation.IsOSPlatform(OSPlatform.Windows)` runtime check.
 
 ---
 
 ## Контракт с BIM-плагинами
 
-> ⚠️ **Эталон** живёт в `RevitBIMFusion/Docs/BimPluginContract.md` + JSON-схемы `TaskFile.schema.json` / `ResultFile.schema.json`. Наш `Docs/BimPluginContract.md` — worker-side отражение. При изменениях в `TaskFile` / `ResultFile` / `ArgumentsTemplate` / `CreateTaskFile` / `TryReadResultFile` — обновлять эталон + плагин + код **синхронно**.
+> ⚠️ **Эталон** живёт в `RevitBIMFusion/Docs/BimPluginContract.md` + JSON-схемы `TaskFile.schema.json` /
+> `ResultFile.schema.json`. Наш `Docs/BimPluginContract.md` — worker-side отражение. При изменениях в
+> `TaskFile` / `ResultFile` / `ArgumentsTemplate` / `CreateTaskFile` / `TryReadResultFile` — обновлять
+> эталон + плагин + код **синхронно**.
 
 ### TaskFile (Worker → плагин)
 
@@ -198,14 +225,14 @@ Durable outbox нужен на случай, если Server упадёт меж
   "status": "done",
   "errorMessage": null,
   "errorDetails": null,
-  "outputFiles": ["B:\\project.pdf"]
+  "outputFiles": "B:\\project.pdf"
 }
 ```
 
 - `status` — enum `ResultStatus { Done, Failed, Cancelled }`, camelCase через `JsonStringEnumConverter`
 - `errorMessage` — короткое сообщение (при `failed`/`cancelled`)
 - `errorDetails` — полный stack trace (для неожиданных исключений)
-- `outputFiles` — `string[]?` (список созданных файлов при `done`)
+- `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.json`)
 
 ### Без AddIn (broken flow)
 
@@ -217,13 +244,15 @@ Worker → Revit.exe открывается как GUI
        3 часа → Worker kill'ит → timeout → Failed
 ```
 
-`DialogDismisser` закрывает только известные модальные окна. Без Revit AddIn Revit не знает что делать с `/command` и просто открывается GUI, игнорируя аргументы.
+`DialogDismisser` закрывает только известные модальные окна. Без Revit AddIn Revit не знает что делать с
+`/command` и просто открывается GUI, игнорируя аргументы.
 
 ---
 
 ## Куда Worker скидывает TaskFile
 
-Путь формируется в `TelegramBot.Core/Config/FileSystemOptions.cs` → `GetEffectiveTaskDirectory()` и используется в `CommandPreparer.GetTaskFilePaths()`.
+Путь формируется в `TelegramBot.Core/Config/FileSystemOptions.cs` → `GetEffectiveTaskDirectory()` и
+используется в `CommandPreparer.GetTaskFilePaths()`.
 
 ### Формула пути
 
@@ -236,6 +265,7 @@ Worker → Revit.exe открывается как GUI
 
 1. **Если в `appsettings.json` задан `FileSystem:TaskDirectory`** → используется этот путь как есть.
 2. **Иначе** (по умолчанию) — собирается через `Path.Combine`:
+
    ```csharp
    Path.Combine(
        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),  // %USERPROFILE%
@@ -245,6 +275,7 @@ Worker → Revit.exe открывается как GUI
    ```
 
 **Дефолтный путь (Windows):**
+
 ```
 C:\Users\<USER>\Documents\TelegramBot\TaskDirectory\
 ```
@@ -258,7 +289,8 @@ var resultFilePath = Path.Combine(_taskDirectory, $"result_{commandId}_{attemptT
 var taskFilePath   = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptToken}.json");
 ```
 
-Где `attemptToken` — `Guid.NewGuid().ToString("N")` (32 hex символа без дефисов), генерируется в `ProcessRunner.RunAsync` на каждую попытку (включая retry).
+Где `attemptToken` — `Guid.NewGuid().ToString("N")` (32 hex символа без дефисов), генерируется в
+`ProcessRunner.RunAsync` на каждую попытку (включая retry).
 
 ### Пример для команды №42 с токеном `6f1c2b3a4d5e6f708192a3b4c5d6e7f8`
 
@@ -293,11 +325,17 @@ C:\Users\y.zhumabayev\Documents\TelegramBot\TaskDirectory\result_42_6f1c2b3a4d5e
 
 ## TaskDirectory — папка обмена
 
-Выделенная папка, а не `Path.GetTempPath()` (иначе Windows-cleaner'ы могут удалить файлы во время длительной команды).
+`TaskDirectory` — это **часть контракта** Worker ↔ BIM-плагин, а не деталь реализации (см.
+[Docs/BimPluginContract.md §Расположение файлов](BimPluginContract.md#расположение-файлов-taskdirectory) и
+эталон `…\RevitBIMFusion\Docs\BimPluginContract.md` §TaskFile Location). Worker и AddIn **обязаны**
+использовать одну и ту же директорию; подменять её на собственный `Path.GetTempPath()` недопустимо —
+`%TEMP%` у Worker'а (Windows-сервис) и у AddIn'а (интерактивная сессия Revit) — это разные директории, и
+стороны просто не найдут файлы друг друга.
 
 **Дефолтный путь:** `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`
 
-Override через `FileSystem:TaskDirectory` в `appsettings.json`. Worker создаёт папку автоматически на старте; если создать не удалось — процесс падает с понятной ошибкой (`Worker/Program.cs` строки 132–145).
+Override через `FileSystem:TaskDirectory` в `appsettings.json`. Worker создаёт папку автоматически на старте;
+если создать не удалось — процесс падает с понятной ошибкой (`Worker/Program.cs` строки 132–145).
 
 **Структура:**
 
@@ -349,7 +387,8 @@ _=services.AddHostedService<HealthCheckHostedService>();
 
 ## Health Check
 
-Worker поднимает HTTP-сервер на порту **5001** (Server — на 5000). Дополнительные checks в `AdditionalChecks`:
+Worker поднимает HTTP-сервер на порту **5001** (Server — на 5000). Дополнительные checks в
+`AdditionalChecks`:
 
 | Check | Описание | Unhealthy |
 |-------|----------|-----------|
@@ -362,7 +401,9 @@ Endpoints: `/health/live` (всегда 200), `/health/ready` (с DB-прове�
 
 ## `SessionCleanupService` — авто-архивация
 
-Отдельный `BackgroundService`. Раз в `CleanupIntervalSeconds` soft-deleted сессий старше `CompletedSessionRetentionDays` (default 30) без `pending`/`processing` команд + cascade soft-delete их команд. `0` отключает.
+Отдельный `BackgroundService`. Раз в `CleanupIntervalSeconds` soft-deleted сессий старше
+`CompletedSessionRetentionDays` (default 30) без `pending`/`processing` команд + cascade soft-delete их
+команд. `0` отключает.
 
 Soft-delete only: `SET Status = 'Deleted'`, никогда `DELETE FROM`.
 

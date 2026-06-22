@@ -50,9 +50,13 @@ public sealed class ResultFile
     public string? ErrorDetails { get; set; }
 
     /// <summary>
-    /// Список созданных файлов при <see cref="Status"/> = <c>Done</c>. Может быть пустым или <c>null</c>.
-    /// Сериализуется как JSON-массив строк (<c>string[]</c>) или <c>null</c>.
+    /// Путь к выходному файлу при <see cref="Status"/> = <c>Done</c>. Несмотря на множественное число в имени,
+    /// это **одна строка**, не массив — соответствует канону в <c>…\RevitBIMFusion\Docs\ResultFile.schema.json</c>
+    /// и C# модели <c>WorkerBridge.Core.ResultFile</c>. Для PDF/NWC — путь к единственному выходному файлу,
+    /// для DWG (один .dwg на лист) — путь к папке экспорта, а не список листов.
+    /// <c>null</c> при <c>Failed</c>/<c>Cancelled</c> и при <c>Done</c> без выходных файлов.
+    /// Поле опускается из JSON при <c>null</c> (WhenWritingNull).
     /// </summary>
     [JsonPropertyName("outputFiles")]
-    public string[]? OutputFiles { get; set; }
+    public string? OutputFiles { get; set; }
 }

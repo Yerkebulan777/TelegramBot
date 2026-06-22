@@ -270,13 +270,13 @@ services.AddHostedService<SessionCleanupService>();
   "status": "done",
   "errorMessage": null,
   "errorDetails": null,
-  "outputFiles": ["B:\\project.pdf"]
+  "outputFiles": "B:\\project.pdf"
 }
 ```
 - `status` — enum `ResultStatus { Done, Failed, Cancelled }`, сериализуется camelCase через `JsonStringEnumConverter`
 - `errorMessage` — короткое сообщение об ошибке (при `failed`/`cancelled`)
 - `errorDetails` — полный stack trace (для неожиданных исключений)
-- `outputFiles` — `string[]?` (список созданных файлов при `done`)
+- `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.json`)
 
 **Алгоритм:**
 1. Worker генерирует `attemptToken` (GUID без дефисов) для каждой попытки

@@ -1,6 +1,8 @@
 # Алгоритм выполнения команд
 
-> **Связанные документы:** [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI | [BimPluginContract.md](BimPluginContract.md) — контракт BIM-плагинов | [README.md](../README.md) — общее описание
+> **Связанные документы:** [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI |
+> [BimPluginContract.md](BimPluginContract.md) — контракт BIM-плагинов | [README.md](../README.md) — общее
+> описание
 
 ## Архитектура
 
@@ -13,7 +15,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
     → OnCommandCompletedAsync: in-memory счётчик → 0 → CountPendingProcessingBySessionAsync (DB confirm)
         → NotifySessionCompletedOnceAsync (atomic Sessions.CompletionNotified=TRUE)
             → INSERT NotificationOutbox(session_completed) + pg_notify('command_completed') wake-up
-            → NotificationSenderService → claim outbox → GetSessionCompletionSummaryAsync → Telegram-сводка → mark sent
+            → NotificationSenderService → claim outbox → GetSessionCompletionSummaryAsync → Telegram-сводка
+                → mark sent
     → CommandNotificationService (Server) слушает также 'session_started' → "⚙️ Задание запущено"
 ```
 
@@ -39,40 +42,56 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `Failed` | Завершена с ошибкой (permanent или после исчерпания retries) |
 | `Deleted` | Soft-delete (пользователь отменил) |
 
-**Переходы:** `pending → processing → Done/Failed/Deleted`. Статус `Deleted` финальный — Worker не перезаписывает его (`WHERE Status != 'Deleted'` в `UpdateCommandStatusAsync`).
+**Переходы:** `pending → processing → Done/Failed/Deleted`. Статус `Deleted` финальный — Worker не
+перезаписывает его (`WHERE Status != 'Deleted'` в `UpdateCommandStatusAsync`).
 
 ### Pipeline команды
 
-1. `SlashCommandService.ConfirmFileSelectionAsync` собирает файлы через `RevitFileDeduplicator` (parallel `Task.WhenAll` по разделам), проверяет:
+1. `SlashCommandService.ConfirmFileSelectionAsync` собирает файлы через `RevitFileDeduplicator` (parallel
+   `Task.WhenAll` по разделам), проверяет:
    - **Rate limit** (`CountQueuedFilesByUserSinceAsync` — сумма `FilesAmount` за 24ч, default ≤1000)
-   - **Duplicate guard** (`HasDuplicateCommandsAsync` — активные pending/processing с теми же `(CommandText, FilePath)`)
+   - **Duplicate guard** (`HasDuplicateCommandsAsync` — активные pending/processing с теми же
+     `(CommandText, FilePath)`)
 2. `SessionDataService.CreateSessionWithCommandsAsync` (одна транзакция):
    - INSERT `Sessions` с `CorrelationId` (GUID без дефисов)
    - INSERT `Commands` батчем (`unnest(@CommandTexts::text[])` × N)
    - `pg_notify('new_tasks', @CorrelationId)` — wake-up сигнал
 3. Worker:
-   - `CommandExecutionService.RunListenerLoopAsync` слушает `new_tasks` (LISTEN + `conn.WaitAsync` + fallback polling)
-   - `DrainPendingCommandsAsync` claim'ит до `min(DefaultBatchSize=5, availableSlots)` команд, запускает каждую как background `Task` и сразу пытается claim'ить ещё (drain loop устраняет head-of-line blocking)
+   - `CommandExecutionService.RunListenerLoopAsync` слушает `new_tasks` (LISTEN + `conn.WaitAsync` +
+     fallback polling)
+   - `DrainPendingCommandsAsync` claim'ит до `min(DefaultBatchSize=5, availableSlots)` команд, запускает
+     каждую как background `Task` и сразу пытается claim'ить ещё (drain loop устраняет head-of-line
+     blocking)
 4. Для каждой команды:
    - `PartitionPoolManager.WaitForSlotAsync(priority)` — semaphore на партицию
    - `ProcessRunner.RunAsync`:
-     - `CommandPreparer.PrepareAsync` — валидация FilePath (path traversal, reparse-point, extension, root containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`, `NavisworksPathResolver`)
+     - `CommandPreparer.PrepareAsync` — валидация FilePath (path traversal, reparse-point, extension, root
+       containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`,
+       `NavisworksPathResolver`)
      - `CreateTaskFile` — atomic write `task_{CommandId}_{attemptToken}.json` (`.tmp` → `File.Move`)
-     - `StartProcessAsync` — `Process.Start` + `UpdateStatus=processing` + регистрация в `_activeProcesses` + `NotifySessionStartedAsync` (`pg_notify('session_started', SessionId|CorrelationId|UserId)`)
-     - `WaitAndHandleResultAsync` — `OutputDataReceived` (64KB лимит, `truncated` флаг) + `WaitForExitAsync` + `TryReadResultFile`:
+     - `StartProcessAsync` — `Process.Start` + `UpdateStatus=processing` + регистрация в `_activeProcesses`
+       + `NotifySessionStartedAsync` (`pg_notify('session_started', SessionId|CorrelationId|UserId)`)
+     - `WaitAndHandleResultAsync` — `OutputDataReceived` (64KB лимит, `truncated` флаг) +
+       `WaitForExitAsync` + `TryReadResultFile`:
        - `Valid` + `status="done"` → `Done`
        - `Valid` + `status="failed"` → `HandleFailureAsync` (классификация + retry/fail)
        - `Invalid` (битый JSON / unknown status) → rename в `.bad` → `HandleFailureAsync`
        - `NotFound` (нет result файла) → fallback по exit code (`0` = Done, иначе `HandleFailureAsync`)
      - `CleanupTempFiles` в `finally` (per-attempt)
 5. `HandleFailureAsync`:
-   - `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes)` или `IsPermanentException(ex)` → `Failed` сразу
-   - Иначе если `RetryCount < MaxRetries` (default 5) → `ScheduleRetryAsync` с `NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (default 60→120→240→480→960s)
+   - `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes)` или
+     `IsPermanentException(ex)` → `Failed` сразу
+   - Иначе если `RetryCount < MaxRetries` (default 5) → `ScheduleRetryAsync` с
+     `NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (default 60→120→240→480→960s)
    - Иначе `Failed` после исчерпания
 6. `SessionCompletionTracker.OnCommandCompletedAsync`:
    - `_sessionRemaining.AddOrUpdate(SessionId, -1)` — атомарный декремент batch-счётчика
-   - При `0` → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` (`CompletionNotified=TRUE`, `NotificationOutbox` insert, `pg_notify('command_completed', SessionId|CorrelationId)` если первый раз)
-7. Server: `CommandNotificationService.OnNotificationReceived` (sync handler) → wake-up в `Channel<NotificationItem>` → `NotificationSenderService` claim'ит pending outbox-записи, отправляет `SendMessageAsync` (project + counts + duration + failed files), затем помечает outbox-запись `sent`
+   - При `0` → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync`
+     (`CompletionNotified=TRUE`, `NotificationOutbox` insert,
+     `pg_notify('command_completed', SessionId|CorrelationId)` если первый раз)
+7. Server: `CommandNotificationService.OnNotificationReceived` (sync handler) → wake-up в
+   `Channel<NotificationItem>` → `NotificationSenderService` claim'ит pending outbox-записи, отправляет
+   `SendMessageAsync` (project + counts + duration + failed files), затем помечает outbox-запись `sent`
 
 ---
 
@@ -105,7 +124,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `CreatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
 | `UpdatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
 
-**Миграция `EnsureSessionsColumns`:** добавление колонок `IF NOT EXISTS` для существующих БД, заполнение `CorrelationId = 'legacy-' || SessionId` для NULL, `SET NOT NULL`.
+**Миграция `EnsureSessionsColumns`:** добавление колонок `IF NOT EXISTS` для существующих БД, заполнение
+`CorrelationId = 'legacy-' || SessionId` для NULL, `SET NOT NULL`.
 
 ### Commands
 
@@ -232,7 +252,8 @@ RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
           selected.Priority, selected.RetryCount;
 ```
 
-**Lease:** `LeaseExpiry = NOW() + ProcessTimeoutMinutes + 5min` (дополнительные 5 мин — буфер для crash recovery). `ProcessTimeoutMinutes` = 180 (3ч) по умолчанию.
+**Lease:** `LeaseExpiry = NOW() + ProcessTimeoutMinutes + 5min` (дополнительные 5 мин — буфер для crash
+recovery). `ProcessTimeoutMinutes` = 180 (3ч) по умолчанию.
 
 ### Обновление статуса (финальное)
 
@@ -290,14 +311,13 @@ SELECT COUNT(*)::int FROM outbox;
 
 `command_completed` — только wake-up сигнал. Durable-событие хранится в `NotificationOutbox`.
 `Sessions.CompletionNotified` защищает от дублей при нескольких Worker: только первый успешный
-`UPDATE ... WHERE CompletionNotified = FALSE` вставляет outbox-запись и отправляет wake-up.
-Единственный источник данных для текста уведомления —
-`SessionDataService.GetSessionCompletionSummaryAsync()`, который читает из БД пользователя,
-проект, total/done/failed, длительность и список failed-файлов.
+`UPDATE ... WHERE CompletionNotified = FALSE` вставляет outbox-запись и отправляет wake-up. Единственный
+источник данных для текста уведомления — `SessionDataService.GetSessionCompletionSummaryAsync()`, который
+читает из БД пользователя, проект, total/done/failed, длительность и список failed-файлов.
 
-`NotificationSenderService` читает outbox при старте, по wake-up и периодически каждые 30 секунд.
-Claim использует `FOR UPDATE SKIP LOCKED` + `LockedUntil`; после успешного Telegram send запись
-помечается `sent`, после ошибки возвращается в `pending` с backoff.
+`NotificationSenderService` читает outbox при старте, по wake-up и периодически каждые 30 секунд. Claim
+использует `FOR UPDATE SKIP LOCKED` + `LockedUntil`; после успешного Telegram send запись помечается
+`sent`, после ошибки возвращается в `pending` с backoff.
 
 ### Очистка истёкших Lease (crash recovery)
 
@@ -312,7 +332,8 @@ WHERE "Status" = 'processing'
   AND "Lease" < @CurrentTimeSec;
 ```
 
-**Advisory lock:** `pg_try_advisory_lock(1234567)` (namespace `telegram_bot_lease_cleanup`) — предотвращает race между несколькими воркерами. Освобождается в `finally`.
+**Advisory lock:** `pg_try_advisory_lock(1234567)` (namespace `telegram_bot_lease_cleanup`) — предотвращает
+race между несколькими воркерами. Освобождается в `finally`.
 
 ### Schedule retry
 
@@ -328,7 +349,8 @@ WHERE CommandId = @CommandId
 RETURNING RetryCount;
 ```
 
-`NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (экспоненциальная задержка). При следующем `ClaimAndReturn` команда будет пропущена, пока `NOW() < NextRetryAt`.
+`NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (экспоненциальная задержка). При следующем
+`ClaimAndReturn` команда будет пропущена, пока `NOW() < NextRetryAt`.
 
 ### Отмена команды пользователем
 
@@ -339,7 +361,8 @@ WHERE CommandId = @CommandId
        OR @IsAdmin = true);
 ```
 
-`DeleteCommandAsync` (UserId/IsAdmin), `DeleteCommandsByTypeAsync` (`WHERE Status NOT IN ('Deleted', 'processing')` — нельзя отменить выполняющуюся).
+`DeleteCommandAsync` (UserId/IsAdmin), `DeleteCommandsByTypeAsync`
+(`WHERE Status NOT IN ('Deleted', 'processing')` — нельзя отменить выполняющуюся).
 
 ### Проверка дубликатов в активной очереди
 
@@ -357,7 +380,8 @@ WHERE EXISTS (
 );
 ```
 
-Используется в `HasDuplicateCommandsAsync` перед `CreateSessionWithCommandsAsync` (если есть дубликаты — сессия не создаётся).
+Используется в `HasDuplicateCommandsAsync` перед `CreateSessionWithCommandsAsync` (если есть дубликаты —
+сессия не создаётся).
 
 ### Получение сводки завершения
 
@@ -374,7 +398,8 @@ WHERE s.SessionId = @SessionId
 GROUP BY s.SessionId;
 ```
 
-+ отдельный запрос `SELECT FilePath FROM Commands WHERE SessionId = @SessionId AND Status = 'Failed' ORDER BY ExecutionOrder, CommandId` для `FailedFilePaths`.
++ отдельный запрос `SELECT FilePath FROM Commands WHERE SessionId = @SessionId AND Status = 'Failed' ORDER
+BY ExecutionOrder, CommandId` для `FailedFilePaths`.
 
 ### Soft-delete неактивных сессий
 
@@ -418,7 +443,8 @@ SELECT COUNT(*)::int FROM deleted_sessions;
 
 ## Приоритеты команд и партиции
 
-`WorkerOptions.Partitions` — `SortedDictionary<threshold, poolSize>`. Команда попадает в **первый** threshold `≥ Priority`. Меньше значение `Priority` = выше приоритет.
+`WorkerOptions.Partitions` — `SortedDictionary<threshold, poolSize>`. Команда попадает в **первый** threshold
+`≥ Priority`. Меньше значение `Priority` = выше приоритет.
 
 **Маппинг (дефолт `Worker:Partitions`):**
 
@@ -439,15 +465,20 @@ SELECT COUNT(*)::int FROM deleted_sessions;
 | 4 | `Low` | `AUTORES` | 1 (порог 3) |
 | 50 | `Default` | (не задано) | 1 (порог 3) |
 
-**Примечание:** `Partitions` в `appsettings.json` с дефолтом `{0:5, 1:3, 2:2, 3:1}` — это **ёмкости по threshold**, не по приоритету. Чтобы PDF (Priority=1) получил пул 5, нужно либо понизить `_commandPriorityMap["PDF"]` до 0, либо переопределить `Partitions`. Текущая конфигурация (без кода с Priority≤0) даёт всем команду порог 3 → пул 1.
+**Примечание:** `Partitions` в `appsettings.json` с дефолтом `{0:5, 1:3, 2:2, 3:1}` — это **ёмкости по
+threshold**, не по приоритету. Чтобы PDF (Priority=1) получил пул 5, нужно либо понизить
+`_commandPriorityMap["PDF"]` до 0, либо переопределить `Partitions`. Текущая конфигурация (без кода с
+Priority≤0) даёт всем команду порог 3 → пул 1.
 
-**Корректное использование:** для боевого деплоя скорректируйте либо `_commandPriorityMap`, либо `Partitions` так, чтобы приоритетные команды получали нужный пул.
+**Корректное использование:** для боевого деплоя скорректируйте либо `_commandPriorityMap`, либо
+`Partitions` так, чтобы приоритетные команды получали нужный пул.
 
 ---
 
 ## Диагностические запросы
 
 **Очередь pending-команд (с приоритетом и возрастом):**
+
 ```sql
 SELECT "CommandId", "CommandText", "Priority", "CreatedAt",
        EXTRACT(EPOCH FROM (NOW() - "CreatedAt")) as "AgeSec"
@@ -457,6 +488,7 @@ ORDER BY "Priority" ASC, "CreatedAt" ASC;
 ```
 
 **Активные выполнения (с LeaseStatus):**
+
 ```sql
 SELECT "CommandId", "CommandText", "ProcessId", "StartedAt",
        EXTRACT(EPOCH FROM (NOW() - "StartedAt")) as "DurationSec",
@@ -468,6 +500,7 @@ ORDER BY "StartedAt" ASC;
 ```
 
 **Зависшие команды (истёк Lease):**
+
 ```sql
 SELECT "CommandId", "CommandText", "ProcessId", "StartedAt", "Lease"
 FROM "Commands"
@@ -478,6 +511,7 @@ ORDER BY "Lease" ASC;
 ```
 
 **Команды, ожидающие retry:**
+
 ```sql
 SELECT "CommandId", "CommandText", "RetryCount", "NextRetryAt",
        EXTRACT(EPOCH FROM ("NextRetryAt" - NOW())) as "WaitSec"
@@ -488,6 +522,7 @@ ORDER BY "NextRetryAt" ASC;
 ```
 
 **Активность сессий (24ч):**
+
 ```sql
 SELECT s.SessionId, s.Username, s.ProjectName, s.CreatedAt,
        COUNT(c.CommandId) AS Total,
@@ -512,20 +547,25 @@ ORDER BY s.CreatedAt DESC;
 
 1. `ProcessRunner.RunAsync()` генерирует `AttemptToken` (GUID без дефисов).
 2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.json` (atomic write).
-3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в `ArgumentsTemplate`.
-4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает `result_{CommandId}_{AttemptToken}.json`.
-5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл
-   существует, но не читается или содержит битый JSON, попытка считается ошибочной и проходит
-   через `ErrorClassifier` (permanent → `Failed`, transient → `ScheduleRetry`). `status` —
-   обязательное enum-поле (`done`/`failed`/`cancelled`), `cancelled` трактуется как permanent failure без retry.
+3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в
+   `ArgumentsTemplate`.
+4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает
+   `result_{CommandId}_{AttemptToken}.json`.
+5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл существует, но не
+   читается или содержит битый JSON, попытка считается ошибочной и проходит через `ErrorClassifier`
+   (permanent → `Failed`, transient → `ScheduleRetry`). `status` — обязательное enum-поле
+   (`done`/`failed`/`cancelled`), `cancelled` трактуется как permanent failure без retry.
 
-Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. Для Navisworks/FileConvert полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может работать только через fallback по exit code.
+Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. Для Navisworks/FileConvert
+полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может
+работать только через fallback по exit code.
 
 Подробности: [BimPluginContract.md](BimPluginContract.md).
 
 ### Добавление новой команды
 
 1. **Добавить конфигурацию** в `appsettings.json` Worker:
+
    ```json
    "Commands": {
      "XLSEXPORT": {
@@ -536,23 +576,30 @@ Revit требует установленный AddIn: `Revit.exe` сам не �
    }
    ```
 
-2. **Настроить приоритет** — добавить запись в `_commandPriorityMap` в `SlashCommandService.cs`. Если не добавить — `Priority=50` (`Default`).
+2. **Настроить приоритет** — добавить запись в `_commandPriorityMap` в `SlashCommandService.cs`. Если не
+   добавить — `Priority=50` (`Default`).
 
 3. **Настроить лимиты партиций** (опционально):
+
    ```json
    "Partitions": { "0": 5, "1": 3, "2": 2, "3": 1 }
    ```
 
-4. **Добавить `CommandDefinition`** в `TelegramBot.Server/Models/CommandDefinition.cs` + `CommandCatalog.GetByGroup(...)` для отображения в меню.
+4. **Добавить `CommandDefinition`** в `TelegramBot.Server/Models/CommandDefinition.cs` +
+   `CommandCatalog.GetByGroup(...)` для отображения в меню.
 
-5. **Добавить `CommandCodes` константу** в `TelegramBot.Core/Constants/CommandCodes.cs` (если нужна в Server-коде).
+5. **Добавить `CommandCodes` константу** в `TelegramBot.Core/Constants/CommandCodes.cs` (если нужна в
+   Server-коде).
 
-6. **Добавить `CallbackPrefixes` константу** в `TelegramBot.Core/Constants/CallbackPrefixes.cs` (для inline-кнопки команды). Формат: `"<CODE>:"` (с двоеточием).
+6. **Добавить `CallbackPrefixes` константу** в `TelegramBot.Core/Constants/CallbackPrefixes.cs` (для
+   inline-кнопки команды). Формат: `"<CODE>:"` (с двоеточием).
 
-7. **Зарегистрировать handler** (если новый callback-префикс): `CommandToggleHandler` уже поддерживает `PDF:`, `DWG:`, и т.д. — для новой команды добавить префикс в `SupportedPrefixes`.
+7. **Зарегистрировать handler** (если новый callback-префикс): `CommandToggleHandler` уже поддерживает
+   `PDF:`, `DWG:`, и т.д. — для новой команды добавить префикс в `SupportedPrefixes`.
 
 ### Добавление нового PG-канала
 
 1. `SELECT pg_notify('new_channel', @Payload)` в отправителе (Worker/Server).
-2. `await using var conn = await CreateOpenConnectionAsync(); conn.Notification += OnNotification;` в получателе.
+2. `await using var conn = await CreateOpenConnectionAsync(); conn.Notification += OnNotification;` в
+   получателе.
 3. Обработать payload в `OnNotificationReceived` (sync handler) — без `async void`.

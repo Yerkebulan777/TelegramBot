@@ -6,23 +6,29 @@
 > C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md
 > ```
 >
-> Этот документ — **worker-side отражение** эталонного контракта, актуальное описание **нашей реализации** (TaskDirectory, плейсхолдеры, поведение Worker'а). Формат JSON, схемы, правила обработки `.rvt` живут в эталоне.
+> Этот документ — **worker-side отражение** эталонного контракта, актуальное описание **нашей реализации**
+> (TaskDirectory, плейсхолдеры, поведение Worker'а). Формат JSON, схемы, правила обработки `.rvt` живут в
+> эталоне.
 
 ## Соответствие эталону
 
-**Реализация TelegramBot.Worker полностью соответствует эталонному контракту.** Любые изменения в коде, затрагивающие обмен `Worker ↔ BIM-плагин`, **обязаны** сохранять это соответствие:
+**Реализация TelegramBot.Worker полностью соответствует эталонному контракту.** Любые изменения в коде,
+затрагивающие обмен `Worker ↔ BIM-плагин`, **обязаны** сохранять это соответствие:
 
 - `TelegramBot.Core/Models/TaskFile.cs` ↔ `…\RevitBIMFusion\Docs\TaskFile.schema.json`
 - `TelegramBot.Core/Models/ResultFile.cs` ↔ `…\RevitBIMFusion\Docs\ResultFile.schema.json`
 - `TelegramBot.Worker/Services/CommandPreparer.cs` (`CreateTaskFile`, `CreateProcessStartInfo`)
 - `TelegramBot.Worker/Services/ProcessRunner.cs` (`TryReadResultFile`, `HandleFailureAsync`)
-- `TelegramBot.Core/Config/WorkerOptions.cs` (`Commands` map) + `TelegramBot.Worker/appsettings.json` (секция `Worker:Commands`)
+- `TelegramBot.Core/Config/WorkerOptions.cs` (`Commands` map) + `TelegramBot.Worker/appsettings.json` (секция
+  `Worker:Commands`)
 
-Если эталон изменился — **сначала** обновляется эталон + плагин (RevitBIMFusion), **потом** синхронизируется наша реализация (этот документ + код) в одном релизе.
+Если эталон изменился — **сначала** обновляется эталон + плагин (RevitBIMFusion), **потом** синхронизируется
+наша реализация (этот документ + код) в одном релизе.
 
 ## Что отдаёт Worker (TaskFile)
 
-Worker пишет `task_{CommandId}_{AttemptToken}.json` в **TaskDirectory** (см. ниже). Формат файла — см. [TaskFile.schema.json](TaskFile.schema.json).
+Worker пишет `task_{CommandId}_{AttemptToken}.json` в **TaskDirectory** (см. ниже). Формат файла — см.
+[TaskFile.schema.json](TaskFile.schema.json).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -32,18 +38,20 @@ Worker пишет `task_{CommandId}_{AttemptToken}.json` в **TaskDirectory** (�
 | `resultFilePath` | `string` | Абсолютный путь в **TaskDirectory**, куда исполнитель обязан записать `ResultFile` |
 | `options` | `JsonElement?` | Closed whitelist: поддерживается только `continueOnError` (bool) для PDF/DWG. Неизвестные ключи вне контракта |
 
-`AttemptToken` — GUID без дефисов, новый для каждой retry-попытки. Worker подставляет его в имя файла и в `resultFilePath`.
+`AttemptToken` — GUID без дефисов, новый для каждой retry-попытки. Worker подставляет его в имя файла и в
+`resultFilePath`.
 
 ## Что Worker ожидает получить (ResultFile)
 
-Исполнитель пишет `result_{CommandId}_{AttemptToken}.json` в `resultFilePath` из TaskFile. Формат файла — см. [ResultFile.schema.json](ResultFile.schema.json).
+Исполнитель пишет `result_{CommandId}_{AttemptToken}.json` в `resultFilePath` из TaskFile. Формат файла — см.
+[ResultFile.schema.json](ResultFile.schema.json).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `status` | enum: `done` \| `failed` \| `cancelled` | Обязательное. Сериализуется camelCase через `JsonStringEnumConverter` |
 | `errorMessage` | `string?` | Краткое сообщение об ошибке при `failed`/`cancelled` |
 | `errorDetails` | `string?` | Полный stack trace / диагностика при неожиданных исключениях |
-| `outputFiles` | `string[]?` | Список созданных файлов при `done`. Может быть пустым или `null` |
+| `outputFiles` | `string?` | Путь к выходному файлу при `done`. Несмотря на множественное число в имени — **одна строка**, не массив (соответствует канону). Для PDF/NWC — путь к единственному файлу. Для DWG (один `.dwg` на лист) — путь к папке экспорта, а не список листов. Поле опускается из JSON при `null` (WhenWritingNull) |
 
 **Трактовка статусов в Worker'е:**
 
@@ -53,13 +61,18 @@ Worker пишет `task_{CommandId}_{AttemptToken}.json` в **TaskDirectory** (�
 | `failed` | `ErrorClassifier` → permanent (Failed) или transient (retry с экспоненциальной задержкой) |
 | `cancelled` | Трактовать как `permanent failure` без retry. Плагин сам сказал «отмена» — повторять бессмысленно |
 
-Если result-файл отсутствует, битый JSON или неизвестный `status` → файл переименовывается в `.bad`, попытка считается ошибочной (через `ErrorClassifier`). Если файла нет вообще — fallback по exit code (`0` = `Done`, иначе → `ErrorClassifier`).
+Если result-файл отсутствует, битый JSON или неизвестный `status` → файл переименовывается в `.bad`, попытка
+считается ошибочной (через `ErrorClassifier`). Если файла нет вообще — fallback по exit code (`0` = `Done`,
+иначе → `ErrorClassifier`).
 
 ## CLI Arguments (плейсхолдеры ArgumentsTemplate)
 
-Worker запускает исполнителя по шаблону `ArgumentsTemplate` из `Worker:Commands:{CommandText}` в `appsettings.json`.
+Worker запускает исполнителя по шаблону `ArgumentsTemplate` из `Worker:Commands:{CommandText}` в
+`appsettings.json`.
 
-**КРИТИЧЕСКОЕ ПРАВИЛО** (см. эталон §CLI Arguments): путь к исходному `.rvt` **НЕ передаётся** в CLI args — он передаётся **только** в `TaskFile.filePath`. Это гарантирует, что AddIn откроет файл сам с правильными `OpenOptions`.
+**КРИТИЧЕСКОЕ ПРАВИЛО** (см. эталон §CLI Arguments): путь к исходному `.rvt` **НЕ передаётся** в CLI args —
+он передаётся **только** в `TaskFile.filePath`. Это гарантирует, что AddIn откроет файл сам с правильными
+`OpenOptions`.
 
 ```text
 Revit.exe /command "{CommandText}" "{TaskFilePath}"
@@ -96,18 +109,20 @@ Revit.exe /command "{CommandText}" "{TaskFilePath}"
 
 ## Расположение файлов (TaskDirectory)
 
-Worker и BIM-исполнители обмениваются JSON через **выделенную папку TaskDirectory** — **не** через `Path.GetTempPath()`. Это нужно, чтобы:
+Worker и BIM-исполнители обмениваются JSON через **выделенную папку TaskDirectory** — это **часть контракта**
+(см. эталон §TaskFile Location), а не деталь реализации. Ни одна из сторон **не вправе** подменять этот путь
+на собственный `Path.GetTempPath()`: `%TEMP%` у Worker'а (Windows-сервис) и у AddIn'а (интерактивная сессия
+Revit) — это разные директории (`C:\Windows\System32\config\systemprofile\AppData\Local\Temp\` против
+`C:\Users\<user>\AppData\Local\Temp\`), и стороны просто не найдут файлы друг друга.
 
-- Windows/system cleaners не удалили task/result-файлы посреди длительной команды (Revit-экспорт может идти до 3 часов).
-- Админ мог открыть папку вручную, проверить активные попытки и просмотреть историю для отладки.
-
-**Путь по умолчанию:**
+**Дефолтный путь:**
 
 ```text
 %USERPROFILE%\Documents\TelegramBot\TaskDirectory\
 ```
 
-Это намеренно на **одном уровне с `Logs\`** в каталоге `Documents\TelegramBot\` — рядом с логами Worker'а, чтобы админу было легко ориентироваться:
+Это намеренно на **одном уровне с `Logs\`** в каталоге `Documents\TelegramBot\` — рядом с логами Worker'а,
+чтобы админу было легко ориентироваться:
 
 ```text
 %USERPROFILE%\Documents\TelegramBot\
@@ -126,13 +141,25 @@ Worker и BIM-исполнители обмениваются JSON через **
 }
 ```
 
-Worker создаёт директорию автоматически на старте; если создать не удалось — Worker **падает** с понятной ошибкой.
+**Важно:** при override путь **обязан быть одинаковым** на обеих сторонах контракта. Worker публикует
+конкретный путь в `TaskFile.resultFilePath` для каждой команды, и AddIn обязан использовать его as-is.
+Worker создаёт директорию автоматически на старте; если создать не удалось — Worker **падает** с понятной
+ошибкой.
+
+**Почему именно `TaskDirectory`, а не `Path.GetTempPath()`** (полная версия — в эталоне §TaskFile Location):
+
+1. **Cross-account mismatch.** `%TEMP%` у Worker'а и у AddIn'а — разные директории. Каждая сторона пишет в
+   свой `TempPath` → вторая сторона не видит файл.
+2. **Service-profile isolation.** Под `LocalSystem` `TempPath` недоступен интерактивной сессии без элевации.
+3. **Volatility.** Disk Cleanup, сторонние cleaner'ы, перезагрузка могут удалить файлы из `%TEMP%` посреди
+   длительного Revit-экспорта (до 3 часов).
 
 **Атомарность записи** (эталон §Atomic result publication):
 
 - `CommandPreparer.CreateTaskFile` пишет `{path}.tmp` → `File.Move(.tmp, path, overwrite: true)`.
 - Плагин (BIM executor) должен делать то же самое для `resultFilePath`.
-- Worker удаляет `result_*` сразу после успешного парсинга; `task_*` и `result_*.bad` — в `finally` через `CommandPreparer.CleanupTempFiles`.
+- Worker удаляет `result_*` сразу после успешного парсинга; `task_*` и `result_*.bad` — в `finally` через
+  `CommandPreparer.CleanupTempFiles`.
 
 ## JSON-схемы (для справки)
 
@@ -143,9 +170,11 @@ Worker создаёт директорию автоматически на ст�
 | TaskFile schema | [TaskFile.schema.json](TaskFile.schema.json) |
 | ResultFile schema | [ResultFile.schema.json](ResultFile.schema.json) |
 
-Эти схемы — **single source of truth** для формата JSON. Если в коде появится расхождение со схемой — это баг, который должен быть исправлен, а не задокументирован.
+Эти схемы — **single source of truth** для формата JSON. Если в коде появится расхождение со схемой — это
+баг, который должен быть исправлен, а не задокументирован.
 
-> **TODO (не реализовано):** добавить опциональную strict-валидацию выходного task-файла по схеме на старте Worker'а (через `JsonSchema.Net` или аналог), чтобы ловить drift в dev/test.
+> **TODO (не реализовано):** добавить опциональную strict-валидацию выходного task-файла по схеме на старте
+> Worker'а (через `JsonSchema.Net` или аналог), чтобы ловить drift в dev/test.
 
 ## Поддерживаемые команды (соответствие эталону)
 
@@ -161,13 +190,18 @@ Worker создаёт директорию автоматически на ст�
 | `CLASHREP` | Clash report | planned | `Worker:Commands:CLASHREP` (FileConvert.exe) |
 | `AUTORES` | Automatic clash resolution | planned | `Worker:Commands:AUTORES` (python) |
 
-Плагин возвращает `NotImplemented: <command>. …` в `errorMessage` для planned-команд → `ErrorClassifier` классифицирует как permanent failure без retry.
+Плагин возвращает `NotImplemented: <command>. …` в `errorMessage` для planned-команд → `ErrorClassifier`
+классифицирует как permanent failure без retry.
 
 ## Revit AddIn — правила открытия файла
 
-Любой автоматический flow, который открывает `task.filePath`, **обязан** использовать Revit `OpenOptions` с `Audit = true` и `DetachFromCentralOption.DetachAndPreserveWorksets` (для workshared-моделей). Это защищает исходный `.rvt` от случайной модификации во время headless worker execution. Реализация — на стороне AddIn'а, Worker не может это проверить.
+Любой автоматический flow, который открывает `task.filePath`, **обязан** использовать Revit `OpenOptions` с
+`Audit = true` и `DetachFromCentralOption.DetachAndPreserveWorksets` (для workshared-моделей). Это защищает
+исходный `.rvt` от случайной модификации во время headless worker execution. Реализация — на стороне
+AddIn'а, Worker не может это проверить.
 
-`WorkerCommandHandler.ResolveTaskFilePath` (в плагине) берёт **первый существующий** аргумент с расширением `.json` из `Environment.GetCommandLineArgs()`. Это делает flow толерантным к порядку аргументов.
+`WorkerCommandHandler.ResolveTaskFilePath` (в плагине) берёт **первый существующий** аргумент с расширением
+`.json` из `Environment.GetCommandLineArgs()`. Это делает flow толерантным к порядку аргументов.
 
 ## Автогенерация result-файла
 
@@ -177,9 +211,12 @@ Worker создаёт директорию автоматически на ст�
 2. Сериализует `ResultFile` в `{resultFilePath}.tmp`.
 3. Переименовывает `.tmp` → `resultFilePath` (атомарно).
 
-`ResultFile` пишется **для каждого** исхода: success, expected error, unknown command, invalid JSON, unexpected executor exception. `WorkerCommandHandler.Execute` использует `try/finally` + `ResultFileWriter.WriteSafe` для гарантии.
+`ResultFile` пишется **для каждого** исхода: success, expected error, unknown command, invalid JSON,
+unexpected executor exception. `WorkerCommandHandler.Execute` использует `try/finally` +
+`ResultFileWriter.WriteSafe` для гарантии.
 
-**Исключения**, когда result не пишется в primary path (эталон §Cases Where ResultFile Is Not Written to the Primary Path):
+**Исключения**, когда result не пишется в primary path (эталон §Cases Where ResultFile Is Not Written to
+the Primary Path):
 
 1. Task-file selection cancelled (`OpenFileDialog` → Cancel) — manual debug only.
 2. `task.ResultFilePath` пуст — fallback `result_error.json` в CWD.
@@ -190,7 +227,8 @@ Worker **не различает** эти случаи: если файла по
 
 ## Дополнительные правила (эталон §Paths)
 
-Все пути в контракте — **абсолютные Windows paths** с буквой диска. Windows .NET I/O API корректно обрабатывают оба стиля разделителей (`\` и `/`).
+Все пути в контракте — **абсолютные Windows paths** с буквой диска. Windows .NET I/O API корректно
+обрабатывают оба стиля разделителей (`\` и `/`).
 
 **НЕ поддерживаются:**
 
