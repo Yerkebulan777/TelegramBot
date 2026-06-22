@@ -26,6 +26,7 @@ public sealed class CommandExecutionService(
     private const string ListenChannel = "new_tasks";
     private const int DefaultBatchSize = 5;
     private const int ShutdownBudgetSeconds = 30;
+    private const int TaskWaitTimeoutSeconds = 15;
 
     // Трекинг выполняемых задач для корректного ожидания при shutdown
     private readonly HashSet<Task> _runningTasks = [];
@@ -253,6 +254,7 @@ public sealed class CommandExecutionService(
         logger.LogInformation("Worker stopping: initiating graceful shutdown...");
 
         using var shutdownBudgetCts = new CancellationTokenSource(TimeSpan.FromSeconds(ShutdownBudgetSeconds));
+        var shutdownStartedAt = DateTime.UtcNow;
 
         if (_shutdownCts != null)
         {
@@ -278,10 +280,13 @@ public sealed class CommandExecutionService(
         }
 
         // Ждем завершения фоновых задач в оставшемся общем бюджете.
+        // Каждый wait использует Min(TaskWaitTimeoutSeconds, остаток_бюджета), чтобы
+        // не превысить общий лимит и выводить в лог точный таймаут.
+        int Remaining() => Math.Max(1, ShutdownBudgetSeconds - (int)(DateTime.UtcNow - shutdownStartedAt).TotalSeconds);
 #pragma warning disable VSTHRD003
-        await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token);
-        await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task", shutdownBudgetCts.Token);
-        await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token);
+        await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
+        await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
+        await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 #pragma warning restore VSTHRD003
 
         _shutdownCts?.Dispose();
@@ -345,7 +350,7 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName, CancellationToken shutdownToken)
+    private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName, CancellationToken shutdownToken, int timeoutSeconds)
     {
         if (task == null)
         {
@@ -358,12 +363,12 @@ public sealed class CommandExecutionService(
             return;
         }
 
-        var timeout = Task.Delay(TimeSpan.FromSeconds(15), shutdownToken);
+        var timeout = Task.Delay(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
 #pragma warning disable VSTHRD003
         if (await Task.WhenAny(task, timeout) != task)
 #pragma warning restore VSTHRD003
         {
-            logger.LogWarning("{TaskName} did not complete within 15s timeout", taskName);
+            logger.LogWarning("{TaskName} did not complete within {Timeout}s timeout", taskName, timeoutSeconds);
         }
         else
         {
@@ -384,7 +389,7 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private async Task WaitForRunningTasksCompletionAsync(CancellationToken shutdownToken)
+    private async Task WaitForRunningTasksCompletionAsync(CancellationToken shutdownToken, int timeoutSeconds)
     {
         Task[] runningTasks;
         lock (_runningTasksLock)
@@ -403,14 +408,14 @@ public sealed class CommandExecutionService(
             return;
         }
 
-        logger.LogInformation("Waiting up to 15s for {Count} command task(s) to stop", runningTasks.Length);
+        logger.LogInformation("Waiting up to {Timeout}s for {Count} command task(s) to stop", timeoutSeconds, runningTasks.Length);
 
         var allTasks = Task.WhenAll(runningTasks);
-        var timeout = Task.Delay(TimeSpan.FromSeconds(15), shutdownToken);
+        var timeout = Task.Delay(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
         if (await Task.WhenAny(allTasks, timeout) != allTasks)
         {
-            logger.LogWarning("{Count} command task(s) did not complete within 15s timeout",
-                runningTasks.Count(task => !task.IsCompleted));
+            logger.LogWarning("{Count} command task(s) did not complete within {Timeout}s timeout",
+                runningTasks.Count(task => !task.IsCompleted), timeoutSeconds);
         }
         else
         {
