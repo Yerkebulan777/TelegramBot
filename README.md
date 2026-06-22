@@ -12,7 +12,7 @@ Telegram-бот для навигации по файловой системе �
 | [AGENTS.md](AGENTS.md) | Архитектура, BimLib, DI, code style, константы |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Worker-side отражение контракта BIM-плагинов (полное соответствие эталону в `RevitBIMFusion/Docs/`) |
-| [Docs/CriticalReview.md](Docs/CriticalReview.md) | Открытые архитектурные проблемы и узкие места |
+| [Docs/CriticalReview.md](Docs/CriticalReview.md) | Статус критичных замечаний и остаточные риски |
 
 ## Обзор
 
@@ -22,7 +22,7 @@ Telegram-бот для навигации по файловой системе �
 - **Экспорт** (`/export`): `PDF`, `DWG`, `NWC`, `IFC`
 - **Автоматизация** (`/automation`): `BIMDOC` (BIM-документирование), `CLASHREP` (Clash Reports), `AUTORES` (AutoResolve)
 - Управление сессиями через `/status`: фильтры (Все / Активные / Завершённые / С ошибками), удаление сессий и отдельных команд
-- Уведомления о завершении сессий: Worker идемпотентно публикует `command_completed`, Server собирает сводку из PostgreSQL и отправляет в Telegram
+- Уведомления о завершении сессий: Worker идемпотентно пишет событие в `NotificationOutbox`, `command_completed` будит Server, Server отправляет сводку и помечает событие отправленным
 - Индикатор «печатает…» во время сбора файлов
 - Дневной лимит файлов на пользователя (`RateLimit:MaxFilesPerUserPerDay`)
 - Дедупликация Revit-файлов по префиксу имени и числовым токенам

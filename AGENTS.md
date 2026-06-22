@@ -9,7 +9,7 @@ Guidance for agentic coding agents working in this repository.
 | [README.md](README.md) | Обзор проекта, запуск, конфигурация, команды бота |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, схема БД, SQL-запросы |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
-| [Docs/CriticalReview.md](Docs/CriticalReview.md) | Открытые архитектурные проблемы и узкие места |
+| [Docs/CriticalReview.md](Docs/CriticalReview.md) | Статус критичных замечаний и остаточные риски |
 | **AGENTS.md** (текущий файл) | Архитектура, BimLib, DI, code style, константы для AI-агентов |
 
 ## Project Overview
@@ -26,7 +26,7 @@ TelegramBot.Core   ←──  TelegramBot.Data
 ```
 
 - **TelegramBot.Core** — Models, DTOs, interfaces, config, constants, `RateLimiter`, `HealthCheckHostedService`. Zero Telegram SDK dependency.
-- **TelegramBot.Data** — **PostgreSQL 18** persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (5 partial files).
+- **TelegramBot.Data** — **PostgreSQL 18** persistence via Dapper + Npgsql. References Core only. SQL constants in `Sql/` (6 partial files).
 - **TelegramBot.Server** — Telegram infrastructure, application services, handlers, hosting, helpers. References Core + Data.
 - **TelegramBot.Worker** — Background service for executing Revit/Navisworks/AI tasks. Polls PostgreSQL for pending commands. References Core + Data. BimLib is embedded inside this project as `Worker/BimLib/` (not a separate project).
 
@@ -105,15 +105,14 @@ Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
 | Infrastructure | `TelegramOutputService` | Обёртка над `ITelegramBotClient`: `SendMessageAsync`, `EditMessageReplyMarkupAsync`, `AnswerCallbackAsync`, `SendChatActionAsync`, `SendMessageWithReplyKeyboardAsync`, `RemoveReplyKeyboardAsync`. HTTP 429 retry |
 | Infrastructure | `KeyboardBuilder` | Inline- и reply-клавиатуры: секции, команды, фильтры `/status`, сессии |
 | Infrastructure | `FileSystemBrowser` | Навигация по `RootPath` → проекты → `01_PROJECT/<project>/<раздел>/` → `01_RVT/*.rvt` |
-| Infrastructure | `CommandNotificationService` | `BackgroundService`: слушает PostgreSQL `LISTEN command_completed` и `LISTEN session_started` (синхронный event handler → `Channel<NotificationItem>.Writer.TryWrite`) |
-| Infrastructure | `NotificationSenderService` | `BackgroundService`: `await foreach` на том же канале, шлёт в Telegram. Формат: "⚙️ Задание запущено" на старте сессии, summary на завершении |
+| Infrastructure | `CommandNotificationService` | `BackgroundService`: слушает PostgreSQL `LISTEN command_completed` и `LISTEN session_started`; `session_started` ставит direct item в `Channel<NotificationItem>`, `command_completed` ставит wake-up для outbox drain |
+| Infrastructure | `NotificationSenderService` | `BackgroundService`: шлёт "⚙️ Задание запущено" из channel; completion-сводки читает из `NotificationOutbox` при старте, по wake-up и polling каждые 30 сек; после Telegram send помечает запись `sent` |
 | Application | `CommandAppService` | Rate-limit → session creation → post-restart cleanup → `SlashCommandService` |
 | Application | `SlashCommandService` | Обработка `/start`/`/export`/`/automation`/`/status`/`/help`, кнопок `Apply`/`Confirm`/`Cancel`. Сканирует `01_RVT/*.rvt` через `RevitFileDeduplicator`, проверяет daily limit, вставляет сессию в БД. Показывает индикатор «печатает…» |
 | Application | `RevitFileDeduplicator` | Удаляет дубликаты RVT-файлов: exact-name dedup + grouping по первым 15 символам имени + numeric-token overlap (короткое имя выигрывает) |
 | Application | `CallbackDispatcher` | O(1) lookup префикса → handler (кэшированный `Dictionary<prefix, handler>`) |
 | Application | `SessionManager` | `ConcurrentDictionary<long, UserSession>`. Per-user `SemaphoreSlim` для сериализации обновлений. Lazy + background cleanup (раз в 30 мин). Безопасное удаление семафоров: проверка `CurrentCount == 1` |
 | Application | `DataServices` | Aggregate-обёртка: `Sessions` / `Commands` / `MessageTracking` — устраняет двойную DI-регистрацию |
-| Application | `DataServices` | Aggregate-обёртка: `Sessions` / `Commands` / `MessageTracking` |
 | Middleware | `AuthorizationMiddleware` | Валидация доступа, `BypassesAccessCheck` для access-related callback-ов, optimistic refresh админа через `UpdatedAt` |
 | Handlers | `AccessRequestHandler` (P=0) | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` — отправляет запрос всем админам |
 | Handlers | `FileNavigationHandler` (P=10) | `GOTOPARENT:` — навигация в выбранную папку с проверкой `IsPathWithinRoot` |
@@ -130,7 +129,7 @@ Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
 ```csharp
 .AddCallbackHandlers()      // 6 ICallbackHandler + CallbackDispatcher
 .AddApplicationServices()   // CommandAppService, AuthorizationMiddleware, RateLimiter, SlashCommandService, SessionManager
-.AddInfrastructureServices()// DataServices, DatabaseInitializerService, FileSystemBrowser
+.AddInfrastructureServices()// DataServices, DatabaseInitializerService, FileSystemBrowser, NotificationOutboxDataService
 .AddTelegramServices()      // ITelegramBotClient, ITelegramOutputService, TelegramUpdateMapper, KeyboardBuilder, Channel<NotificationItem>, 3 hosted services
 .AddHealthCheckServices()   // HealthCheckHostedService + notificationChannel check
 ```
@@ -190,7 +189,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 | `PartitionPoolManager` | `SortedDictionary<int, SemaphoreSlim>` по priority. `Initialize(partitions)`, `WaitForSlotAsync(priority)`, `ReleaseSlot(priority)`, `TotalCapacity`. `GetThreshold(priority)` = первый threshold ≥ priority. Over-release guard |
 | `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (Revit через BimLib, Navisworks через BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
 | `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс, регистрирует в `_activeProcesses`, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
-| `SessionCompletionTracker` | `ConcurrentDictionary<int, int> _sessionRemaining`. `TrackClaimedCommands(claimed)` (AddOrUpdate с GroupBy SessionId) + `OnCommandCompletedAsync` (AddOrUpdate с -1, при 0 → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `pg_notify('command_completed', SessionId|CorrelationId)`) |
+| `SessionCompletionTracker` | `ConcurrentDictionary<int, int> _sessionRemaining`. `TrackClaimedCommands(claimed)` (AddOrUpdate с GroupBy SessionId) + `OnCommandCompletedAsync` (AddOrUpdate с -1, при 0 → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up) |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
 
 **Drain loop (v1.7):** `CommandExecutionService.DrainPendingCommandsAsync` — claim'ит пачку (`DefaultBatchSize = 5`), запускает каждую команду как background `Task`, сразу пытается claim'ить ещё. Это устраняет head-of-line blocking, когда одна долгая команда (3h Revit timeout) блокирует остальные 4 из батча. Трекинг выполняемых задач через `_runningTasks` (HashSet + lock) для корректного shutdown.
@@ -219,7 +218,7 @@ services.AddHostedService<CommandExecutionService>();
 services.AddHostedService<SessionCleanupService>();
 ```
 
-**DataAccessBase:** общий base-класс для `UserDataService`/`CommandDataService`/`SessionDataService`/`MessageTrackingDataService` с protected `CreateOpenConnectionAsync()`. Public static `NpgsqlHelper.CreateOpenConnectionAsync()` — для `CommandNotificationService` и `NotificationSenderService`, которые НЕ наследуют `DataAccessBase`.
+**DataAccessBase:** общий base-класс для `UserDataService`/`CommandDataService`/`SessionDataService`/`MessageTrackingDataService`/`NotificationOutboxDataService` с protected `CreateOpenConnectionAsync()`. Public static `NpgsqlHelper.CreateOpenConnectionAsync()` — для `CommandNotificationService`, который НЕ наследует `DataAccessBase`.
 
 ---
 
@@ -343,7 +342,7 @@ Worker → Revit.exe opens as GUI
 |--------|----------|---------|
 | `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — общий reply-keyboard + tracking для SlashCommandService, FileNavigationHandler, CommandSelectionHandler |
 | `ProcessHealthHelper` | `Worker/BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общий для Revit и Navisworks process trackers |
-| `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` (public static) — для сервисов, не наследующих `DataAccessBase` (`CommandNotificationService`, `NotificationSenderService`) |
+| `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` (public static) — для сервисов, не наследующих `DataAccessBase` (`CommandNotificationService`) |
 | `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Serilog filter: события с `SourceContext` начинающимся на `"TelegramBot.Worker.BimLib` → отдельный rolling file |
 | `PostgresReconnectLoop` | `TelegramBot.Data/PostgresReconnectLoop.cs` | Outer retry loop для переподключения PostgreSQL (5 сек); используется в `CommandExecutionService` и `CommandNotificationService` |
 | `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | `IsPermanentFailure(message, exitCode, codes)`, `IsPermanentException(ex)`: классификация ошибок → `InvalidFileError` (Failed без retry) vs `ProcessCrashError` (retry) |
@@ -406,15 +405,17 @@ CommandExecutionService (Worker)
                     exit=0 без файла → Done
             PartitionPoolManager.ReleaseSlot(priority)
             SessionCompletionTracker.OnCommandCompletedAsync:
-                AddOrUpdate(_sessionRemaining, -1) → 0 → CountPendingProcessingBySessionAsync (DB confirm) → NotifySessionCompletedOnceAsync → pg_notify('command_completed', SessionId|CorrelationId)
+                AddOrUpdate(_sessionRemaining, -1) → 0 → CountPendingProcessingBySessionAsync (DB confirm) → NotifySessionCompletedOnceAsync
     CleanupTempFiles in finally (per-attempt)
 
-CommandNotificationService (Server) ── LISTEN command_completed ──▶ Channel<NotificationItem> ──▶ NotificationSenderService ──▶ SessionDataService.GetSessionCompletionSummaryAsync() ──▶ SendMessageAsync (project name, done/failed counts, duration, failed file names)
+NotifySessionCompletedOnceAsync ──▶ Sessions.CompletionNotified=TRUE + INSERT NotificationOutbox(session_completed) + pg_notify('command_completed') wake-up
+CommandNotificationService (Server) ── LISTEN command_completed ──▶ Channel<NotificationItem> wake-up
+NotificationSenderService ──▶ Claim NotificationOutbox ──▶ SessionDataService.GetSessionCompletionSummaryAsync() ──▶ SendMessageAsync ──▶ Mark outbox sent
 ```
 
 **In-memory счётчик сессий:** `SessionCompletionTracker._sessionRemaining` (`ConcurrentDictionary<int, int>`) как batch-local счётчик. При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`, при каждом выходе захваченной команды из `processing` (Done/Failed/retry) атомарно декрементится через `AddOrUpdate`. Уведомление отправляется только когда `remaining == 0` И БД подтверждает отсутствие `pending`/`processing` (`CountPendingProcessingBySessionAsync`).
 
-**Идемпотентность через `Sessions.CompletionNotified`:** `SessionDataService.NotifySessionCompletedOnceAsync` атомарно выставляет `CompletionNotified = TRUE` и отправляет `pg_notify('command_completed', SessionId|CorrelationId)` только для первой успешной попытки (`UPDATE ... WHERE CompletionNotified = FALSE RETURNING SessionId`).
+**Идемпотентность через `Sessions.CompletionNotified` + `NotificationOutbox`:** `SessionDataService.NotifySessionCompletedOnceAsync` атомарно выставляет `CompletionNotified = TRUE`, вставляет `NotificationOutbox(EventType='session_completed')` и отправляет `pg_notify('command_completed')` как wake-up только для первой успешной попытки (`UPDATE ... WHERE CompletionNotified = FALSE RETURNING SessionId`). Итоговая Telegram-сводка отправляется из durable outbox, а не напрямую из `NOTIFY`.
 
 DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`. The filesystem root comes from `FileSystemOptions` (bound to `"FileSystem"` config section). The Worker registers data services напрямую в `Program.cs`.
 
@@ -509,22 +510,23 @@ For Markdown escaping, use `MarkdownHelper.Escape()` from `TelegramBot.Server/He
 
 ### Database
 
-Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Все запросы — DB-backed. Soft-delete only — `Status = 'Deleted'`, никогда `DELETE FROM`. Worker auto-cleanup (`SessionCleanupService`) тоже soft-delete для сессий старше `Worker:CompletedSessionRetentionDays` без pending/processing.
+Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutbox`. Все запросы — DB-backed. Soft-delete only — `Status = 'Deleted'`, никогда `DELETE FROM`. Worker auto-cleanup (`SessionCleanupService`) тоже soft-delete для сессий старше `Worker:CompletedSessionRetentionDays` без pending/processing.
 
 **Schemas** (см. [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md#схема-базы-данных) для полной версии):
 
 - **BotUsers** — `UserId BIGINT PK`, `Username TEXT`, `Role INTEGER` (`UserRole` enum: `User=0`, `Admin=1`), `Status INTEGER` (`UserAccessStatus` enum: `Pending=0`, `Approved=1`, `Rejected=2`, `Blocked=3`), `CreatedAt/UpdatedAt TIMESTAMPTZ`
-- **Sessions** — `SessionId SERIAL PK`, `UserId BIGINT`, `Username TEXT`, `CorrelationId TEXT NOT NULL`, `PriorityId INTEGER` (default 0), `Status TEXT` (`'pending'`/`'Done'`/`'Failed'`/`'Deleted'`), `ProjectName TEXT`, `FilesAmount INTEGER`, `CompletionNotified BOOLEAN` (default FALSE; защита от дублей в multi-worker), `CreatedAt/UpdatedAt TIMESTAMPTZ`
+- **Sessions** — `SessionId SERIAL PK`, `UserId BIGINT`, `Username TEXT`, `CorrelationId TEXT NOT NULL`, `PriorityId INTEGER` (default 0), `Status TEXT` (`'pending'`/`'Done'`/`'Failed'`/`'Deleted'`), `ProjectName TEXT`, `FilesAmount INTEGER`, `CompletionNotified BOOLEAN` (default FALSE; защита от duplicate enqueue в multi-worker), `CreatedAt/UpdatedAt TIMESTAMPTZ`
 - **Commands** — `CommandId SERIAL PK`, `SessionId INT REFERENCES Sessions`, `CommandText TEXT`, `FilePath TEXT`, `ExecutionOrder INT`, `Status TEXT` (default `'pending'`), `CreatedAt/StartedAt/CompletedAt TIMESTAMPTZ`, `GUID TEXT`, `Lease INT` (Unix seconds), `Partition TEXT`, `Priority INT` (default 50), `ProcessId INT`, `ErrorMessage TEXT`, `RetryCount INT` (default 0), `NextRetryAt TIMESTAMPTZ`, `Progress INT` (default 0), `Result TEXT`, `UpdatedAt TIMESTAMPTZ`
 - **TrackedMessages** — `MessageId SERIAL PK`, `SessionId INT REFERENCES Sessions (nullable)`, `ChatId BIGINT`, `MessageIdPg INT`, `CreatedAt TIMESTAMPTZ` (для DB-backed message tracking + cleanup на session delete)
+- **NotificationOutbox** — `OutboxId BIGSERIAL PK`, `EventType TEXT` (`session_completed`), `SessionId INT REFERENCES Sessions`, `CorrelationId TEXT`, `Status TEXT` (`pending`/`processing`/`sent`), `Attempts INT`, `NextAttemptAt TIMESTAMPTZ`, `LockedUntil TIMESTAMPTZ`, `LastError TEXT`, `CreatedAt/UpdatedAt/SentAt TIMESTAMPTZ`
 
-**Indexes:** `idx_commands_status`, `idx_commands_session`, `idx_commands_status_lease` (partial WHERE Status='processing'), `idx_sessions_user_created`, `idx_sessions_correlation_id`, `idx_commands_pending_priority` (partial WHERE Status='pending'), `idx_commands_partition_status`, `idx_commands_unique` (UNIQUE on SessionId+CommandText+FilePath), `idx_tracked_messages_session`, `idx_tracked_messages_chat`, `idx_commands_updated_at`.
+**Indexes:** `idx_commands_status`, `idx_commands_session`, `idx_commands_status_lease` (partial WHERE Status='processing'), `idx_sessions_user_created`, `idx_sessions_correlation_id`, `idx_commands_pending_priority` (partial WHERE Status='pending'), `idx_commands_partition_status`, `idx_commands_unique` (UNIQUE on SessionId+CommandText+FilePath), `idx_tracked_messages_session`, `idx_tracked_messages_chat`, `idx_commands_updated_at`, `idx_notification_outbox_session_completed` (UNIQUE partial), `idx_notification_outbox_pending` (pending/processing claim).
 
 **Команды — soft-delete flow:** `CommandDataService.DeleteCommandAsync` → `Status = 'Deleted'` с проверкой `UserId`/`IsAdmin`. `DeleteCommandsByTypeAsync` → soft-delete by `SessionId+CommandType` (исключает уже `Deleted` и `processing`).
 
 **Sessions — soft-delete flow:** `SessionDataService.DeleteSessionAsync` (UserId/IsAdmin) → `Status = 'Deleted'` + soft-delete всех команд. `SoftDeleteInactiveSessionsOlderThanAsync` (cutoff timestamp) → `Status = 'Deleted'` для сессий без `pending`/`processing` команд + cascade soft-delete команд.
 
-**Idempotent completion notification:** `SessionDataService.NotifySessionCompletedOnceAsync(sessionId, correlationId)` → atomic `UPDATE Sessions SET CompletionNotified=TRUE WHERE SessionId=@Id AND CompletionNotified=FALSE AND Status!='Deleted' RETURNING SessionId` → `pg_notify('command_completed', SessionId|CorrelationId)` (только для returned rows).
+**Durable completion notification:** `SessionDataService.NotifySessionCompletedOnceAsync(sessionId, correlationId)` → atomic `UPDATE Sessions SET CompletionNotified=TRUE WHERE SessionId=@Id AND CompletionNotified=FALSE AND Status!='Deleted' RETURNING SessionId` → `INSERT NotificationOutbox(EventType='session_completed')` → `pg_notify('command_completed', SessionId|CorrelationId)` wake-up. `NotificationSenderService` claim'ит outbox через `FOR UPDATE SKIP LOCKED`, отправляет Telegram summary и помечает `sent`; ошибки возвращают запись в `pending` с backoff.
 
 **Session completion summary:** `SessionDataService.GetSessionCompletionSummaryAsync` → UserId/Username/SessionId/CorrelationId/ProjectName + TotalFiles/DoneFiles/FailedFiles + `DurationSeconds = EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))` + `FailedFilePaths` (list).
 
@@ -533,7 +535,7 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`. Все запро
 **Advisory lock** для `ReleaseExpiredLeasesAsync`: `pg_try_advisory_lock(1234567)` — namespace `telegram_bot_lease_cleanup`. Предотвращает race между несколькими воркерами, освобождающими истёкшие Lease.
 
 Database: **PostgreSQL 18** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()` (Server only).
-All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.cs`, `SessionDataService.cs`, `UserDataService.cs`, `MessageTrackingDataService.cs`). Connection creation is unified via `CreateOpenConnectionAsync()` helper in `DataAccessBase`. SQL constants в `TelegramBot.Data/Sql/` (5 partial files: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`).
+All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.cs`, `SessionDataService.cs`, `UserDataService.cs`, `MessageTrackingDataService.cs`, `NotificationOutboxDataService.cs`). Connection creation is unified via `CreateOpenConnectionAsync()` helper in `DataAccessBase`. SQL constants в `TelegramBot.Data/Sql/` (6 partial files: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`, `Queries.NotificationOutbox.cs`).
 
 ---
 
@@ -677,7 +679,7 @@ Previously, linked CTS вызывал немедленное прерывани�
 - Maintain good code readability and unify methods for easier editing
 - Extract shared static helpers (`HandlerHelpers`, `NpgsqlHelper`) when the same 5+ line pattern appears in multiple files
 - Use `dotnet format --diagnostics IDE0005` to remove unused `using` directives
-- Notification delivery decoupled via `Channel<NotificationItem>` (256-capacity bounded channel): `CommandNotificationService` enqueues, `NotificationSenderService` dequeues and sends to Telegram
+- Start notifications are decoupled via `Channel<NotificationItem>` (256-capacity bounded channel). Completion notifications are durable via `NotificationOutbox`; `Channel<NotificationItem>` carries only wake-up signals for outbox drain.
 - `NpgsqlHelper.CreateOpenConnectionAsync()` (static, in `TelegramBot.Data`) — public helper for services that don't inherit from `DataAccessBase`
 
 ### Optimization Principles
@@ -700,6 +702,7 @@ Previously, linked CTS вызывал немедленное прерывани�
 - ✅ **Session cleanup:** lazy при доступе + фоновая раз в 30 мин
 - ✅ **Atomic writes** для task/result JSON: `.tmp` → `File.Move(overwrite: true)`
 - ✅ **`sessionRemaining`** — in-memory счётчик, уменьшает SQL-запросы
+- ✅ **Durable completion notifications** — `NotificationOutbox` + `pg_notify` wake-up + polling fallback
 
 #### Интерфейсы
 - ✅ Все single-implementation удалены (кроме `ICallbackHandler` и `ITelegramOutputService`, data services)
@@ -719,11 +722,11 @@ Previously, linked CTS вызывал немедленное прерывани�
 
 ---
 
-## Open architectural concerns
+## Residual architectural concerns
 
 См. подробности в [Docs/CriticalReview.md](Docs/CriticalReview.md):
-- **Durable completion notifications** — `pg_notify('command_completed')` is not durable; нужен outbox-механизм для guaranteed delivery при downtime Server'а
-- **Single-Writer assumption на Server** — в multi-instance сценарии потребуется distributed lock для `pg_notify` sender'а
+- **At-least-once Telegram delivery boundary** — если Telegram send уже прошёл, но Server упал до `NotificationOutbox.Status='sent'`, summary может отправиться повторно после retry
+- **Single-Writer assumption на Server** — в multi-instance сценарии потребуется distributed lock или ownership для outbox sender'а
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

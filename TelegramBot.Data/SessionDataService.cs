@@ -262,7 +262,7 @@ public sealed class SessionDataService(
             await using var conn = await CreateOpenConnectionAsync();
             var notified = await conn.ExecuteScalarAsync<int>(
                 SqlQueries.Sessions.NotifyCompletionOnce,
-                new { SessionId = sessionId, Payload = payload });
+                new { SessionId = sessionId, CorrelationId = correlationId, Payload = payload });
             return notified > 0;
         }
         catch (Exception e)

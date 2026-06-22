@@ -160,10 +160,17 @@ internal static partial class SqlQueries
                   AND Status != 'Deleted'
                 RETURNING SessionId
             ),
+            outbox AS (
+                INSERT INTO NotificationOutbox (EventType, SessionId, CorrelationId)
+                SELECT 'session_completed', SessionId, @CorrelationId
+                FROM marked
+                ON CONFLICT DO NOTHING
+                RETURNING OutboxId
+            ),
             notified AS (
                 SELECT pg_notify('command_completed', @Payload)
                 FROM marked
             )
-            SELECT COUNT(*)::int FROM notified;";
+            SELECT COUNT(*)::int FROM outbox;";
     }
 }

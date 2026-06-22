@@ -12,8 +12,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
     → ErrorClassifier → Done / Failed / ScheduleRetry (NextRetryAt + RetryCount)
     → OnCommandCompletedAsync: in-memory счётчик → 0 → CountPendingProcessingBySessionAsync (DB confirm)
         → NotifySessionCompletedOnceAsync (atomic Sessions.CompletionNotified=TRUE)
-            → pg_notify('command_completed', SessionId|CorrelationId) → Server
-            → NotificationSenderService → GetSessionCompletionSummaryAsync → Telegram-сводка
+            → INSERT NotificationOutbox(session_completed) + pg_notify('command_completed') wake-up
+            → NotificationSenderService → claim outbox → GetSessionCompletionSummaryAsync → Telegram-сводка → mark sent
     → CommandNotificationService (Server) слушает также 'session_started' → "⚙️ Задание запущено"
 ```
 
@@ -23,7 +23,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 
 | Слой | Server | Worker |
 |------|--------|--------|
-| Входящие обновления | `Channel<Update>` (200) + `Parallel.ForEachAsync` (`MaxDegree=10`) | `Channel<NotificationItem>` (256) bounded |
+| Входящие обновления | Telegram updates: `Channel<Update>` (200) + `Parallel.ForEachAsync` (`MaxDegree=10`); notification wake-up: `Channel<NotificationItem>` (256) | PostgreSQL `new_tasks` LISTEN + fallback polling |
 | Per-user / per-session | `SessionManager.AcquireUserLockAsync` (`SemaphoreSlim`) | `PartitionPoolManager` (`SortedDictionary<threshold, SemaphoreSlim>`) |
 | Background tasks | `TelegramBotHostedService` + `CommandNotificationService` + `NotificationSenderService` | `CommandExecutionService` + `SessionCleanupService` |
 
@@ -71,8 +71,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
    - Иначе `Failed` после исчерпания
 6. `SessionCompletionTracker.OnCommandCompletedAsync`:
    - `_sessionRemaining.AddOrUpdate(SessionId, -1)` — атомарный декремент batch-счётчика
-   - При `0` → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` (`pg_notify('command_completed', SessionId|CorrelationId)` если первый раз)
-7. Server: `CommandNotificationService.OnNotificationReceived` (sync handler) → `Channel<NotificationItem>.Writer.TryWrite` → `NotificationSenderService` (consumer) → `GetSessionCompletionSummaryAsync` → `SendMessageAsync` (project + counts + duration + failed files)
+   - При `0` → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` (`CompletionNotified=TRUE`, `NotificationOutbox` insert, `pg_notify('command_completed', SessionId|CorrelationId)` если первый раз)
+7. Server: `CommandNotificationService.OnNotificationReceived` (sync handler) → wake-up в `Channel<NotificationItem>` → `NotificationSenderService` claim'ит pending outbox-записи, отправляет `SendMessageAsync` (project + counts + duration + failed files), затем помечает outbox-запись `sent`
 
 ---
 
@@ -101,7 +101,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `Status` | `TEXT NOT NULL DEFAULT 'pending'` | `'pending'` / `'Done'` / `'Failed'` / `'Deleted'` |
 | `ProjectName` | `TEXT` | Имя проекта из `GetCurrentProjectName(session)` |
 | `FilesAmount` | `INTEGER` | Количество файлов в сессии (для `CountQueuedFilesByUserSinceAsync`) |
-| `CompletionNotified` | `BOOLEAN NOT NULL DEFAULT FALSE` | Идемпотентность `pg_notify('command_completed')` в multi-worker |
+| `CompletionNotified` | `BOOLEAN NOT NULL DEFAULT FALSE` | Идемпотентность enqueue completion event в `NotificationOutbox` при multi-worker |
 | `CreatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
 | `UpdatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
 
@@ -144,6 +144,23 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 
 **Миграция `MakeTrackedMessagesSessionNullable`:** для старых схем, где `SessionId` был NOT NULL.
 
+### NotificationOutbox
+
+| Колонка | Тип | Описание |
+|---------|-----|----------|
+| `OutboxId` | `BIGSERIAL PK` | |
+| `EventType` | `TEXT NOT NULL` | Сейчас используется `session_completed` |
+| `SessionId` | `INTEGER NOT NULL` | FK на `Sessions` |
+| `CorrelationId` | `TEXT NOT NULL` | Корреляция логов и payload wake-up |
+| `Status` | `TEXT NOT NULL DEFAULT 'pending'` | `pending` / `processing` / `sent` |
+| `Attempts` | `INTEGER NOT NULL DEFAULT 0` | Увеличивается при claim |
+| `NextAttemptAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | Backoff после ошибок отправки |
+| `LockedUntil` | `TIMESTAMPTZ` | Lease для crash recovery Server |
+| `LastError` | `TEXT` | Последняя ошибка отправки |
+| `CreatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
+| `UpdatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
+| `SentAt` | `TIMESTAMPTZ` | Время успешной отправки Telegram-сводки |
+
 ### Indexes
 
 | Index | Columns | Notes |
@@ -159,6 +176,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `idx_tracked_messages_session` | `SessionId` | |
 | `idx_tracked_messages_chat` | `ChatId` | |
 | `idx_commands_updated_at` | `UpdatedAt DESC` | |
+| `idx_notification_outbox_session_completed` | `EventType, SessionId` | UNIQUE partial `WHERE EventType = 'session_completed'` |
+| `idx_notification_outbox_pending` | `Status, NextAttemptAt, CreatedAt, OutboxId` | partial `WHERE Status IN ('pending', 'processing')` |
 
 ---
 
@@ -255,21 +274,30 @@ WITH marked AS (
       AND Status != 'Deleted'
     RETURNING SessionId
 ),
+outbox AS (
+    INSERT INTO NotificationOutbox (EventType, SessionId, CorrelationId)
+    SELECT 'session_completed', SessionId, @CorrelationId
+    FROM marked
+    ON CONFLICT DO NOTHING
+    RETURNING OutboxId
+),
 notified AS (
     SELECT pg_notify('command_completed', @Payload)
     FROM marked
 )
-SELECT COUNT(*)::int FROM notified;
+SELECT COUNT(*)::int FROM outbox;
 ```
 
-`command_completed` — транспортный сигнал. `Sessions.CompletionNotified` защищает от дублей
-при нескольких Worker: только первый успешный `UPDATE ... WHERE CompletionNotified = FALSE`
-отправляет `pg_notify`. Единственный источник данных для текста уведомления —
+`command_completed` — только wake-up сигнал. Durable-событие хранится в `NotificationOutbox`.
+`Sessions.CompletionNotified` защищает от дублей при нескольких Worker: только первый успешный
+`UPDATE ... WHERE CompletionNotified = FALSE` вставляет outbox-запись и отправляет wake-up.
+Единственный источник данных для текста уведомления —
 `SessionDataService.GetSessionCompletionSummaryAsync()`, который читает из БД пользователя,
 проект, total/done/failed, длительность и список failed-файлов.
 
-**Ограничение:** `pg_notify` не durable. Если Server не слушал канал в момент отправки, событие
-не будет переиграно без отдельного outbox-механизма. См. [CriticalReview.md](CriticalReview.md).
+`NotificationSenderService` читает outbox при старте, по wake-up и периодически каждые 30 секунд.
+Claim использует `FOR UPDATE SKIP LOCKED` + `LockedUntil`; после успешного Telegram send запись
+помечается `sent`, после ошибки возвращается в `pending` с backoff.
 
 ### Очистка истёкших Lease (crash recovery)
 
@@ -384,7 +412,7 @@ SELECT COUNT(*)::int FROM deleted_sessions;
 |-------|---------|-------------|------------|------------|
 | `new_tasks` | `CorrelationId` | `SessionDataService.CreateSessionWithCommandsAsync` | `CommandExecutionService.RunListenerLoopAsync` | Wake-up: новые команды в очереди |
 | `session_started` | `SessionId\|CorrelationId\|UserId` | `CommandDataService.NotifySessionStartedAsync` (внутри `ProcessRunner.StartProcessAsync`) | `CommandNotificationService.OnSessionStarted` | Server шлёт "⚙️ Задание запущено" пользователю |
-| `command_completed` | `SessionId\|CorrelationId` | `SessionDataService.NotifySessionCompletedOnceAsync` (атомарно с `CompletionNotified=TRUE`) | `CommandNotificationService.OnNotificationReceived` | Server шлёт итоговую сводку сессии |
+| `command_completed` | `SessionId\|CorrelationId` | `SessionDataService.NotifySessionCompletedOnceAsync` (атомарно с `CompletionNotified=TRUE` + outbox insert) | `CommandNotificationService.OnNotificationReceived` | Wake-up: Server drain'ит `NotificationOutbox` и шлёт итоговую сводку |
 
 ---
 

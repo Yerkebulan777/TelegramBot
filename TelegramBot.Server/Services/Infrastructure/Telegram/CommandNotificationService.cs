@@ -89,14 +89,13 @@ public sealed class CommandNotificationService(
 
             _=_startedSessions.TryRemove(sessionId, out _);
 
-            var item = new NotificationItem(sessionId, parts[1]);
-            if (!notificationChannel.Writer.TryWrite(item))
+            if (!notificationChannel.Writer.TryWrite(NotificationItem.CompletionWakeUp))
             {
-                logger.LogWarning("Completion notify dropped: reason=channel_full, session={SessionId}", sessionId);
+                logger.LogWarning("Completion wake-up dropped: reason=channel_full, session={SessionId}", sessionId);
                 return;
             }
 
-            logger.LogDebug("Completion notify queued: session={SessionId}, correlationId={CorrelationId}", sessionId, parts[1]);
+            logger.LogDebug("Completion wake-up queued: session={SessionId}, correlationId={CorrelationId}", sessionId, parts[1]);
         }
         catch (Exception ex)
         {
@@ -119,7 +118,7 @@ public sealed class CommandNotificationService(
             return; // уже отправляли для этой сессии
         }
 
-        var item = new NotificationItem(sessionId, parts[1], userId);
+        var item = NotificationItem.SessionStarted(sessionId, parts[1], userId);
         if (!notificationChannel.Writer.TryWrite(item))
         {
             _=_startedSessions.TryRemove(sessionId, out _);

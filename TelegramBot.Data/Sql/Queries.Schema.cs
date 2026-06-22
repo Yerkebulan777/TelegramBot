@@ -85,9 +85,39 @@ internal static partial class SqlQueries
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
 
+        internal const string CreateNotificationOutboxTable = @"
+            CREATE TABLE IF NOT EXISTS NotificationOutbox (
+                OutboxId BIGSERIAL PRIMARY KEY,
+                EventType TEXT NOT NULL,
+                SessionId INTEGER NOT NULL REFERENCES Sessions(SessionId),
+                CorrelationId TEXT NOT NULL,
+                Status TEXT NOT NULL DEFAULT 'pending',
+                Attempts INTEGER NOT NULL DEFAULT 0,
+                NextAttemptAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                LockedUntil TIMESTAMPTZ,
+                LastError TEXT,
+                CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                SentAt TIMESTAMPTZ
+            );";
+
         internal const string MakeTrackedMessagesSessionNullable = @"
             ALTER TABLE TrackedMessages
             ALTER COLUMN SessionId DROP NOT NULL;";
+
+        internal const string EnsureNotificationOutboxColumns = @"
+            ALTER TABLE NotificationOutbox
+            ADD COLUMN IF NOT EXISTS EventType TEXT,
+            ADD COLUMN IF NOT EXISTS SessionId INTEGER,
+            ADD COLUMN IF NOT EXISTS CorrelationId TEXT,
+            ADD COLUMN IF NOT EXISTS Status TEXT NOT NULL DEFAULT 'pending',
+            ADD COLUMN IF NOT EXISTS Attempts INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS NextAttemptAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ADD COLUMN IF NOT EXISTS LockedUntil TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS LastError TEXT,
+            ADD COLUMN IF NOT EXISTS CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ADD COLUMN IF NOT EXISTS SentAt TIMESTAMPTZ;";
 
         internal const string CreateIndexes = @"
             CREATE INDEX IF NOT EXISTS idx_commands_status ON Commands(Status);
@@ -103,6 +133,12 @@ internal static partial class SqlQueries
             CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_session ON TrackedMessages(SessionId);
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_chat ON TrackedMessages(ChatId);
-            CREATE INDEX IF NOT EXISTS idx_commands_updated_at ON Commands(UpdatedAt DESC);";
+            CREATE INDEX IF NOT EXISTS idx_commands_updated_at ON Commands(UpdatedAt DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_outbox_session_completed
+                ON NotificationOutbox(EventType, SessionId)
+                WHERE EventType = 'session_completed';
+            CREATE INDEX IF NOT EXISTS idx_notification_outbox_pending
+                ON NotificationOutbox(Status, NextAttemptAt, CreatedAt, OutboxId)
+                WHERE Status IN ('pending', 'processing');";
     }
 }

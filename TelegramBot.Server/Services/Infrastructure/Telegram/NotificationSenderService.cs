@@ -1,6 +1,7 @@
 using System.Text;
 using System.Threading.Channels;
 using TelegramBot.Data;
+using TelegramBot.Data.Models;
 using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -11,18 +12,26 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 public sealed class NotificationSenderService(
     Channel<NotificationItem> notificationChannel,
     SessionDataService sessionDataService,
+    NotificationOutboxDataService notificationOutboxDataService,
     ITelegramOutputService telegramOutput,
     ILogger<NotificationSenderService> logger) : BackgroundService
 {
+    private static readonly TimeSpan OutboxLeaseDuration = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan OutboxPollInterval = TimeSpan.FromSeconds(30);
+    private const int OutboxBatchSize = 20;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("Notification sender starting");
 
         try
         {
+            await DrainCompletionOutboxAsync(stoppingToken);
+            _ = RunOutboxPollingAsync(stoppingToken);
+
             await foreach (var item in notificationChannel.Reader.ReadAllAsync(stoppingToken))
             {
-                await SendNotificationItemAsync(item);
+                await SendNotificationItemAsync(item, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -37,46 +46,113 @@ public sealed class NotificationSenderService(
         logger.LogInformation("Notification sender stopped");
     }
 
-    private async Task SendNotificationItemAsync(NotificationItem item)
+    private async Task RunOutboxPollingAsync(CancellationToken stoppingToken)
     {
         try
         {
+            using var timer = new PeriodicTimer(OutboxPollInterval);
+
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                await DrainCompletionOutboxAsync(stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Outbox polling stopped unexpectedly");
+        }
+    }
+
+    private async Task SendNotificationItemAsync(NotificationItem item, CancellationToken stoppingToken)
+    {
+        try
+        {
+            if (item.DrainCompletionOutbox)
+            {
+                await DrainCompletionOutboxAsync(stoppingToken);
+                return;
+            }
+
             if (item.UserId.HasValue)
             {
                 _=await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
-                var startedUsername = await sessionDataService.GetSessionUsernameAsync(item.SessionId) ?? "(unnamed)";
+                var startedUsername = await sessionDataService.GetSessionUsernameAsync(item.SessionId!.Value) ?? "(unnamed)";
                 logger.LogInformation("Session started notify sent: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}",
                     startedUsername, item.UserId.Value, item.SessionId, item.CorrelationId);
                 return;
             }
 
-            var session = await sessionDataService.GetSessionCompletionSummaryAsync(item.SessionId);
-            var prefix = string.IsNullOrEmpty(session.ProjectName) ? "" : $"{session.ProjectName} — ";
-            var durationPrefix = FormatDurationPrefix(session.DurationSeconds);
-
-            var summary = new StringBuilder();
-
-            _=session.FailedFiles == 0
-                ? summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано")
-                : session.DoneFiles == 0
-                    ? summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {session.FailedFiles} файлов с ошибками")
-                    : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {session.DoneFiles} ✅, {session.FailedFiles} ❌ из {session.TotalFiles}");
-
-            if (session.FailedFiles > 0 && session.FailedFilePaths.Count > 0)
-            {
-                _=summary.Append("\n\nОшибки:\n");
-                _=summary.AppendJoin('\n', session.FailedFilePaths.Select(f => $"- {Path.GetFileName(f)}"));
-            }
-
-            _=await telegramOutput.SendMessageAsync(session.UserId, summary.ToString());
-            logger.LogInformation("Session completed: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
-                session.Username ?? "(unnamed)", session.UserId, item.SessionId, item.CorrelationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
+            logger.LogWarning("Notification item ignored: reason=unknown_shape");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to send queued notification for session {SessionId}, correlationId={CorrelationId}",
             item.SessionId, item.CorrelationId);
         }
+    }
+
+    private async Task DrainCompletionOutboxAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var items = await notificationOutboxDataService.ClaimPendingAsync(
+                NotificationOutboxDataService.SessionCompletedEvent,
+                OutboxBatchSize,
+                OutboxLeaseDuration);
+
+            if (items.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var item in items)
+            {
+                await SendCompletionOutboxItemAsync(item);
+            }
+        }
+    }
+
+    private async Task SendCompletionOutboxItemAsync(NotificationOutboxItem item)
+    {
+        try
+        {
+            await SendCompletionNotificationAsync(item.SessionId, item.CorrelationId);
+            await notificationOutboxDataService.MarkSentAsync(item.OutboxId);
+        }
+        catch (Exception ex)
+        {
+            await notificationOutboxDataService.MarkFailedAsync(item.OutboxId, item.Attempts, ex);
+            logger.LogError(ex, "Failed to send outbox notification: outboxId={OutboxId}, session={SessionId}, correlationId={CorrelationId}, attempts={Attempts}",
+                item.OutboxId, item.SessionId, item.CorrelationId, item.Attempts);
+        }
+    }
+
+    private async Task SendCompletionNotificationAsync(int sessionId, string correlationId)
+    {
+        var session = await sessionDataService.GetSessionCompletionSummaryAsync(sessionId);
+        var prefix = string.IsNullOrEmpty(session.ProjectName) ? "" : $"{session.ProjectName} — ";
+        var durationPrefix = FormatDurationPrefix(session.DurationSeconds);
+
+        var summary = new StringBuilder();
+
+        _=session.FailedFiles == 0
+            ? summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано")
+            : session.DoneFiles == 0
+                ? summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {session.FailedFiles} файлов с ошибками")
+                : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {session.DoneFiles} ✅, {session.FailedFiles} ❌ из {session.TotalFiles}");
+
+        if (session.FailedFiles > 0 && session.FailedFilePaths.Count > 0)
+        {
+            _=summary.Append("\n\nОшибки:\n");
+            _=summary.AppendJoin('\n', session.FailedFilePaths.Select(f => $"- {Path.GetFileName(f)}"));
+        }
+
+        _=await telegramOutput.SendMessageAsync(session.UserId, summary.ToString());
+        logger.LogInformation("Session completed: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+            session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
     }
 
     private static string FormatDurationPrefix(int? durationSeconds)
