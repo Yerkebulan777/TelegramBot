@@ -548,7 +548,8 @@ ORDER BY s.CreatedAt DESC;
 1. `ProcessRunner.RunAsync()` генерирует `AttemptToken` (GUID без дефисов).
 2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.json` (atomic write).
 3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в
-   `ArgumentsTemplate`.
+   `ArgumentsTemplate`. Для Revit AddIn шаблон должен быть `/command "WORKER" "{TaskFilePath}"`; реальная
+   команда остаётся в `TaskFile.commandText`.
 4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает
    `result_{CommandId}_{AttemptToken}.json`.
 5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл существует, но не
@@ -556,7 +557,8 @@ ORDER BY s.CreatedAt DESC;
    (permanent → `Failed`, transient → `ScheduleRetry`). `status` — обязательное enum-поле
    (`done`/`failed`/`cancelled`), `cancelled` трактуется как permanent failure без retry.
 
-Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. Для Navisworks/FileConvert
+Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. RevitBIMFusion AddIn ожидает
+fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Navisworks/FileConvert
 полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может
 работать только через fallback по exit code.
 

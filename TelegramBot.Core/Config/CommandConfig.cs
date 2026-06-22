@@ -8,7 +8,9 @@ public sealed class CommandConfig
 
     /// <summary>
     /// Шаблон аргументов командной строки.
-    /// {CommandText} и {FilePath} подставляются из команды.
+    /// Поддерживаемые плейсхолдеры: {CommandText}, {FilePath}, {CommandId}, {TaskFilePath}, {ResultFilePath}.
+    /// Для RevitBIMFusion Revit AddIn вместо {CommandText} должен передаваться fixed dispatcher WORKER;
+    /// реальная команда остаётся в TaskFile.commandText.
     /// </summary>
     public string ArgumentsTemplate { get; set; } = "\"{FilePath}\"";
 

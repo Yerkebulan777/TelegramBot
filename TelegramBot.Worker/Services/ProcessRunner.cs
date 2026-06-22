@@ -245,9 +245,14 @@ public sealed class ProcessRunner(
             // Failed или Cancelled. Cancelled — permanent failure (без retry), как и Failed через ErrorClassifier.
             if (result.Status == ResultStatus.Cancelled)
             {
+                var cancellationMessage = result.ErrorMessage ?? "Plugin reported cancellation";
                 logger.LogInformation(
                     "Command cancelled by plugin: id={Id}, correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}, error={Error}",
-                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported cancellation");
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds, cancellationMessage);
+
+                _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: cancellationMessage);
+                await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+                return;
             }
             else
             {
@@ -277,8 +282,9 @@ public sealed class ProcessRunner(
         {
             // Процесс завершился с кодом 0, но result-файл не был найден и не распарсен.
             // Это типичный симптом нарушения контракта BimPlugin со стороны AddIn: он
-            // получил CLI args, но TaskFilePathResolver не нашёл task-файл по args[4]
-            // (например, AddIn ожидает args[5], а Worker передаёт 4 аргумента), и
+            // получил CLI args, но TaskFilePathResolver не нашёл task-файл по строгому layout:
+            // args[1] == /command, args[2] == WORKER, args[3] == task-файл. Например,
+            // если Worker передал commandText вместо WORKER, AddIn считает argv malformed и
             // вернул Result.Cancelled без записи ResultFile. Логируем громко с
             // подсказкой — это ускоряет диагностику, когда плагин «молча» падает.
             logger.LogWarning(

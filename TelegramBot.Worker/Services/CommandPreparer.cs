@@ -182,12 +182,12 @@ public sealed class CommandPreparer(
     private async Task<(string? resolvedPath, string? errorMessage)> ResolveExecutablePathAsync(
         PendingCommand cmd, string configuredPath, string commandText, CancellationToken ct)
     {
-        if (commandText is CommandCodes.Pdf or CommandCodes.Dwg or CommandCodes.Ifc or CommandCodes.BimDoc)
+        if (commandText is CommandCodes.Pdf or CommandCodes.Dwg or CommandCodes.Ifc or CommandCodes.BimDoc or CommandCodes.Nwc)
         {
             return await ResolveRevitPathAsync(cmd, commandText, ct) ?? (configuredPath, null);
         }
 
-        if (commandText is CommandCodes.Nwc or CommandCodes.ClashRep)
+        if (commandText is CommandCodes.ClashRep)
         {
             return ResolveNavisworksPath(commandText) ?? (configuredPath, null);
         }
@@ -291,9 +291,9 @@ public sealed class CommandPreparer(
     /// <summary>
     /// Создаёт файл задания <c>task_{CommandId}_{attemptToken}.json</c> для BIM-плагина (контракт
     /// <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> §TaskFile Location). Плагин читает этот файл,
-    /// чтобы получить <c>filePath</c> и <c>resultFilePath</c>. <c>commandText</c> плагин также получает
-    /// из CLI args, но <c>filePath</c> намеренно НЕ передаётся в CLI (контракт §CLI Arguments) —
-    /// плагин открывает .rvt сам с <c>Audit=true</c>/<c>DetachAndPreserveWorksets</c>.
+    /// чтобы получить <c>commandText</c>, <c>filePath</c> и <c>resultFilePath</c>. В CLI для Revit AddIn
+    /// передаётся fixed dispatcher <c>WORKER</c>, а <c>filePath</c> намеренно НЕ передаётся
+    /// (контракт §CLI Arguments) — плагин открывает .rvt сам с <c>Audit=true</c>/<c>DetachAndPreserveWorksets</c>.
     /// Поэтому если запись task-файла провалилась — AddIn не сможет корректно выполнить команду.
     /// </summary>
     /// <returns>

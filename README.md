@@ -99,7 +99,8 @@ Worker запускает внешние исполнители и обмени�
 | Команды | Исполнитель | stdout/stderr | Важное |
 |---------|-------------|---------------|--------|
 | `PDF`, `DWG`, `IFC`, `BIMDOC` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Без AddIn Revit просто откроется как GUI и команда завершится таймаутом. Worker определяет версию файла через OLE-стрим `BasicFileInfo` (OpenMcdf) и ищет соответствующий `Revit.exe` в реестре Windows |
-| `NWC`, `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
+| `NWC` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Экспорт NWC выполняется AddIn по `TaskFile.commandText`; CLI dispatcher всегда `WORKER` |
+| `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
 | `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task` и писать `ResultFile` |
 
 > ⚠️ **Эталонный контракт** (всегда проверять при изменениях) живёт в `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + JSON-схемы `TaskFile.schema.json` / `ResultFile.schema.json`.

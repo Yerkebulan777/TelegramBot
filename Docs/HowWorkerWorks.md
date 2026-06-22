@@ -83,8 +83,8 @@ drain снова.
    - проверить что CommandText известен в Worker:Commands
    - ValidateFilePath: path traversal, reparse point, расширение, root containment
    - ResolveExecutablePathAsync:
-       * PDF/DWG/IFC/BIMDOC → Revit через BimLib (OLE-stream + реестр)
-       * NWC/CLASHREP → Navisworks через BimLib
+       * PDF/DWG/IFC/BIMDOC/NWC → Revit через BimLib (OLE-stream + реестр)
+       * CLASHREP → Navisworks через BimLib
        * остальные → configured path из appsettings
    - клонировать CommandConfig (не мутировать shared IOptions!)
 
@@ -93,7 +93,8 @@ drain снова.
    - путь: %USERPROFILE%\Documents\TelegramBot\TaskDirectory\task_{Id}_{token}.json
 
 4. Process.Start с ArgumentsTemplate
-   (подстановка {CommandText}/{FilePath}/{CommandId}/{TaskFilePath}/{ResultFilePath})
+   (подстановка {CommandText}/{FilePath}/{CommandId}/{TaskFilePath}/{ResultFilePath};
+    для Revit AddIn args[2] всегда WORKER, реальная команда в TaskFile.commandText)
 
 5. UpdateCommandStatus(Processing) + NotifySessionStartedAsync
    → pg_notify 'session_started' → Server шлёт "⚙️ Задание запущено"
@@ -129,7 +130,8 @@ drain снова.
 | Тип | stdout/stderr | Result mechanism |
 |-----|---------------|------------------|
 | `PDF`, `DWG`, `IFC`, `BIMDOC` | **Нет** — GUI приложение (Revit) | TaskFile + ResultFile JSON |
-| `NWC`, `CLASHREP` | Обычно есть (CLI wrapper) | TaskFile + ResultFile, иначе fallback на exit code |
+| `NWC` | **Нет** — GUI приложение (Revit) | TaskFile + ResultFile JSON |
+| `CLASHREP` | Обычно есть (CLI wrapper) | TaskFile + ResultFile, иначе fallback на exit code |
 | `AUTORES` | **Да** — консольный python скрипт | TaskFile + ResultFile, иначе fallback на exit code |
 
 ---

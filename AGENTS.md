@@ -187,7 +187,7 @@ services.AddSingleton<NavisworksProcessTracker>();
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `ScheduleRetryAsync` (NextRetryAt + RetryCount), `NotifySessionStartedAsync` (pg_notify), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
 | `PartitionPoolManager` | `SortedDictionary<int, SemaphoreSlim>` по priority. `Initialize(partitions)`, `WaitForSlotAsync(priority)`, `ReleaseSlot(priority)`, `TotalCapacity`. `GetThreshold(priority)` = первый threshold ≥ priority. Over-release guard |
-| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (Revit через BimLib, Navisworks через BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
+| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER`, **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
 | `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс, регистрирует в `_activeProcesses`, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `ConcurrentDictionary<int, int> _sessionRemaining`. `TrackClaimedCommands(claimed)` (AddOrUpdate с GroupBy SessionId) + `OnCommandCompletedAsync` (AddOrUpdate с -1, при 0 → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up) |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
@@ -281,7 +281,7 @@ services.AddHostedService<SessionCleanupService>();
 **Алгоритм:**
 1. Worker генерирует `attemptToken` (GUID без дефисов) для каждой попытки
 2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.json` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
-3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{TaskFilePath}`/`{ResultFilePath}`). **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile (см. эталон §CLI Arguments).
+3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{TaskFilePath}`/`{ResultFilePath}`). Для Revit AddIn `args[2]` всегда `WORKER`, реальная команда берётся из `TaskFile.commandText`. **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile (см. эталон §CLI Arguments).
 4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.json` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
 5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
    - `status="done"` → `Done`
@@ -304,7 +304,7 @@ Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_6f1c2b3a.json"
 Доступные плейсхолдеры:
 | Плейсхолдер | Описание |
 |-------------|----------|
-| `{CommandText}` | Тип экспорта (PDF, DWG, IFC...) |
+| `{CommandText}` | Тип экспорта для console/wrapper-команд; для Revit AddIn не используется как dispatcher |
 | `{FilePath}` | Полный путь к исходному файлу |
 | `{CommandId}` | ID команды в БД |
 | `{TaskFilePath}` | Полный путь к `task_{CommandId}_{AttemptToken}.json` |
@@ -330,8 +330,8 @@ Worker → Revit.exe opens as GUI
 
 | Type | Executable | stdout/stderr | Result mechanism |
 |------|-----------|---------------|------------------|
-| PDF, DWG, IFC, BIMDOC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile + ResultFile JSON exchange |
-| NWC, CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
+| PDF, DWG, IFC, BIMDOC, NWC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile + ResultFile JSON exchange |
+| CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
 | AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task`/`--result`, fallback to exit code |
 
 **Temp-file cleanup (v1.7):** Temp-файлы (`task_*.json`, `result_*.json`) очищаются per-attempt в `finally` блоке `ProcessRunner.RunAsync()`. Каждая попытка использует уникальный `attemptToken`, предотвращая stale-file конфликты между retry.

@@ -75,21 +75,26 @@ Worker запускает исполнителя по шаблону `ArgumentsT
 `OpenOptions`.
 
 ```text
-Revit.exe /command "{CommandText}" "{TaskFilePath}"
+Revit.exe /command "WORKER" "{TaskFilePath}"
 ```
 
 | Позиция | Аргумент | Пример | Обязателен |
 |:-------:|----------|--------|:----------:|
 | 0 | Исполняемый файл | `Revit.exe` или полный путь | да |
 | 1 | `/command` | Ключ команды Revit API | да |
-| 2 | `commandText` | `"PDF"` | да |
+| 2 | dispatcher | `"WORKER"` | да |
 | 3 | `taskFilePath` | `"C:\\…\\task_42_abc123.json"` | да |
+
+`args[2]` — fixed dispatcher Revit AddIn, а не тип экспорта. Реальная команда (`PDF`, `DWG`, `NWC`, ...)
+живёт только в `TaskFile.commandText` и читается исполнителем из JSON. Если Worker передаст в `args[2]`
+реальный commandText вроде `"PDF"`, AddIn не будет угадывать путь к task-файлу: strict resolver уйдёт в
+debug fallback (`OpenFileDialog`) или вернёт `Cancelled` в headless-режиме без `ResultFile`.
 
 **Плейсхолдеры** в `ArgumentsTemplate`:
 
 | Плейсхолдер | Описание | Используется в шаблонах |
 |-------------|----------|--------------------------|
-| `{CommandText}` | Код команды | Все |
+| `{CommandText}` | Код команды | Console/wrapper-команды, но **не** Revit AddIn dispatcher |
 | `{TaskFilePath}` | Полный путь к `task_{CommandId}_{AttemptToken}.json` | Все |
 | `{ResultFilePath}` | Полный путь к `result_*.json` | Только если плагин берёт из CLI (опционально) |
 | `{CommandId}` | ID команды | Только если плагину нужен (опционально) |
@@ -98,11 +103,11 @@ Revit.exe /command "{CommandText}" "{TaskFilePath}"
 Текущие шаблоны в `appsettings.json` Worker'а (полное соответствие эталону):
 
 ```json
-"PDF":     "/command \"{CommandText}\" \"{TaskFilePath}\""
-"DWG":     "/command \"{CommandText}\" \"{TaskFilePath}\""
-"IFC":     "/command \"{CommandText}\" \"{TaskFilePath}\""
-"BIMDOC":  "/command \"{CommandText}\" \"{TaskFilePath}\""
-"NWC":     "/command \"{CommandText}\" \"{TaskFilePath}\""
+"PDF":     "/command \"WORKER\" \"{TaskFilePath}\""
+"DWG":     "/command \"WORKER\" \"{TaskFilePath}\""
+"IFC":     "/command \"WORKER\" \"{TaskFilePath}\""
+"BIMDOC":  "/command \"WORKER\" \"{TaskFilePath}\""
+"NWC":     "/command \"WORKER\" \"{TaskFilePath}\""
 "CLASHREP":"/command \"{CommandText}\" \"{TaskFilePath}\""
 "AUTORES": "ai_agent.py --command \"{CommandText}\" --task \"{TaskFilePath}\""
 ```
@@ -184,7 +189,7 @@ Worker создаёт директорию автоматически на ст�
 |---------|-----------|------------------|------------------------|
 | `PDF` | Export sheets to PDF | supported | `Worker:Commands:PDF` (Revit.exe) |
 | `DWG` | Export to AutoCAD DWG | supported | `Worker:Commands:DWG` (Revit.exe) |
-| `NWC` | Export to Navisworks NWC | supported | `Worker:Commands:NWC` (FileConvert.exe) |
+| `NWC` | Export to Navisworks NWC | supported | `Worker:Commands:NWC` (Revit.exe + AddIn) |
 | `IFC` | Export to IFC | planned (NotImplemented) | `Worker:Commands:IFC` (Revit.exe) |
 | `BIMDOC` | BIM documentation | planned | `Worker:Commands:BIMDOC` (Revit.exe) |
 | `CLASHREP` | Clash report | planned | `Worker:Commands:CLASHREP` (FileConvert.exe) |
@@ -200,8 +205,9 @@ Worker создаёт директорию автоматически на ст�
 исходный `.rvt` от случайной модификации во время headless worker execution. Реализация — на стороне
 AddIn'а, Worker не может это проверить.
 
-`WorkerCommandHandler.ResolveTaskFilePath` (в плагине) берёт **первый существующий** аргумент с расширением
-`.json` из `Environment.GetCommandLineArgs()`. Это делает flow толерантным к порядку аргументов.
+`TaskFilePathResolver.Resolve()` (в плагине) валидирует строгий positional layout:
+`args[1] == "/command"`, `args[2] == "WORKER"`, `args[3] == "<task>.json"`. Resolver не сканирует argv
+дальше `args[3]` и не угадывает путь.
 
 ## Автогенерация result-файла
 
@@ -218,10 +224,12 @@ unexpected executor exception. `WorkerCommandHandler.Execute` используе
 **Исключения**, когда result не пишется в primary path (эталон §Cases Where ResultFile Is Not Written to
 the Primary Path):
 
-1. Task-file selection cancelled (`OpenFileDialog` → Cancel) — manual debug only.
-2. `task.ResultFilePath` пуст — fallback `result_error.json` в CWD.
-3. Primary-path write failed — fallback `resultFilePath + ".error.json"`.
-4. AddIn не стартовал (Revit crash) — вне контракта.
+1. Task-file selection cancelled (`OpenFileDialog` → Cancel или headless host) — manual debug only.
+2. `task.ResultFilePath` пуст — AddIn ничего не пишет и не invent'ит cwd/temp fallback.
+3. `TaskFileParser.Parse` упал до получения валидного `resultFilePath` — AddIn возвращает `Cancelled`, но
+   `ResultFile` не пишет.
+4. Primary-path write failed — fallback `resultFilePath + ".error.json"`.
+5. AddIn не стартовал (Revit crash) — вне контракта.
 
 Worker **не различает** эти случаи: если файла по `resultFilePath` нет — fallback по exit code.
 
