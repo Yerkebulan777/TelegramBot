@@ -365,7 +365,7 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 | `ButtonTexts.cs` | Reply keyboard button labels | `Apply` ("✅ Применить"), `Confirm` ("✅ Подтвердить"), `Cancel` ("❌ Отмена") |
 
 **Server-only constants** (`TelegramBot.Server/Constants/`):
-- `HandlerPriorities.cs` — `AccessRequest` (0), `FileNavigation` (10), `FileSelection` (20), `CommandToggle` (100), `SessionManagement` (100), `CommandSelection` (100), `Default` (1000)
+- (нет — dispatcher полагается на уникальность префиксов между хендлерами, см. `CallbackPrefixes`)
 
 **Important notes:**
 - All callback prefixes end with `:` (colon) for data concatenation
@@ -487,15 +487,15 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 
 ### Callback Handling — Chain of Responsibility
 
-`CallbackDispatcher` routes callbacks to the first `ICallbackHandler` that `CanHandle()` the prefix (сортировка по `Priority`, lower = first). O(1) lookup через кэшированный `_handlerMap` (`Dictionary<prefix, handler>`), построенный в конструкторе из `handlers.GetSupportedPrefixes()`. Все handlers extend `CallbackHandlerBase`.
+`CallbackDispatcher` routes callbacks to handler по уникальному `prefix` через кэшированный `_handlerMap` (`Dictionary<prefix, handler>`), построенный в конструкторе из `handlers.GetSupportedPrefixes()`. Все handlers extend `CallbackHandlerBase`. Префиксы между хендлерами не пересекаются (см. `CallbackPrefixes`), поэтому никакая сортировка/приоритеты не нужны.
 
-Handler hierarchy:
-- `AccessRequestHandler` (Priority 0) — `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:`
-- `FileNavigationHandler` (Priority 10) — `GOTOPARENT:`
-- `FileSelectionHandler` (Priority 20) — file/folder toggle
-- `CommandToggleHandler` (Priority 100) — `PDF:`, `DWG:`, `IFC:`, `BIMDOC:`, `NWC:`, `CLASHREP:`, `AUTORES:`
-- `CommandSelectionHandler` (Priority 100) — `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`
-- `SessionManagementHandler` (Priority 100) — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`
+Handler hierarchy (порядок не имеет значения — выбор по prefix):
+- `AccessRequestHandler` — `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:`
+- `FileNavigationHandler` — `GOTOPARENT:`
+- `FileSelectionHandler` — `FILE:`, `SELECTALLSECTIONS:`
+- `CommandToggleHandler` — `PDF:`, `DWG:`, `IFC:`, `BIMDOC:`, `NWC:`, `CLASHREP:`, `AUTORES:`
+- `CommandSelectionHandler` — `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`
+- `SessionManagementHandler` — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`
 
 **Error handling:** `CallbackHandlerBase.HandleAsync()` **НЕ ловит** исключения — они пропагируются в `CallbackDispatcher.DispatchAsync()`, который ловит `Exception`, логирует с `elapsedMs`/handlerName и возвращает `false` (исключая double logging). `OperationCanceledException` пробрасывается наверх.
 

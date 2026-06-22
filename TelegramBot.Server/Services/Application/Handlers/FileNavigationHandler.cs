@@ -3,7 +3,6 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
@@ -19,8 +18,6 @@ public sealed class FileNavigationHandler(
     private readonly FileSystemOptions _options = options.Value;
 
     protected override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.GoToParent];
-
-    public override int Priority => HandlerPriorities.FileNavigation;
 
     public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {

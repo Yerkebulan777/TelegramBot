@@ -4,7 +4,6 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
 
@@ -18,8 +17,6 @@ public sealed class AccessRequestHandler(
     ILogger<AccessRequestHandler> logger) : CallbackHandlerBase(logger)
 {
     private readonly long[] _adminIds = botOptions.Value.AdminUserIds;
-
-    public override int Priority => HandlerPriorities.AccessRequest;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [

@@ -3,7 +3,6 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Server.Constants;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
@@ -24,8 +23,6 @@ public sealed class FileSelectionHandler(
         CallbackPrefixes.File,
         CallbackPrefixes.SelectAllSectionFolders
     ];
-
-    public override int Priority => HandlerPriorities.FileSelection;
 
     public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {

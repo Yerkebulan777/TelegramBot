@@ -9,14 +9,13 @@ namespace TelegramBot.Server.Services.Application;
 /// </summary>
 public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, ILogger<CallbackDispatcher> logger)
 {
-    // Кэш префикс → handler для быстрого поиска (O(1) вместо O(n))
+    // Кэш префикс → handler для быстрого поиска (O(1) вместо O(n)).
+    // Префиксы уникальны между хендлерами (см. CallbackPrefixes), поэтому коллизий быть не может.
     private readonly Dictionary<string, ICallbackHandler> _handlerMap =
         handlers
             .SelectMany(h => GetSupportedPrefixes(h).Select(p => (p, h)))
             .GroupBy(x => x.p)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderBy(x => x.h.Priority).First().h);
+            .ToDictionary(g => g.Key, g => g.First().h);
 
     /// <summary>Возвращает поддерживаемые префиксы из хендлера.</summary>
     private static IEnumerable<string> GetSupportedPrefixes(ICallbackHandler handler)
