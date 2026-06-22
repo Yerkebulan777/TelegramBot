@@ -65,8 +65,6 @@ public sealed class RevitVersionDetector(
             return Task.FromResult<RevitDetectedVersion?>(new RevitDetectedVersion
             {
                 Year = year,
-                DisplayName = $"Autodesk Revit {year}",
-                IsSupported = year is >= 2017 and <= 2026,
                 ExecutablePath = pathResolver.ResolveExecutablePath(year)
             });
         }

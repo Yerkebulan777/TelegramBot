@@ -22,16 +22,6 @@ public sealed class MessageTrackingDataService(
     }
 
     /// <inheritdoc/>
-    public async Task DeleteTrackedMessagesAsync(int sessionId, IEnumerable<int> messageIds)
-    {
-        await TryExecuteTrackedAsync(
-            SqlQueries.TrackedMessages.DeleteByIds,
-            new { SessionId = sessionId, MessageIds = messageIds.ToArray() },
-            "Failed to delete tracked messages for session {SessionId}",
-            sessionId);
-    }
-
-    /// <inheritdoc/>
     public async Task DeleteTrackedMessagesBySessionAsync(int sessionId)
     {
         await TryExecuteTrackedAsync(
@@ -55,16 +45,6 @@ public sealed class MessageTrackingDataService(
             new { ChatId = chatId, MessageIds = ids },
             "Failed to delete tracked messages for chat {ChatId}",
             chatId);
-    }
-
-    /// <inheritdoc/>
-    public async Task<IReadOnlyList<int>> GetTrackedMessagesBySessionAsync(int sessionId)
-    {
-        return await TryQueryTrackedAsync<int>(
-            SqlQueries.TrackedMessages.GetBySession,
-            new { SessionId = sessionId },
-            "Failed to get tracked messages for session {SessionId}",
-            sessionId);
     }
 
     /// <inheritdoc/>

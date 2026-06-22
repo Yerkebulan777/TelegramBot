@@ -52,15 +52,10 @@ public sealed class CommandSelectionHandler(
         var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        await SendActionsReplyKeyboardAsync(context);
+        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
+            keyboardBuilder.GetFileActionsReplyKeyboardAsync);
 
         return true;
-    }
-
-    private Task SendActionsReplyKeyboardAsync(CallbackContext context)
-    {
-        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
-                keyboardBuilder.GetFileActionsReplyKeyboardAsync);
     }
 
     private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)

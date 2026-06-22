@@ -148,8 +148,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `ErrorMessage` | `TEXT` | Последнее сообщение об ошибке (для Failed) |
 | `RetryCount` | `INTEGER NOT NULL DEFAULT 0` | Счётчик попыток |
 | `NextRetryAt` | `TIMESTAMPTZ` | Время следующей попытки; используется в `ClaimAndReturn` (пропускает если `> NOW()`) |
-| `Progress` | `INTEGER NOT NULL DEFAULT 0` | 0..100, обновляется через `UpdateCommandProgressAsync` |
-| `Result` | `TEXT` | Произвольный JSON-результат (обновляется через `UpdateCommandResultAsync`) |
+| `Progress` | `INTEGER NOT NULL DEFAULT 0` | 0..100, обновляется через `UpdateCommandStatusAsync` (параметр `progress`) |
+| `Result` | `TEXT` | Произвольный JSON-результат (обновляется через `UpdateCommandStatusAsync` (параметр `result`)) |
 | `UpdatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
 
 ### TrackedMessages

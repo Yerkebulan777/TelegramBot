@@ -9,11 +9,6 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
 
     protected virtual HashSet<string> SupportedPrefixes { get; } = [];
 
-    public virtual bool CanHandle(string prefix)
-    {
-        return SupportedPrefixes.Count > 0 && SupportedPrefixes.Contains(prefix);
-    }
-
     public virtual IEnumerable<string> GetSupportedPrefixes()
     {
         return SupportedPrefixes;

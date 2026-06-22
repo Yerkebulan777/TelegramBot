@@ -86,14 +86,14 @@ public class TelegramOutputService(
             session.LastUserMessageId = null;
         }
 
-        await CleanupTrackedMessagesAsync(chatId, session, exceptMessageIds ?? [], CancellationToken.None);
+        await CleanupTrackedMessagesInternalAsync(chatId, session, exceptMessageIds ?? [], CancellationToken.None);
     }
 
-    public async Task CleanupTrackedMessagesAsync(
+    private async Task CleanupTrackedMessagesInternalAsync(
         long chatId,
         UserSession session,
         IEnumerable<int> keepMessageIds,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         var trackedMessageIds = await messageTrackingService.GetTrackedMessagesByChatAsync(chatId);
         if (trackedMessageIds.Count == 0)

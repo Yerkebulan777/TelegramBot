@@ -7,15 +7,9 @@ namespace TelegramBot.Core.Interfaces;
 /// </summary>
 public interface ICallbackHandler
 {
-    /// <summary>Проверяет, может ли обработчик обработать callback.</summary>
-    bool CanHandle(string prefix);
-
     /// <summary>Обрабатывает callback асинхронно.</summary>
     Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Возвращает список callback-префиксов, которые поддерживает этот обработчик.</summary>
-    IEnumerable<string> GetSupportedPrefixes()
-    {
-        return [];
-    }
+    IEnumerable<string> GetSupportedPrefixes();
 }

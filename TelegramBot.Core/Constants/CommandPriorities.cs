@@ -9,6 +9,5 @@ public static class CommandPriorities
     public const int High = 2;
     public const int Medium = 3;
     public const int Low = 4;
-    public const int Lowest = 5;
     public const int Default = 50;
 }

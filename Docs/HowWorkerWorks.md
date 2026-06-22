@@ -368,10 +368,8 @@ _=services.AddSingleton<DatabaseInitializerService>();
 // BIM-интеграция
 _=services.AddSingleton<RevitVersionDetector>();
 _=services.AddSingleton<RevitPathResolver>();
-_=services.AddSingleton<RevitProcessTracker>();
 _=services.AddSingleton<DialogDismisser>();
 _=services.AddSingleton<NavisworksPathResolver>();
-_=services.AddSingleton<NavisworksProcessTracker>();
 
 // Компоненты выполнения
 _=services.AddSingleton<PartitionPoolManager>();

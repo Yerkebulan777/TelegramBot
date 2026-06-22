@@ -4,8 +4,8 @@ using TelegramBot.Worker.BimLib.Models;
 namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>
-/// Статический helper для проверки здоровья процесса.
-/// Устраняет дублирование CheckHealth между RevitProcessTracker и NavisworksProcessTracker.
+/// Статический helper для проверки здоровья процесса (responsiveness, memory, duration).
+/// Используется CommandExecutionService.CheckProcessesHealth.
 /// </summary>
 internal static class ProcessHealthHelper
 {

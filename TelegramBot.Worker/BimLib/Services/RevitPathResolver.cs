@@ -15,26 +15,6 @@ public sealed class RevitPathResolver(
 {
     private readonly BimIntegrationOptions _options = options.Value;
 
-    /// <summary>Возвращает список установленных версий Revit (по убыванию), найденных через реестр Windows.</summary>
-    public IReadOnlyList<int> GetInstalledVersions()
-    {
-        var versions = new List<int>();
-
-        for (var year = _options.MinSupportedVersion; year <= _options.MaxSupportedVersion; year++)
-        {
-            var path = ResolveExecutablePath(year);
-            if (path != null)
-            {
-                versions.Add(year);
-            }
-        }
-
-        var result = versions.OrderByDescending(v => v).ToList();
-        logger.LogDebug("Found installed Revit versions via registry: {Versions}",
-            string.Join(", ", result));
-        return result;
-    }
-
     /// <summary>Находит полный путь к Revit.exe для указанной версии через реестр Windows.</summary>
     public string? ResolveExecutablePath(int versionYear)
     {

@@ -81,14 +81,6 @@ public sealed class SessionDataService(
         return sessionId;
     }
 
-    /// <summary>Возвращает список всех сессий.</summary>
-    public async Task<List<SessionsList>> GetSessionsListAsync()
-    {
-        await using var conn = await CreateOpenConnectionAsync();
-        var result = await conn.QueryAsync<SessionsList>(SqlQueries.Sessions.GetList);
-        return result.ToList();
-    }
-
     /// <summary>Возвращает отфильтрованный список сессий.</summary>
     public async Task<List<SessionsList>> GetSessionsListFilteredAsync(string filter)
     {

@@ -51,22 +51,6 @@ public sealed class CommandDataService(
             "update status");
     }
 
-    /// <summary>Обновляет прогресс команды.</summary>
-    public Task<bool> UpdateCommandProgressAsync(int commandId, int progress)
-    {
-        return TryExecuteAsync(commandId, SqlQueries.Commands.UpdateProgress,
-            new { CommandId = commandId, Progress = progress },
-            "update progress");
-    }
-
-    /// <summary>Обновляет результат команды.</summary>
-    public Task<bool> UpdateCommandResultAsync(int commandId, string result)
-    {
-        return TryExecuteAsync(commandId, SqlQueries.Commands.UpdateResult,
-            new { CommandId = commandId, Result = result },
-            "update result");
-    }
-
     /// <summary>Планирует повторную попытку.</summary>
     public async Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage)
     {
@@ -75,15 +59,6 @@ public sealed class CommandDataService(
             SqlQueries.Commands.ScheduleRetry,
             new { CommandId = commandId, NextRetryAt = nextRetryAt, ErrorMessage = errorMessage });
         return retryCount;
-    }
-
-    /// <summary>Возвращает команду по ID.</summary>
-    public async Task<PendingCommand?> GetCommandByIdAsync(int commandId, long userId, bool isAdmin = false)
-    {
-        await using var conn = await CreateOpenConnectionAsync();
-        return await conn.QuerySingleOrDefaultAsync<PendingCommand>(
-            SqlQueries.Commands.GetById,
-            new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
     }
 
     /// <summary>Мягкое удаление команды.</summary>

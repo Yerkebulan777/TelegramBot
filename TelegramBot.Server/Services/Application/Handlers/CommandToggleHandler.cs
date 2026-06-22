@@ -10,11 +10,6 @@ public sealed class CommandToggleHandler(
     ITelegramOutputService outputService,
     ILogger<CommandToggleHandler> logger) : CallbackHandlerBase(logger)
 {
-    public override bool CanHandle(string prefix)
-    {
-        return CommandCatalog.TryGetByPrefix(prefix, out _);
-    }
-
     public override IEnumerable<string> GetSupportedPrefixes()
     {
         return CommandCatalog.All.Select(c => c.Prefix);

@@ -26,16 +26,7 @@ internal static class User32
     internal static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
-    internal static extern IntPtr GetDlgCtrlID(IntPtr hWnd);
-
-    [DllImport("user32.dll", SetLastError = true)]
     internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    internal static extern IntPtr GetWindow(IntPtr hWnd, int uCmd);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    internal static extern IntPtr GetParent(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -197,30 +188,6 @@ internal static class User32
         }
     }
 
-    /// <summary>Safe: retrieves dialog control ID. Returns 0 on failure.</summary>
-    internal static int GetDlgCtrlIDSafe(IntPtr hWnd)
-    {
-        try
-        {
-            var result = GetDlgCtrlID(hWnd);
-            if (result == IntPtr.Zero)
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (error != 0)
-                {
-                    WinApiHelper.LogWarning(nameof(GetDlgCtrlID), $"hWnd={hWnd}", error);
-                }
-            }
-
-            return result.ToInt32();
-        }
-        catch (Exception ex)
-        {
-            WinApiHelper.LogError(nameof(GetDlgCtrlID), ex, $"hWnd={hWnd}");
-            return 0;
-        }
-    }
-
     /// <summary>
     /// Safe: sends a window message with timeout protection.
     /// Runs on a background thread to prevent hanging if the target window is unresponsive.
@@ -253,54 +220,6 @@ internal static class User32
             },
             $"SendMessage(0x{msg:X})",
             IntPtr.Zero);
-    }
-
-    /// <summary>Safe: retrieves a related window handle. Returns <see cref="IntPtr.Zero"/> on failure.</summary>
-    internal static IntPtr GetWindowSafe(IntPtr hWnd, int uCmd)
-    {
-        try
-        {
-            var result = GetWindow(hWnd, uCmd);
-            if (result == IntPtr.Zero)
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (error != 0)
-                {
-                    WinApiHelper.LogWarning(nameof(GetWindow), $"hWnd={hWnd}, cmd={uCmd}", error);
-                }
-            }
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            WinApiHelper.LogError(nameof(GetWindow), ex, $"hWnd={hWnd}, cmd={uCmd}");
-            return IntPtr.Zero;
-        }
-    }
-
-    /// <summary>Safe: retrieves parent window handle. Returns <see cref="IntPtr.Zero"/> on failure.</summary>
-    internal static IntPtr GetParentSafe(IntPtr hWnd)
-    {
-        try
-        {
-            var result = GetParent(hWnd);
-            if (result == IntPtr.Zero)
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (error != 0)
-                {
-                    WinApiHelper.LogWarning(nameof(GetParent), $"hWnd={hWnd}", error);
-                }
-            }
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            WinApiHelper.LogError(nameof(GetParent), ex, $"hWnd={hWnd}");
-            return IntPtr.Zero;
-        }
     }
 
     /// <summary>Safe: checks window visibility. Returns <c>false</c> on failure.</summary>

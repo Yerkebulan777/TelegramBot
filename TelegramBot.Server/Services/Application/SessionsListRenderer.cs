@@ -18,7 +18,7 @@ public sealed class SessionsListRenderer(
     ILogger<SessionsListRenderer> logger)
 {
     /// <summary>Строит текст сообщения и клавиатуру для текущего фильтра.</summary>
-    public async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
+    private async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
         string filter, CancellationToken cancellationToken = default)
     {
         var sessionsTask = dataServices.Sessions.GetSessionsListFilteredAsync(filter);

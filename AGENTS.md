@@ -143,8 +143,8 @@ BimLib is a **Windows-only** set of modules located inside the Worker project (`
 | Folder | Contents |
 |--------|----------|
 | `Config/` | `BimIntegrationOptions` — min/max supported Revit version (default 2018–2026), `RevitInstallRoot`; `DialogDismisserOptions` — `MaxDismissAttempts`, `KnownDialogPatterns`, `CloseButtonTexts`, `ExclusionDialogTitles` |
-| `Models/` | `RevitDetectedVersion` (Year, DisplayName, IsSupported, ExecutablePath), `RevitProcessHealth` (status: `Healthy`/`NotResponding`/`Error`, MemoryMb, Duration) |
-| `Monitor/` | `RevitProcessTracker`, `NavisworksProcessTracker`, `ProcessHealthHelper` (static `CheckHealth`), `DialogDismisser`, `WindowUtil`, `WindowInfo` |
+| `Models/` | `RevitDetectedVersion` (Year, ExecutablePath), `RevitProcessHealth` (status: `Healthy`/`NotResponding`/`Error`, MemoryMb, Duration) |
+| `Monitor/` | `ProcessHealthHelper` (static `CheckHealth`), `DialogDismisser`, `WindowUtil`, `WindowInfo` |
 | `Native/` | P/Invoke WinAPI: `User32`, `Win32Types`, `WinApiHelper` (с настраиваемым `ILogger` для safe error logging) |
 | `Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver` |
 | `Interfaces/` | (пусто) — все интерфейсы удалены в v1.4, остались только concrete-классы |
@@ -156,8 +156,8 @@ BimLib is a **Windows-only** set of modules located inside the Worker project (`
 | `RevitVersionDetector` | Читает OLE-стрим `BasicFileInfo` из .rvt/.rfa через OpenMcdf, извлекает `Format: YYYY`. Поддерживает `.rvt`, `.rfa`, `.rte`. Возвращает `RevitDetectedVersion` с `Year` (2017–2026 supported) и `ExecutablePath` от `RevitPathResolver` |
 | `RevitPathResolver` | Резолвит `Revit.exe` через реестр Windows: `HKLM\SOFTWARE\Autodesk\Revit\{version}` (fallback `\Revit{version}` и `WOW6432Node`), ищет подраздел с префиксом `REVIT-`, читает `InstallationLocation` |
 | `NavisworksPathResolver` | Резолвит `FileConvert.exe` / `Roamer.exe` / `Navisworks.exe`. Реестр: `HKLM\SOFTWARE\Autodesk\Navisworks\R{year}` или `NavisworksManage\R{year}` |
-| `RevitProcessTracker` | Мониторит Revit-процессы: responsiveness (MainWindowHandle), `DialogDismisser.DismissDialogsForProcess`, PID tracking |
-| `NavisworksProcessTracker` | Мониторит Navisworks-процессы (Roamer, FileConvert) |
+| `RevitProcessTracker` | _Удалён в v1.x — мониторинг Revit делегирован `ProcessHealthHelper` (вызывается из `CommandExecutionService.CheckProcessesHealth`)._ |
+| `NavisworksProcessTracker` | _Удалён в v1.x — `CommandExecutionService` использует `ProcessHealthHelper` напрямую._ |
 | `ProcessHealthHelper` | Статический `CheckHealth(Process, ILogger, context)`: `RevitingResponseStatus` по IsResponding + memory sampling |
 | `DialogDismisser` | Авто-закрывает модальные окна Revit/Navisworks (#32770): ищет окна по `KnownDialogPatterns`, нажимает кнопки из `CloseButtonTexts`. Исключает информационные диалоги (`ExclusionDialogTitles`) |
 
@@ -165,10 +165,8 @@ BimLib is a **Windows-only** set of modules located inside the Worker project (`
 ```csharp
 services.AddSingleton<RevitVersionDetector>();
 services.AddSingleton<RevitPathResolver>();
-services.AddSingleton<RevitProcessTracker>();
 services.AddSingleton<DialogDismisser>();
 services.AddSingleton<NavisworksPathResolver>();
-services.AddSingleton<NavisworksProcessTracker>();
 ```
 Требует `BimIntegrationOptions` (секция `BimIntegration`) и `DialogDismisserOptions` (секция `DialogDismisser`) в `appsettings.json`.
 
@@ -428,7 +426,6 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 - `ISlashCommandService` → `SlashCommandService`
 - `IAccessValidator` → `AuthorizationMiddleware`
 - `ISessionManager` → `SessionManager`
-- `IKeyboardBuilder` → `KeyboardBuilder`
 - `IRevitVersionDetector` → `RevitVersionDetector`
 - `INavisworksPathResolver` → `NavisworksPathResolver`
 
@@ -502,7 +499,7 @@ Handler hierarchy (порядок не имеет значения — выбо�
 
 **Log instrumentation:** `CallbackDispatcher` логирует dispatch (debug), handled/not-handled (debug с `elapsedMs`), error (error с `elapsedMs`), ignored (debug с reason=no_handler).
 
-Callback prefixes — константы в `CallbackPrefixes` (`TelegramBot.Core/Constants/CallbackPrefixes.cs`). Command codes — в `CommandCodes` (`TelegramBot.Core/Constants/CommandCodes.cs`). Используй `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) для получения `ParsedCallback`, затем match через `parsed.Is(CallbackPrefixes.GoToParent)`.
+Callback prefixes — константы в `CallbackPrefixes` (`TelegramBot.Core/Constants/CallbackPrefixes.cs`). Command codes — в `CommandCodes` (`TelegramBot.Core/Constants/CommandCodes.cs`). Используй `CallbackDataParser.Parse(data)` (from `ParsedCallback.cs`) для получения `ParsedCallback`, затем match через `string.Equals(context.ParsedCallback.Prefix, CallbackPrefixes.GoToParent)`.
 
 > **SessionManagementHandler** управляет `/status` actions. Delete buttons сначала показывают confirmation dialog («✅ Да, удалить» / «↩️ Назад»). Поддерживает фильтры (`ALL`/`ACTIVE`/`DONE`/`FAILED`). Удаление команды (включая running) → `Status = 'Deleted'` (soft-delete). При удалении последней команды в сессии — удаляется и сама сессия + tracked messages (`DeleteSessionAndMessagesAsync`).
 

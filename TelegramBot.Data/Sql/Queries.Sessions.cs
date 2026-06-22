@@ -9,25 +9,6 @@ internal static partial class SqlQueries
             VALUES (@UserId, @Username, @CorrelationId, @ProjectName, @FilesAmount)
             RETURNING SessionId;";
 
-        internal const string GetList = @"
-            SELECT
-                s.SessionId,
-                s.UserId,
-                s.Username,
-                s.ProjectName,
-                s.CreatedAt AS Date,
-                s.Status,
-                COUNT(c.CommandId) AS TotalCommands,
-                COUNT(CASE WHEN c.Status = 'Done' THEN 1 END) AS DoneCommands,
-                COUNT(CASE WHEN c.Status = 'Failed' THEN 1 END) AS FailedCommands,
-                COUNT(CASE WHEN c.Status IN ('pending', 'processing') THEN 1 END) AS ActiveCommands
-            FROM Sessions s
-            LEFT JOIN Commands c ON c.SessionId = s.SessionId AND c.Status != 'Deleted'
-            WHERE s.Status != 'Deleted'
-            GROUP BY s.SessionId, s.UserId, s.Username, s.ProjectName, s.CreatedAt, s.Status
-            ORDER BY s.CreatedAt DESC
-            LIMIT 20;";
-
         internal const string GetListFiltered = @"
             WITH session_stats AS (
                 SELECT

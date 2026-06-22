@@ -129,7 +129,6 @@ Worker запускает внешние исполнители и обмени�
 | `FileSystem` | `RootPath` | Корневая директория (required, validated) |
 | `FileSystem` | `RvtDirectoryName` | Имя папки с RVT внутри раздела (default `01_RVT`) |
 | `FileSystem` | `ProjectDirectoryName` | Имя папки проекта (default `01_PROJECT`) |
-| `FileSystem` | `RevitFileExtension` | Расширение (default `.rvt`) |
 | `FileSystem` | `SectionFolderPattern` | Regex для папок-разделов (default `^(\d{2}|\d{3}\|I{1,3})_`) |
 | `FileSystem` | `LogDirectory` | Опционально: путь к логам (default `%USERPROFILE%\Documents\TelegramBot\Logs`) |
 | `FileSystem` | `TaskDirectory` | Опционально: папка для task/result JSON (default `%USERPROFILE%\Documents\TelegramBot\TaskDirectory`). **Только Worker** |

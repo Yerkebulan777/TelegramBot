@@ -24,25 +24,6 @@ internal static class WindowUtil
         return User32.GetWindowThreadProcessIdSafe(hwnd);
     }
 
-    /// <summary>Получает владельца окна. Возвращает <see cref="IntPtr.Zero"/> при ошибке.</summary>
-    internal static IntPtr GetOwnerWindow(IntPtr hwnd)
-    {
-        // GetWindow with GW_OWNER = 4
-        return User32.GetWindowSafe(hwnd, 4);
-    }
-
-    /// <summary>Получает родительское окно. Возвращает <see cref="IntPtr.Zero"/> при ошибке.</summary>
-    internal static IntPtr GetParentWindow(IntPtr hwnd)
-    {
-        return User32.GetParentSafe(hwnd);
-    }
-
-    /// <summary>Получает Control ID диалогового элемента. Возвращает 0 при ошибке.</summary>
-    internal static int GetDialogControlId(IntPtr hwnd)
-    {
-        return User32.GetDlgCtrlIDSafe(hwnd);
-    }
-
     /// <summary>
     /// Перечисляет все top-level окна, соответствующие указанным критериям.
     /// </summary>

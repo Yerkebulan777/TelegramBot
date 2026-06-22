@@ -5,12 +5,6 @@ namespace TelegramBot.Core.Models;
 /// </summary>
 public readonly record struct ParsedCallback(string Prefix, string Argument)
 {
-    /// <summary>Проверяет, совпадает ли префикс с указанным значением.</summary>
-    public bool Is(string prefix)
-    {
-        return string.Equals(Prefix, prefix, StringComparison.Ordinal);
-    }
-
 }
 
 /// <summary>

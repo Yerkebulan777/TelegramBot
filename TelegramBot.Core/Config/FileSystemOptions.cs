@@ -17,9 +17,6 @@ public sealed class FileSystemOptions
     /// <summary>Относительный путь к директории проекта.</summary>
     public string ProjectDirectoryName { get; set; } = "01_PROJECT";
 
-    /// <summary>Расширение файлов Revit (с точкой).</summary>
-    public string RevitFileExtension { get; set; } = ".rvt";
-
     /// <summary>Регулярное выражение для папок разделов.</summary>
     public string SectionFolderPattern { get; set; } = @"^(\d{2}|\d{3}|I{1,3})_";
 
@@ -59,12 +56,6 @@ public sealed class FileSystemOptions
     public string GetRvtPath(string sectionPath)
     {
         return Path.Combine(sectionPath, RvtDirectoryName);
-    }
-
-    /// <summary>Проверяет, является ли файл файлом Revit.</summary>
-    public bool IsRevitFile(string filePath)
-    {
-        return filePath.EndsWith(RevitFileExtension, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Проверяет, находится ли пользователь на уровне выбора проектов (а не разделов).</summary>

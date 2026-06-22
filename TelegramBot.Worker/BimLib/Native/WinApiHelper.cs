@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace TelegramBot.Worker.BimLib.Native;
 
 /// <summary>
@@ -98,19 +96,4 @@ internal static class WinApiHelper
             fallback);
     }
 
-    /// <summary>Validates that a window handle is not <see cref="IntPtr.Zero"/>.</summary>
-    internal static bool IsValidHandle(IntPtr hwnd)
-    {
-        return hwnd != IntPtr.Zero;
-    }
-
-    /// <summary>
-    /// Safely retrieves the last Win32 error code (0 if no error).
-    /// Call immediately after a P/Invoke method that has <c>SetLastError = true</c>
-    /// and whose return value indicates failure.
-    /// </summary>
-    internal static int GetLastError()
-    {
-        return Marshal.GetLastWin32Error();
-    }
 }

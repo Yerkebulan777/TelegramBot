@@ -56,10 +56,8 @@ public static class Program
                     // BIM-интеграция (Revit + Navisworks)
                     _=services.AddSingleton<RevitVersionDetector>();
                     _=services.AddSingleton<RevitPathResolver>();
-                    _=services.AddSingleton<RevitProcessTracker>();
                     _=services.AddSingleton<DialogDismisser>();
                     _=services.AddSingleton<NavisworksPathResolver>();
-                    _=services.AddSingleton<NavisworksProcessTracker>();
 
                     // Компоненты выполнения команд (декомпозиция CommandExecutionService)
                     _=services.AddSingleton<PartitionPoolManager>();

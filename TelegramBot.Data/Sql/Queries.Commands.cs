@@ -114,28 +114,6 @@ internal static partial class SqlQueries
               AND Lease IS NOT NULL
               AND Lease < @CurrentTimeSec;";
 
-        internal const string UpdateProgress = @"
-            UPDATE Commands
-            SET Progress = @Progress,
-                UpdatedAt = NOW()
-            WHERE CommandId = @CommandId;";
-
-        internal const string UpdateResult = @"
-            UPDATE Commands
-            SET Result = @Result,
-                UpdatedAt = NOW()
-            WHERE CommandId = @CommandId;";
-
-        internal const string GetById = @"
-            SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath,
-                   c.ExecutionOrder, s.UserId, s.Username, s.CorrelationId, c.Partition, c.Priority, c.RetryCount
-            FROM Commands c
-            JOIN Sessions s ON s.SessionId = c.SessionId
-            WHERE c.CommandId = @CommandId
-              AND c.Status != 'Deleted'
-              AND s.Status != 'Deleted'
-              AND (s.UserId = @UserId OR @IsAdmin = true);";
-
         internal const string CountPendingProcessingBySession = @"
             SELECT COUNT(*)
             FROM Commands
