@@ -310,7 +310,7 @@ public sealed class CommandPreparer(
             // Гарантируем, что директория существует.
             Directory.CreateDirectory(_taskDirectory);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
             logger.LogError(ex,
                 "Failed to create task directory '{Dir}' for command {Id} (correlationId={CorrelationId}, command={Cmd}). " +
@@ -337,7 +337,7 @@ public sealed class CommandPreparer(
             File.Move(tmpPath, taskFilePath, overwrite: true);
             return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
             // Запись task-файла не удалась. AddIn не получит filePath (контракт §CLI Arguments запрещает
             // передачу .rvt-пути в CLI args), поэтому команда почти наверняка упадёт. Логируем громко

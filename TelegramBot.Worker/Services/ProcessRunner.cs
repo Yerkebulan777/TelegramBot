@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -109,10 +110,11 @@ public sealed class ProcessRunner(
         // с IOException, чтобы ErrorClassifier пометил это как permanent failure без retry:
         // проблема инфраструктурная (TaskDirectory недоступен/переполнен/заблокирован антивирусом),
         // повторная попытка ничего не даст.
+        var (_, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken);
         if (!commandPreparer.CreateTaskFile(cmd, attemptToken))
         {
             throw new IOException(
-                $"Failed to write task file in TaskDirectory '{commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken).taskFilePath}'. " +
+                $"Failed to write task file in TaskDirectory '{taskFilePath}'. " +
                 $"AddIn cannot proceed without the task file. Check FileSystem:TaskDirectory permissions, disk space, and antivirus.");
         }
 
@@ -126,9 +128,10 @@ public sealed class ProcessRunner(
         {
             _ = process.Start();
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
-            // Process.Start() бросает Win32Exception при отсутствии exe / access denied.
+            // Process.Start() бросает Win32Exception при отсутствии exe / access denied,
+            // InvalidOperationException — если процесс уже стартовал или не задан FileName.
             // Disposed, чтобы Process не утекал: outer finally в RunAsync() увидит process == null
             // и ничего не dispose'нет — поэтому освобождаем здесь.
             process.Dispose();
