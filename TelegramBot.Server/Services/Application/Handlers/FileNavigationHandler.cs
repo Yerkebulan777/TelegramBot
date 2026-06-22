@@ -22,7 +22,7 @@ public sealed class FileNavigationHandler(
 
     public override int Priority => HandlerPriorities.FileNavigation;
 
-    protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;

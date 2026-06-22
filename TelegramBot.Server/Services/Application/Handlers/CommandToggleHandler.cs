@@ -20,7 +20,7 @@ public sealed class CommandToggleHandler(
         return CommandCatalog.All.Select(c => c.Prefix);
     }
 
-    protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         if (!CommandCatalog.TryGetByPrefix(context.ParsedCallback.Prefix, out var command))
         {

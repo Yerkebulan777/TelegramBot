@@ -22,12 +22,7 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
         return SupportedPrefixes;
     }
 
-    public Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
-    {
-        return HandleAsyncInternalAsync(context, cancellationToken);
-    }
-
-    protected abstract Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default);
+    public abstract Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
 
     protected void LogInvalidInput(string fieldName, object? value, string? username, long userId)
     {

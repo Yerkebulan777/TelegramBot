@@ -29,7 +29,7 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.StatusFilter
     ];
 
-    protected override async Task<bool> HandleAsyncInternalAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {
