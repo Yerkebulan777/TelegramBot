@@ -197,22 +197,24 @@ public class TelegramBotHostedService(
     /// Благодаря немедленному возврату SDK может получать следующие обновления,
     /// не дожидаясь завершения обработки текущего.
     /// </summary>
-    /// <summary>
-    /// Быстро ставит обновление в очередь для параллельной обработки.
-    /// SDK вызывает этот метод для каждого обновления по очереди.
-    /// Благодаря немедленному возврату SDK может получать следующие обновления,
-    /// не дожидаясь завершения обработки текущего.
-    /// </summary>
     public async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken token)
     {
         try
         {
             await _updateChannel.Writer.WriteAsync(update, token);
         }
-        catch (Exception)
+        catch (ChannelClosedException ex)
         {
-            // Канал закрыт (shutdown) или отмена — обновление будет получено заново
-            // при следующем polling-цикле после перезапуска
+            logger.LogDebug(ex, "Channel writer rejected update {UpdateId}: channel closed", update.Id);
+        }
+        catch (OperationCanceledException)
+        {
+            // Отмена токена (shutdown) — ожидаемо, обновление уйдёт в следующий polling-цикл
+            logger.LogDebug("Channel writer rejected update {UpdateId}: operation cancelled", update.Id);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to enqueue update {UpdateId}", update.Id);
         }
     }
 

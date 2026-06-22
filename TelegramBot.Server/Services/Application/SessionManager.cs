@@ -5,7 +5,7 @@ namespace TelegramBot.Server.Services.Application;
 
 /// <summary>
 /// Менеджер сессий пользователей с потокобезопасной блокировкой и очисткой.
-/// Исправлена утечка памяти _sessionLocks: семафоры удаляются при RemoveSession.
+/// Семафоры очищаются фоновым CleanUpExpiredSessionsAsync и Dispose().
 /// </summary>
 public class SessionManager : IDisposable
 {
@@ -56,36 +56,7 @@ public class SessionManager : IDisposable
     {
         var sessionLock = _sessionLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
         await sessionLock.WaitAsync();
-        return new SessionLockReleaser(sessionLock, this, userId);
-    }
-
-    /// <summary>
-    /// Удаляет сессию и освобождает ресурсы (семафор).
-    /// </summary>
-    public void RemoveSession(long userId)
-    {
-        _ = _sessions.TryRemove(userId, out _);
-
-        if (_sessionLocks.TryRemove(userId, out var semaphore))
-        {
-            if (semaphore.CurrentCount >= 1)
-            {
-                try
-                {
-                    semaphore.Dispose();
-                    _logger?.LogDebug("Session lock disposed for user {UserId}", userId);
-                }
-                catch (ObjectDisposedException)
-                {
-                    _logger?.LogTrace("Session lock already disposed for user {UserId}", userId);
-                }
-            }
-            else
-            {
-                _ = _sessionLocks.TryAdd(userId, semaphore);
-                _logger?.LogDebug("Session lock still in use for user {UserId}, deferred cleanup", userId);
-            }
-        }
+        return new SessionLockReleaser(sessionLock);
     }
 
     private async Task CleanUpExpiredSessionsAsync(CancellationToken cancellationToken)
@@ -199,10 +170,9 @@ public class SessionManager : IDisposable
         private readonly SemaphoreSlim _sessionLock;
         private int _disposed;
 
-        public SessionLockReleaser(SemaphoreSlim sessionLock, SessionManager _, long __)
+        public SessionLockReleaser(SemaphoreSlim sessionLock)
         {
             _sessionLock = sessionLock;
-            _disposed = 0;
         }
 
         public void Dispose()
