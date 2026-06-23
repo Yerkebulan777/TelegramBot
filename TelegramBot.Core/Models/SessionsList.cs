@@ -12,5 +12,4 @@ public class SessionsList
     public int TotalCommands { get; set; }
     public int DoneCommands { get; set; }
     public int FailedCommands { get; set; }
-    public int ActiveCommands { get; set; }
 }

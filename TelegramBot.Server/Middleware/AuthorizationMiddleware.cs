@@ -98,7 +98,4 @@ public sealed record AccessValidationResult(
     BotUser? User,
     bool IsAdmin,
     bool IsBanned,
-    bool IsActive)
-{
-    public bool HasAccess => IsActive;
-}
+    bool IsActive);

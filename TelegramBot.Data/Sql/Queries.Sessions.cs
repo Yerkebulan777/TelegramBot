@@ -30,8 +30,7 @@ internal static partial class SqlQueries
                 s.Status,
                 COALESCE(stats.DoneCount, 0) + COALESCE(stats.FailedCount, 0) + COALESCE(stats.ActiveCount, 0) AS TotalCommands,
                 COALESCE(stats.DoneCount, 0) AS DoneCommands,
-                COALESCE(stats.FailedCount, 0) AS FailedCommands,
-                COALESCE(stats.ActiveCount, 0) AS ActiveCommands
+                COALESCE(stats.FailedCount, 0) AS FailedCommands
             FROM Sessions s
             LEFT JOIN session_stats stats ON stats.SessionId = s.SessionId
             WHERE s.Status != 'Deleted'

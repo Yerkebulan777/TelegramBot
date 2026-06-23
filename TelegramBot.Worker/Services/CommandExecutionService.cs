@@ -502,8 +502,7 @@ public sealed class CommandExecutionService(
                 }
             }
         }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Error draining pending commands");
         }

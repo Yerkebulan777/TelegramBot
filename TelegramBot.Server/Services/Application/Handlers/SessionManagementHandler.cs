@@ -73,7 +73,6 @@ public sealed class SessionManagementHandler(
         if (string.Equals(filter, "SUMMARY", StringComparison.OrdinalIgnoreCase))
         {
             Logger.LogInformation("{Username} view session summary {SessionId}", context.Username, sessionId);
-            session.IsInStatusView = false;
             session.SessionId = sessionId;
 
             var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
@@ -86,7 +85,6 @@ public sealed class SessionManagementHandler(
         {
             Logger.LogInformation("{Username} view cmds {SessionId} with filter {Filter}",
                 context.Username, sessionId, filter);
-            session.IsInStatusView = true;
             session.SessionId = sessionId;
 
             var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
@@ -112,7 +110,6 @@ public sealed class SessionManagementHandler(
 
         Logger.LogInformation("{Username} requested delete confirmation for session {SessionId}",
             context.Username, sessionId);
-        context.Session.IsInStatusView = true;
 
         var keyboard = BuildConfirmationKeyboard(
             CallbackPrefixes.ConfirmDeleteSession, sessionId.ToString(),
@@ -141,7 +138,6 @@ public sealed class SessionManagementHandler(
 
         Logger.LogInformation("{Username} requested delete confirmation for command {CommandId}",
             context.Username, commandId);
-        context.Session.IsInStatusView = false;
 
         var keyboard = BuildConfirmationKeyboard(
             CallbackPrefixes.ConfirmDeleteCommand, $"{commandId}:{filter}",
@@ -193,7 +189,6 @@ public sealed class SessionManagementHandler(
             return true;
         }
 
-        context.Session.IsInStatusView = true;
         await ShowSessionsListAsync(context);
 
         return true;
@@ -296,7 +291,6 @@ public sealed class SessionManagementHandler(
         {
             if (await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
             {
-                context.Session.IsInStatusView = true;
                 await ShowSessionsListAsync(context);
             }
         }

@@ -29,7 +29,7 @@ public sealed class RateLimiter
         var now = DateTime.UtcNow;
         var requestWindow = _requests.GetOrAdd(userId, static _ => new RequestWindow());
 
-        lock (requestWindow.SyncRoot)
+        lock (requestWindow)
         {
             // Очистка expired записей в той же критической секции
             while (requestWindow.Timestamps.TryPeek(out var timestamp) && now - timestamp > _window)
@@ -42,8 +42,7 @@ public sealed class RateLimiter
             // (предыдущая версия проверяла IsEmpty после Enqueue — ветка была мёртвой).
             if (requestWindow.Timestamps.IsEmpty)
             {
-                _ = ((ICollection<KeyValuePair<long, RequestWindow>>)_requests).Remove(
-                    new KeyValuePair<long, RequestWindow>(userId, requestWindow));
+                _ = _requests.TryRemove(userId, out _);
             }
 
             // Проверка лимита и добавление нового timestamp
@@ -61,6 +60,5 @@ public sealed class RateLimiter
     private sealed class RequestWindow
     {
         public ConcurrentQueue<DateTime> Timestamps { get; } = new();
-        public object SyncRoot { get; } = new object();
     }
 }

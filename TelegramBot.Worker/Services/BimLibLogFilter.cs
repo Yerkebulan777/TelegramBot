@@ -8,15 +8,13 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 internal static class BimLibLogFilter
 {
-    private const string BimLibPrefix = "\"TelegramBot.Worker.BimLib";
-
     /// <summary>
     /// Фильтр: true если событие относится к BimLib (SourceContext содержит "TelegramBot.Worker.BimLib").
-    /// Serilog оборачивает строковые ScalarValue в кавычки, поэтому проверяем с '"'.
     /// </summary>
     public static bool IsBimLibEvent(LogEvent logEvent)
     {
-        return logEvent.Properties.TryGetValue("SourceContext", out var sourceContext)
-               && sourceContext.ToString()?.StartsWith(BimLibPrefix, StringComparison.Ordinal) == true;
+        return logEvent.Properties.TryGetValue("SourceContext", out var sc)
+               && sc is ScalarValue { Value: string s }
+               && s.StartsWith("TelegramBot.Worker.BimLib", StringComparison.Ordinal);
     }
 }

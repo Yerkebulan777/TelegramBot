@@ -415,9 +415,9 @@ public sealed class ProcessRunner(
                 _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
             var newRetryCount = await commandDataService.ScheduleRetryAsync(
                 cmd.CommandId, nextRetryAt, errorMessage);
-            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
+            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
-                nextRetryAt.ToString("O"), exitCode, sw.ElapsedMilliseconds, errorMessage);
+                nextRetryAt, exitCode, sw.ElapsedMilliseconds, errorMessage);
             await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
         }
         else

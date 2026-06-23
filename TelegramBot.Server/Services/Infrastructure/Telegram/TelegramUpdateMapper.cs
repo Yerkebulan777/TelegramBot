@@ -5,7 +5,7 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public class TelegramUpdateMapper
 {
-    public MessageDto MapMessage(Message message)
+    private MessageDto MapMessage(Message message)
     {
         var msg = message.From
             ?? throw new InvalidOperationException("Message.From is null.");
@@ -15,12 +15,11 @@ public class TelegramUpdateMapper
             Username = msg.Username,
             ChatId = message.Chat.Id,
             Text = message.Text,
-            Date = message.Date,
             MessageId = message.MessageId
         };
     }
 
-    public CallbackQueryDto MapCallback(CallbackQuery callback)
+    private CallbackQueryDto MapCallback(CallbackQuery callback)
     {
         var msg = callback.Message
             ?? throw new InvalidOperationException("CallbackQuery.Message is null.");

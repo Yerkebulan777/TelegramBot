@@ -43,20 +43,6 @@ internal static class User32
     // return-value validation, and structured error logging.
     // ---------------------------------------------------------------
 
-    /// <summary>Safe: retrieves window title length. Returns 0 on failure.</summary>
-    internal static int GetWindowTextLengthSafe(IntPtr hWnd)
-    {
-        try
-        {
-            return GetWindowTextLength(hWnd);
-        }
-        catch (Exception ex)
-        {
-            WinApiHelper.LogError(nameof(GetWindowTextLength), ex, $"hWnd={hWnd}");
-            return 0;
-        }
-    }
-
     /// <summary>Safe: retrieves window title. Returns <c>null</c> on failure.</summary>
     internal static string? GetWindowTextSafe(IntPtr hWnd)
     {

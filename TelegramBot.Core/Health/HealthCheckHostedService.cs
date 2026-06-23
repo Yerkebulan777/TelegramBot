@@ -193,7 +193,7 @@ public sealed class HealthCheckHostedService(
         {
             logger.LogWarning(ex, "Health check error for path {Path}", requestLine.Path);
             return (503, "application/json",
-                $$"""{"status":"error","message":"{{JsonEscape(ex.Message)}}"}""");
+                $$"""{"status":"error","message":{{JsonSerializer.Serialize(ex.Message)}}}""");
         }
     }
 
@@ -337,16 +337,6 @@ public sealed class HealthCheckHostedService(
         var assembly = Assembly.GetEntryAssembly() ?? typeof(HealthCheckHostedService).Assembly;
         var version = assembly.GetName().Version;
         return version?.ToString() ?? "unknown";
-    }
-
-    /// <summary>Экранирует строку для JSON.</summary>
-    private static string JsonEscape(string value)
-    {
-        return value.Replace("\\", "\\\\")
-             .Replace("\"", "\\\"")
-             .Replace("\n", "\\n")
-             .Replace("\r", "\\r")
-             .Replace("\t", "\\t");
     }
 }
 

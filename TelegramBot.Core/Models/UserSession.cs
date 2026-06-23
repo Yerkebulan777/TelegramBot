@@ -49,9 +49,6 @@ public class UserSession
         }
     }
 
-    /// <summary>True when the user is viewing the top-level sessions list (status view).</summary>
-    public bool IsInStatusView { get; set; }
-
     /// <summary>Текущий фильтр в /status: ALL, ACTIVE, DONE, FAILED.</summary>
     public string StatusFilter { get; set; } = "ALL";
 
@@ -151,7 +148,6 @@ public class UserSession
         ClearSelectedFiles();
         ClearPendingCommands();
         CurrentPath = rootPath;
-        IsInStatusView = false;
         CommandSelectionMessageId = null;
         IsFileSelectionActive = false;
         FileSelectionMessageId = null;

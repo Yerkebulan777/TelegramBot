@@ -83,7 +83,6 @@ public sealed partial class SlashCommandService(
             case "/status":
                 logger.LogDebug("Executing /status for {Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
-                session.IsInStatusView = true;
                 session.StatusFilter = StatusFilters.All;
 
                 var sent = await sessionsListRenderer.SendNewAsync(userId, session.StatusFilter);
@@ -118,7 +117,7 @@ public sealed partial class SlashCommandService(
 
     private async Task<UserCommandContext> ValidateUserContextAsync(long userId, string command, MessageDto message, UserSession session)
     {
-        var username = message.Username!;
+        var username = message.Username;
 
         var text = NormalizeCommandText(command);
 
@@ -144,12 +143,12 @@ public sealed partial class SlashCommandService(
             text,
             username,
             user,
-            text == "/start" || access.HasAccess);
+            text == "/start" || access.IsActive);
     }
 
     private static CommandStrategy ResolveCommandStrategy(UserCommandContext context)
     {
-        return context.HasAccess switch
+        return context.IsActive switch
         {
             false => CommandStrategy.AccessDenied,
             true => context.Command switch
@@ -178,7 +177,7 @@ public sealed partial class SlashCommandService(
 
             case CommandStrategy.Start:
                 context.Session.Reset(_options.RootPath);
-                if (context.HasAccess)
+                if (context.IsActive)
                 {
                     await SendHelpMessageAsync(context.UserId, context.Session);
                 }
@@ -597,16 +596,16 @@ public sealed partial class SlashCommandService(
         await CleanupCurrentViewAsync(userId, session, warning?.Id);
     }
 
-    private async Task CleanupCurrentViewAsync(long userId, UserSession session, params int?[] extraKeepMessageIds)
+    private async Task CleanupCurrentViewAsync(long userId, UserSession session, int? extraKeepMessageId = null)
     {
         var keepMessageIds = new[]
             {
                 session.CommandSelectionMessageId,
                 session.FileSelectionMessageId,
                 session.StatusMessageId,
-                session.LastActionsMessageId
+                session.LastActionsMessageId,
+                extraKeepMessageId
             }
-            .Concat(extraKeepMessageIds)
             .Where(messageId => messageId.HasValue)
             .Select(messageId => messageId!.Value);
 
@@ -784,7 +783,7 @@ public sealed partial class SlashCommandService(
         string Command,
         string Username,
         BotUser? User,
-        bool HasAccess);
+        bool IsActive);
 
     private sealed record CommandExecutionResult(CommandExecutionStatus Status)
     {

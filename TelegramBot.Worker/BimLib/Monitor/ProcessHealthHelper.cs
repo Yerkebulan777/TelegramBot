@@ -23,13 +23,13 @@ internal static class ProcessHealthHelper
                 ? RevitProcessStatus.Healthy
                 : RevitProcessStatus.NotResponding;
 
-            return new RevitProcessHealth(process.Id, status, memoryMb, duration, responding);
+            return new RevitProcessHealth(status, memoryMb, duration);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to check health for {ProcessName} process {ProcessId}",
                 processDisplayName, process.Id);
-            return new RevitProcessHealth(process.Id, RevitProcessStatus.Error, 0, TimeSpan.Zero, false);
+            return new RevitProcessHealth(RevitProcessStatus.Error, 0, TimeSpan.Zero);
         }
     }
 }
