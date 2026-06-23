@@ -26,7 +26,8 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.ConfirmDeleteCommand,
         CallbackPrefixes.DeleteSessionByType,
         CallbackPrefixes.ConfirmDeleteSessionByType,
-        CallbackPrefixes.StatusFilter
+        CallbackPrefixes.StatusFilter,
+        CallbackPrefixes.StatusPage
     ];
 
     public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -41,6 +42,7 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.DeleteSessionByType => await HandleDeleteByTypeConfirmationAsync(context),
             CallbackPrefixes.ConfirmDeleteSessionByType => await HandleDeleteByTypeAsync(context),
             CallbackPrefixes.StatusFilter => await HandleStatusFilterAsync(context),
+            CallbackPrefixes.StatusPage => await HandleStatusPageAsync(context),
             _ => false
         };
     }
@@ -54,6 +56,23 @@ public sealed class SessionManagementHandler(
             : context.ParsedCallback.Argument;
 
         context.Session.StatusFilter = filter;
+        // Сброс страницы при смене фильтра — новый список может быть короче.
+        context.Session.StatusPage = 0;
+        await ShowSessionsListAsync(context);
+        return true;
+    }
+
+    // ────────────────────────── Page ──────────────────────────
+
+    private async Task<bool> HandleStatusPageAsync(CallbackContext context)
+    {
+        if (!int.TryParse(context.ParsedCallback.Argument, out var page) || page < 0)
+        {
+            LogInvalidInput("page", context.ParsedCallback.Argument, context.Username, context.UserId);
+            return true;
+        }
+
+        context.Session.StatusPage = page;
         await ShowSessionsListAsync(context);
         return true;
     }
@@ -326,7 +345,7 @@ public sealed class SessionManagementHandler(
         var session = context.Session;
         var targetMessageId = session.StatusMessageId ?? context.MessageId;
         await sessionsListRenderer.EditExistingAsync(
-            context.UserId, targetMessageId, session.StatusFilter, context.Username);
+            context.UserId, targetMessageId, session.StatusFilter, session.StatusPage, context.Username);
         session.StatusMessageId ??= context.MessageId;
     }
 

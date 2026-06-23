@@ -73,4 +73,7 @@ public static class CallbackPrefixes
 
     /// <summary>Фильтр статуса в /status.</summary>
     public const string StatusFilter = "STATUSFILTER:";
+
+    /// <summary>Постраничная навигация в /status.</summary>
+    public const string StatusPage = "STATUSPAGE:";
 }

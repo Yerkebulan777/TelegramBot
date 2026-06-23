@@ -17,32 +17,39 @@ public sealed class SessionsListRenderer(
     ITelegramOutputService outputService,
     ILogger<SessionsListRenderer> logger)
 {
-    /// <summary>Строит текст сообщения и клавиатуру для текущего фильтра.</summary>
+    /// <summary>Строит текст сообщения и клавиатуру для текущего фильтра и страницы.</summary>
     private async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
-        string filter, CancellationToken cancellationToken = default)
+        string filter, int page, CancellationToken cancellationToken = default)
     {
         var sessionsTask = dataServices.Sessions.GetSessionsListFilteredAsync(filter);
         var countTask = dataServices.Sessions.CountSessionsFilteredAsync(filter);
         await Task.WhenAll(sessionsTask, countTask);
 
-        var text = $"{StatusFilters.GetTitle(filter)} (всего {await countTask})";
-        var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(await sessionsTask, filter);
+        var sessions = await sessionsTask;
+        var total = await countTask;
+        var (clampedPage, totalPages) = KeyboardBuilder.GetSessionsPageInfo(total, page);
+
+        var text = totalPages > 1
+            ? $"{StatusFilters.GetTitle(filter)} (всего {total} • стр. {clampedPage + 1}/{totalPages})"
+            : $"{StatusFilters.GetTitle(filter)} (всего {total})";
+
+        var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessions, filter, clampedPage);
         return (text, keyboard);
     }
 
     /// <summary>Отправляет список как новое сообщение (первый запуск /status).</summary>
-    public async Task<Message?> SendNewAsync(long chatId, string filter, CancellationToken cancellationToken = default)
+    public async Task<Message?> SendNewAsync(long chatId, string filter, int page = 0, CancellationToken cancellationToken = default)
     {
-        var (text, keyboard) = await BuildAsync(filter, cancellationToken);
+        var (text, keyboard) = await BuildAsync(filter, page, cancellationToken);
         return await outputService.SendMessageWithKeyboardAsync(chatId, text, keyboard);
     }
 
-    /// <summary>Редактирует существующее сообщение /status (переключение фильтра, возврат после удаления).</summary>
+    /// <summary>Редактирует существующее сообщение /status (переключение фильтра/страницы, возврат после удаления).</summary>
     public async Task EditExistingAsync(
-        long chatId, int targetMessageId, string filter, string username, CancellationToken cancellationToken = default)
+        long chatId, int targetMessageId, string filter, int page, string username, CancellationToken cancellationToken = default)
     {
-        var (text, keyboard) = await BuildAsync(filter, cancellationToken);
-        logger.LogInformation("{Username} view sessions — filter={Filter}", username, filter);
+        var (text, keyboard) = await BuildAsync(filter, page, cancellationToken);
+        logger.LogInformation("{Username} view sessions — filter={Filter}, page={Page}", username, filter, page);
         await outputService.EditMessageTextWithKeyboardAsync(chatId, targetMessageId, text, keyboard);
     }
 }

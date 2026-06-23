@@ -8,6 +8,13 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 {
+    /// <summary>
+    /// Размер страницы списка сессий в /status. Подобран так, чтобы суммарный
+    /// размер reply_markup (callback_data + label'ов) не превышал лимит Telegram
+    /// (~4096 байт) даже с длинными именами проектов и username'ами.
+    /// </summary>
+    public const int SessionsPageSize = 8;
+
     public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
     {
         return fileNavigationService.GetSectionsViewAsync(userId, session.CurrentPath);
@@ -32,10 +39,19 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
     }
 
-    /// <summary>Строит клавиатуру списка сессий с фильтрами.</summary>
+    /// <summary>Строит клавиатуру списка сессий с фильтрами и постраничной навигацией.</summary>
+    /// <param name="page">Запрошенная страница (0-based). Клампится в валидный диапазон.</param>
     public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(
-        List<SessionsList> sessionsList, string currentFilter)
+        List<SessionsList> sessionsList, string currentFilter, int page = 0)
     {
+        var total = sessionsList.Count;
+        var totalPages = total > 0
+            ? (total + SessionsPageSize - 1) / SessionsPageSize
+            : 0;
+        var clampedPage = totalPages > 0
+            ? Math.Clamp(page, 0, totalPages - 1)
+            : 0;
+
         var buttons = new List<List<InlineKeyboardButton>>
         {
             StatusFilters.AllDescriptors
@@ -45,7 +61,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
                 .ToList()
         };
 
-        foreach (var session in sessionsList)
+        foreach (var session in sessionsList.Skip(clampedPage * SessionsPageSize).Take(SessionsPageSize))
         {
             var finished = session.DoneCommands + session.FailedCommands == session.TotalCommands;
             var progressIcon = finished ? "✅" : "🔄";
@@ -60,7 +76,38 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             ]);
         }
 
+        if (totalPages > 1)
+        {
+            var navRow = new List<InlineKeyboardButton>();
+            if (clampedPage > 0)
+            {
+                navRow.Add(InlineKeyboardButton.WithCallbackData(
+                    "◀️ Назад", $"{CallbackPrefixes.StatusPage}{clampedPage - 1}"));
+            }
+            if (clampedPage < totalPages - 1)
+            {
+                navRow.Add(InlineKeyboardButton.WithCallbackData(
+                    "Вперёд ▶️", $"{CallbackPrefixes.StatusPage}{clampedPage + 1}"));
+            }
+            if (navRow.Count > 0)
+            {
+                buttons.Add(navRow);
+            }
+        }
+
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
+    }
+
+    /// <summary>Вычисляет (clampedPage, totalPages) для отображения в тексте сообщения /status.</summary>
+    public static (int ClampedPage, int TotalPages) GetSessionsPageInfo(int totalCount, int page)
+    {
+        var totalPages = totalCount > 0
+            ? (totalCount + SessionsPageSize - 1) / SessionsPageSize
+            : 0;
+        var clampedPage = totalPages > 0
+            ? Math.Clamp(page, 0, totalPages - 1)
+            : 0;
+        return (clampedPage, totalPages);
     }
 
     private static string FilterLabel(string title, string currentFilter, string filterKey) =>

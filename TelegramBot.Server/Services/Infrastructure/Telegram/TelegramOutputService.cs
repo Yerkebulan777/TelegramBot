@@ -129,8 +129,33 @@ public class TelegramOutputService(
 
     public async Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
     {
-        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
+        // Сначала пробуем отправить с inline-клавиатурой без retry-цикла, чтобы
+        // поймать permanent-ошибку «reply markup is too long» и сразу упасть в
+        // fallback на plain-text (без клавиатуры). Для остальных transient-ошибок
+        // (429, сетевые) — делегируем в ExecuteWithRetryAsync.
+        try
+        {
+            return await botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
+        }
+        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
+        {
+            logger.LogWarning(
+                "SendMessageWithKeyboardAsync: reply markup too long for {UserId}; falling back to text-only send",
+                userId);
+            return await ExecuteWithRetryAsync(() => botClient.SendMessage(
+                chatId: userId, text: message, parseMode: ParseMode.Markdown), userId);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Transient-ошибка — попадаем в retry-цикл (429, сетевые и т.п.).
+            return await ExecuteWithRetryAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+        }
     }
 
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
@@ -171,6 +196,13 @@ public class TelegramOutputService(
         {
             logger.LogDebug("Skipped unchanged message reply markup edit for {UserId} messageId={MessageId}", userId, messageId);
         }
+        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
+        {
+            // Существующая клавиатура остаётся — фронт не ломаем, только логируем.
+            logger.LogWarning(
+                "EditMessageReplyMarkupAsync: reply markup too long for {UserId} messageId={MessageId}; existing keyboard kept",
+                userId, messageId);
+        }
         catch (ApiRequestException ex)
         {
             logger.LogWarning(ex, "Failed to edit message reply markup for {UserId} messageId={MessageId}", userId, messageId);
@@ -186,6 +218,28 @@ public class TelegramOutputService(
         catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
             logger.LogDebug("Skipped unchanged message text with keyboard edit for {UserId} messageId={MessageId}", userId, messageId);
+        }
+        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
+        {
+            logger.LogWarning(
+                "EditMessageTextWithKeyboardAsync: reply markup too long for {UserId} messageId={MessageId}; " +
+                "falling back to text-only edit",
+                userId, messageId);
+            try
+            {
+                _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
+            }
+            catch (ApiRequestException fbEx) when (IsMessageNotModified(fbEx))
+            {
+                logger.LogDebug(
+                    "Skipped unchanged text-only fallback for {UserId} messageId={MessageId}", userId, messageId);
+            }
+            catch (ApiRequestException fbEx)
+            {
+                logger.LogWarning(
+                    fbEx,
+                    "Text-only fallback edit failed for {UserId} messageId={MessageId}", userId, messageId);
+            }
         }
         catch (ApiRequestException ex)
         {
@@ -213,6 +267,19 @@ public class TelegramOutputService(
     {
         return ex.ErrorCode == 400
             && ex.Message.Contains("message is not modified", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Telegram API: HTTP 400 «Bad Request: reply markup is too long».
+    /// Срабатывает, когда суммарный размер callback_data всех кнопок inline-клавиатуры
+    /// превышает ~4096 байт. Лечится пагинацией (см. KeyboardBuilder.SessionsPageSize)
+    /// или fallback на текст без клавиатуры.
+    /// </summary>
+    private static bool IsReplyMarkupTooLong(ApiRequestException ex)
+    {
+        return ex.ErrorCode == 400
+            && ex.Message.Contains("reply markup", StringComparison.OrdinalIgnoreCase)
+            && ex.Message.Contains("too long", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
