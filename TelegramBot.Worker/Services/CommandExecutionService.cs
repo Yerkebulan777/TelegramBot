@@ -93,7 +93,7 @@ public sealed class CommandExecutionService(
             }
             else
             {
-                logger.LogDebug("Fallback polling triggered after {TimeoutSec}s", fallbackTimeoutSec);
+                logger.LogInformation("Worker heartbeat: checking pending commands after {TimeoutSec}s without PostgreSQL notification", fallbackTimeoutSec);
             }
 
             await DrainPendingCommandsAsync(stoppingToken);

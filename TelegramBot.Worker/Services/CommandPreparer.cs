@@ -335,6 +335,11 @@ public sealed class CommandPreparer(
             var tmpPath = taskFilePath + ".tmp";
             File.WriteAllText(tmpPath, json);
             File.Move(tmpPath, taskFilePath, overwrite: true);
+
+            logger.LogInformation(
+                "Task file created: id={Id}, correlationId={CorrelationId}, command={Cmd}, taskFile={TaskFilePath}, resultFile={ResultFilePath}, sourceFile={SourceFile}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, taskFilePath, resultFilePath, cmd.FilePath);
+
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
@@ -359,14 +364,31 @@ public sealed class CommandPreparer(
         try
         {
             var (resultFilePath, taskFilePath) = GetTaskFilePaths(commandId, attemptToken);
+            var deletedFiles = new List<string>(capacity: 2);
+
             if (File.Exists(taskFilePath))
             {
                 File.Delete(taskFilePath);
+                deletedFiles.Add(taskFilePath);
             }
 
             if (File.Exists(resultFilePath))
             {
                 File.Delete(resultFilePath);
+                deletedFiles.Add(resultFilePath);
+            }
+
+            if (deletedFiles.Count > 0)
+            {
+                logger.LogInformation(
+                    "Temp files cleaned: commandId={CommandId}, attemptToken={AttemptToken}, files={Files}",
+                    commandId, attemptToken, string.Join("; ", deletedFiles));
+            }
+            else
+            {
+                logger.LogDebug(
+                    "No temp files to clean: commandId={CommandId}, attemptToken={AttemptToken}, taskFile={TaskFilePath}, resultFile={ResultFilePath}",
+                    commandId, attemptToken, taskFilePath, resultFilePath);
             }
         }
         catch (Exception ex)

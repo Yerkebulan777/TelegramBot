@@ -119,9 +119,13 @@ public sealed class ProcessRunner(
         }
 
         var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg, attemptToken);
+        var (resultFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken);
 
         logger.LogInformation("Command start: id={Id}, correlationId={CorrelationId}, command={Cmd}, attempt={Attempt}",
             cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
+        logger.LogInformation(
+            "External process start: id={Id}, correlationId={CorrelationId}, exe={ExecutablePath}, args={Arguments}, workingDirectory={WorkingDirectory}, taskFile={TaskFilePath}, expectedResultFile={ResultFilePath}",
+            cmd.CommandId, cmd.CorrelationId, startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory, taskFilePath, resultFilePath);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try
@@ -230,6 +234,14 @@ public sealed class ProcessRunner(
 
         // Пробуем прочитать result-файл от плагина
         var resultReadStatus = TryReadResultFile(cmd.CommandId, attemptToken, out var result, out var resultReadError);
+        if (resultReadStatus == ResultFileReadStatus.NotFound)
+        {
+            var (expectedResultFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken);
+            logger.LogInformation(
+                "Result file not found: id={Id}, correlationId={CorrelationId}, command={Cmd}, expectedResultFile={ResultFilePath}. Falling back to process exit code.",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, expectedResultFilePath);
+        }
+
         if (resultReadStatus == ResultFileReadStatus.Valid)
         {
             if (result.Status == ResultStatus.Done)
