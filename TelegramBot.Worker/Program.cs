@@ -108,25 +108,7 @@ public static class Program
                     });
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>
-                    {
-                        SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker");
-
-                        // Отдельный файл для BIM-специфичных логов (Revit, Navisworks — TelegramBot.Worker.BimLib.*)
-                        var logBasePath = context.Configuration
-                            .GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.LogDirectory)];
-                        if (string.IsNullOrWhiteSpace(logBasePath))
-                        {
-                            logBasePath = null;
-                        }
-
-                        _=loggerConfiguration.WriteTo.Logger(lc => lc
-                            .MinimumLevel.Information()
-                            .Enrich.FromLogContext()
-                            .Filter.ByIncludingOnly(BimLibLogFilter.IsBimLibEvent)
-                            .WriteTo.File(
-                                SerilogSetup.GetLogPath(Path.Combine("Worker", "BimLib"), logBasePath),
-                                rollingInterval: RollingInterval.Day));
-                    })
+                    SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker"))
                 .Build();
 
             // Initialize WinApiHelper logger for safe P/Invoke error logging
