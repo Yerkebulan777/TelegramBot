@@ -9,11 +9,11 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 {
     /// <summary>
-    /// Размер страницы списка сессий в /status. Подобран так, чтобы суммарный
-    /// размер reply_markup (callback_data + label'ов) не превышал лимит Telegram
-    /// (~4096 байт) даже с длинными именами проектов и username'ами.
+    /// Размер страницы списков в /status. Длинные подписи кнопок обрезаются,
+    /// чтобы не превышать лимит Telegram reply_markup (~4096 байт).
     /// </summary>
-    public const int SessionsPageSize = 8;
+    public const int SessionsPageSize = 15;
+    private const int MaxListButtonTextLength = 64;
 
     public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
     {
@@ -68,10 +68,11 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             var errorInfo = session.FailedCommands > 0 ? $" ⚠️{session.FailedCommands}" : "";
             var projectName = string.IsNullOrEmpty(session.ProjectName) ? "" : $" {session.ProjectName}";
 
+            var label = $"{projectName} 👤{session.Username} 📅{session.Date:dd.MM.yy} ({session.DoneCommands}/{session.TotalCommands}){progressIcon}{errorInfo}";
             buttons.Add(
             [
                 InlineKeyboardButton.WithCallbackData(
-                    $"{projectName} 👤{session.Username} 📅{session.Date:dd.MM.yy} ({session.DoneCommands}/{session.TotalCommands}){progressIcon}{errorInfo}",
+                    TruncateListButtonText(label),
                     $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
             ]);
         }
@@ -128,7 +129,8 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
     }
 
-    public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(List<SessionCommands> sessionCommands, int sessionId, string selectedFilter)
+    public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(
+        List<SessionCommands> sessionCommands, int sessionId, string selectedFilter, int page = 0)
     {
         var buttons = new List<List<InlineKeyboardButton>>();
 
@@ -175,29 +177,55 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             ? sessionCommands
             : sessionCommands.Where(c => string.Equals(c.Command, selectedFilter, StringComparison.OrdinalIgnoreCase)).ToList();
 
-        foreach (var sessionCommand in visibleCommands)
+        var totalFiles = visibleCommands.Count;
+        var totalFilePages = totalFiles > 0
+            ? (totalFiles + SessionsPageSize - 1) / SessionsPageSize
+            : 0;
+        var clampedFilePage = totalFilePages > 0
+            ? Math.Clamp(page, 0, totalFilePages - 1)
+            : 0;
+
+        foreach (var sessionCommand in visibleCommands.Skip(clampedFilePage * SessionsPageSize).Take(SessionsPageSize))
         {
             var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
             var fileName = Path.GetFileName(sessionCommand.FileName);
 
             if (sessionCommand.Status == "pending")
             {
+                var label = $"{statusIcon} {sessionCommand.Command}: {fileName} ✖️";
                 buttons.Add(
                 [
                     InlineKeyboardButton.WithCallbackData(
-                        $"{statusIcon} {sessionCommand.Command}: {fileName} ✖️",
+                        TruncateListButtonText(label),
                         $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}:{selectedFilter}")
                 ]);
             }
             else
             {
+                var label = $"{statusIcon} {sessionCommand.Command}: {fileName}";
                 buttons.Add(
                 [
                     InlineKeyboardButton.WithCallbackData(
-                        $"{statusIcon} {sessionCommand.Command}: {fileName}",
+                        TruncateListButtonText(label),
                         $"{CallbackPrefixes.SessionDetails}{sessionId}:{selectedFilter}")
                 ]);
             }
+        }
+
+        if (totalFilePages > 1)
+        {
+            var navRow = new List<InlineKeyboardButton>();
+            if (clampedFilePage > 0)
+            {
+                navRow.Add(InlineKeyboardButton.WithCallbackData(
+                    "◀️ Назад", $"{CallbackPrefixes.CommandsPage}{sessionId}:{selectedFilter}:{clampedFilePage - 1}"));
+            }
+            if (clampedFilePage < totalFilePages - 1)
+            {
+                navRow.Add(InlineKeyboardButton.WithCallbackData(
+                    "Вперёд ▶️", $"{CallbackPrefixes.CommandsPage}{sessionId}:{selectedFilter}:{clampedFilePage + 1}"));
+            }
+            buttons.Add(navRow);
         }
 
         return Task.FromResult(new InlineKeyboardMarkup(buttons));
@@ -214,6 +242,14 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             "Deleted" => "🗑",
             _ => "❓"
         };
+    }
+
+    private static string TruncateListButtonText(string text)
+    {
+        const string suffix = "...";
+        return text.Length <= MaxListButtonTextLength
+            ? text
+            : text[..(MaxListButtonTextLength - suffix.Length)] + suffix;
     }
 
     private static InlineKeyboardMarkup BuildSelectableCommandsKeyboard(

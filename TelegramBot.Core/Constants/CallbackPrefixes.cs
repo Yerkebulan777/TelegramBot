@@ -76,4 +76,7 @@ public static class CallbackPrefixes
 
     /// <summary>Постраничная навигация в /status.</summary>
     public const string StatusPage = "STATUSPAGE:";
+
+    /// <summary>Постраничная навигация по командам сессии. Аргумент: "sessionId:filter:page".</summary>
+    public const string CommandsPage = "CMDPAGE:";
 }

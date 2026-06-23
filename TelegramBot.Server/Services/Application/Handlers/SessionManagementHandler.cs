@@ -27,7 +27,8 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.DeleteSessionByType,
         CallbackPrefixes.ConfirmDeleteSessionByType,
         CallbackPrefixes.StatusFilter,
-        CallbackPrefixes.StatusPage
+        CallbackPrefixes.StatusPage,
+        CallbackPrefixes.CommandsPage
     ];
 
     public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -43,6 +44,7 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.ConfirmDeleteSessionByType => await HandleDeleteByTypeAsync(context),
             CallbackPrefixes.StatusFilter => await HandleStatusFilterAsync(context),
             CallbackPrefixes.StatusPage => await HandleStatusPageAsync(context),
+            CallbackPrefixes.CommandsPage => await HandleCommandsPageAsync(context),
             _ => false
         };
     }
@@ -77,6 +79,35 @@ public sealed class SessionManagementHandler(
         return true;
     }
 
+    /// <summary>Страница списка файлов внутри сессии. Аргумент: "sessionId:filter:page".</summary>
+    private async Task<bool> HandleCommandsPageAsync(CallbackContext context)
+    {
+        var parts = context.ParsedCallback.Argument.Split(':', 3);
+        if (parts.Length < 3
+            || !int.TryParse(parts[0], out var sessionId) || sessionId <= 0
+            || !int.TryParse(parts[2], out var page) || page < 0)
+        {
+            LogInvalidInput("sessionId:filter:page", context.ParsedCallback.Argument, context.Username, context.UserId);
+            return true;
+        }
+
+        await RenderCommandsViewAsync(context, sessionId, parts[1], page);
+        return true;
+    }
+
+    /// <summary>Загружает команды сессии и редактирует сообщение клавиатурой/текстом списка файлов.</summary>
+    private async Task RenderCommandsViewAsync(CallbackContext context, int sessionId, string filter, int page = 0)
+    {
+        context.Session.SessionId = sessionId;
+
+        var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
+        var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
+        var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter, page);
+        await outputService.EditMessageTextWithKeyboardAsync(
+            context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
+        context.Session.StatusMessageId = context.MessageId;
+    }
+
     // ────────────────────────── Session Details ──────────────────────────
 
     private async Task<bool> HandleSessionDetailsAsync(CallbackContext context)
@@ -104,15 +135,7 @@ public sealed class SessionManagementHandler(
         {
             Logger.LogInformation("{Username} view cmds {SessionId} with filter {Filter}",
                 context.Username, sessionId, filter);
-            session.SessionId = sessionId;
-
-            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
-            var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
-
-            var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter);
-            await outputService.EditMessageTextWithKeyboardAsync(
-                context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
-            session.StatusMessageId = context.MessageId;
+            await RenderCommandsViewAsync(context, sessionId, filter);
         }
 
         return true;
@@ -315,13 +338,7 @@ public sealed class SessionManagementHandler(
         }
         else
         {
-            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
-            var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
-
-            var newKeyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter);
-            await outputService.EditMessageTextWithKeyboardAsync(
-                context.UserId, context.MessageId,
-                BuildStatusReply(sessionStatus, sessionCommands), newKeyboard);
+            await RenderCommandsViewAsync(context, sessionId, filter);
         }
     }
 
