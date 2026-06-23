@@ -283,8 +283,10 @@ public sealed class CommandPreparer(
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
+            // CP1251, не UTF-8: системные ошибки Win32/Chromium (Revit) на ru-RU Windows
+            // пишутся в ANSI-кодировке локали, UTF-8-декодер превращал их в "????" в логах.
+            StandardOutputEncoding = Encoding.GetEncoding(1251),
+            StandardErrorEncoding = Encoding.GetEncoding(1251)
         };
     }
 

@@ -164,52 +164,19 @@ public sealed class ProcessRunner(
         // Потоковая обработка stdout/stderr с ограничением размера
         void OnOutputDataReceived(object? sender, DataReceivedEventArgs e)
         {
-            if (e.Data != null && !outputTruncated)
+            if (e.Data != null)
             {
-                lock (outputBuilder)
-                {
-                    if (outputBuilder.Length + e.Data.Length + 1 <= MaxOutputChars)
-                    {
-                        _=outputBuilder.AppendLine(e.Data);
-                    }
-                    else
-                    {
-                        // Дописываем сколько влезает и ставим флаг truncation
-                        var remaining = MaxOutputChars - outputBuilder.Length;
-                        if (remaining > 0)
-                        {
-                            _=outputBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
-                        }
-                        outputTruncated = true;
-                    }
-                }
+                AppendBounded(outputBuilder, e.Data, ref outputTruncated, MaxOutputChars);
             }
         }
-        ;
 
         void OnErrorDataReceived(object? sender, DataReceivedEventArgs e)
         {
-            if (e.Data != null && !errorTruncated)
+            if (e.Data != null)
             {
-                lock (errorBuilder)
-                {
-                    if (errorBuilder.Length + e.Data.Length + 1 <= MaxOutputChars)
-                    {
-                        _=errorBuilder.AppendLine(e.Data);
-                    }
-                    else
-                    {
-                        var remaining = MaxOutputChars - errorBuilder.Length;
-                        if (remaining > 0)
-                        {
-                            _=errorBuilder.Append(e.Data.AsSpan(0, Math.Min(remaining, e.Data.Length)));
-                        }
-                        errorTruncated = true;
-                    }
-                }
+                AppendBounded(errorBuilder, e.Data, ref errorTruncated, MaxOutputChars);
             }
         }
-        ;
 
         process.OutputDataReceived += OnOutputDataReceived;
         process.ErrorDataReceived += OnErrorDataReceived;
@@ -314,7 +281,7 @@ public sealed class ProcessRunner(
         {
             var errorMessage = $"Process exited with code {process.ExitCode}";
             logger.LogWarning("Command exit: id={Id}, correlationId={CorrelationId}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
-                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, process.ExitCode, sw.ElapsedMilliseconds);
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, FormatExitCode(process.ExitCode), sw.ElapsedMilliseconds);
             await HandleFailureAsync(cmd, errorMessage, null, sw, process.ExitCode);
         }
     }
@@ -356,8 +323,7 @@ public sealed class ProcessRunner(
             }
 
             // Невалидный status — rename для диагностики
-            try { File.Move(path, path + ".bad", overwrite: true); }
-            catch (Exception ex) { logger.LogWarning(ex, "Failed to rename invalid result file to .bad: {Path}", path); }
+            RenameToBadFile(path);
             result = null!;
             errorMessage = $"Plugin result file has invalid status: {path}";
             return ResultFileReadStatus.Invalid;
@@ -365,17 +331,29 @@ public sealed class ProcessRunner(
         catch (JsonException ex)
         {
             // Битый JSON — rename для диагностики
-            try { File.Move(path, path + ".bad", overwrite: true); }
-            catch (Exception moveEx) { logger.LogWarning(moveEx, "Failed to rename invalid JSON result file to .bad: {Path}", path); }
+            RenameToBadFile(path);
             result = null!;
             errorMessage = $"Plugin result file contains invalid JSON: {path}. {ex.Message}";
             return ResultFileReadStatus.Invalid;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             result = null!;
             errorMessage = $"Plugin result file cannot be read: {path}. {ex.Message}";
             return ResultFileReadStatus.Invalid;
+        }
+    }
+
+    /// <summary>Переименовывает битый result-файл в .bad, чтобы не парсить его повторно, но оставить для диагностики.</summary>
+    private void RenameToBadFile(string path)
+    {
+        try
+        {
+            File.Move(path, path + ".bad", overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Failed to rename invalid result file to .bad: {Path}", path);
         }
     }
 
@@ -417,7 +395,7 @@ public sealed class ProcessRunner(
             // InvalidFileError → сразу Failed, без retry
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed with permanent error (no retry): correlationId={CorrelationId}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
-                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, exitCode, sw.ElapsedMilliseconds, errorMessage);
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, FormatExitCode(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
         }
         else if (cmd.RetryCount < _workerOptions.MaxRetries)
@@ -429,7 +407,7 @@ public sealed class ProcessRunner(
                 cmd.CommandId, nextRetryAt, errorMessage);
             logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
-                nextRetryAt, exitCode, sw.ElapsedMilliseconds, errorMessage);
+                nextRetryAt, FormatExitCode(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
         }
         else
@@ -437,7 +415,7 @@ public sealed class ProcessRunner(
             // Исчерпаны все retry → Failed
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed after attempts: correlationId={CorrelationId}, attempt={Attempt}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
-                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, exitCode, sw.ElapsedMilliseconds, errorMessage);
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, FormatExitCode(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
         }
     }
@@ -466,6 +444,38 @@ public sealed class ProcessRunner(
         }
     }
 
+    /// <summary>Дописывает данные в builder с ограничением размера; выставляет truncated при превышении лимита.</summary>
+    private static void AppendBounded(StringBuilder builder, string data, ref bool truncated, int maxChars)
+    {
+        if (truncated)
+        {
+            return;
+        }
+
+        lock (builder)
+        {
+            if (truncated)
+            {
+                return;
+            }
+
+            if (builder.Length + data.Length + 1 <= maxChars)
+            {
+                _ = builder.AppendLine(data);
+                return;
+            }
+
+            // Дописываем сколько влезает и ставим флаг truncation
+            var remaining = maxChars - builder.Length;
+            if (remaining > 0)
+            {
+                _ = builder.Append(data.AsSpan(0, Math.Min(remaining, data.Length)));
+            }
+
+            truncated = true;
+        }
+    }
+
     /// <summary>Обрезает вывод до 4 КБ для предотвращения раздувания логов.</summary>
     private static string TruncateOutput(StringBuilder builder)
     {
@@ -473,6 +483,29 @@ public sealed class ProcessRunner(
         return builder.Length > maxLength
             ? builder.ToString(0, maxLength) + $"\n... (truncated for log, total {builder.Length} chars)"
             : builder.ToString(0, builder.Length);
+    }
+
+    /// <summary>Превращает голый exit code в читаемый вид: decimal + hex + имя известного NTSTATUS-краша.</summary>
+    private static string FormatExitCode(int? exitCode)
+    {
+        if (exitCode is not { } code)
+        {
+            return "n/a";
+        }
+
+        var name = code switch
+        {
+            unchecked((int)0xC0000005) => "ACCESS_VIOLATION",
+            unchecked((int)0xC00000FD) => "STACK_OVERFLOW",
+            unchecked((int)0xC0000135) => "DLL_NOT_FOUND",
+            unchecked((int)0xC000013A) => "CONTROL_C_EXIT",
+            unchecked((int)0xC0000409) => "STACK_BUFFER_OVERRUN",
+            _ => null,
+        };
+
+        return name is null
+            ? $"{code} (0x{code:X8})"
+            : $"{code} (0x{code:X8}, {name})";
     }
 
     private enum ResultFileReadStatus

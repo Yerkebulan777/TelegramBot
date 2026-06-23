@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Serilog;
 using System.Runtime.Versioning;
+using System.Text;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Health;
 using TelegramBot.Core.Helpers;
@@ -19,6 +20,10 @@ public static class Program
 {
     public static async Task Main(string[]? args)
     {
+        // Нужно для CP1251 в CommandPreparer.CreateProcessStartInfo: native Win32/Chromium
+        // сообщения об ошибках на ru-RU Windows приходят в этой кодировке, не UTF-8.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
         SerilogSetup.ConfigureBootstrapLogger("Worker");
 
         try
