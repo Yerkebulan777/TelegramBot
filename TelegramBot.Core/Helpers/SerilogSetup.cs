@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Serilog;
+using System.Text;
 using TelegramBot.Core.Config;
 
 namespace TelegramBot.Core.Helpers;
@@ -10,6 +11,10 @@ namespace TelegramBot.Core.Helpers;
 /// </summary>
 public static class SerilogSetup
 {
+    private const long LogFileSizeLimitBytes = 50 * 1024 * 1024;
+    private const int RetainedFileCountLimit = 31;
+    private static readonly TimeSpan FlushToDiskInterval = TimeSpan.FromSeconds(1);
+
     /// <summary>Дефолтный базовый путь для логов: %USERPROFILE%\Documents\TelegramBot\Logs.</summary>
     private static string DefaultLogBasePath =>
         Path.Combine(
@@ -23,13 +28,37 @@ public static class SerilogSetup
         return Path.Combine(logBasePath, subfolder, "log-.txt");
     }
 
+    /// <summary>Возвращает базовую директорию логов из конфигурации или дефолтный путь.</summary>
+    public static string GetConfiguredLogBasePath(IConfiguration configuration)
+    {
+        var logBasePath = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.LogDirectory)];
+        return string.IsNullOrWhiteSpace(logBasePath) ? DefaultLogBasePath : logBasePath;
+    }
+
     /// <summary>Создаёт bootstrap-логгер с выводом в консоль и файл.</summary>
     public static void ConfigureBootstrapLogger(string subfolder)
     {
         Log.Logger = new LoggerConfiguration()
             .WriteTo.Console()
-            .WriteTo.File(GetLogPath(subfolder), rollingInterval: RollingInterval.Day)
+            .WriteToRollingFile(subfolder)
             .CreateBootstrapLogger();
+    }
+
+    /// <summary>Добавляет файловый sink с едиными стабильными параметрами ротации и flush.</summary>
+    public static LoggerConfiguration WriteToRollingFile(
+        this LoggerConfiguration loggerConfiguration,
+        string subfolder,
+        string? logBasePath = null)
+    {
+        return loggerConfiguration.WriteTo.File(
+            GetLogPath(subfolder, logBasePath),
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: RetainedFileCountLimit,
+            fileSizeLimitBytes: LogFileSizeLimitBytes,
+            rollOnFileSizeLimit: true,
+            shared: true,
+            flushToDiskInterval: FlushToDiskInterval,
+            encoding: Encoding.UTF8);
     }
 
     /// <summary>
@@ -45,16 +74,12 @@ public static class SerilogSetup
         LoggerConfiguration loggerConfiguration,
         string subfolder)
     {
-        var logBasePath = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.LogDirectory)];
-        if (string.IsNullOrWhiteSpace(logBasePath))
-        {
-            logBasePath = null;
-        }
+        var logBasePath = GetConfiguredLogBasePath(configuration);
 
         _=loggerConfiguration
             .ReadFrom.Configuration(configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
-            .WriteTo.File(GetLogPath(subfolder, logBasePath), rollingInterval: RollingInterval.Day);
+            .WriteToRollingFile(subfolder, logBasePath);
     }
 }
