@@ -32,6 +32,11 @@ public sealed class ProcessRunner(
     // Трекинг активных процессов для health-мониторинга и graceful shutdown
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
 
+    // Сериализует момент Process.Start(): одновременный старт нескольких Revit.exe
+    // ведёт к коллизии devtools-порта встроенного CEF и ACCESS_VIOLATION. Сами процессы
+    // после старта продолжают работать параллельно — gate не уменьшает PartitionPoolManager.
+    private readonly SemaphoreSlim _launchGate = new(1, 1);
+
     private const int PerProcessKillTimeoutSeconds = 10;
 
     /// <summary>Снимок активных процессов для health-мониторинга.</summary>
@@ -65,7 +70,7 @@ public sealed class ProcessRunner(
             }
 
             // Шаг 2: запуск процесса
-            process = await StartProcessAsync(cmd, commandCfg, attemptToken);
+            process = await StartProcessAsync(cmd, commandCfg, attemptToken, timeoutToken);
 
             // Шаг 3: ожидание и обработка результата (exit code + stdout/stderr)
             await WaitAndHandleResultAsync(cmd, process, sw, timeoutToken, attemptToken);
@@ -102,7 +107,7 @@ public sealed class ProcessRunner(
     }
 
     /// <summary>Запускает процесс по конфигурации команды.</summary>
-    private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, string attemptToken)
+    private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, string attemptToken, CancellationToken ct)
     {
         // Создаём task-файл для CAD-плагина перед запуском процесса.
         // Если запись не удалась — AddIn не получит filePath (контракт BimPluginContract §CLI Arguments
@@ -128,9 +133,23 @@ public sealed class ProcessRunner(
             cmd.CommandId, cmd.CorrelationId, startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory, taskFilePath, resultFilePath);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        await _launchGate.WaitAsync(ct);
         try
         {
             _ = process.Start();
+
+            // Регистрируем сразу после Start() — до stagger-задержки, иначе health-check
+            // и shutdown-kill (PerformGracefulShutdownAsync) не увидят процесс, остановленный
+            // Worker в этом окне, и он останется осиротевшим.
+            _activeProcesses[cmd.CommandId] = process;
+
+            // Держим gate, пока CEF в новом Revit успеет забиндить devtools-порт.
+            // CancellationToken.None: gate должен освободиться даже на shutdown, иначе
+            // следующий старт в очереди зависнет на disposed/cancelled semaphore.
+            if (_workerOptions.LaunchStaggerSeconds > 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(_workerOptions.LaunchStaggerSeconds), CancellationToken.None);
+            }
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
@@ -141,7 +160,10 @@ public sealed class ProcessRunner(
             process.Dispose();
             throw;
         }
-        _activeProcesses[cmd.CommandId] = process;
+        finally
+        {
+            _ = _launchGate.Release();
+        }
         _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Processing, process.Id);
         _ = commandDataService.NotifySessionStartedAsync(cmd.SessionId, cmd.CorrelationId, cmd.UserId);
 

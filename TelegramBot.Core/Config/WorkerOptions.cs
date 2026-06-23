@@ -55,6 +55,14 @@ public sealed class WorkerOptions
     public int HealthCheckIntervalSeconds { get; set; } = 30;
 
     /// <summary>
+    /// Пауза между запусками внешних процессов в секундах (по умолчанию 5).
+    /// Revit держит встроенный Chromium (CEF) для devtools-порта; одновременный
+    /// Process.Start() нескольких Revit.exe ведёт к коллизии порта и ACCESS_VIOLATION.
+    /// 0 отключает stagger (старая, нестабильная при параллельном Revit поведение).
+    /// </summary>
+    public int LaunchStaggerSeconds { get; set; } = 5;
+
+    /// <summary>
     /// Через сколько дней автоматически скрывать сессии без pending/processing команд.
     /// Значение 0 или меньше отключает автоочистку.
     /// </summary>

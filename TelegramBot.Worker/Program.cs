@@ -48,6 +48,7 @@ public static class Program
                         .Validate(options => options.MaxRetries >= 0, "Worker:MaxRetries must be greater than or equal to 0")
                         .Validate(options => options.RetryDelayBaseSeconds > 0, "Worker:RetryDelayBaseSeconds must be greater than 0")
                         .Validate(options => options.FallbackPollingIntervalSeconds > 0, "Worker:FallbackPollingIntervalSeconds must be greater than 0")
+                        .Validate(options => options.LaunchStaggerSeconds >= 0, "Worker:LaunchStaggerSeconds must be greater than or equal to 0")
                         .Validate(options => options.Partitions.Count > 0, "Worker:Partitions must contain at least one partition")
                         .Validate(options => options.Partitions.All(p => p.Key >= 0 && p.Value > 0), "Worker:Partitions thresholds must be non-negative and pool sizes must be greater than 0")
                         .Validate(options => options.Commands.Count > 0, "Worker:Commands must contain at least one command")
