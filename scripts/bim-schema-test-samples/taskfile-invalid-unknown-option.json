@@ -1,0 +1,9 @@
+{
+  "commandId": 46,
+  "commandText": "PDF",
+  "filePath": "C:/Projects/building.rvt",
+  "resultFilePath": "C:/Tasks/result_46_xyz.json",
+  "options": {
+    "unknownOption": true
+  }
+}
