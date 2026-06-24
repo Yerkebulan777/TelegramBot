@@ -27,7 +27,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | Слой | Server | Worker |
 |------|--------|--------|
 | Входящие обновления | Telegram updates: `Channel<Update>` (200) + `Parallel.ForEachAsync` (`MaxDegree=10`); notification wake-up: `Channel<NotificationItem>` (256) | PostgreSQL `new_tasks` LISTEN + fallback polling |
-| Per-user / per-session | `SessionManager.AcquireUserLockAsync` (`SemaphoreSlim`) | `PartitionPoolManager` (`SortedDictionary<threshold, SemaphoreSlim>`) |
+| Per-user / per-session | `SessionManager.AcquireUserLockAsync` (`SemaphoreSlim`) | один `SemaphoreSlim` в `CommandExecutionService` |
 | Background tasks | `TelegramBotHostedService` + `CommandNotificationService` + `NotificationSenderService` | `CommandExecutionService` + `SessionCleanupService` |
 
 ---
@@ -63,7 +63,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      каждую как background `Task` и сразу пытается claim'ить ещё (drain loop устраняет head-of-line
      blocking)
 4. Для каждой команды:
-   - `PartitionPoolManager.WaitForSlotAsync(priority)` — semaphore на партицию
+   - `_commandSlots.WaitAsync(ct)` — общий лимит параллельных команд
    - `ProcessRunner.RunAsync`:
      - `CommandPreparer.PrepareAsync` — валидация FilePath (path traversal, reparse-point, extension, root
        containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`,
@@ -85,8 +85,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      `NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (default 60→120→240→480→960s)
    - Иначе `Failed` после исчерпания
 6. `SessionCompletionTracker.OnCommandCompletedAsync`:
-   - `_sessionRemaining.AddOrUpdate(SessionId, -1)` — атомарный декремент batch-счётчика
-   - При `0` → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync`
+   - `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync`
      (`CompletionNotified=TRUE`, `NotificationOutbox` insert,
      `pg_notify('command_completed', SessionId|CorrelationId)` если первый раз)
 7. Server: `CommandNotificationService.OnNotificationReceived` (sync handler) → wake-up в
@@ -441,37 +440,16 @@ SELECT COUNT(*)::int FROM deleted_sessions;
 
 ---
 
-## Приоритеты команд и партиции
+## Приоритеты команд и лимит параллельности
 
-`WorkerOptions.Partitions` — `SortedDictionary<threshold, poolSize>`. Команда попадает в **первый** threshold
-`≥ Priority`. Меньше значение `Priority` = выше приоритет.
+Меньше значение `Priority` = выше приоритет. Приоритет используется в SQL при claim'е:
+`ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC`.
 
-**Маппинг (дефолт `Worker:Partitions`):**
+`WorkerOptions.Partitions` оставлен для обратной совместимости с конфигом. Worker больше не создаёт
+отдельные пулы по threshold; ключи словаря не используются для routing, итоговый лимит параллельных команд
+равен сумме значений.
 
-| Partition threshold | Pool size | Commands |
-|---------------------|-----------|----------|
-| 0 | 5 | (нет — порог для дефолтного 50) |
-| 1 | 3 | (нет — нет кода с Priority=1) |
-| 2 | 2 | (нет) |
-| 3 | 1 | (нет) |
-
-**Реальное распределение по `_commandPriorityMap` в `SlashCommandService`:**
-
-| Priority | Константа | Команды | Effective pool |
-|----------|-----------|---------|----------------|
-| 1 | `Critical` | (нет в текущей конфигурации) | 5 (порог 0) |
-| 2 | `High` | (нет) | 3 (порог 1) |
-| 3 | `Medium` | `NWC`, `IFC`, `BIMDOC`, `CLASHREP` | 2 (порог 2) |
-| 4 | `Low` | `AUTORES` | 1 (порог 3) |
-| 50 | `Default` | (не задано) | 1 (порог 3) |
-
-**Примечание:** `Partitions` в `appsettings.json` с дефолтом `{0:5, 1:3, 2:2, 3:1}` — это **ёмкости по
-threshold**, не по приоритету. Чтобы PDF (Priority=1) получил пул 5, нужно либо понизить
-`_commandPriorityMap["PDF"]` до 0, либо переопределить `Partitions`. Текущая конфигурация (без кода с
-Priority≤0) даёт всем команду порог 3 → пул 1.
-
-**Корректное использование:** для боевого деплоя скорректируйте либо `_commandPriorityMap`, либо
-`Partitions` так, чтобы приоритетные команды получали нужный пул.
+Default `{0:5, 1:3, 2:2, 3:1}` даёт общий лимит `11`.
 
 ---
 
@@ -581,11 +559,13 @@ fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Nav
 2. **Настроить приоритет** — добавить запись в `_commandPriorityMap` в `SlashCommandService.cs`. Если не
    добавить — `Priority=50` (`Default`).
 
-3. **Настроить лимиты партиций** (опционально):
+3. **Настроить общий лимит параллельности** (опционально):
 
    ```json
    "Partitions": { "0": 5, "1": 3, "2": 2, "3": 1 }
    ```
+
+   Ключи (`"0"`, `"1"`, ...) сейчас legacy; важна только сумма значений.
 
 4. **Добавить `CommandDefinition`** в `TelegramBot.Server/Models/CommandDefinition.cs` +
    `CommandCatalog.GetByGroup(...)` для отображения в меню.

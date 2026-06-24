@@ -11,11 +11,10 @@ namespace TelegramBot.Worker.Services;
 
 /// <summary>
 /// Background service: orchestrator для событийной обработки очереди команд через PostgreSQL LISTEN/NOTIFY.
-/// Делегирует выполнение специализированным компонентам: PartitionPoolManager, ProcessRunner, SessionCompletionTracker.
+/// Делегирует выполнение специализированным компонентам: ProcessRunner и SessionCompletionTracker.
 /// </summary>
 public sealed class CommandExecutionService(
     CommandDataService commandDataService,
-    PartitionPoolManager partitionPoolManager,
     ProcessRunner processRunner,
     IOptions<WorkerOptions> workerOptions,
     IConfiguration configuration,
@@ -31,6 +30,8 @@ public sealed class CommandExecutionService(
     private readonly HashSet<Task> _runningTasks = [];
     private readonly object _runningTasksLock = new();
     private readonly SemaphoreSlim _drainGate = new(1, 1);
+    private readonly int _maxConcurrentCommands = Math.Max(1, workerOptions.Value.Partitions.Sum(p => p.Value));
+    private SemaphoreSlim? _commandSlots;
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? DataAccessBase.DefaultConnectionString;
@@ -42,10 +43,9 @@ public sealed class CommandExecutionService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        partitionPoolManager.Initialize(_workerOptions.Partitions);
+        _commandSlots = new SemaphoreSlim(_maxConcurrentCommands, _maxConcurrentCommands);
 
-        logger.LogInformation("Worker starting: partitions={PartitionCount}, pools={Pools}",
-            partitionPoolManager.PoolCount, partitionPoolManager.GetPoolInfo());
+        logger.LogInformation("Worker starting: maxConcurrentCommands={MaxConcurrentCommands}", _maxConcurrentCommands);
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -293,19 +293,16 @@ public sealed class CommandExecutionService(
             }
         }
 
-        // Ждем завершения фоновых задач в оставшемся общем бюджете.
-        // Каждый wait использует Min(TaskWaitTimeoutSeconds, остаток_бюджета), чтобы
-        // не превысить общий лимит и выводить в лог точный таймаут.
         int Remaining() => Math.Max(1, ShutdownBudgetSeconds - (int)(DateTime.UtcNow - shutdownStartedAt).TotalSeconds);
 #pragma warning disable VSTHRD003
         await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
         await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
-        await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 #pragma warning restore VSTHRD003
+        await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 
         _shutdownCts?.Dispose();
         _drainGate.Dispose();
-        partitionPoolManager.Dispose();
+        _commandSlots?.Dispose();
 
         logger.LogInformation("Worker shutdown completed");
     }
@@ -377,29 +374,21 @@ public sealed class CommandExecutionService(
             return;
         }
 
-        var timeout = Task.Delay(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
-#pragma warning disable VSTHRD003
-        if (await Task.WhenAny(task, timeout) != task)
-#pragma warning restore VSTHRD003
+        try
+        {
+            await task.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
+        }
+        catch (TimeoutException)
         {
             logger.LogWarning("{TaskName} did not complete within {Timeout}s timeout", taskName, timeoutSeconds);
         }
-        else
+        catch (OperationCanceledException)
         {
-            try
-            {
-#pragma warning disable VSTHRD003
-                await task;
-#pragma warning restore VSTHRD003
-            }
-            catch (OperationCanceledException)
-            {
-                // штатное завершение фоновой задачи при остановке Worker
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "{TaskName} failed during shutdown", taskName);
-            }
+            // штатное завершение фоновой задачи при остановке Worker
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "{TaskName} failed during shutdown", taskName);
         }
     }
 
@@ -424,27 +413,22 @@ public sealed class CommandExecutionService(
 
         logger.LogInformation("Waiting up to {Timeout}s for {Count} command task(s) to stop", timeoutSeconds, runningTasks.Length);
 
-        var allTasks = Task.WhenAll(runningTasks);
-        var timeout = Task.Delay(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
-        if (await Task.WhenAny(allTasks, timeout) != allTasks)
+        try
+        {
+            await Task.WhenAll(runningTasks).WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
+        }
+        catch (TimeoutException)
         {
             logger.LogWarning("{Count} command task(s) did not complete within {Timeout}s timeout",
                 runningTasks.Count(task => !task.IsCompleted), timeoutSeconds);
         }
-        else
+        catch (OperationCanceledException)
         {
-            try
-            {
-                await allTasks;
-            }
-            catch (OperationCanceledException)
-            {
-                // штатное завершение command task'ов при остановке Worker
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "One or more command tasks failed during shutdown");
-            }
+            // штатное завершение command task'ов при остановке Worker
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "One or more command tasks failed during shutdown");
         }
     }
 
@@ -466,7 +450,7 @@ public sealed class CommandExecutionService(
             {
                 PruneCompletedTasks();
 
-                var availableSlots = partitionPoolManager.TotalCapacity - GetRunningTaskCount();
+                var availableSlots = _maxConcurrentCommands - GetRunningTaskCount();
                 if (availableSlots <= 0)
                 {
                     break;
@@ -526,8 +510,7 @@ public sealed class CommandExecutionService(
 
     private async Task ProcessWithPoolAsync(PendingCommand cmd, CancellationToken ct)
     {
-        await partitionPoolManager.WaitForSlotAsync(cmd.Priority, ct);
-        var slotAcquired = true;
+        await _commandSlots!.WaitAsync(ct);
         try
         {
             await processRunner.RunAsync(cmd, ct);
@@ -539,10 +522,7 @@ public sealed class CommandExecutionService(
         }
         finally
         {
-            if (slotAcquired)
-            {
-                partitionPoolManager.ReleaseSlot(cmd.Priority);
-            }
+            _ = _commandSlots.Release();
         }
     }
 

@@ -7,7 +7,7 @@ PostgreSQL-БД и запускает их. Server кладёт команды �
 ## Архитектура в одном абзаце
 
 Worker — событийный orchestrator поверх PostgreSQL-очереди. `LISTEN/NOTIFY` будит drain-loop, который
-параллельно claim'ит до 5 команд и раскидывает их по приоритетным пулам семафоров. `ProcessRunner` запускает
+claim'ит команды до общего лимита параллельности. `ProcessRunner` запускает
 внешние BIM-процессы, обмениваясь с ними JSON-файлами в `TaskDirectory`. Результат классифицируется через
 `ErrorClassifier` (permanent → Failed, transient → retry с экспонентой), а `SessionCompletionTracker` пачкой
 уведомляет Server о завершении сессии через durable `NotificationOutbox`.
@@ -45,7 +45,7 @@ while (есть свободные слоты):
 
 Батч из 5 команд запускается **параллельно как фоновые `Task`**, drain сразу пытается взять следующую
 пачку. До v1.7 одна долгая команда (3 часа Revit-экспорта) блокировала обработку остальных 4 из батча.
-Сейчас — все 5 стартуют сразу (если хватает слотов в пуле), а после завершения каждой `ContinueWith` будит
+Сейчас команды стартуют сразу (если хватает слотов), а после завершения каждой `ContinueWith` будит
 drain снова.
 
 `_drainGate` (SemaphoreSlim) защищает от повторного входа drain, `_runningTasks` (HashSet под lock) — для
@@ -53,21 +53,12 @@ drain снова.
 
 ---
 
-## Приоритетный пул: `PartitionPoolManager`
+## Лимит параллельности
 
-`SortedDictionary<threshold, poolSize>` с семафорами. Default из `appsettings.json`: `{0: 5, 1: 3, 2: 2, 3: 1}`.
-
-| Команды | Priority | Пул |
-|---------|----------|-----|
-| `PDF` | 1 (Critical) | 5 параллельных слотов |
-| `DWG` | 2 (High) | 3 |
-| `NWC`, `IFC`, `BIMDOC`, `CLASHREP` | 3 (Medium) | 2 |
-| `AUTORES` | 4 (Low) | 1 |
-
-Команда попадает в первый порог `≥ Priority`. Priority берётся из `SlashCommandService._commandPriorityMap`
-на стороне Server.
-
-**Over-release guard** защищает от двойного `ReleaseSlot`. `GetThreshold(priority)` находит нужный пул.
+Worker использует один `SemaphoreSlim` внутри `CommandExecutionService`. `Worker:Partitions` оставлен для
+обратной совместимости с конфигом; ключи словаря не используются для routing, итоговый лимит равен сумме
+значений. Приоритет команды всё ещё влияет на порядок claim'а в SQL (`ORDER BY Priority ASC`), но не создаёт
+отдельные пулы.
 
 ---
 
@@ -171,7 +162,7 @@ restart `NotificationSenderService` подхватит все неотправл
    **30 сек** (per-process 10 сек через `ProcessKillHelper.KillAsync`)
 3. Wait for cleanup + health tasks (15 сек каждый)
 4. Wait for running tasks (15 сек)
-5. Dispose семафоров и `PartitionPoolManager`
+5. Dispose семафоров
 
 Важно: при shutdown процессы **не удаляются** из `_activeProcesses` сразу — `LogActiveProcessesOnShutdownAsync`
 должен увидеть все активные процессы до остановки.
@@ -372,7 +363,6 @@ _=services.AddSingleton<DialogDismisser>();
 _=services.AddSingleton<NavisworksPathResolver>();
 
 // Компоненты выполнения
-_=services.AddSingleton<PartitionPoolManager>();
 _=services.AddSingleton<CommandPreparer>();
 _=services.AddSingleton<SessionCompletionTracker>();
 _=services.AddSingleton<ProcessRunner>();

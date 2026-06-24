@@ -29,7 +29,7 @@ Telegram-бот для навигации по файловой системе �
 - Запрос доступа с подтверждением администратором
 - Умный retry: классификация ошибок (`InvalidFileError` → сразу Failed, `ProcessCrashError` → retry с экспоненциальной задержкой)
 - Health check endpoints: `/health/live`, `/health/ready`, `/health`; Worker добавляет checks `bimInstallRoot` и `activeProcesses`
-- Декомпозиция выполнения команд: `PartitionPoolManager` (приоритетные семафоры), `CommandPreparer` (валидация + BIM-резолвинг), `ProcessRunner` (запуск + timeout + retry), `SessionCompletionTracker` (in-memory счётчик + DB confirmation)
+- Декомпозиция выполнения команд: `CommandExecutionService` (LISTEN/NOTIFY + лимит параллельности), `CommandPreparer` (валидация + BIM-резолвинг), `ProcessRunner` (запуск + timeout + retry), `SessionCompletionTracker` (DB confirmation)
 
 ## Технологии
 
@@ -151,9 +151,16 @@ Worker запускает внешние исполнители и обмени�
 | `Worker` | `CleanupIntervalSeconds` | Интервал фоновой очистки истёкших Lease (default `300`) |
 | `Worker` | `HealthCheckIntervalSeconds` | Интервал проверки здоровья активных процессов (default `30`) |
 | `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
-| `Worker` | `Partitions` | `SortedDictionary<threshold, poolSize>`. Команда попадает в первый threshold ≥ Priority. Default: `{0: 5, 1: 3, 2: 2, 3: 1}` (PDF=5, DWG=3, NWC/IFC/BIMDOC/CLASHREP=2, AUTORES=1) |
+| `Worker` | `Partitions` | Backward-compatible словарь лимитов; Worker использует сумму значений как общий лимит параллельных команд. Default: `{0: 5, 1: 3, 2: 2, 3: 1}` → `11` |
 | `Worker.Commands` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}` |
 | `HealthCheck` | `Port` / `ServiceName` / `CacheSeconds` / `DbCheckTimeoutSeconds` | Health-сервер (default `5001` / `TelegramBot.Worker` / `10` / `5`) |
+
+#### Как сейчас работают `Worker:Partitions`
+
+Название осталось для совместимости с существующим `appsettings.json`. Worker не маршрутизирует команды по
+partition-key и не держит отдельные пулы по приоритетам. В [CommandExecutionService.cs](TelegramBot.Worker/Services/CommandExecutionService.cs)
+создаётся один `SemaphoreSlim`, а общий лимит считается как `Sum(Partitions.Values)`. Приоритет команды
+влияет только на порядок SQL claim'а: меньший `Priority` забирается раньше.
 
 ### Пример `appsettings.Local.json` (gitignored)
 

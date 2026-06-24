@@ -184,10 +184,9 @@ services.AddSingleton<NavisworksPathResolver>();
 | Component | Role |
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `ScheduleRetryAsync` (NextRetryAt + RetryCount), `NotifySessionStartedAsync` (pg_notify), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
-| `PartitionPoolManager` | `SortedDictionary<int, SemaphoreSlim>` по priority. `Initialize(partitions)`, `WaitForSlotAsync(priority)`, `ReleaseSlot(priority)`, `TotalCapacity`. `GetThreshold(priority)` = первый threshold ≥ priority. Over-release guard |
 | `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER`, **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
 | `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс, регистрирует в `_activeProcesses`, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
-| `SessionCompletionTracker` | `ConcurrentDictionary<int, int> _sessionRemaining`. `TrackClaimedCommands(claimed)` (AddOrUpdate с GroupBy SessionId) + `OnCommandCompletedAsync` (AddOrUpdate с -1, при 0 → `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up) |
+| `SessionCompletionTracker` | `OnCommandCompletedAsync`: `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
 
 **Drain loop (v1.7):** `CommandExecutionService.DrainPendingCommandsAsync` — claim'ит пачку (`DefaultBatchSize = 5`), запускает каждую команду как background `Task`, сразу пытается claim'ить ещё. Это устраняет head-of-line blocking, когда одна долгая команда (3h Revit timeout) блокирует остальные 4 из батча. Трекинг выполняемых задач через `_runningTasks` (HashSet + lock) для корректного shutdown.
@@ -197,7 +196,7 @@ services.AddSingleton<NavisworksPathResolver>();
 2. `LogActiveProcessesOnShutdown()` + параллельный `Kill(entireProcessTree: true)` всех активных процессов в общем shutdown-бюджете (`30s`, per-process `10s`)
 3. `WaitForBackgroundTaskCompletionAsync` (cleanup + health tasks, `15s` каждый)
 4. `WaitForRunningTasksCompletionAsync` (`15s`)
-5. Dispose semaphores + `PartitionPoolManager`
+5. Dispose semaphores
 
 **Корреляция событий:** каждая команда и сессия имеют `CorrelationId` (GUID без дефисов), который проходит через весь pipeline: создание сессии → claim → notify → completion → Telegram. Используется в логах для трассировки.
 
@@ -208,7 +207,6 @@ services.AddSingleton<CommandDataService>();
 services.AddSingleton<SessionDataService>();
 services.AddSingleton<MessageTrackingDataService>();
 services.AddSingleton<DatabaseInitializerService>();
-services.AddSingleton<PartitionPoolManager>();
 services.AddSingleton<CommandPreparer>();
 services.AddSingleton<SessionCompletionTracker>();
 services.AddSingleton<ProcessRunner>();
@@ -392,7 +390,7 @@ CommandExecutionService (Worker)
     DrainPendingCommandsAsync:
         ClaimPendingCommandsAsync(limit) -- FOR UPDATE SKIP LOCKED + Lease
         ProcessWithPoolAsync(cmd):
-            PartitionPoolManager.WaitForSlotAsync(priority)
+            _commandSlots.WaitAsync(ct)
             ProcessRunner.RunAsync(cmd):
                 CommandPreparer.PrepareAsync (validation + BimLib path resolution + Config clone)
                 CreateTaskFile (atomic write)
@@ -401,9 +399,9 @@ CommandExecutionService (Worker)
                     status="done" → UpdateStatus=Done
                     status="failed" / битый / нет файла + exit != 0 → ErrorClassifier → permanent (Failed) / transient (ScheduleRetry)
                     exit=0 без файла → Done
-            PartitionPoolManager.ReleaseSlot(priority)
+            _commandSlots.Release()
             SessionCompletionTracker.OnCommandCompletedAsync:
-                AddOrUpdate(_sessionRemaining, -1) → 0 → CountPendingProcessingBySessionAsync (DB confirm) → NotifySessionCompletedOnceAsync
+                CountPendingProcessingBySessionAsync (DB confirm) → NotifySessionCompletedOnceAsync
     CleanupTempFiles in finally (per-attempt)
 
 NotifySessionCompletedOnceAsync ──▶ Sessions.CompletionNotified=TRUE + INSERT NotificationOutbox(session_completed) + pg_notify('command_completed') wake-up

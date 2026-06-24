@@ -1,7 +1,7 @@
 namespace TelegramBot.Core.Config;
 
 /// <summary>
-/// Конфигурация Worker: маппинг кодов команд на исполняемые файлы, таймаут и партиции.
+/// Конфигурация Worker: маппинг кодов команд на исполняемые файлы, таймауты и лимит параллельности.
 /// </summary>
 public sealed class WorkerOptions
 {
@@ -69,14 +69,8 @@ public sealed class WorkerOptions
     public int CompletedSessionRetentionDays { get; set; } = 30;
 
     /// <summary>
-    /// Партиции приоритетов: ключ — максимальный Priority threshold (чем меньше Priority, тем выше приоритет),
-    /// значение — максимальное количество одновременных процессов (SemaphoreSlim).
-    /// Команда попадает в первый threshold >= Priority.
-    /// Конфигурация по умолчанию:
-    /// Priority 0 (Critical) — 5 слотов,
-    /// Priority 1 (High) — 3 слота,
-    /// Priority 2 (Medium) — 2 слота,
-    /// Priority 3 (Low) — 1 слот.
+    /// Лимит параллельных команд. Для обратной совместимости читается как словарь;
+    /// ключи не используются для routing, итоговый лимит равен сумме значений.
     /// </summary>
     public SortedDictionary<int, int> Partitions { get; set; } = new()
     {

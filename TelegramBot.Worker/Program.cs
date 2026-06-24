@@ -51,8 +51,8 @@ public static class Program
                         .Validate(options => options.RetryDelayBaseSeconds > 0, "Worker:RetryDelayBaseSeconds must be greater than 0")
                         .Validate(options => options.FallbackPollingIntervalSeconds > 0, "Worker:FallbackPollingIntervalSeconds must be greater than 0")
                         .Validate(options => options.LaunchStaggerSeconds >= 0, "Worker:LaunchStaggerSeconds must be greater than or equal to 0")
-                        .Validate(options => options.Partitions.Count > 0, "Worker:Partitions must contain at least one partition")
-                        .Validate(options => options.Partitions.All(p => p.Key >= 0 && p.Value > 0), "Worker:Partitions thresholds must be non-negative and pool sizes must be greater than 0")
+                        .Validate(options => options.Partitions.Count > 0, "Worker:Partitions must contain at least one entry")
+                        .Validate(options => options.Partitions.All(p => p.Value > 0), "Worker:Partitions values must be greater than 0")
                         .Validate(options => options.Commands.Count > 0, "Worker:Commands must contain at least one command")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), "Worker:Commands executable paths are required")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ArgumentsTemplate)), "Worker:Commands argument templates are required")
@@ -68,9 +68,7 @@ public static class Program
                     _=services.AddSingleton<RevitPathResolver>();
                     _=services.AddSingleton<DialogDismisser>();
 
-                    // Компоненты выполнения команд (декомпозиция CommandExecutionService)
                     _=services.AddSingleton<SessionCompletionTracker>();
-                    _=services.AddSingleton<PartitionPoolManager>();
                     _=services.AddSingleton<CommandPreparer>();
                     _=services.AddSingleton<ProcessRunner>();
 

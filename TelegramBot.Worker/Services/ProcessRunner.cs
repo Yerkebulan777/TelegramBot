@@ -33,8 +33,7 @@ public sealed class ProcessRunner(
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
 
     // Сериализует момент Process.Start(): одновременный старт нескольких Revit.exe
-    // ведёт к коллизии devtools-порта встроенного CEF и ACCESS_VIOLATION. Сами процессы
-    // после старта продолжают работать параллельно — gate не уменьшает PartitionPoolManager.
+    // ведёт к коллизии devtools-порта встроенного CEF и ACCESS_VIOLATION.
     private readonly SemaphoreSlim _launchGate = new(1, 1);
 
     private const int PerProcessKillTimeoutSeconds = 10;
