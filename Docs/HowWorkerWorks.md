@@ -52,6 +52,39 @@ drain снова.
 `_drainGate` (SemaphoreSlim) защищает от повторного входа drain, `_runningTasks` (HashSet под lock) — для
 корректного ожидания при shutdown.
 
+## LaunchStaggerGate — защита от коллизии CEF-порта Revit
+
+`ProcessRunner._launchGate` (`SemaphoreSlim(1, 1)`) сериализует момент `Process.Start()` для **всех**
+внешних процессов. Это предотвращает коллизию devtools-порта встроенного Chromium (CEF) при параллельном
+старте нескольких `Revit.exe`, которая приводила к `ACCESS_VIOLATION (0xC0000005)` сразу после старта.
+
+```csharp
+await _launchGate.WaitAsync(ct);
+try
+{
+    process.Start();
+    _activeProcesses[cmd.CommandId] = process;  // регистрация ДО задержки!
+    if (_workerOptions.LaunchStaggerSeconds > 0)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(_workerOptions.LaunchStaggerSeconds), CancellationToken.None);
+    }
+}
+finally
+{
+    _ = _launchGate.Release();
+}
+```
+
+**Важные детали:**
+- Процесс регистрируется в `_activeProcesses` **до** stagger-задержки, чтобы health-check и shutdown-kill
+  (`PerformGracefulShutdownAsync`) видели процесс сразу.
+- `Task.Delay` использует `CancellationToken.None`, а не `ct` — gate всегда освобождается даже при shutdown.
+  Иначе следующий старт зависнет на disposed/cancelled semaphore.
+- Gate применяется ко всем типам команд, без спец-кейсов по `CommandText` — лишняя пауза для не-Revit
+  процессов не критична.
+- `LaunchStaggerSeconds` (default `5`) настраивается через `Worker:LaunchStaggerSeconds` в `appsettings.json`.
+  `0` отключает gate (эквивалент старому поведению).
+
 ---
 
 ## DB scheduler и partition-gating
@@ -87,42 +120,75 @@ Worker использует один `SemaphoreSlim` внутри `CommandExecut
        * CLASHREP → Navisworks через BimLib
        * остальные → configured path из appsettings
    - клонировать CommandConfig (не мутировать shared IOptions!)
+   - **Если PrepareAsync вернул null** — команда уже помечена Failed в БД (например, неизвестный
+     CommandText). `OnCommandCompletedAsync` вызывается, выполнение прерывается.
 
-3. CommandPreparer.CreateTaskFile:
-   - atomic write: .tmp → File.Move(overwrite: true)
-   - путь: %USERPROFILE%\Documents\TelegramBot\TaskDirectory\task_{Id}_{token}.json
+3. StartProcessAsync (объединяет шаги 3–9):
 
-4. Process.Start с ArgumentsTemplate
-   (подстановка {CommandText}/{FilePath}/{CommandId}/{TaskFilePath}/{ResultFilePath};
-    для Revit AddIn args[2] всегда WORKER, реальная команда в TaskFile.commandText)
+   3a. CommandPreparer.CreateTaskFile:
+       - atomic write: .tmp → File.Move(overwrite: true)
+       - путь: %USERPROFILE%\Documents\TelegramBot\TaskDirectory\task_{Id}_{token}.json
+       - **Если CreateTaskFile вернул false** — бросается IOException (fail-fast,
+         ErrorClassifier классифицирует как permanent failure без retry; проблема
+         инфраструктурная — диск/права/антивирус)
 
-5. UpdateCommandStatus(Processing) + NotifySessionStartedAsync
-   → pg_notify 'session_started' → Server шлёт "⚙️ Задание запущено"
+   3b. Захват _launchGate (SemaphoreSlim 1/1)
 
-6. WaitForExitAsync с timeout (default 180 мин, настраивается)
+   3c. Process.Start с ArgumentsTemplate
+       (подстановка {CommandText}/{FilePath}/{CommandId}/{TaskFilePath}/{ResultFilePath};
+        для Revit AddIn args[2] всегда WORKER (RevitDispatcherCommand), реальная команда в TaskFile.commandText)
+       - **Process.Start() неудачен** → catch Win32Exception/InvalidOperationException → process.Dispose()
+         → throw; outer catch передаёт в HandleFailureAsync
 
-7. Прочитать result_{Id}_{token}.json от плагина:
-   - Valid Done → Status=Done
-   - Valid Failed → HandleFailureAsync
-   - Valid Cancelled → permanent Failed (без retry)
-   - Invalid/битый JSON → rename в .bad + HandleFailureAsync
-   - Не найден → fallback на exit code: 0 = Done, иначе HandleFailureAsync
+   3d. Регистрация process в _activeProcesses (ДО stagger-задержки!)
 
-8. HandleFailureAsync → ErrorClassifier:
+   3e. Task.Delay(LaunchStaggerSeconds) — CEF биндит порт
+       (CancellationToken.None: gate освобождается даже при shutdown)
+
+   3f. Освобождение _launchGate
+
+   3g. UpdateCommandStatus(Processing) + NotifySessionStartedAsync
+       → pg_notify 'session_started' → Server шлёт "⚙️ Задание запущено"
+
+4. WaitAndHandleResultAsync:
+
+   4a. **Захват stdout/stderr** — OutputDataReceived/ErrorDataReceived с double-checked lock
+       и лимитом 64KB на каждый канал. При превышении — флаг `truncated`. Обработчики
+       отписываются в `finally` для предотвращения утечек.
+
+   4b. WaitForExitAsync с timeout (default 180 мин). Timeout реализован через
+       `CancellationTokenSource.CreateLinkedTokenSource` — при срабатывании `OperationCanceledException`
+       ловится в outer catch как таймаут (не shutdown).
+
+   4c. Прочитать result_{Id}_{token}.json от плагина (ResultFileReadStatus: NotFound/Valid/Invalid):
+       - Valid + status="done" → Status=Done
+       - Valid + status="failed" → HandleFailureAsync (с `errorMessage` из файла, `errorDetails` в Debug-лог)
+       - Valid + status="cancelled" → **прямой** Status=Failed (минуя ErrorClassifier и HandleFailureAsync),
+         permanent failure без retry
+       - Invalid/битый JSON → rename в .bad + HandleFailureAsync
+       - NotFound → fallback на exit code: 0 = Done (с громким warning о нарушении контракта AddIn),
+         иначе HandleFailureAsync с FormatExitCode (decimal + hex + NTSTATUS имя краша, например ACCESS_VIOLATION)
+
+5. HandleFailureAsync:
+   - Вызов: `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes, ex)`
+     (4 параметра: текст ошибки, exit code, список permanent-кодов, исключение)
    - InvalidFileError (паттерны EN+RU, exit code, тип исключения)
      → сразу Failed, без retry
    - ProcessCrashError + retry < MaxRetries
      → ScheduleRetry с экспоненциальной задержкой (60s → 120s → 240s → 480s → 960s)
    - retry исчерпаны → Failed
 
-9. finally: CleanupTempFiles
+6. finally: CleanupTempFiles
    (удаляет task и result JSON этой попытки — per-attempt)
+   + TryRemove из _activeProcesses + process.Dispose() (только если не shutdown)
 ```
 
 ### Стриминг stdout/stderr
 
-`OutputDataReceived`/`ErrorDataReceived` с lock и лимитом 64KB на каждый канал. При превышении лимита
-ставится флаг `truncated`, в лог пишется `[TRUNCATED: 64KB limit reached]`. Это предотвращает OOM, если
+`OutputDataReceived`/`ErrorDataReceived` с double-checked lock (`lock(builder)`) и лимитом 64KB (`MaxOutputChars`)
+на каждый канал. При превышении лимита ставится флаг `truncated`, данные дописываются сколько влезает.
+В лог пишется `[TRUNCATED: 64KB limit reached]`. Обработчики отписываются в `finally` для предотвращения
+утечек. Лог-вывод дополнительно обрезается до 4KB через `TruncateOutput()`. Это предотвращает OOM, если
 плагин начнёт лить бесконечный вывод.
 
 ### stdout/stderr в зависимости от типа команды
@@ -355,7 +421,7 @@ Override через `FileSystem:TaskDirectory` в `appsettings.json`. Worker с�
 
 ## DI registration
 
-В `Worker/Program.cs`:
+В `Worker/Program.cs` (порядок соответствует исходному коду):
 
 ```csharp
 // Data-сервисы
@@ -365,21 +431,51 @@ _=services.AddSingleton<SessionDataService>();
 _=services.AddSingleton<MessageTrackingDataService>();
 _=services.AddSingleton<DatabaseInitializerService>();
 
-// BIM-интеграция
+// WorkerOptions — валидация на старте
+_=services.AddOptions<WorkerOptions>()
+    .Bind(context.Configuration.GetSection(WorkerOptions.SectionName))
+    .Validate(options => options.ProcessTimeoutMinutes > 0, ...)
+    .Validate(options => options.MaxRetries >= 0, ...)
+    .Validate(options => options.RetryDelayBaseSeconds > 0, ...)
+    .Validate(options => options.FallbackPollingIntervalSeconds > 0, ...)
+    .Validate(options => options.LaunchStaggerSeconds >= 0, ...)
+    .Validate(options => options.Partitions.Count > 0, ...)
+    .Validate(options => options.Partitions.All(p => p.Value > 0), ...)
+    .Validate(options => options.Commands.Count > 0, ...)
+    .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), ...)
+    .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ArgumentsTemplate)), ...)
+    .ValidateOnStart();
+
+// Config-секции
+_=services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
+_=services.Configure<DialogDismisserOptions>(context.Configuration.GetSection(DialogDismisserOptions.SectionName));
+_=services.Configure<FileSystemOptions>(context.Configuration.GetSection(FileSystemOptions.SectionName));
+
+// BIM-интеграция (Revit + Navisworks)
 _=services.AddSingleton<RevitVersionDetector>();
+_=services.AddSingleton<NavisworksPathResolver>();   // Navisworks ДО RevitPathResolver
 _=services.AddSingleton<RevitPathResolver>();
 _=services.AddSingleton<DialogDismisser>();
-_=services.AddSingleton<NavisworksPathResolver>();
 
 // Компоненты выполнения
-_=services.AddSingleton<CommandPreparer>();
 _=services.AddSingleton<SessionCompletionTracker>();
+_=services.AddSingleton<CommandPreparer>();
 _=services.AddSingleton<ProcessRunner>();
 
 // Hosted services
 _=services.AddHostedService<CommandExecutionService>();
 _=services.AddHostedService<SessionCleanupService>();
-_=services.AddHostedService<HealthCheckHostedService>();
+
+// Health check HTTP-сервер (через фабрику, не прямая регистрация HealthCheckHostedService)
+_=services.AddOptions<HealthCheckOptions>()
+    .Bind(context.Configuration.GetSection(HealthCheckOptions.SectionName))
+    .Validate(options => options.Port is >0 and <=65535, ...);
+_=services.AddHostedService(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<HealthCheckOptions>>();
+    var logger = sp.GetRequiredService<ILogger<HealthCheckHostedService>>();
+    return HealthCheckServiceFactory.Create(options, logger, connectionString);
+});
 ```
 
 ---

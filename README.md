@@ -13,6 +13,7 @@ Telegram-бот для навигации по файловой системе �
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Worker-side отражение контракта BIM-плагинов (полное соответствие эталону в `RevitBIMFusion/Docs/`) |
 | [Docs/CriticalReview.md](Docs/CriticalReview.md) | Статус критичных замечаний и остаточные риски |
+| [Docs/HowWorkerWorks.md](Docs/HowWorkerWorks.md) | Подробное описание архитектуры Worker |
 
 ## Обзор
 
@@ -151,6 +152,7 @@ Worker запускает внешние исполнители и обмени�
 | `Worker` | `CleanupIntervalSeconds` | Интервал фоновой очистки истёкших Lease (default `300`) |
 | `Worker` | `HealthCheckIntervalSeconds` | Интервал проверки здоровья активных процессов (default `30`) |
 | `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
+| `Worker` | `LaunchStaggerSeconds` | Пауза между запусками внешних процессов (default `5`). Предотвращает коллизию devtools-порта CEF при параллельном старте Revit. `0` отключает |
 | `Worker` | `Partitions` | Backward-compatible словарь лимитов; Worker использует сумму значений как общий лимит параллельных команд. Логические очередные partition живут в БД (`Commands.Partition`). Default: `{0: 5, 1: 3, 2: 2, 3: 1}` → `11` |
 | `Worker.Commands` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}` |
 | `HealthCheck` | `Port` / `ServiceName` / `CacheSeconds` / `DbCheckTimeoutSeconds` | Health-сервер (default `5001` / `TelegramBot.Worker` / `10` / `5`) |

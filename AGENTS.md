@@ -113,12 +113,13 @@ Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
 | Application | `CallbackDispatcher` | O(1) lookup префикса → handler (кэшированный `Dictionary<prefix, handler>`) |
 | Application | `SessionManager` | `ConcurrentDictionary<long, UserSession>`. Per-user `SemaphoreSlim` для сериализации обновлений. Lazy + background cleanup (раз в 30 мин). Безопасное удаление семафоров: проверка `CurrentCount == 1` |
 | Application | `DataServices` | Aggregate-обёртка: `Sessions` / `Commands` / `MessageTracking` — устраняет двойную DI-регистрацию |
+| Application | `SessionsListRenderer` | Рендеринг списка сессий для `/status` с фильтрацией и нумерацией |
 | Middleware | `AuthorizationMiddleware` | Валидация доступа, `BypassesAccessCheck` для access-related callback-ов, optimistic refresh админа через `UpdatedAt` |
 | Handlers | `AccessRequestHandler` (P=0) | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` — отправляет запрос всем админам |
 | Handlers | `FileNavigationHandler` (P=10) | `GOTOPARENT:` — навигация в выбранную папку с проверкой `IsPathWithinRoot` |
 | Handlers | `FileSelectionHandler` (P=20) | Тоггл выбора файла/папки |
 | Handlers | `CommandToggleHandler` (P=100) | Тоггл выбора команды (`PDF:`, `DWG:`, `IFC:` и т.д.) |
-| Handlers | `SessionManagementHandler` (P=100) | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:` |
+| Handlers | `SessionManagementHandler` (P=100) | `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`, `STATUSPAGE:`, `CMDPAGE:` |
 | Handlers | `CommandSelectionHandler` (P=100) | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
 | Helpers | `HandlerHelpers` | `SendActionsReplyKeyboardAsync` (общий для SlashCommandService, FileNavigationHandler, CommandSelectionHandler) |
 | Helpers | `MarkdownHelper` | `Escape(text, ParseMode)` для Markdown/MarkdownV2 |
@@ -132,6 +133,17 @@ Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
 .AddInfrastructureServices()// DataServices, DatabaseInitializerService, FileSystemBrowser, NotificationOutboxDataService
 .AddTelegramServices()      // ITelegramBotClient, ITelegramOutputService, TelegramUpdateMapper, KeyboardBuilder, Channel<NotificationItem>, 3 hosted services
 .AddHealthCheckServices()   // HealthCheckHostedService + notificationChannel check
+
+**Server DI registration (DependencyInjectionExtensions.cs):**
+
+```csharp
+.AddConfiguration()          // FileSystemOptions, BotOptions, RateLimitOptions, HealthCheckOptions
+.AddCallbackHandlers()       // 6 ICallbackHandler + CallbackDispatcher
+.AddApplicationServices()    // CommandAppService, AuthorizationMiddleware, RateLimiter, SlashCommandService, SessionManager, SessionsListRenderer
+.AddInfrastructureServices() // UserDataService, CommandDataService, SessionDataService, MessageTrackingDataService, NotificationOutboxDataService, DataServices, DatabaseInitializerService, FileSystemBrowser
+.AddTelegramServices()       // ITelegramBotClient, ITelegramOutputService, TelegramUpdateMapper, KeyboardBuilder, Channel<NotificationItem>, TelegramBotHostedService, CommandNotificationService, NotificationSenderService
+.AddHealthCheckServices()    // HealthCheckHostedService
+```
 ```
 
 ### BimLib (BIM Integration) — embedded in Worker
@@ -184,8 +196,8 @@ services.AddSingleton<NavisworksPathResolver>();
 | Component | Role |
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `ScheduleRetryAsync` (NextRetryAt + RetryCount), `NotifySessionStartedAsync` (pg_notify), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
-| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER`, **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
-| `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс, регистрирует в `_activeProcesses`, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
+| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER` (`WorkerOptions.RevitDispatcherCommand`), **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
+| `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `OnCommandCompletedAsync`: `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
 
@@ -194,9 +206,15 @@ services.AddSingleton<NavisworksPathResolver>();
 **Shutdown order (v1.7):**
 1. `_shutdownCts.CancelAsync()` — останавливает background loops
 2. `LogActiveProcessesOnShutdown()` + параллельный `Kill(entireProcessTree: true)` всех активных процессов в общем shutdown-бюджете (`30s`, per-process `10s`)
-3. `WaitForBackgroundTaskCompletionAsync` (cleanup + health tasks, `15s` каждый)
-4. `WaitForRunningTasksCompletionAsync` (`15s`)
+3. Wait for cleanup + health tasks (`15s` каждый)
+4. Wait for running tasks (`15s`)
 5. Dispose semaphores
+
+**LaunchStaggerGate:** В `ProcessRunner` добавлен `SemaphoreSlim _launchGate` (capacity 1), сериализующий
+момент `Process.Start()` для всех типов команд. После `Start()` gate удерживается `LaunchStaggerSeconds`
+(default 5), чтобы встроенный CEF-компонент Revit успел забиндить devtools-порт. `Task.Delay` использует
+`CancellationToken.None`, чтобы gate всегда освобождался даже при shutdown. Процесс регистрируется в
+`_activeProcesses` **до** stagger-задержки, чтобы health-check и shutdown-kill видели его сразу.
 
 **Корреляция событий:** каждая команда и сессия имеют `CorrelationId` (GUID без дефисов), который проходит через весь pipeline: создание сессии → claim → notify → completion → Telegram. Используется в логах для трассировки.
 
@@ -225,6 +243,8 @@ services.AddHostedService<SessionCleanupService>();
 - `RevitProcessStatus` enum: `Healthy`, `NotResponding`, `Error`.
 - Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete-классы only).
 - Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(5).
+- `WorkerOptions.RevitDispatcherCommand` = `"WORKER"` — константа-диспетчер для Revit AddIn. Реальная команда (`PDF`, `DWG`, ...) передаётся только в `TaskFile.commandText`, не в CLI args.
+- `WorkerOptions.LaunchStaggerSeconds` (default `5`) — пауза между запусками внешних процессов для предотвращения коллизии CEF devtools-порта Revit. `0` отключает.
 - `SessionManager.GetOrCreateSession()` no longer calls `RemoveSession()` (была race с `AcquireUserLockAsync`). Background `CleanUpExpiredSessionsAsync` безопасно обрабатывает оба dictionary.
 
 ### How BIM Command Plugins Actually Work
@@ -353,7 +373,7 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 
 | File | Purpose | Key Constants |
 |------|---------|---------------|
-| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
+| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `StatusPage`, `CommandsPage`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
 | `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |
 | `Statuses.cs` | Entity statuses (commands/sessions) | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses` (set), `ActiveStatuses` (set) |
 | `CommandPriorities.cs` | Worker queue priority levels | `Critical`=1, `High`=2, `Medium`=3, `Low`=4, `Default`=5 |
@@ -491,7 +511,7 @@ Handler hierarchy (порядок не имеет значения — выбо�
 - `FileSelectionHandler` — `FILE:`, `SELECTALLSECTIONS:`
 - `CommandToggleHandler` — `PDF:`, `DWG:`, `IFC:`, `BIMDOC:`, `NWC:`, `CLASHREP:`, `AUTORES:`
 - `CommandSelectionHandler` — `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`
-- `SessionManagementHandler` — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`
+- `SessionManagementHandler` — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`, `STATUSPAGE:`, `CMDPAGE:`
 
 **Error handling:** `CallbackHandlerBase.HandleAsync()` **НЕ ловит** исключения — они пропагируются в `CallbackDispatcher.DispatchAsync()`, который ловит `Exception`, логирует с `elapsedMs`/handlerName и возвращает `false` (исключая double logging). `OperationCanceledException` пробрасывается наверх.
 

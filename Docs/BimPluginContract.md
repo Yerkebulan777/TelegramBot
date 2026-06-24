@@ -15,12 +15,13 @@
 **Реализация TelegramBot.Worker полностью соответствует эталонному контракту.** Любые изменения в коде,
 затрагивающие обмен `Worker ↔ BIM-плагин`, **обязаны** сохранять это соответствие:
 
-- `TelegramBot.Core/Models/TaskFile.cs` ↔ `…\RevitBIMFusion\Docs\TaskFile.schema.json`
-- `TelegramBot.Core/Models/ResultFile.cs` ↔ `…\RevitBIMFusion\Docs\ResultFile.schema.json`
-- `TelegramBot.Worker/Services/CommandPreparer.cs` (`CreateTaskFile`, `CreateProcessStartInfo`)
-- `TelegramBot.Worker/Services/ProcessRunner.cs` (`TryReadResultFile`, `HandleFailureAsync`)
-- `TelegramBot.Core/Config/WorkerOptions.cs` (`Commands` map) + `TelegramBot.Worker/appsettings.json` (секция
-  `Worker:Commands`)
+| Наша реализация (TelegramBot) | Эталон (RevitBIMFusion) |
+|------------------------------|-------------------------|
+| `TelegramBot.Core/Models/TaskFile.cs` | `WorkerBridge/Core/Contracts.cs` (DTO) |
+| `TelegramBot.Core/Models/ResultFile.cs` | `WorkerBridge/Core/Contracts.cs` (DTO) |
+| `TelegramBot.Worker/Services/CommandPreparer.cs` | `WorkerBridge/Core/JsonIo.cs` (IO utilities) |
+| `TelegramBot.Worker/Services/ProcessRunner.cs` | `WorkerBridge/Commands/WorkerCommandHandler.cs` (executor) |
+| `TelegramBot.Core/Config/WorkerOptions.cs` + `appsettings.json` | `RevitBIMFusion/Infrastructure/Worker/BimTaskExecutor.cs` |
 
 Если эталон изменился — **сначала** обновляется эталон + плагин (RevitBIMFusion), **потом** синхронизируется
 наша реализация (этот документ + код) в одном релизе.
@@ -85,10 +86,16 @@ Revit.exe /command "WORKER" "{TaskFilePath}"
 | 2 | dispatcher | `"WORKER"` | да |
 | 3 | `taskFilePath` | `"C:\\…\\task_42_abc123.json"` | да |
 
-`args[2]` — fixed dispatcher Revit AddIn, а не тип экспорта. Реальная команда (`PDF`, `DWG`, `NWC`, ...)
-живёт только в `TaskFile.commandText` и читается исполнителем из JSON. Если Worker передаст в `args[2]`
-реальный commandText вроде `"PDF"`, AddIn не будет угадывать путь к task-файлу: strict resolver уйдёт в
-debug fallback (`OpenFileDialog`) или вернёт `Cancelled` в headless-режиме без `ResultFile`.
+**Строгое правило (эталон §CLI Arguments):** Revit.exe запускается ровно с 4 аргументами.
+Дополнительные флаги (например, `/nosplash`) между dispatcher и путём к task-файлу **запрещены** —
+`TaskFilePathResolver.Resolve()` валидирует строгий positional layout и не сканирует argv дальше `args[3]`.
+Все текущие шаблоны Worker'а (см. ниже) соответствуют этому правилу.
+
+`args[2]` — fixed dispatcher (`WorkerOptions.RevitDispatcherCommand = "WORKER"`), а не тип экспорта.
+Реальная команда (`PDF`, `DWG`, `NWC`, ...) живёт только в `TaskFile.commandText` и читается исполнителем
+из JSON. Если Worker передаст в `args[2]` реальный commandText вроде `"PDF"`, AddIn не будет угадывать
+путь к task-файлу: strict resolver уйдёт в debug fallback (`OpenFileDialog`) или вернёт `Cancelled`
+в headless-режиме без `ResultFile`.
 
 **Плейсхолдеры** в `ArgumentsTemplate`:
 
@@ -161,8 +168,12 @@ Worker создаёт директорию автоматически на ст�
 
 **Атомарность записи** (эталон §Atomic result publication):
 
-- `CommandPreparer.CreateTaskFile` пишет `{path}.tmp` → `File.Move(.tmp, path, overwrite: true)`.
-- Плагин (BIM executor) должен делать то же самое для `resultFilePath`.
+- `CommandPreparer.CreateTaskFile` пишет `{path}.tmp` → `File.Move(.tmp, path, overwrite: true)`. Это
+  эквивалентно канонической последовательности `File.Delete(target) → File.Move(.tmp, target)`.
+- Плагин (BIM executor — `ResultFileWriter.Write` в `WorkerBridge/Core/JsonIo.cs`) делает то же самое для
+  `resultFilePath`.
+- `ResultFile.WriteSafe` (в плагине) гарантирует запись result-файла для **каждого** исхода (success,
+  expected error, unknown command, exception) через `try/finally`.
 - Worker удаляет `result_*` сразу после успешного парсинга; `task_*` и `result_*.bad` — в `finally` через
   `CommandPreparer.CleanupTempFiles`.
 
@@ -193,7 +204,7 @@ Worker создаёт директорию автоматически на ст�
 | `IFC` | Export to IFC | planned (NotImplemented) | `Worker:Commands:IFC` (Revit.exe) |
 | `BIMDOC` | BIM documentation | planned | `Worker:Commands:BIMDOC` (Revit.exe) |
 | `CLASHREP` | Clash report | planned | `Worker:Commands:CLASHREP` (FileConvert.exe) |
-| `AUTORES` | Automatic clash resolution | planned | `Worker:Commands:AUTORES` (python) |
+| `AUTORES` | Automatic clash resolution | planned | `Worker:Commands:AUTORES` (python, `WorkingDirectory: "."`) |
 
 Плагин возвращает `NotImplemented: <command>. …` в `errorMessage` для planned-команд → `ErrorClassifier`
 классифицирует как permanent failure без retry.

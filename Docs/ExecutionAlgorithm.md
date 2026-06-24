@@ -69,12 +69,16 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
        containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`,
        `NavisworksPathResolver`)
      - `CreateTaskFile` — atomic write `task_{CommandId}_{attemptToken}.json` (`.tmp` → `File.Move`)
-     - `StartProcessAsync` — `Process.Start` + `UpdateStatus=processing` + регистрация в `_activeProcesses`
-       + `NotifySessionStartedAsync` (`pg_notify('session_started', SessionId|CorrelationId|UserId)`)
+     - `StartProcessAsync` — захват `_launchGate` (SemaphoreSlim 1/1) → `Process.Start` → регистрация в
+       `_activeProcesses` (ДО stagger-задержки, чтобы health-check и shutdown видели процесс) →
+       `Task.Delay(LaunchStaggerSeconds)` с `CancellationToken.None` (gate освобождается даже при shutdown)
+       → освобождение gate → `UpdateStatus=processing` + `NotifySessionStartedAsync`
+       (`pg_notify('session_started', SessionId|CorrelationId|UserId)`)
      - `WaitAndHandleResultAsync` — `OutputDataReceived` (64KB лимит, `truncated` флаг) +
        `WaitForExitAsync` + `TryReadResultFile`:
        - `Valid` + `status="done"` → `Done`
        - `Valid` + `status="failed"` → `HandleFailureAsync` (классификация + retry/fail)
+       - `Valid` + `status="cancelled"` → permanent `Failed` без retry
        - `Invalid` (битый JSON / unknown status) → rename в `.bad` → `HandleFailureAsync`
        - `NotFound` (нет result файла) → fallback по exit code (`0` = Done, иначе `HandleFailureAsync`)
      - `CleanupTempFiles` в `finally` (per-attempt)
@@ -190,6 +194,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `idx_sessions_user_created` | `UserId, CreatedAt DESC` | |
 | `idx_sessions_correlation_id` | `CorrelationId` | |
 | `idx_commands_pending_priority` | `Status, Priority ASC, CreatedAt ASC, CommandId ASC` | partial `WHERE Status = 'pending'` |
+| `idx_commands_claim_partition` | `Status, Partition, Priority ASC, CreatedAt ASC, CommandId ASC` | partial `WHERE Status = 'pending'`. Критичен для производительности `ClaimAndReturn` (DISTINCT ON + ORDER BY) |
 | `idx_commands_partition_status` | `Partition, Status` | |
 | `idx_commands_unique` | `SessionId, CommandText, FilePath` | UNIQUE |
 | `idx_tracked_messages_session` | `SessionId` | |
@@ -210,13 +215,20 @@ INSERT INTO Sessions (UserId, Username, CorrelationId, ProjectName, FilesAmount)
 VALUES (@UserId, @Username, @CorrelationId, @ProjectName, @FilesAmount)
 RETURNING SessionId;
 
--- 2) INSERT Commands батчем
-INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder, Priority)
+-- 2) INSERT Commands батчем (Partition вычисляется на лету из FilePath)
+INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder, Priority, Partition)
 SELECT @SessionId,
-       unnest(@CommandTexts::text[]),
-       unnest(@FilePaths::text[]),
-       unnest(@Orders::int[]),
-       unnest(@Priorities::int[]);
+       data.CommandText,
+       data.FilePath,
+       data.ExecutionOrder,
+       data.Priority,
+       'file:' || md5(lower(COALESCE(NULLIF(data.FilePath, ''), data.CommandText)))
+FROM unnest(
+    @CommandTexts::text[],
+    @FilePaths::text[],
+    @Orders::int[],
+    @Priorities::int[]
+) AS data(CommandText, FilePath, ExecutionOrder, Priority);
 
 -- 3) wake-up сигнал для Worker
 SELECT pg_notify('new_tasks', @CorrelationId);
@@ -241,12 +253,14 @@ Worker не решает, какая команда следующая. Он т�
 
 Claim-запрос делает всё в одной транзакции:
 
-1. Берёт только `pending` команды с готовым `NextRetryAt` и заполненной `Partition`.
+1. Берёт только `pending` команды с готовым `NextRetryAt` (IS NULL или ≤ NOW()) и заполненной `Partition`.
 2. Исключает partition, где уже есть `processing`.
 3. Через `DISTINCT ON (Partition)` оставляет максимум одну команду каждой partition в batch.
 4. Сортирует кандидатов по `Priority ASC, CreatedAt ASC, CommandId ASC`.
-5. Закрывает гонки между worker-ами через `pg_try_advisory_xact_lock(...)` и `FOR UPDATE SKIP LOCKED`.
-6. Обновляет выбранные строки в `processing`, проставляет `Lease` и возвращает команды worker-у.
+5. Закрывает гонки между worker-ами через `pg_try_advisory_xact_lock(1234568, hashtext(Partition))`
+   (per-partition advisory lock, namespace отличный от lease cleanup 1234567) и `FOR UPDATE SKIP LOCKED`.
+6. Обновляет выбранные строки в `processing`, проставляет `Lease` + `StartedAt = NOW()` + `Partition =
+   selected.Partition` (backfill для legacy строк с NULL Partition) и возвращает команды worker-у.
 
 **Lease:** `LeaseExpiry = NOW() + ProcessTimeoutMinutes + 5min` (дополнительные 5 мин — буфер для crash
 recovery). `ProcessTimeoutMinutes` = 180 (3ч) по умолчанию.
@@ -329,7 +343,9 @@ WHERE "Status" = 'processing'
 ```
 
 **Advisory lock:** `pg_try_advisory_lock(1234567)` (namespace `telegram_bot_lease_cleanup`) — предотвращает
-race между несколькими воркерами. Освобождается в `finally`.
+race между несколькими воркерами. Освобождается в `finally`. Для claim-запроса используется отдельный
+namespace: `pg_try_advisory_xact_lock(1234568, hashtext(Partition))` с транзакционной (xact) блокировкой,
+которая автоматически освобождается при коммите транзакции.
 
 ### Schedule retry
 
@@ -394,8 +410,15 @@ WHERE s.SessionId = @SessionId
 GROUP BY s.SessionId;
 ```
 
-+ отдельный запрос `SELECT FilePath FROM Commands WHERE SessionId = @SessionId AND Status = 'Failed' ORDER
-BY ExecutionOrder, CommandId` для `FailedFilePaths`.
++ отдельный запрос `SqlQueries.Commands.GetFailedFilePathsBySession` для `FailedFilePaths`:
+
+```sql
+SELECT FilePath
+FROM Commands
+WHERE SessionId = @SessionId
+  AND Status = 'Failed'
+ORDER BY ExecutionOrder, CommandId;
+```
 
 ### Soft-delete неактивных сессий
 
@@ -541,22 +564,30 @@ fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Nav
 
 ### Добавление новой команды
 
-1. **Добавить конфигурацию** в `appsettings.json` Worker:
+1. **Добавить конфигурацию** в `appsettings.json` Worker (или в дефолты `WorkerOptions.cs`):
 
    ```json
    "Commands": {
      "XLSEXPORT": {
        "ExecutablePath": "excel_exporter.exe",
        "ArgumentsTemplate": "--input \"{FilePath}\"",
-       "AllowedExtensions": [".xlsx", ".xls"]
+       "AllowedExtensions": [".xlsx", ".xls"],
+       "WorkingDirectory": "."
      }
    }
    ```
 
+   Если команда использует Revit AddIn — `ArgumentsTemplate` должен содержать
+   `WorkerOptions.RevitDispatcherCommand` (`"WORKER"`) как `args[2]`:
+   `/command \"WORKER\" \"{TaskFilePath}\"`
+
 2. **Настроить приоритет** — добавить запись в `_commandPriorityMap` в `SlashCommandService.cs`. Если не
    добавить — `Priority=5` (`Default`).
 
-3. **Настроить общий лимит параллельности** (опционально):
+3. **Настроить stagger-gate** (опционально): если команда запускает Revit или другой процесс с
+   Chromium CEF, stagger-gate уже сериализует все запуски — дополнительных настроек не нужно.
+
+4. **Настроить общий лимит параллельности** (опционально):
 
    ```json
    "Partitions": { "0": 5, "1": 3, "2": 2, "3": 1 }
@@ -564,16 +595,16 @@ fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Nav
 
    Ключи (`"0"`, `"1"`, ...) сейчас legacy; важна только сумма значений.
 
-4. **Добавить `CommandDefinition`** в `TelegramBot.Server/Models/CommandDefinition.cs` +
+5. **Добавить `CommandDefinition`** в `TelegramBot.Server/Models/CommandDefinition.cs` +
    `CommandCatalog.GetByGroup(...)` для отображения в меню.
 
-5. **Добавить `CommandCodes` константу** в `TelegramBot.Core/Constants/CommandCodes.cs` (если нужна в
+6. **Добавить `CommandCodes` константу** в `TelegramBot.Core/Constants/CommandCodes.cs` (если нужна в
    Server-коде).
 
-6. **Добавить `CallbackPrefixes` константу** в `TelegramBot.Core/Constants/CallbackPrefixes.cs` (для
+7. **Добавить `CallbackPrefixes` константу** в `TelegramBot.Core/Constants/CallbackPrefixes.cs` (для
    inline-кнопки команды). Формат: `"<CODE>:"` (с двоеточием).
 
-7. **Зарегистрировать handler** (если новый callback-префикс): `CommandToggleHandler` уже поддерживает
+8. **Зарегистрировать handler** (если новый callback-префикс): `CommandToggleHandler` уже поддерживает
    `PDF:`, `DWG:`, и т.д. — для новой команды добавить префикс в `SupportedPrefixes`.
 
 ### Добавление нового PG-канала

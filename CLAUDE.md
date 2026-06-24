@@ -1,11 +1,71 @@
+# TelegramBot — Project Instructions for AI Agents
+
+## Quick Reference
+
+| Документ | Описание |
+|----------|----------|
+| [AGENTS.md](AGENTS.md) | Основной файл: архитектура, DI, BimLib, code style, константы |
+| [README.md](README.md) | Обзор, команды, конфигурация, запуск |
+| [Docs/CriticalReview.md](Docs/CriticalReview.md) | Известные архитектурные риски |
+| [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
+| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт BIM-плагинов |
+| [Docs/HowWorkerWorks.md](Docs/HowWorkerWorks.md) | Архитектура Worker |
+
+## Build & Verify
+
+```bash
+# Build all projects (main verification)
+dotnet build TelegramBot.slnx
+
+# Run Server
+dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
+
+# Run Worker (separate terminal)
+dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
+
+# Publish
+dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
+
+# Format code (must pass: exit code 0)
+dotnet format TelegramBot.slnx
+```
+
+**Tests are intentionally disabled.** Do not add test projects or run `dotnet test`.
+
+## Key Architecture Rules
+
+- **4 projects** (`.slnx`): Core ← Data → Server + Worker. All services are **Singletons**.
+- **Windows-only**: BimLib uses Registry + P/Invoke. `[SupportedOSPlatform("windows")]` everywhere.
+- **PostgreSQL 18** via Dapper + Npgsql. Use `await using var conn = await CreateOpenConnectionAsync()`.
+- **Soft-delete only**: `Status = 'Deleted'`, never `DELETE FROM`.
+- **No single-implementation interfaces** (except `ICallbackHandler` and `ITelegramOutputService`).
+- **Primary constructors** preferred (C# 12). No redundant `private readonly` fields for direct captures.
+- **Async methods** always suffixed with `Async`, no `async void`, no `ConfigureAwait(false)`.
+- **Worker staggering**: `ProcessRunner._launchGate` serializes `Process.Start()` with `LaunchStaggerSeconds` (default 5s) to prevent Revit CEF port collision.
+- **Revit dispatcher**: `WorkerOptions.RevitDispatcherCommand = "WORKER"` — real command in `TaskFile.commandText`, not CLI args.
+
+## Documentation Updates
+
+When changing code, keep docs in sync:
+1. Update `AGENTS.md` if architecture, DI, handlers, or constants change
+2. Update `Docs/ExecutionAlgorithm.md` if SQL queries, DB schema, or pipeline changes
+3. Update `Docs/BimPluginContract.md` if TaskFile/ResultFile, ArgumentsTemplate, or contract changes
+4. Update `Docs/CriticalReview.md` if addressing or discovering new risks
+5. Update `Docs/HowWorkerWorks.md` if Worker internals change (ProcessRunner, CommandExecutionService, etc.)
+6. Update `README.md` if config, commands, or general overview changes
+
+All docs live in the repo root and `Docs/` — keep path references consistent.
+
+---
+
 <!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+## GitNexus — Code Intelligence
 
 This project is indexed by GitNexus as **TelegramBot** (1281 symbols, 3316 relationships, 105 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
-## Always Do
+### Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
 - **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "master"})`.
@@ -13,14 +73,14 @@ This project is indexed by GitNexus as **TelegramBot** (1281 symbols, 3316 relat
 - When exploring unfamiliar code, use `query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
 
-## Never Do
+### Never Do
 
 - NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
 - NEVER commit changes without running `detect_changes()` to check affected scope.
 
-## Resources
+### Resources
 
 | Resource | Use for |
 |----------|---------|
@@ -29,7 +89,7 @@ This project is indexed by GitNexus as **TelegramBot** (1281 symbols, 3316 relat
 | `gitnexus://repo/TelegramBot/processes` | All execution flows |
 | `gitnexus://repo/TelegramBot/process/{name}` | Step-by-step execution trace |
 
-## CLI
+### CLI
 
 | Task | Read this skill file |
 |------|---------------------|
