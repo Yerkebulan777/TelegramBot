@@ -7,7 +7,8 @@ PostgreSQL-БД и запускает их. Server кладёт команды �
 ## Архитектура в одном абзаце
 
 Worker — событийный orchestrator поверх PostgreSQL-очереди. `LISTEN/NOTIFY` будит drain-loop, который
-claim'ит команды до общего лимита параллельности. `ProcessRunner` запускает
+просит БД отдать следующие команды до общего лимита параллельности. Порядок очереди, partition-gating и
+защита от гонок живут в одном SQL claim-запросе. `ProcessRunner` запускает
 внешние BIM-процессы, обмениваясь с ними JSON-файлами в `TaskDirectory`. Результат классифицируется через
 `ErrorClassifier` (permanent → Failed, transient → retry с экспонентой), а `SessionCompletionTracker` пачкой
 уведомляет Server о завершении сессии через durable `NotificationOutbox`.
@@ -53,12 +54,20 @@ drain снова.
 
 ---
 
+## DB scheduler и partition-gating
+
+Worker не маршрутизирует команды сам. Он считает свободные слоты и вызывает
+`CommandDataService.ClaimPendingCommandsAsync(limit, leaseTimeoutMinutes)`. PostgreSQL выбирает очередь
+атомарно внутри claim-запроса: команды одного RVT/NWC-файла идут последовательно, разные файлы выполняются
+параллельно до общего лимита worker-а. Канонический алгоритм: [ExecutionAlgorithm.md](ExecutionAlgorithm.md#захват-команд-атомарный-db-scheduler).
+
+---
+
 ## Лимит параллельности
 
 Worker использует один `SemaphoreSlim` внутри `CommandExecutionService`. `Worker:Partitions` оставлен для
 обратной совместимости с конфигом; ключи словаря не используются для routing, итоговый лимит равен сумме
-значений. Приоритет команды всё ещё влияет на порядок claim'а в SQL (`ORDER BY Priority ASC`), но не создаёт
-отдельные пулы.
+значений. Логические партиции очереди хранятся в `Commands.Partition` и обслуживаются БД внутри claim-запроса.
 
 ---
 

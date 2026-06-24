@@ -151,7 +151,7 @@ Worker запускает внешние исполнители и обмени�
 | `Worker` | `CleanupIntervalSeconds` | Интервал фоновой очистки истёкших Lease (default `300`) |
 | `Worker` | `HealthCheckIntervalSeconds` | Интервал проверки здоровья активных процессов (default `30`) |
 | `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
-| `Worker` | `Partitions` | Backward-compatible словарь лимитов; Worker использует сумму значений как общий лимит параллельных команд. Default: `{0: 5, 1: 3, 2: 2, 3: 1}` → `11` |
+| `Worker` | `Partitions` | Backward-compatible словарь лимитов; Worker использует сумму значений как общий лимит параллельных команд. Логические очередные partition живут в БД (`Commands.Partition`). Default: `{0: 5, 1: 3, 2: 2, 3: 1}` → `11` |
 | `Worker.Commands` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}` |
 | `HealthCheck` | `Port` / `ServiceName` / `CacheSeconds` / `DbCheckTimeoutSeconds` | Health-сервер (default `5001` / `TelegramBot.Worker` / `10` / `5`) |
 
@@ -161,6 +161,11 @@ Worker запускает внешние исполнители и обмени�
 partition-key и не держит отдельные пулы по приоритетам. В [CommandExecutionService.cs](TelegramBot.Worker/Services/CommandExecutionService.cs)
 создаётся один `SemaphoreSlim`, а общий лимит считается как `Sum(Partitions.Values)`. Приоритет команды
 влияет только на порядок SQL claim'а: меньший `Priority` забирается раньше.
+
+Очередные partition назначает и обслуживает PostgreSQL. При вставке команды `Commands.Partition` строится
+по исходному файлу (`file:` + md5 от нормализованного `FilePath`). Claim-запрос не отдаёт следующую команду
+этой partition, пока предыдущая находится в `processing`, поэтому задачи одного файла идут последовательно,
+а разные файлы выполняются параллельно до общего лимита worker-а.
 
 ### Пример `appsettings.Local.json` (gitignored)
 

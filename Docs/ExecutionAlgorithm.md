@@ -142,7 +142,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `GUID` | `TEXT` | Резерв для дополнительной идентификации |
 | `Lease` | `INTEGER` | Unix seconds — момент истечения lease; NULL когда не processing |
 | `Partition` | `TEXT` | Имя партиции (для группировки) |
-| `Priority` | `INTEGER NOT NULL DEFAULT 50` | 1=Critical, 2=High, 3=Medium, 4=Low, 50=Default |
+| `Priority` | `INTEGER NOT NULL DEFAULT 5` | 1=Critical, 2=High, 3=Medium, 4=Low, 5=Default |
 | `ProcessId` | `INTEGER` | PID запущенного процесса |
 | `ErrorMessage` | `TEXT` | Последнее сообщение об ошибке (для Failed) |
 | `RetryCount` | `INTEGER NOT NULL DEFAULT 0` | Счётчик попыток |
@@ -224,32 +224,29 @@ SELECT pg_notify('new_tasks', @CorrelationId);
 
 Реализация: `SessionDataService.CreateSessionWithCommandsAsync` — единая `BeginTransactionAsync` + commit.
 
-### Захват команд (атомарный, FOR UPDATE SKIP LOCKED)
+### Захват команд (атомарный DB scheduler)
+
+Worker не решает, какая команда следующая. Он только сообщает БД, сколько свободных слотов есть, а БД
+атомарно выбирает команды через `SqlQueries.Commands.ClaimAndReturn`.
+
+`Partition` назначается при вставке команды как стабильный ключ исходного файла:
 
 ```sql
-WITH selected AS (
-    SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder,
-           s.UserId, s.Username, s.CorrelationId, c.Partition, c.Priority, c.RetryCount
-    FROM Commands c
-    JOIN Sessions s ON s.SessionId = c.SessionId
-    WHERE c.Status = 'pending'
-      AND s.Status != 'Deleted'
-      AND (c.NextRetryAt IS NULL OR c.NextRetryAt <= NOW())
-    ORDER BY c.Priority ASC, c.CreatedAt ASC, c.CommandId ASC
-    LIMIT @Limit
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE Commands c
-SET Status = 'processing',
-    Lease = @LeaseExpiry,
-    StartedAt = NOW()
-FROM selected
-WHERE c.CommandId = selected.CommandId
-RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
-          selected.FilePath, selected.ExecutionOrder, selected.UserId,
-          selected.Username, selected.CorrelationId, selected.Partition,
-          selected.Priority, selected.RetryCount;
+'file:' || md5(lower(COALESCE(NULLIF(FilePath, ''), CommandText)))
 ```
+
+Это сериализует команды одного файла: пока по этой партиции есть `processing`, следующая команда того же
+файла не будет отдана worker-у. Разные файлы могут выполняться параллельно до общего лимита worker-а.
+Для старых строк с `Partition IS NULL` тот же ключ backfill-ится при инициализации схемы.
+
+Claim-запрос делает всё в одной транзакции:
+
+1. Берёт только `pending` команды с готовым `NextRetryAt` и заполненной `Partition`.
+2. Исключает partition, где уже есть `processing`.
+3. Через `DISTINCT ON (Partition)` оставляет максимум одну команду каждой partition в batch.
+4. Сортирует кандидатов по `Priority ASC, CreatedAt ASC, CommandId ASC`.
+5. Закрывает гонки между worker-ами через `pg_try_advisory_xact_lock(...)` и `FOR UPDATE SKIP LOCKED`.
+6. Обновляет выбранные строки в `processing`, проставляет `Lease` и возвращает команды worker-у.
 
 **Lease:** `LeaseExpiry = NOW() + ProcessTimeoutMinutes + 5min` (дополнительные 5 мин — буфер для crash
 recovery). `ProcessTimeoutMinutes` = 180 (3ч) по умолчанию.
@@ -557,7 +554,7 @@ fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Nav
    ```
 
 2. **Настроить приоритет** — добавить запись в `_commandPriorityMap` в `SlashCommandService.cs`. Если не
-   добавить — `Priority=50` (`Default`).
+   добавить — `Priority=5` (`Default`).
 
 3. **Настроить общий лимит параллельности** (опционально):
 

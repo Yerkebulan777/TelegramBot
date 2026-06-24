@@ -60,7 +60,7 @@ internal static partial class SqlQueries
                 GUID TEXT,
                 Lease INTEGER,
                 Partition TEXT,
-                Priority INTEGER NOT NULL DEFAULT 50,
+                Priority INTEGER NOT NULL DEFAULT 5,
                 ProcessId INTEGER,
                 ErrorMessage TEXT,
                 RetryCount INTEGER NOT NULL DEFAULT 0,
@@ -72,9 +72,24 @@ internal static partial class SqlQueries
 
         internal const string EnsureCommandsColumns = @"
             ALTER TABLE Commands
+            ADD COLUMN IF NOT EXISTS Lease INTEGER,
+            ADD COLUMN IF NOT EXISTS Partition TEXT,
+            ADD COLUMN IF NOT EXISTS Priority INTEGER NOT NULL DEFAULT 5,
+            ADD COLUMN IF NOT EXISTS ProcessId INTEGER,
+            ADD COLUMN IF NOT EXISTS ErrorMessage TEXT,
+            ADD COLUMN IF NOT EXISTS RetryCount INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS NextRetryAt TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS Progress INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS Result TEXT,
-            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();";
+            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+            ALTER TABLE Commands
+            ALTER COLUMN Priority SET DEFAULT 5,
+            ALTER COLUMN RetryCount SET DEFAULT 0;
+
+            UPDATE Commands
+            SET Partition = 'file:' || md5(lower(COALESCE(NULLIF(FilePath, ''), CommandText)))
+            WHERE Partition IS NULL;";
 
         internal const string CreateTrackedMessagesTable = @"
             CREATE TABLE IF NOT EXISTS TrackedMessages (
@@ -130,6 +145,8 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority ASC, CreatedAt ASC, CommandId ASC)
                 WHERE Status = 'pending';
             CREATE INDEX IF NOT EXISTS idx_commands_partition_status ON Commands(Partition, Status);
+            CREATE INDEX IF NOT EXISTS idx_commands_claim_partition ON Commands(Status, Partition, Priority ASC, CreatedAt ASC, CommandId ASC)
+                WHERE Status = 'pending';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_session ON TrackedMessages(SessionId);
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_chat ON TrackedMessages(ChatId);

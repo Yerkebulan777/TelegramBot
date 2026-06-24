@@ -224,7 +224,7 @@ services.AddHostedService<SessionCleanupService>();
 - `RevitDetectedVersion.Year` диапазон: `2017..2026` (константа в `RevitVersionDetector`); `BimIntegrationOptions.MinSupportedVersion`/`MaxSupportedVersion` — default `2018`–`2026`.
 - `RevitProcessStatus` enum: `Healthy`, `NotResponding`, `Error`.
 - Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete-классы only).
-- Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(50).
+- Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(5).
 - `SessionManager.GetOrCreateSession()` no longer calls `RemoveSession()` (была race с `AcquireUserLockAsync`). Background `CleanUpExpiredSessionsAsync` безопасно обрабатывает оба dictionary.
 
 ### How BIM Command Plugins Actually Work
@@ -356,7 +356,7 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 | `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
 | `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |
 | `Statuses.cs` | Entity statuses (commands/sessions) | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses` (set), `ActiveStatuses` (set) |
-| `CommandPriorities.cs` | Worker queue priority levels | `Critical`=1, `High`=2, `Medium`=3, `Low`=4, `Lowest`=5, `Default`=50 |
+| `CommandPriorities.cs` | Worker queue priority levels | `Critical`=1, `High`=2, `Medium`=3, `Low`=4, `Default`=5 |
 | `ButtonTexts.cs` | Reply keyboard button labels | `Apply` ("✅ Применить"), `Confirm` ("✅ Подтвердить"), `Cancel` ("❌ Отмена") |
 
 **Server-only constants** (`TelegramBot.Server/Constants/`):
@@ -511,7 +511,7 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutb
 
 - **BotUsers** — `UserId BIGINT PK`, `Username TEXT`, `Role INTEGER` (`UserRole` enum: `User=0`, `Admin=1`), `Status INTEGER` (`UserAccessStatus` enum: `Pending=0`, `Approved=1`, `Rejected=2`, `Blocked=3`), `CreatedAt/UpdatedAt TIMESTAMPTZ`
 - **Sessions** — `SessionId SERIAL PK`, `UserId BIGINT`, `Username TEXT`, `CorrelationId TEXT NOT NULL`, `PriorityId INTEGER` (default 0), `Status TEXT` (`'pending'`/`'Done'`/`'Failed'`/`'Deleted'`), `ProjectName TEXT`, `FilesAmount INTEGER`, `CompletionNotified BOOLEAN` (default FALSE; защита от duplicate enqueue в multi-worker), `CreatedAt/UpdatedAt TIMESTAMPTZ`
-- **Commands** — `CommandId SERIAL PK`, `SessionId INT REFERENCES Sessions`, `CommandText TEXT`, `FilePath TEXT`, `ExecutionOrder INT`, `Status TEXT` (default `'pending'`), `CreatedAt/StartedAt/CompletedAt TIMESTAMPTZ`, `GUID TEXT`, `Lease INT` (Unix seconds), `Partition TEXT`, `Priority INT` (default 50), `ProcessId INT`, `ErrorMessage TEXT`, `RetryCount INT` (default 0), `NextRetryAt TIMESTAMPTZ`, `Progress INT` (default 0), `Result TEXT`, `UpdatedAt TIMESTAMPTZ`
+- **Commands** — `CommandId SERIAL PK`, `SessionId INT REFERENCES Sessions`, `CommandText TEXT`, `FilePath TEXT`, `ExecutionOrder INT`, `Status TEXT` (default `'pending'`), `CreatedAt/StartedAt/CompletedAt TIMESTAMPTZ`, `GUID TEXT`, `Lease INT` (Unix seconds), `Partition TEXT`, `Priority INT` (default 5), `ProcessId INT`, `ErrorMessage TEXT`, `RetryCount INT` (default 0), `NextRetryAt TIMESTAMPTZ`, `Progress INT` (default 0), `Result TEXT`, `UpdatedAt TIMESTAMPTZ`
 - **TrackedMessages** — `MessageId SERIAL PK`, `SessionId INT REFERENCES Sessions (nullable)`, `ChatId BIGINT`, `MessageIdPg INT`, `CreatedAt TIMESTAMPTZ` (для DB-backed message tracking + cleanup на session delete)
 - **NotificationOutbox** — `OutboxId BIGSERIAL PK`, `EventType TEXT` (`session_completed`), `SessionId INT REFERENCES Sessions`, `CorrelationId TEXT`, `Status TEXT` (`pending`/`processing`/`sent`), `Attempts INT`, `NextAttemptAt TIMESTAMPTZ`, `LockedUntil TIMESTAMPTZ`, `LastError TEXT`, `CreatedAt/UpdatedAt/SentAt TIMESTAMPTZ`
 

@@ -5,8 +5,19 @@ internal static partial class SqlQueries
     internal static class Commands
     {
         internal const string InsertBatch = @"
-            INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder, Priority)
-            SELECT @SessionId, unnest(@CommandTexts::text[]), unnest(@FilePaths::text[]), unnest(@Orders::int[]), unnest(@Priorities::int[])";
+            INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder, Priority, Partition)
+            SELECT @SessionId,
+                   data.CommandText,
+                   data.FilePath,
+                   data.ExecutionOrder,
+                   data.Priority,
+                   'file:' || md5(lower(COALESCE(NULLIF(data.FilePath, ''), data.CommandText)))
+            FROM unnest(
+                @CommandTexts::text[],
+                @FilePaths::text[],
+                @Orders::int[],
+                @Priorities::int[]
+            ) AS data(CommandText, FilePath, ExecutionOrder, Priority)";
 
         internal const string GetBySession = @"
             SELECT c.ExecutionOrder AS ExecOrder, c.CommandText AS Command,
@@ -67,27 +78,57 @@ internal static partial class SqlQueries
 
 
         internal const string ClaimAndReturn = @"
-            WITH selected AS (
+            WITH candidates AS (
                 SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder,
-                       s.UserId, s.Username, s.CorrelationId, c.Partition, c.Priority, c.RetryCount
+                       s.UserId, s.Username, s.CorrelationId,
+                       c.Partition,
+                       c.Priority, c.RetryCount, c.CreatedAt
                 FROM Commands c
                 JOIN Sessions s ON s.SessionId = c.SessionId
                 WHERE c.Status = 'pending'
                   AND s.Status != 'Deleted'
                   AND (c.NextRetryAt IS NULL OR c.NextRetryAt <= NOW())
-                ORDER BY c.Priority ASC, c.CreatedAt ASC, c.CommandId ASC
+                  AND c.Partition IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM Commands running
+                      WHERE running.Status = 'processing'
+                        AND running.Partition = c.Partition
+                  )
+            ),
+            one_per_partition AS (
+                SELECT DISTINCT ON (Partition)
+                       CommandId, SessionId, CommandText, FilePath, ExecutionOrder,
+                       UserId, Username, CorrelationId, Partition,
+                       Priority, RetryCount, CreatedAt
+                FROM candidates
+                ORDER BY Partition, Priority ASC, CreatedAt ASC, CommandId ASC
+            ),
+            selected AS (
+                SELECT p.CommandId, p.SessionId, p.CommandText, p.FilePath, p.ExecutionOrder,
+                       p.UserId, p.Username, p.CorrelationId, p.Partition,
+                       p.Priority, p.RetryCount
+                FROM one_per_partition p
+                JOIN Commands lockc ON lockc.CommandId = p.CommandId
+                WHERE lockc.Status = 'pending'
+                  AND pg_try_advisory_xact_lock(1234568, hashtext(p.Partition))
+                ORDER BY p.Priority ASC, p.CreatedAt ASC, p.CommandId ASC
                 LIMIT @Limit
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF lockc SKIP LOCKED
             )
             UPDATE Commands c
             SET Status = 'processing', 
                 Lease = @LeaseExpiry,
-                StartedAt = NOW()
+                StartedAt = NOW(),
+                Partition = selected.Partition
             FROM selected
             WHERE c.CommandId = selected.CommandId
+              AND c.Status = 'pending'
             RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
                       selected.FilePath, selected.ExecutionOrder, selected.UserId, 
-                      selected.Username, selected.CorrelationId, selected.Partition, selected.Priority, selected.RetryCount;";
+                      selected.Username, selected.CorrelationId,
+                      selected.Partition,
+                      selected.Priority, selected.RetryCount;";
 
         internal const string ScheduleRetry = @"
             UPDATE Commands
