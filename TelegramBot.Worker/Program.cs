@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Options;
 using Serilog;
-using Serilog.Events;
 using System.Runtime.Versioning;
 using System.Text;
 using TelegramBot.Core.Config;
@@ -84,7 +83,6 @@ public static class Program
                     _ = loggerConfiguration.WriteTo.Logger(lc => lc
                         .MinimumLevel.Information()
                         .Enrich.FromLogContext()
-                        .Filter.ByIncludingOnly(IsBimLibEvent)
                         .WriteToRollingFile(Path.Combine("Worker", "BimLib"), logBasePath));
                 })
                 .Build();
@@ -99,13 +97,13 @@ public static class Program
             var taskDir = fileSystemOptions.GetEffectiveTaskDirectory();
             try
             {
-                _=Directory.CreateDirectory(taskDir);
+                Directory.CreateDirectory(taskDir);
                 Log.Information("TaskDirectory ready: {Path}", taskDir);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Log.Error(ex, "Failed to create TaskDirectory '{Path}'. Command execution will likely fail.", taskDir);
-                throw;
+                var message = $"Failed to create TaskDirectory '{taskDir}'";
+                throw new InvalidOperationException(message, ex);
             }
 
             await host.InitializeDatabaseAsync();
@@ -121,13 +119,6 @@ public static class Program
         }
     }
 
-    /// <summary>
-    /// Фильтр: true если событие относится к BimLib (SourceContext содержит "TelegramBot.Worker.BimLib").
-    /// </summary>
-    private static bool IsBimLibEvent(LogEvent logEvent)
-    {
-        return logEvent.Properties.TryGetValue("SourceContext", out var sc)
-               && sc is ScalarValue { Value: string s }
-               && s.StartsWith("TelegramBot.Worker.BimLib", StringComparison.Ordinal);
-    }
+
+
 }

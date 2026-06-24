@@ -34,6 +34,7 @@ internal static class ProcessKillHelper
         }
 
         using var killCts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
+
         killCts.CancelAfter(timeout);
 
         try
@@ -48,14 +49,22 @@ internal static class ProcessKillHelper
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "WaitForExitAsync after Kill failed: commandId={Id}, pid={Pid}",
-                commandId, SafeGetPid(process));
+            logger.LogDebug(ex, "WaitForExitAsync after Kill failed: commandId={Id}, pid={Pid}", commandId, SafeGetPid(process));
             return false;
         }
     }
 
     private static int SafeGetPid(Process p)
     {
-        try { return p.Id; } catch { return -1; }
+        try
+        {
+            return p.Id;
+        }
+        catch
+        {
+            return -1;
+        }
     }
+
+
 }
