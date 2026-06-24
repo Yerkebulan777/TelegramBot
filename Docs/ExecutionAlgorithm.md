@@ -68,7 +68,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      - `CommandPreparer.PrepareAsync` — валидация FilePath (path traversal, reparse-point, extension, root
        containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`,
        `NavisworksPathResolver`)
-     - `CreateTaskFile` — atomic write `task_{CommandId}_{attemptToken}.json` (`.tmp` → `File.Move`)
+     - `CreateTaskFile` — atomic write `task_{CommandId}_{attemptToken}.xml` (`.tmp` → `File.Move`)
      - `StartProcessAsync` — захват `_launchGate` (SemaphoreSlim 1/1) → `Process.Start` → регистрация в
        `_activeProcesses` (ДО stagger-задержки, чтобы health-check и shutdown видели процесс) →
        `Task.Delay(LaunchStaggerSeconds)` с `CancellationToken.None` (gate освобождается даже при shutdown)
@@ -79,7 +79,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
        - `Valid` + `status="done"` → `Done`
        - `Valid` + `status="failed"` → `HandleFailureAsync` (классификация + retry/fail)
        - `Valid` + `status="cancelled"` → permanent `Failed` без retry
-       - `Invalid` (битый JSON / unknown status) → rename в `.bad` → `HandleFailureAsync`
+       - `Invalid` (битый XML / unknown status) → rename в `.bad` → `HandleFailureAsync`
        - `NotFound` (нет result файла) → fallback по exit code (`0` = Done, иначе `HandleFailureAsync`)
      - `CleanupTempFiles` в `finally` (per-attempt)
 5. `HandleFailureAsync`:
@@ -544,14 +544,14 @@ ORDER BY s.CreatedAt DESC;
 Для Revit/Navisworks/AI-команд Worker использует один механизм:
 
 1. `ProcessRunner.RunAsync()` генерирует `AttemptToken` (GUID без дефисов).
-2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.json` (atomic write).
+2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.xml` (atomic write).
 3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в
    `ArgumentsTemplate`. Для Revit AddIn шаблон должен быть `/command "WORKER" "{TaskFilePath}"`; реальная
    команда остаётся в `TaskFile.commandText`.
 4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает
-   `result_{CommandId}_{AttemptToken}.json`.
+   `result_{CommandId}_{AttemptToken}.xml`.
 5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл существует, но не
-   читается или содержит битый JSON, попытка считается ошибочной и проходит через `ErrorClassifier`
+   читается или содержит битый XML, попытка считается ошибочной и проходит через `ErrorClassifier`
    (permanent → `Failed`, transient → `ScheduleRetry`). `status` — обязательное enum-поле
    (`done`/`failed`/`cancelled`), `cancelled` трактуется как permanent failure без retry.
 

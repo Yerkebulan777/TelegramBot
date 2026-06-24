@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text;
+using System.Xml;
+using System.Xml.Serialization;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
@@ -24,6 +26,8 @@ public sealed class CommandPreparer(
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
     private readonly string _taskDirectory = fileSystemOptions.Value.GetEffectiveTaskDirectory();
     private readonly string? _fileSystemRoot = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.RootPath)];
+    private static readonly XmlSerializer TaskFileSerializer = new(typeof(TaskFile));
+    private static readonly XmlSerializerNamespaces EmptyXmlNamespaces = new([XmlQualifiedName.Empty]);
 
     /// <summary>
     /// Возвращает пути к task-файлу и result-файлу для указанной команды и попытки.
@@ -32,8 +36,8 @@ public sealed class CommandPreparer(
     /// </summary>
     public (string resultFilePath, string taskFilePath) GetTaskFilePaths(int commandId, string attemptToken)
     {
-        var resultFilePath = Path.Combine(_taskDirectory, $"result_{commandId}_{attemptToken}.json");
-        var taskFilePath = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptToken}.json");
+        var resultFilePath = Path.Combine(_taskDirectory, $"result_{commandId}_{attemptToken}.xml");
+        var taskFilePath = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptToken}.xml");
         return (resultFilePath, taskFilePath);
     }
 
@@ -291,7 +295,7 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>
-    /// Создаёт файл задания <c>task_{CommandId}_{attemptToken}.json</c> для BIM-плагина (контракт
+    /// Создаёт файл задания <c>task_{CommandId}_{attemptToken}.xml</c> для BIM-плагина (контракт
     /// <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> §TaskFile Location). Плагин читает этот файл,
     /// чтобы получить <c>commandText</c>, <c>filePath</c> и <c>resultFilePath</c>. В CLI для Revit AddIn
     /// передаётся fixed dispatcher <c>WORKER</c>, а <c>filePath</c> намеренно НЕ передаётся
@@ -331,11 +335,19 @@ public sealed class CommandPreparer(
 
         try
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(task, JsonOptions.CamelCase);
-
             // Atomic write: пишем во временный файл, затем переименовываем
             var tmpPath = taskFilePath + ".tmp";
-            File.WriteAllText(tmpPath, json);
+            var settings = new XmlWriterSettings
+            {
+                Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                Indent = true,
+            };
+
+            using (var writer = XmlWriter.Create(tmpPath, settings))
+            {
+                TaskFileSerializer.Serialize(writer, task, EmptyXmlNamespaces);
+            }
+
             File.Move(tmpPath, taskFilePath, overwrite: true);
 
             logger.LogInformation(

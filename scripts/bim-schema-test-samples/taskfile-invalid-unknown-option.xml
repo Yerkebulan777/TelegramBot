@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<taskFile>
+  <commandId>46</commandId>
+  <commandText>PDF</commandText>
+  <filePath>C:/Projects/building.rvt</filePath>
+  <resultFilePath>C:/Tasks/result_46_xyz.xml</resultFilePath>
+  <options>
+    <unknownOption>true</unknownOption>
+  </options>
+</taskFile>

@@ -27,16 +27,16 @@ public sealed class FileSystemOptions
     public string? LogDirectory { get; set; }
 
     /// <summary>
-    /// Путь к директории для TaskFile/ResultFile JSON-обмена между Worker и BIM-исполнителями.
+    /// Путь к директории для TaskFile/ResultFile XML-обмена между Worker и BIM-исполнителями.
     /// Если не задан (null или пусто), используется дефолтный путь:
     /// <c>%USERPROFILE%\Documents\TelegramBot\TaskDirectory</c> — на одном уровне с <c>Logs\</c>,
-    /// чтобы админ мог открыть папку вручную и проверить активные task/result JSON-файлы.
+    /// чтобы админ мог открыть папку вручную и проверить активные task/result XML-файлы.
     /// </summary>
     public string? TaskDirectory { get; set; }
 
     /// <summary>
     /// Возвращает эффективный путь к TaskDirectory: значение из конфига или дефолт.
-    /// Используется Worker'ом и любым другим кодом, который пишет/читает task/result JSON.
+    /// Используется Worker'ом и любым другим кодом, который пишет/читает task/result XML.
     /// </summary>
     public string GetEffectiveTaskDirectory()
     {

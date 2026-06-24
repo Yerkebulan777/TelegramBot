@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="resultFile">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="status">
+          <xs:simpleType>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="done" />
+              <xs:enumeration value="failed" />
+              <xs:enumeration value="cancelled" />
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+        <xs:element name="errorMessage" type="xs:string" minOccurs="0" />
+        <xs:element name="errorDetails" type="xs:string" minOccurs="0" />
+        <xs:element name="outputFiles" type="xs:string" minOccurs="0" />
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

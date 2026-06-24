@@ -107,10 +107,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install ajv-cli (JSON Schema validator)
-      run: npm install -g ajv-cli
-
-    - name: Validate BIM JSON Schemas (TaskFile + ResultFile)
+    - name: Validate BIM XML Schemas (TaskFile + ResultFile)
       shell: pwsh
       run: |
         ./scripts/validate-bim-schemas.ps1

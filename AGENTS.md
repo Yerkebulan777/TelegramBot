@@ -197,7 +197,7 @@ services.AddSingleton<NavisworksPathResolver>();
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `ScheduleRetryAsync` (NextRetryAt + RetryCount), `NotifySessionStartedAsync` (pg_notify), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
 | `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER` (`WorkerOptions.RevitDispatcherCommand`), **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
-| `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый JSON) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
+| `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, обновляет DB Status=processing + ProcessId, `NotifySessionStartedAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый XML) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `OnCommandCompletedAsync`: `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
 
@@ -253,58 +253,55 @@ services.AddHostedService<SessionCleanupService>();
 
 > ⚠️ **CANONICAL CONTRACT (эталон)** находится в:
 > `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md`
-> + JSON-схемы `TaskFile.schema.json` / `ResultFile.schema.json` рядом с ним.
+> + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd` рядом с ним.
 >
 > [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — **worker-side отражение** этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
 
-Кратко: Worker запускает внешний процесс и обменивается с ним через JSON-файлы в **TaskDirectory** (по умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`, настраивается через `FileSystem:TaskDirectory`):
+Кратко: Worker запускает внешний процесс и обменивается с ним через XML-файлы в **TaskDirectory** (по умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`, настраивается через `FileSystem:TaskDirectory`):
 
 | Файл | Кто создаёт | Кто читает | Назначение |
 |------|------------|------------|------------|
-| `task_{CommandId}_{AttemptToken}.json` | Worker (`CommandPreparer.CreateTaskFile`, atomic write) | Плагин | Задание: что и с каким файлом делать |
-| `result_{CommandId}_{AttemptToken}.json` | Плагин (atomic write) | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка/отмена + выходные файлы |
+| `task_{CommandId}_{AttemptToken}.xml` | Worker (`CommandPreparer.CreateTaskFile`, atomic write) | Плагин | Задание: что и с каким файлом делать |
+| `result_{CommandId}_{AttemptToken}.xml` | Плагин (atomic write) | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка/отмена + выходные файлы |
 
 **TaskFile** (`TelegramBot.Core.Models.TaskFile`):
-```json
-{
-  "commandId": 42,
-  "commandText": "PDF",
-  "filePath": "B:\\project.rvt",
-  "resultFilePath": "C:\\Users\\svc\\Documents\\TelegramBot\\TaskDirectory\\result_42_6f1c2b3a.json",
-  "options": null
-}
+```xml
+<taskFile>
+  <commandId>42</commandId>
+  <commandText>PDF</commandText>
+  <filePath>B:\project.rvt</filePath>
+  <resultFilePath>C:\Users\svc\Documents\TelegramBot\TaskDirectory\result_42_6f1c2b3a.xml</resultFilePath>
+</taskFile>
 ```
 - `commandId` — ID команды в БД
 - `commandText` — тип экспорта (`PDF`, `DWG`, `IFC`, `BIMDOC`, `NWC`, `CLASHREP`, `AUTORES`)
 - `filePath` — полный путь к исходному файлу. AddIn открывает его сам через `OpenOptions { Audit = true, DetachAndPreserveWorksets }`. **Не передаётся в CLI args** (только в TaskFile).
 - `resultFilePath` — путь в **TaskDirectory**, куда плагин должен записать результат
-- `options` — `JsonElement?` (closed whitelist; поддерживается только `continueOnError` для PDF/DWG)
+- `options` — XML element (closed whitelist; поддерживается только `continueOnError` для PDF/DWG)
 
 **ResultFile** (`TelegramBot.Core.Models.ResultFile`):
-```json
-{
-  "status": "done",
-  "errorMessage": null,
-  "errorDetails": null,
-  "outputFiles": "B:\\project.pdf"
-}
+```xml
+<resultFile>
+  <status>done</status>
+  <outputFiles>B:\project.pdf</outputFiles>
+</resultFile>
 ```
-- `status` — enum `ResultStatus { Done, Failed, Cancelled }`, сериализуется camelCase через `JsonStringEnumConverter`
+- `status` — enum `ResultStatus { Done, Failed, Cancelled }`, XML value `done`/`failed`/`cancelled`
 - `errorMessage` — короткое сообщение об ошибке (при `failed`/`cancelled`)
 - `errorDetails` — полный stack trace (для неожиданных исключений)
-- `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.json`)
+- `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.xsd`)
 
 **Алгоритм:**
 1. Worker генерирует `attemptToken` (GUID без дефисов) для каждой попытки
-2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.json` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
+2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.xml` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
 3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{TaskFilePath}`/`{ResultFilePath}`). Для Revit AddIn `args[2]` всегда `WORKER`, реальная команда берётся из `TaskFile.commandText`. **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile (см. эталон §CLI Arguments).
-4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.json` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
+4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.xml` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
 5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
    - `status="done"` → `Done`
    - `status="failed"` → `HandleFailureAsync` (retry/error classification); `errorMessage` в лог, `errorDetails` в Debug-лог
    - `status="cancelled"` → permanent `Failed` без retry
-   - Битый JSON / unreadable / неизвестный status → rename в `.bad` → `HandleFailureAsync`
-   - result JSON отсутствует — fallback по exit code: `0` = `Done`, иначе `HandleFailureAsync`
+   - Битый XML / unreadable / неизвестный status → rename в `.bad` → `HandleFailureAsync`
+   - result XML отсутствует — fallback по exit code: `0` = `Done`, иначе `HandleFailureAsync`
 6. Файлы текущей попытки очищаются в `finally` блока `ProcessRunner.RunAsync()` (через `CommandPreparer.CleanupTempFiles`)
 
 Исполнитель должен записать result-файл и завершиться с exit code `0` при успехе. Если result-файл не найден — Worker использует fallback по exit code.
@@ -314,7 +311,7 @@ services.AddHostedService<SessionCleanupService>();
 Плагин получает аргументы командной строки (шаблон `ArgumentsTemplate` в `appsettings.json`):
 
 ```
-Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_6f1c2b3a.json"
+Revit.exe /command "WORKER" "C:\Temp\task_42_6f1c2b3a.xml"
 ```
 
 Доступные плейсхолдеры:
@@ -323,10 +320,10 @@ Revit.exe /command "PDF" "B:\project.rvt" "C:\Temp\task_42_6f1c2b3a.json"
 | `{CommandText}` | Тип экспорта для console/wrapper-команд; для Revit AddIn не используется как dispatcher |
 | `{FilePath}` | Полный путь к исходному файлу |
 | `{CommandId}` | ID команды в БД |
-| `{TaskFilePath}` | Полный путь к `task_{CommandId}_{AttemptToken}.json` |
-| `{ResultFilePath}` | Полный путь к `result_{CommandId}_{AttemptToken}.json` |
+| `{TaskFilePath}` | Полный путь к `task_{CommandId}_{AttemptToken}.xml` |
+| `{ResultFilePath}` | Полный путь к `result_{CommandId}_{AttemptToken}.xml` |
 
-**Рекомендуемый подход:** плагин должен читать task-файл, а не полагаться только на аргументы командной строки — JSON содержит полную структурированную информацию.
+**Рекомендуемый подход:** плагин должен читать task-файл, а не полагаться только на аргументы командной строки — XML содержит полную структурированную информацию.
 
 > **Важно (v1.7):** Имена temp-файлов включают уникальный `AttemptToken` (GUID без дефисов) для каждой попытки выполнения. Это предотвращает: (1) подсовывание ложного result локальным процессом (predictable filenames), (2) чтение stale result от предыдущей retry-попытки, (3) конфликты между параллельными выполнениями одной команды.
 
@@ -346,11 +343,11 @@ Worker → Revit.exe opens as GUI
 
 | Type | Executable | stdout/stderr | Result mechanism |
 |------|-----------|---------------|------------------|
-| PDF, DWG, IFC, BIMDOC, NWC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile + ResultFile JSON exchange |
+| PDF, DWG, IFC, BIMDOC, NWC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile + ResultFile XML exchange |
 | CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
 | AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task`/`--result`, fallback to exit code |
 
-**Temp-file cleanup (v1.7):** Temp-файлы (`task_*.json`, `result_*.json`) очищаются per-attempt в `finally` блоке `ProcessRunner.RunAsync()`. Каждая попытка использует уникальный `attemptToken`, предотвращая stale-file конфликты между retry.
+**Temp-file cleanup (v1.7):** Temp-файлы (`task_*.xml`, `result_*.xml`) очищаются per-attempt в `finally` блоке `ProcessRunner.RunAsync()`. Каждая попытка использует уникальный `attemptToken`, предотвращая stale-file конфликты между retry.
 
 ### Shared Static Helpers
 
@@ -362,7 +359,7 @@ Worker → Revit.exe opens as GUI
 | `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Serilog filter: события с `SourceContext` начинающимся на `"TelegramBot.Worker.BimLib` → отдельный rolling file |
 | `PostgresReconnectLoop` | `TelegramBot.Data/PostgresReconnectLoop.cs` | Outer retry loop для переподключения PostgreSQL (5 сек); используется в `CommandExecutionService` и `CommandNotificationService` |
 | `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | `IsPermanentFailure(message, exitCode, codes)`, `IsPermanentException(ex)`: классификация ошибок → `InvalidFileError` (Failed без retry) vs `ProcessCrashError` (retry) |
-| `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Best-effort удаление `task_{CommandId}_{token}.json` и `result_{CommandId}_{token}.json` для указанной попытки |
+| `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Best-effort удаление `task_{CommandId}_{token}.xml` и `result_{CommandId}_{token}.xml` для указанной попытки |
 | `DataAccessBase` | `TelegramBot.Data/DataAccessBase.cs` | Base-класс с protected `CreateOpenConnectionAsync()`, `DefaultConnectionString` |
 
 ---
@@ -715,7 +712,7 @@ Previously, linked CTS вызывал немедленное прерывани�
 - ✅ **Markdown-экранирование:** `Regex.Replace`
 - ✅ **FS-caching:** TTL-кэш в `FileSystemBrowser` (5 сек)
 - ✅ **Session cleanup:** lazy при доступе + фоновая раз в 30 мин
-- ✅ **Atomic writes** для task/result JSON: `.tmp` → `File.Move(overwrite: true)`
+- ✅ **Atomic writes** для task/result XML: `.tmp` → `File.Move(overwrite: true)`
 - ✅ **`sessionRemaining`** — in-memory счётчик, уменьшает SQL-запросы
 - ✅ **Durable completion notifications** — `NotificationOutbox` + `pg_notify` wake-up + polling fallback
 
@@ -746,7 +743,7 @@ Previously, linked CTS вызывал немедленное прерывани�
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1281 symbols, 3316 relationships, 105 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1277 symbols, 3294 relationships, 104 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

@@ -108,7 +108,7 @@ public static class Program
             var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
             WinApiHelper.SetLogger(loggerFactory.CreateLogger("TelegramBot.Worker.BimLib.Native.WinApiHelper"));
 
-            // Гарантируем, что TaskDirectory существует — иначе первая же команда упадёт при записи task_*.json.
+            // Гарантируем, что TaskDirectory существует — иначе первая же команда упадёт при записи task_*.xml.
             // Путь настраивается через FileSystem:TaskDirectory; по умолчанию %USERPROFILE%\Documents\TelegramBot\TaskDirectory.
             var fileSystemOptions = host.Services.GetRequiredService<IOptions<FileSystemOptions>>().Value;
             var taskDir = fileSystemOptions.GetEffectiveTaskDirectory();

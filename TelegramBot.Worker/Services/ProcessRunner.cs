@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
-using System.Text.Json;
+using System.Xml.Serialization;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
@@ -16,7 +16,7 @@ namespace TelegramBot.Worker.Services;
 /// Запускает внешний процесс, отслеживает его выполнение, обрабатывает stdout/stderr,
 /// таймауты, retry и финальный статус команды.
 /// Результат выполнения определяется по exit code процесса.
-/// Если плагин написал <c>result_{{CommandId}}.json</c> — статус берётся из него.
+/// Если плагин написал <c>result_{{CommandId}}.xml</c> — статус берётся из него.
 /// Владеет словарём активных процессов <c>_activeProcesses</c> для health-мониторинга.
 /// Оптимизация: потоковая обработка stdout/stderr с ограничением 64KB для предотвращения переполнения памяти.
 /// </summary>
@@ -28,6 +28,7 @@ public sealed class ProcessRunner(
     ILogger<ProcessRunner> logger)
 {
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
+    private static readonly XmlSerializer ResultFileSerializer = new(typeof(ResultFile));
 
     // Трекинг активных процессов для health-мониторинга и graceful shutdown
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
@@ -310,7 +311,7 @@ public sealed class ProcessRunner(
     /// <summary>
     /// Пробует прочитать result-файл из TaskDirectory (настраивается через <c>FileSystem:TaskDirectory</c>).
     /// Возвращает true, если файл существует и успешно распарсен.
-    /// Порядок: сначала парсим, потом удаляем — чтобы при битом JSON
+    /// Порядок: сначала парсим, потом удаляем — чтобы при битом XML
     /// файл остался для диагностики.
     /// </summary>
     private ResultFileReadStatus TryReadResultFile(
@@ -330,9 +331,8 @@ public sealed class ProcessRunner(
 
         try
         {
-            var json = File.ReadAllText(path);
-
-            result = JsonSerializer.Deserialize<ResultFile>(json, JsonOptions.CamelCase)!;
+            using var stream = File.OpenRead(path);
+            result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
 
             // Status — enum (Done/Failed/Cancelled). required поле → если десериализация прошла, status всегда валиден.
             if (Enum.IsDefined(result.Status))
@@ -349,12 +349,12 @@ public sealed class ProcessRunner(
             errorMessage = $"Plugin result file has invalid status: {path}";
             return ResultFileReadStatus.Invalid;
         }
-        catch (JsonException ex)
+        catch (InvalidOperationException ex)
         {
-            // Битый JSON — rename для диагностики
+            // Битый XML — rename для диагностики
             RenameToBadFile(path);
             result = null!;
-            errorMessage = $"Plugin result file contains invalid JSON: {path}. {ex.Message}";
+            errorMessage = $"Plugin result file contains invalid XML: {path}. {ex.Message}";
             return ResultFileReadStatus.Invalid;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

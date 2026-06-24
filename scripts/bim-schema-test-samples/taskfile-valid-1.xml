@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<taskFile>
+  <commandId>42</commandId>
+  <commandText>PDF</commandText>
+  <filePath>C:/Projects/building.rvt</filePath>
+  <resultFilePath>C:/Tasks/result_42_abc123.xml</resultFilePath>
+</taskFile>

@@ -38,29 +38,22 @@ Multi-instance — planned enhancement, на данный момент не тр
 
 ---
 
-## 3. Отсутствие strict-валидации task-файла по JSON Schema
+## 3. Отсутствие runtime strict-валидации task-файла по XSD
 
-**Риск:** `CommandPreparer.CreateTaskFile` пишет `TaskFile` JSON без валидации по
-`TaskFile.schema.json`. Если модель `TaskFile` в коде расходится с JSON-схемой, расхождение
+**Риск:** `CommandPreparer.CreateTaskFile` пишет `TaskFile` XML без runtime-валидации по
+`TaskFile.schema.xsd`. Если модель `TaskFile` в коде расходится с XSD-схемой, расхождение
 будет обнаружено только в рантайме (плагин не сможет распарсить или прочитает не те поля).
 
-**Статус:** ✅ **Частично решено** — CI-проверка добавлена (`.github/workflows/ci.yml` + `scripts/validate-bim-schemas.ps1`).
-Набор sample JSON (`scripts/bim-schema-test-samples/`) валидируется против схем при каждом push/PR.
-RUNTIME-валидация (до записи в TaskDirectory) **не реализована** — решение принято осознанно: дублирование
-валидации в рантайме замедлило бы старт команды без существенного выигрыша, т.к. CI ловит drift до деплоя.
-
-**CI-валидация:**
-- `scripts/bim-schema-test-samples/taskfile-valid-*.json` — обязаны проходить
-- `scripts/bim-schema-test-samples/taskfile-invalid-*.json` — обязаны НЕ проходить (negative testing)
-- То же для `resultfile-*.json`
-- Используется `ajv` (JSON Schema Draft 2020-12 валидатор)
+**Статус:** ⚠️ **Остаточный риск** — XSD-схемы обновлены до XML-контракта, но runtime-валидация перед записью
+в `TaskDirectory` не реализована. Практическая защита сейчас — синхронное обновление эталона, схем, моделей
+и успешная сборка.
 
 ---
 
 ## 4. `outputFiles` — singular string despite plural name
 
 **Риск:** Поле `ResultFile.OutputFiles` названо во множественном числе, но является `string?`,
-а не массивом. Это соответствует канону в `RevitBIMFusion/Docs/ResultFile.schema.json`,
+а не массивом. Это соответствует канону в `RevitBIMFusion/Docs/ResultFile.schema.xsd`,
 но может ввести в заблуждение разработчика, ожидающего список файлов.
 
 **Статус:** Зафиксировано в контракте. Изменение потребует координации с RevitBIMFusion

@@ -59,13 +59,13 @@ All docs live in the repo root and `Docs/` — keep path references consistent.
 ---
 
 <!-- gitnexus:start -->
-## GitNexus — Code Intelligence
+# GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1281 symbols, 3316 relationships, 105 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1277 symbols, 3294 relationships, 104 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
-### Always Do
+## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
 - **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "master"})`.
@@ -73,14 +73,14 @@ This project is indexed by GitNexus as **TelegramBot** (1281 symbols, 3316 relat
 - When exploring unfamiliar code, use `query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
 
-### Never Do
+## Never Do
 
 - NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
 - NEVER commit changes without running `detect_changes()` to check affected scope.
 
-### Resources
+## Resources
 
 | Resource | Use for |
 |----------|---------|
@@ -89,7 +89,7 @@ This project is indexed by GitNexus as **TelegramBot** (1281 symbols, 3316 relat
 | `gitnexus://repo/TelegramBot/processes` | All execution flows |
 | `gitnexus://repo/TelegramBot/process/{name}` | Step-by-step execution trace |
 
-### CLI
+## CLI
 
 | Task | Read this skill file |
 |------|---------------------|

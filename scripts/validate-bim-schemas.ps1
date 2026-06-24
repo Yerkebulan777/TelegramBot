@@ -1,21 +1,10 @@
 <#
 .SYNOPSIS
-    Validates BIM TaskFile/ResultFile JSON samples against their JSON Schemas.
-    Uses ajv-cli (Node.js) to validate Draft 2020-12 schemas.
+    Validates BIM TaskFile/ResultFile XML samples against their XSD schemas.
 .DESCRIPTION
-    This script validates sample JSON files against the BIM contract schemas
-    (Docs/TaskFile.schema.json, Docs/ResultFile.schema.json) to detect drift
-    between C# models and JSON schemas.
-    
-    Steps:
-    1. Validates the schemas themselves are valid JSON Schema
-    2. Validates expected-valid samples MUST pass
-    3. Validates expected-invalid samples MUST fail (negative testing)
-.NOTES
-    Requires:
-      - Node.js (pre-installed on GitHub Actions windows-latest runners)
-      - ajv-cli installed globally (npm install -g ajv-cli)
-    Schemas use Draft 2020-12 — ajv v8+ with --spec=draft2020 flag required.
+    This script validates sample XML files against the BIM contract schemas
+    (Docs/TaskFile.schema.xsd, Docs/ResultFile.schema.xsd) to detect drift
+    between C# models and XSD schemas.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -24,8 +13,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $SchemaDir = Join-Path $RepoRoot "Docs"
 $SamplesDir = Join-Path $RepoRoot "scripts" "bim-schema-test-samples"
 
-# ── Helper: run ajv for one schema ──
-function Test-Ajv {
+function Test-XmlSchema {
     param(
         [string]$Description,
         [string]$Schema,
@@ -33,33 +21,75 @@ function Test-Ajv {
         [switch]$ShouldFail
     )
 
-    Write-Host "  🔍 $Description ... " -NoNewline
-    $result = & ajv validate --spec=draft2020 -s $Schema -d $DataFile 2>&1
-    $exitCode = $LASTEXITCODE
+    Write-Host "  $Description ... " -NoNewline
 
-    if (-not $ShouldFail) {
-        # Expected to PASS
-        if ($exitCode -eq 0) {
-            Write-Host "✅ PASS" -ForegroundColor Green
-            return $true
-        } else {
-            Write-Host "❌ FAIL" -ForegroundColor Red
-            Write-Host "     $result" -ForegroundColor Red
-            return $false
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $settings = [System.Xml.XmlReaderSettings]::new()
+    $settings.ValidationType = [System.Xml.ValidationType]::Schema
+    $settings.Schemas.Add($null, $Schema) | Out-Null
+    $settings.add_ValidationEventHandler({
+        param($sender, $eventArgs)
+        $errors.Add($eventArgs.Message)
+    })
+
+    try {
+        $reader = [System.Xml.XmlReader]::Create($DataFile, $settings)
+        try {
+            while ($reader.Read()) { }
         }
-    } else {
-        # Expected to FAIL
-        if ($exitCode -ne 0) {
-            Write-Host "✅ CORRECTLY FAILED" -ForegroundColor Green
-            return $true
-        } else {
-            Write-Host "❌ SHOULD HAVE FAILED (but passed)" -ForegroundColor Red
-            return $false
+        finally {
+            $reader.Dispose()
         }
+    }
+    catch {
+        $errors.Add($_.Exception.Message)
+    }
+
+    $passed = $errors.Count -eq 0
+    if (-not $ShouldFail -and $passed) {
+        Write-Host "PASS" -ForegroundColor Green
+        return $true
+    }
+
+    if ($ShouldFail -and -not $passed) {
+        Write-Host "CORRECTLY FAILED" -ForegroundColor Green
+        return $true
+    }
+
+    if ($passed) {
+        Write-Host "SHOULD HAVE FAILED (but passed)" -ForegroundColor Red
+    }
+    else {
+        Write-Host "FAIL" -ForegroundColor Red
+        foreach ($errorText in $errors) {
+            Write-Host "     $errorText" -ForegroundColor Red
+        }
+    }
+
+    return $false
+}
+
+function Test-SchemaCompiles {
+    param(
+        [string]$Description,
+        [string]$Schema
+    )
+
+    Write-Host "  $Description ... " -NoNewline
+    try {
+        $schemas = [System.Xml.Schema.XmlSchemaSet]::new()
+        $schemas.Add($null, $Schema) | Out-Null
+        $schemas.Compile()
+        Write-Host "PASS" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "     $($_.Exception.Message)" -ForegroundColor Red
+        return $false
     }
 }
 
-# ── Helper: validate samples for one schema type ──
 function Validate-Samples {
     param(
         [string]$SchemaName,
@@ -68,45 +98,44 @@ function Validate-Samples {
         [string[]]$InvalidSamples
     )
 
-    Write-Host "`n══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "======================================================" -ForegroundColor Cyan
     Write-Host "  Schema: $SchemaName ($SchemaFile)" -ForegroundColor Cyan
-    Write-Host "══════════════════════════════════════════════════════`n" -ForegroundColor Cyan
+    Write-Host "======================================================" -ForegroundColor Cyan
 
     $schemaPath = Join-Path $SchemaDir $SchemaFile
     $allOk = $true
 
-    # ── Step 1: Validate the schema itself ──
-    Write-Host "  ── Schema self-validation ──" -ForegroundColor Yellow
-    if (-not (Test-Ajv -Description "Schema is valid JSON Schema" -Schema $schemaPath -DataFile $schemaPath -ShouldFail)) {
+    if (-not (Test-SchemaCompiles -Description "Schema compiles" -Schema $schemaPath)) {
         $allOk = $false
     }
-    Write-Host ""
 
-    # ── Step 2: Validate expected-to-pass samples ──
-    Write-Host "  ── Positive tests (should PASS) ──" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Positive tests (should PASS)" -ForegroundColor Yellow
     foreach ($sample in $ValidSamples) {
         $dataFile = Join-Path $SamplesDir $sample
         if (-not (Test-Path $dataFile)) {
-            Write-Host "  ❌ MISSING: $sample" -ForegroundColor Red
+            Write-Host "  MISSING: $sample" -ForegroundColor Red
             $allOk = $false
             continue
         }
-        if (-not (Test-Ajv -Description "$sample" -Schema $schemaPath -DataFile $dataFile)) {
+
+        if (-not (Test-XmlSchema -Description $sample -Schema $schemaPath -DataFile $dataFile)) {
             $allOk = $false
         }
     }
 
-    # ── Step 3: Validate expected-to-fail samples ──
-    Write-Host "" 
-    Write-Host "  ── Negative tests (should FAIL) ──" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Negative tests (should FAIL)" -ForegroundColor Yellow
     foreach ($sample in $InvalidSamples) {
         $dataFile = Join-Path $SamplesDir $sample
         if (-not (Test-Path $dataFile)) {
-            Write-Host "  ❌ MISSING: $sample" -ForegroundColor Red
+            Write-Host "  MISSING: $sample" -ForegroundColor Red
             $allOk = $false
             continue
         }
-        if (-not (Test-Ajv -Description "$sample" -Schema $schemaPath -DataFile $dataFile -ShouldFail)) {
+
+        if (-not (Test-XmlSchema -Description $sample -Schema $schemaPath -DataFile $dataFile -ShouldFail)) {
             $allOk = $false
         }
     }
@@ -115,58 +144,50 @@ function Validate-Samples {
         throw "Schema validation FAILED for $SchemaName. See errors above."
     }
 
-    Write-Host "`n  ✅ All checks passed for $SchemaName" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  All checks passed for $SchemaName" -ForegroundColor Green
 }
 
-# ════════════════════════════════════════
-# MAIN
-# ════════════════════════════════════════
-Write-Host "╔══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║      BIM JSON Schema Validation                          ║" -ForegroundColor Cyan
-Write-Host "║      Validates C# model samples against JSON schemas     ║" -ForegroundColor Cyan
-Write-Host "╚══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "BIM XML Schema Validation"
+Write-Host "Validates XML samples against XSD schemas"
 Write-Host ""
 
 try {
-    # ── TaskFile ──
     Validate-Samples `
         -SchemaName "TaskFile" `
-        -SchemaFile "TaskFile.schema.json" `
+        -SchemaFile "TaskFile.schema.xsd" `
         -ValidSamples @(
-            "taskfile-valid-1.json",
-            "taskfile-valid-2.json",
-            "taskfile-valid-3.json"
+            "taskfile-valid-1.xml",
+            "taskfile-valid-2.xml",
+            "taskfile-valid-3.xml"
         ) `
         -InvalidSamples @(
-            "taskfile-invalid-missing-fields.json",
-            "taskfile-invalid-wrong-type-commandid.json",
-            "taskfile-invalid-unknown-option.json"
+            "taskfile-invalid-missing-fields.xml",
+            "taskfile-invalid-wrong-type-commandid.xml",
+            "taskfile-invalid-unknown-option.xml"
         )
 
-    # ── ResultFile ──
     Validate-Samples `
         -SchemaName "ResultFile" `
-        -SchemaFile "ResultFile.schema.json" `
+        -SchemaFile "ResultFile.schema.xsd" `
         -ValidSamples @(
-            "resultfile-valid-1.json",
-            "resultfile-valid-2.json",
-            "resultfile-valid-3.json",
-            "resultfile-valid-4.json"
+            "resultfile-valid-1.xml",
+            "resultfile-valid-2.xml",
+            "resultfile-valid-3.xml",
+            "resultfile-valid-4.xml"
         ) `
         -InvalidSamples @(
-            "resultfile-invalid-missing-status.json",
-            "resultfile-invalid-bad-enum.json"
+            "resultfile-invalid-missing-status.xml",
+            "resultfile-invalid-bad-enum.xml"
         )
 
-    Write-Host "`n╔══════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║  ✅ ALL BIM SCHEMA VALIDATIONS PASSED                ║" -ForegroundColor Green
-    Write-Host "╚══════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "ALL BIM SCHEMA VALIDATIONS PASSED" -ForegroundColor Green
     exit 0
 }
 catch {
-    Write-Host "`n╔══════════════════════════════════════════════════════╗" -ForegroundColor Red
-    Write-Host "║  ❌ BIM SCHEMA VALIDATION FAILED                     ║" -ForegroundColor Red
-    Write-Host "╚══════════════════════════════════════════════════════╝" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "BIM SCHEMA VALIDATION FAILED" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
 }

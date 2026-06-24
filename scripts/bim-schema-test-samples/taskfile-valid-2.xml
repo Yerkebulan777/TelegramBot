@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<taskFile>
+  <commandId>43</commandId>
+  <commandText>DWG</commandText>
+  <filePath>B:/project.rvt</filePath>
+  <resultFilePath>C:/Tasks/result_43_def456.xml</resultFilePath>
+  <options>
+    <continueOnError>true</continueOnError>
+  </options>
+</taskFile>

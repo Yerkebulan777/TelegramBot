@@ -1,9 +1,0 @@
-{
-  "commandId": 43,
-  "commandText": "DWG",
-  "filePath": "B:/project.rvt",
-  "resultFilePath": "C:/Tasks/result_43_def456.json",
-  "options": {
-    "continueOnError": true
-  }
-}

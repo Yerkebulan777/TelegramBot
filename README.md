@@ -95,7 +95,7 @@ Server добавляет `notificationChannel` — проверяет, что `
 
 ## BIM-плагины
 
-Worker запускает внешние исполнители и обменивается с ними через JSON-файлы `TaskFile`/`ResultFile`.
+Worker запускает внешние исполнители и обменивается с ними через XML-файлы `TaskFile`/`ResultFile`.
 
 | Команды | Исполнитель | stdout/stderr | Важное |
 |---------|-------------|---------------|--------|
@@ -104,7 +104,7 @@ Worker запускает внешние исполнители и обмени�
 | `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
 | `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task` и писать `ResultFile` |
 
-> ⚠️ **Эталонный контракт** (всегда проверять при изменениях) живёт в `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + JSON-схемы `TaskFile.schema.json` / `ResultFile.schema.json`.
+> ⚠️ **Эталонный контракт** (всегда проверять при изменениях) живёт в `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd`.
 >
 > Наш [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — worker-side отражение этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
 
@@ -132,7 +132,7 @@ Worker запускает внешние исполнители и обмени�
 | `FileSystem` | `ProjectDirectoryName` | Имя папки проекта (default `01_PROJECT`) |
 | `FileSystem` | `SectionFolderPattern` | Regex для папок-разделов (default `^(\d{2}|\d{3}\|I{1,3})_`) |
 | `FileSystem` | `LogDirectory` | Опционально: путь к логам (default `%USERPROFILE%\Documents\TelegramBot\Logs`) |
-| `FileSystem` | `TaskDirectory` | Опционально: папка для task/result JSON (default `%USERPROFILE%\Documents\TelegramBot\TaskDirectory`). **Только Worker** |
+| `FileSystem` | `TaskDirectory` | Опционально: папка для task/result XML (default `%USERPROFILE%\Documents\TelegramBot\TaskDirectory`). **Только Worker** |
 | `HealthCheck` | `Port` / `ServiceName` / `CacheSeconds` / `DbCheckTimeoutSeconds` | Health-сервер (default `5000` / `TelegramBot.Server` / `10` / `5`) |
 
 ### Worker — `TelegramBot.Worker/appsettings.json`
@@ -209,7 +209,7 @@ partition-key и не держит отдельные пулы по приори
 
 ### TaskDirectory — обмен с BIM-исполнителями
 
-Worker обменивается JSON (`task_*.json` / `result_*.json`) с CAD-плагинами через **выделенную папку**, а не через `Path.GetTempPath()` — иначе Windows/system-cleaner'ы могут удалить файлы во время длительной команды (Revit-экспорт до 3 часов). Папка намеренно находится **рядом с логами**, чтобы админ мог открыть её вручную и проверить активные попытки.
+Worker обменивается XML (`task_*.xml` / `result_*.xml`) с CAD-плагинами через **выделенную папку**, а не через `Path.GetTempPath()` — иначе Windows/system-cleaner'ы могут удалить файлы во время длительной команды (Revit-экспорт до 3 часов). Папка намеренно находится **рядом с логами**, чтобы админ мог открыть её вручную и проверить активные попытки.
 
 **Дефолтный путь:** `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`
 
@@ -220,7 +220,7 @@ Worker обменивается JSON (`task_*.json` / `result_*.json`) с CAD-п
 │   └── Worker\
 │       ├── BimLib\
 │       └── (Serilog-логи Worker)
-└── TaskDirectory\           ← task_{CommandId}_{token}.json + result_{CommandId}_{token}.json
+└── TaskDirectory\           ← task_{CommandId}_{token}.xml + result_{CommandId}_{token}.xml
 ```
 
 **Override** через опциональный параметр `FileSystem:TaskDirectory` (только Worker):

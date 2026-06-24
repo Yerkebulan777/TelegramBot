@@ -9,7 +9,7 @@ PostgreSQL-БД и запускает их. Server кладёт команды �
 Worker — событийный orchestrator поверх PostgreSQL-очереди. `LISTEN/NOTIFY` будит drain-loop, который
 просит БД отдать следующие команды до общего лимита параллельности. Порядок очереди, partition-gating и
 защита от гонок живут в одном SQL claim-запросе. `ProcessRunner` запускает
-внешние BIM-процессы, обмениваясь с ними JSON-файлами в `TaskDirectory`. Результат классифицируется через
+внешние BIM-процессы, обмениваясь с ними XML-файлами в `TaskDirectory`. Результат классифицируется через
 `ErrorClassifier` (permanent → Failed, transient → retry с экспонентой), а `SessionCompletionTracker` пачкой
 уведомляет Server о завершении сессии через durable `NotificationOutbox`.
 
@@ -127,7 +127,7 @@ Worker использует один `SemaphoreSlim` внутри `CommandExecut
 
    3a. CommandPreparer.CreateTaskFile:
        - atomic write: .tmp → File.Move(overwrite: true)
-       - путь: %USERPROFILE%\Documents\TelegramBot\TaskDirectory\task_{Id}_{token}.json
+       - путь: %USERPROFILE%\Documents\TelegramBot\TaskDirectory\task_{Id}_{token}.xml
        - **Если CreateTaskFile вернул false** — бросается IOException (fail-fast,
          ErrorClassifier классифицирует как permanent failure без retry; проблема
          инфраструктурная — диск/права/антивирус)
@@ -160,12 +160,12 @@ Worker использует один `SemaphoreSlim` внутри `CommandExecut
        `CancellationTokenSource.CreateLinkedTokenSource` — при срабатывании `OperationCanceledException`
        ловится в outer catch как таймаут (не shutdown).
 
-   4c. Прочитать result_{Id}_{token}.json от плагина (ResultFileReadStatus: NotFound/Valid/Invalid):
+   4c. Прочитать result_{Id}_{token}.xml от плагина (ResultFileReadStatus: NotFound/Valid/Invalid):
        - Valid + status="done" → Status=Done
        - Valid + status="failed" → HandleFailureAsync (с `errorMessage` из файла, `errorDetails` в Debug-лог)
        - Valid + status="cancelled" → **прямой** Status=Failed (минуя ErrorClassifier и HandleFailureAsync),
          permanent failure без retry
-       - Invalid/битый JSON → rename в .bad + HandleFailureAsync
+       - Invalid/битый XML → rename в .bad + HandleFailureAsync
        - NotFound → fallback на exit code: 0 = Done (с громким warning о нарушении контракта AddIn),
          иначе HandleFailureAsync с FormatExitCode (decimal + hex + NTSTATUS имя краша, например ACCESS_VIOLATION)
 
@@ -179,7 +179,7 @@ Worker использует один `SemaphoreSlim` внутри `CommandExecut
    - retry исчерпаны → Failed
 
 6. finally: CleanupTempFiles
-   (удаляет task и result JSON этой попытки — per-attempt)
+   (удаляет task и result XML этой попытки — per-attempt)
    + TryRemove из _activeProcesses + process.Dispose() (только если не shutdown)
 ```
 
@@ -195,8 +195,8 @@ Worker использует один `SemaphoreSlim` внутри `CommandExecut
 
 | Тип | stdout/stderr | Result mechanism |
 |-----|---------------|------------------|
-| `PDF`, `DWG`, `IFC`, `BIMDOC` | **Нет** — GUI приложение (Revit) | TaskFile + ResultFile JSON |
-| `NWC` | **Нет** — GUI приложение (Revit) | TaskFile + ResultFile JSON |
+| `PDF`, `DWG`, `IFC`, `BIMDOC` | **Нет** — GUI приложение (Revit) | TaskFile + ResultFile XML |
+| `NWC` | **Нет** — GUI приложение (Revit) | TaskFile + ResultFile XML |
 | `CLASHREP` | Обычно есть (CLI wrapper) | TaskFile + ResultFile, иначе fallback на exit code |
 | `AUTORES` | **Да** — консольный python скрипт | TaskFile + ResultFile, иначе fallback на exit code |
 
@@ -266,41 +266,38 @@ restart `NotificationSenderService` подхватит все неотправл
 
 ## Контракт с BIM-плагинами
 
-> ⚠️ **Эталон** живёт в `RevitBIMFusion/Docs/BimPluginContract.md` + JSON-схемы `TaskFile.schema.json` /
-> `ResultFile.schema.json`. Наш `Docs/BimPluginContract.md` — worker-side отражение. При изменениях в
+> ⚠️ **Эталон** живёт в `RevitBIMFusion/Docs/BimPluginContract.md` + XSD-схемы `TaskFile.schema.xsd` /
+> `ResultFile.schema.xsd`. Наш `Docs/BimPluginContract.md` — worker-side отражение. При изменениях в
 > `TaskFile` / `ResultFile` / `ArgumentsTemplate` / `CreateTaskFile` / `TryReadResultFile` — обновлять
 > эталон + плагин + код **синхронно**.
 
 ### TaskFile (Worker → плагин)
 
-```json
-{
-  "commandId": 42,
-  "commandText": "PDF",
-  "filePath": "B:\\project.rvt",
-  "resultFilePath": "C:\\...\\TaskDirectory\\result_42_6f1c2b3a.json",
-  "options": null
-}
+```xml
+<taskFile>
+  <commandId>42</commandId>
+  <commandText>PDF</commandText>
+  <filePath>B:\project.rvt</filePath>
+  <resultFilePath>C:\...\TaskDirectory\result_42_6f1c2b3a.xml</resultFilePath>
+</taskFile>
 ```
 
 - `filePath` — НЕ передаётся в CLI args (только в TaskFile), чтобы избежать двойной подстановки
-- `options` — `JsonElement?`, closed whitelist (сейчас только `continueOnError` для PDF/DWG)
+- `options` — XML element, closed whitelist (сейчас только `continueOnError` для PDF/DWG)
 
 ### ResultFile (плагин → Worker)
 
-```json
-{
-  "status": "done",
-  "errorMessage": null,
-  "errorDetails": null,
-  "outputFiles": "B:\\project.pdf"
-}
+```xml
+<resultFile>
+  <status>done</status>
+  <outputFiles>B:\project.pdf</outputFiles>
+</resultFile>
 ```
 
-- `status` — enum `ResultStatus { Done, Failed, Cancelled }`, camelCase через `JsonStringEnumConverter`
+- `status` — enum `ResultStatus { Done, Failed, Cancelled }`, XML value `done`/`failed`/`cancelled`
 - `errorMessage` — короткое сообщение (при `failed`/`cancelled`)
 - `errorDetails` — полный stack trace (для неожиданных исключений)
-- `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.json`)
+- `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.xsd`)
 
 ### Без AddIn (broken flow)
 
@@ -325,8 +322,8 @@ Worker → Revit.exe открывается как GUI
 ### Формула пути
 
 ```
-<TaskDirectory> / task_{CommandId}_{AttemptToken}.json
-<TaskDirectory> / result_{CommandId}_{AttemptToken}.json
+<TaskDirectory> / task_{CommandId}_{AttemptToken}.xml
+<TaskDirectory> / result_{CommandId}_{AttemptToken}.xml
 ```
 
 Где `<TaskDirectory>` это:
@@ -353,8 +350,8 @@ C:\Users\<USER>\Documents\TelegramBot\TaskDirectory\
 Из `CommandPreparer.GetTaskFilePaths` (строки 33–38):
 
 ```csharp
-var resultFilePath = Path.Combine(_taskDirectory, $"result_{commandId}_{attemptToken}.json");
-var taskFilePath   = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptToken}.json");
+var resultFilePath = Path.Combine(_taskDirectory, $"result_{commandId}_{attemptToken}.xml");
+var taskFilePath   = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptToken}.xml");
 ```
 
 Где `attemptToken` — `Guid.NewGuid().ToString("N")` (32 hex символа без дефисов), генерируется в
@@ -363,8 +360,8 @@ var taskFilePath   = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptTok
 ### Пример для команды №42 с токеном `6f1c2b3a4d5e6f708192a3b4c5d6e7f8`
 
 ```
-C:\Users\y.zhumabayev\Documents\TelegramBot\TaskDirectory\task_42_6f1c2b3a4d5e6f708192a3b4c5d6e7f8.json
-C:\Users\y.zhumabayev\Documents\TelegramBot\TaskDirectory\result_42_6f1c2b3a4d5e6f708192a3b4c5d6e7f8.json
+C:\Users\y.zhumabayev\Documents\TelegramBot\TaskDirectory\task_42_6f1c2b3a4d5e6f708192a3b4c5d6e7f8.xml
+C:\Users\y.zhumabayev\Documents\TelegramBot\TaskDirectory\result_42_6f1c2b3a4d5e6f708192a3b4c5d6e7f8.xml
 ```
 
 ### Override через `appsettings.json`
@@ -384,10 +381,10 @@ C:\Users\y.zhumabayev\Documents\TelegramBot\TaskDirectory\result_42_6f1c2b3a4d5e
 
 | Файл | Создаётся | Удаляется |
 |------|-----------|-----------|
-| `task_{Id}_{token}.json` | Worker в `CommandPreparer.CreateTaskFile` (atomic write `.tmp` → `File.Move`) | В `finally` блоке `ProcessRunner.RunAsync` через `CommandPreparer.CleanupTempFiles` — **после** завершения процесса (timeout/fail/done) |
-| `result_{Id}_{token}.json` | BIM-плагином по пути из `task.resultFilePath` | Worker в `TryReadResultFile` — **только после успешного парсинга** (иначе rename в `.bad` для диагностики) |
-| `result_{Id}_{token}.json.bad` | Worker'ом при битом JSON / невалидном status | Никогда автоматически — остаётся для ручной диагностики |
-| `task_{Id}_{token}.json.tmp` | Worker при atomic write | Сразу же через `File.Move(overwrite: true)` |
+| `task_{Id}_{token}.xml` | Worker в `CommandPreparer.CreateTaskFile` (atomic write `.tmp` → `File.Move`) | В `finally` блоке `ProcessRunner.RunAsync` через `CommandPreparer.CleanupTempFiles` — **после** завершения процесса (timeout/fail/done) |
+| `result_{Id}_{token}.xml` | BIM-плагином по пути из `task.resultFilePath` | Worker в `TryReadResultFile` — **только после успешного парсинга** (иначе rename в `.bad` для диагностики) |
+| `result_{Id}_{token}.xml.bad` | Worker'ом при битом XML / невалидном status | Никогда автоматически — остаётся для ручной диагностики |
+| `task_{Id}_{token}.xml.tmp` | Worker при atomic write | Сразу же через `File.Move(overwrite: true)` |
 
 ---
 
@@ -414,7 +411,7 @@ Override через `FileSystem:TaskDirectory` в `appsettings.json`. Worker с�
 │   └── Worker\
 │       ├── BimLib\              # BIM-специфичные логи
 │       └── log-{date}.txt       # Serilog-логи Worker
-└── TaskDirectory\               # task_{Id}_{token}.json + result_{Id}_{token}.json
+└── TaskDirectory\               # task_{Id}_{token}.xml + result_{Id}_{token}.xml
 ```
 
 ---

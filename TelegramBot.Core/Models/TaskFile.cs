@@ -1,23 +1,23 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Xml.Serialization;
 
 namespace TelegramBot.Core.Models;
 
 /// <summary>
-/// Файл задания для BIM-плагина. Worker создаёт <c>task_{CommandId}_{AttemptToken}.json</c> в TaskDirectory
+/// Файл задания для BIM-плагина. Worker создаёт <c>task_{CommandId}_{AttemptToken}.xml</c> в TaskDirectory
 /// перед запуском процесса. Плагин читает этот файл, получает все параметры команды и после
-/// выполнения пишет результат в <c>result_{CommandId}_{AttemptToken}.json</c>.
+/// выполнения пишет результат в <c>result_{CommandId}_{AttemptToken}.xml</c>.
 /// </summary>
 /// <remarks>
 /// Формат полностью соответствует <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> и
-/// JSON-схеме <c>…\RevitBIMFusion\Docs\TaskFile.schema.json</c>.
+/// XML-схеме <c>…\RevitBIMFusion\Docs\TaskFile.schema.xsd</c>.
 /// Плагин НЕ должен полагаться только на аргументы командной строки —
 /// task-файл содержит полную и структурированную информацию о задании.
 /// </remarks>
+[XmlRoot("taskFile")]
 public sealed class TaskFile
 {
     /// <summary>ID команды в БД (соответствует CommandId в Commands таблице).</summary>
-    [JsonPropertyName("commandId")]
+    [XmlElement("commandId")]
     public required int CommandId { get; set; }
 
     /// <summary>
@@ -25,28 +25,37 @@ public sealed class TaskFile
     /// <c>"NWC"</c>, <c>"CLASHREP"</c>, <c>"AUTORES"</c>.
     /// Соответствует <see cref="Constants.CommandCodes"/>.
     /// </summary>
-    [JsonPropertyName("commandText")]
+    [XmlElement("commandText")]
     public required string CommandText { get; set; }
 
     /// <summary>
     /// Полный путь к исходному файлу (.rvt, .rfa, .nwc, .nwd, .ifc и т.д.).
     /// AddIn открывает файл сам — через <c>OpenOptions { Audit = true, DetachAndPreserveWorksets }</c> для .rvt.
     /// </summary>
-    [JsonPropertyName("filePath")]
+    [XmlElement("filePath")]
     public required string FilePath { get; set; }
 
     /// <summary>
-    /// Полный путь к файлу результата в TaskDirectory. Плагин обязан записать сюда JSON с
-    /// <see cref="ResultFile"/> (см. <c>…\RevitBIMFusion\Docs\ResultFile.schema.json</c>).
+    /// Полный путь к файлу результата в TaskDirectory. Плагин обязан записать сюда XML с
+    /// <see cref="ResultFile"/> (см. <c>…\RevitBIMFusion\Docs\ResultFile.schema.xsd</c>).
     /// </summary>
-    [JsonPropertyName("resultFilePath")]
+    [XmlElement("resultFilePath")]
     public required string ResultFilePath { get; set; }
 
     /// <summary>
     /// Дополнительные опции команды. Closed whitelist — в текущей реализации поддерживается только
     /// <c>continueOnError</c> (bool) для PDF/DWG. Неизвестные ключи находятся вне контракта.
-    /// Сериализуется как JSON-объект или <c>null</c>.
+    /// Сериализуется как XML-элемент <c>options</c> или опускается.
     /// </summary>
-    [JsonPropertyName("options")]
-    public JsonElement? Options { get; set; }
+    [XmlElement("options")]
+    public TaskFileOptions? Options { get; set; }
+}
+
+public sealed class TaskFileOptions
+{
+    [XmlElement("continueOnError")]
+    public bool ContinueOnError { get; set; }
+
+    [XmlIgnore]
+    public bool ContinueOnErrorSpecified { get; set; }
 }
