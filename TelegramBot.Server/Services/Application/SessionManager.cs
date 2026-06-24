@@ -165,33 +165,22 @@ public class SessionManager : IDisposable
         _sessionLocks.Clear();
     }
 
-    private sealed class SessionLockReleaser : IDisposable
+    private sealed class SessionLockReleaser(SemaphoreSlim _sessionLock) : IDisposable
     {
-        private readonly SemaphoreSlim _sessionLock;
-        private int _disposed;
-
-        public SessionLockReleaser(SemaphoreSlim sessionLock)
-        {
-            _sessionLock = sessionLock;
-        }
-
         public void Dispose()
         {
-            if (Interlocked.CompareExchange(ref _disposed, 1, 0) == 0)
+            try
             {
-                try
-                {
-                    _ = _sessionLock.Release();
-                }
-                catch (ObjectDisposedException)
-                {
-                    // Семафор уже Disposed (shutdown снёс его в SessionManager.Dispose).
-                }
-                catch (SemaphoreFullException)
-                {
-                    // Release() вызван повторно — для SemaphoreSlim не должно случаться,
-                    // но на всякий случай проглатываем как уже-учтённое.
-                }
+                _ = _sessionLock.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Семафор уже Disposed (shutdown снёс его в SessionManager.Dispose).
+            }
+            catch (SemaphoreFullException)
+            {
+                // Release() вызван повторно — для SemaphoreSlim не должно случаться,
+                // но на всякий случай проглатываем как уже-учтённое.
             }
         }
     }

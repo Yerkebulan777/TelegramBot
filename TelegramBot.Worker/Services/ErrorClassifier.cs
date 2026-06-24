@@ -52,8 +52,16 @@ public static class ErrorClassifier
     /// <param name="exitCode">Код возврата процесса (если известен).</param>
     /// <param name="permanentExitCodes">Набор кодов возврата, считающихся постоянными ошибками
     /// (из <c>WorkerOptions.PermanentFailureExitCodes</c>).</param>
-    public static bool IsPermanentFailure(string errorMessage, int? exitCode = null, IReadOnlySet<int>? permanentExitCodes = null)
+    /// <param name="exception">Исключение (если есть) для дополнительной классификации.</param>
+    public static bool IsPermanentFailure(string errorMessage, int? exitCode = null, IReadOnlySet<int>? permanentExitCodes = null, Exception? exception = null)
     {
+        // Проверка по типу исключения: файл не найден, нет доступа и т.п.
+        if (exception is FileNotFoundException or DirectoryNotFoundException
+            or UnauthorizedAccessException or PathTooLongException)
+        {
+            return true;
+        }
+
         // Проверка по exit code: если код в списке постоянных — сразу permanent
         if (exitCode.HasValue && permanentExitCodes?.Contains(exitCode.Value) == true)
         {
@@ -63,21 +71,5 @@ public static class ErrorClassifier
         // Проверка по тексту ошибки: ищем характерные паттерны
         var message = errorMessage?.ToLowerInvariant() ?? string.Empty;
         return PermanentFailurePatterns.Any(message.Contains);
-    }
-
-    /// <summary>
-    /// Определяет, является ли исключение признаком постоянной ошибки
-    /// (файл не найден, нет доступа и т.п.).
-    /// </summary>
-    public static bool IsPermanentException(Exception? ex)
-    {
-        return ex switch
-        {
-            FileNotFoundException => true,
-            DirectoryNotFoundException => true,
-            UnauthorizedAccessException => true,
-            PathTooLongException => true,
-            _ => false,
-        };
     }
 }

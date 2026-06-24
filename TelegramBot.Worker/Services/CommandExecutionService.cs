@@ -17,7 +17,6 @@ public sealed class CommandExecutionService(
     CommandDataService commandDataService,
     PartitionPoolManager partitionPoolManager,
     ProcessRunner processRunner,
-    SessionCompletionTracker sessionCompletionTracker,
     IOptions<WorkerOptions> workerOptions,
     IConfiguration configuration,
     ILogger<CommandExecutionService> logger,
@@ -55,11 +54,26 @@ public sealed class CommandExecutionService(
 
         try
         {
-            await PostgresReconnectLoop.RunAsync(
-                "Worker",
-                RunListenerLoopAsync,
-                logger,
-                stoppingToken: stoppingToken);
+            var reconnectDelayMs = 5_000;
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await RunListenerLoopAsync(stoppingToken);
+                    reconnectDelayMs = 5_000;
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Worker listener lost: retryMs={Delay}", reconnectDelayMs);
+                    try { await Task.Delay(reconnectDelayMs, stoppingToken); }
+                    catch (OperationCanceledException) { break; }
+                    reconnectDelayMs = Math.Min((int)(reconnectDelayMs * 1.5), 60_000);
+                }
+            }
         }
         finally
         {
@@ -472,8 +486,6 @@ public sealed class CommandExecutionService(
                     "Worker batch claimed: count={Count}, correlationIds={CorrelationIds}",
                     claimed.Count,
                     string.Join(", ", claimed.Select(c => c.CorrelationId).Distinct()));
-
-                sessionCompletionTracker.TrackClaimedCommands(claimed);
 
                 foreach (var cmd in claimed)
                 {

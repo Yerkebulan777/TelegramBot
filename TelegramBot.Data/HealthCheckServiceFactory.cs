@@ -7,7 +7,7 @@ using TelegramBot.Core.Health;
 namespace TelegramBot.Data;
 
 /// <summary>
-/// Фабрика для единой настройки health check hosted service в Server и Worker.
+/// Фабрика для единой настройки readiness probe health check в Server и Worker.
 /// </summary>
 public static class HealthCheckServiceFactory
 {
@@ -16,7 +16,7 @@ public static class HealthCheckServiceFactory
         ILogger<HealthCheckHostedService> logger,
         string connectionString)
     {
-        var svc = new HealthCheckHostedService(options, logger)
+        return new HealthCheckHostedService(options, logger)
         {
             DatabaseCheckAsync = async ct =>
             {
@@ -25,7 +25,5 @@ public static class HealthCheckServiceFactory
                 return true;
             },
         };
-
-        return svc;
     }
 }

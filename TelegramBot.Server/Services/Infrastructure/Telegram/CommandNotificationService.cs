@@ -25,11 +25,26 @@ public sealed class CommandNotificationService(
     {
         logger.LogInformation("Command notifications starting");
 
-        await PostgresReconnectLoop.RunAsync(
-            "Command notifications",
-            RunListenerLoopAsync,
-            logger,
-            stoppingToken: stoppingToken);
+        var reconnectDelayMs = 5_000;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await RunListenerLoopAsync(stoppingToken);
+                reconnectDelayMs = 5_000;
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Command notifications listener lost: retryMs={Delay}", reconnectDelayMs);
+                try { await Task.Delay(reconnectDelayMs, stoppingToken); }
+                catch (OperationCanceledException) { break; }
+                reconnectDelayMs = Math.Min((int)(reconnectDelayMs * 1.5), 60_000);
+            }
+        }
 
         logger.LogInformation("Command notifications stopped");
     }

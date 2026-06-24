@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Serilog;
+using Serilog.Events;
 using System.Runtime.Versioning;
 using System.Text;
 using TelegramBot.Core.Config;
@@ -87,28 +88,8 @@ public static class Program
                     {
                         var options = sp.GetRequiredService<IOptions<HealthCheckOptions>>();
                         var logger = sp.GetRequiredService<ILogger<HealthCheckHostedService>>();
-                        var bimOptions = sp.GetRequiredService<IOptions<BimIntegrationOptions>>().Value;
-                        var processRunner = sp.GetRequiredService<ProcessRunner>();
 
-                        var svc = HealthCheckServiceFactory.Create(options, logger, connectionString);
-
-                        svc.AdditionalChecks["bimInstallRoot"] = _ =>
-                            Task.FromResult(new HealthComponentStatus
-                            {
-                                Status = Directory.Exists(bimOptions.RevitInstallRoot) ? "healthy" : "unhealthy",
-                                Message = Directory.Exists(bimOptions.RevitInstallRoot)
-                                    ? null
-                                    : $"Directory not found: {bimOptions.RevitInstallRoot}",
-                            });
-
-                        svc.AdditionalChecks["activeProcesses"] = _ =>
-                            Task.FromResult(new HealthComponentStatus
-                            {
-                                Status = "healthy",
-                                Message = $"active={processRunner.ActiveProcesses.Count()}",
-                            });
-
-                        return svc;
+                        return HealthCheckServiceFactory.Create(options, logger, connectionString);
                     });
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>
@@ -120,7 +101,7 @@ public static class Program
                     _ = loggerConfiguration.WriteTo.Logger(lc => lc
                         .MinimumLevel.Information()
                         .Enrich.FromLogContext()
-                        .Filter.ByIncludingOnly(BimLibLogFilter.IsBimLibEvent)
+                        .Filter.ByIncludingOnly(IsBimLibEvent)
                         .WriteToRollingFile(Path.Combine("Worker", "BimLib"), logBasePath));
                 })
                 .Build();
@@ -155,5 +136,15 @@ public static class Program
         {
             await Log.CloseAndFlushAsync();
         }
+    }
+
+    /// <summary>
+    /// Фильтр: true если событие относится к BimLib (SourceContext содержит "TelegramBot.Worker.BimLib").
+    /// </summary>
+    private static bool IsBimLibEvent(LogEvent logEvent)
+    {
+        return logEvent.Properties.TryGetValue("SourceContext", out var sc)
+               && sc is ScalarValue { Value: string s }
+               && s.StartsWith("TelegramBot.Worker.BimLib", StringComparison.Ordinal);
     }
 }

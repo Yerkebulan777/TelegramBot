@@ -409,8 +409,7 @@ public sealed class ProcessRunner(
 
         // Определяем тип ошибки: permanent (InvalidFileError — повторять бессмысленно)
         // vs transient (ProcessCrashError — можно повторить)
-        var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, exitCode, _workerOptions.PermanentFailureExitCodes)
-                          || ErrorClassifier.IsPermanentException(ex);
+        var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, exitCode, _workerOptions.PermanentFailureExitCodes, ex);
 
         if (isPermanent)
         {

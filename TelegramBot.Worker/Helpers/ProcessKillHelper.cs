@@ -43,8 +43,7 @@ internal static class ProcessKillHelper
         }
         catch (OperationCanceledException)
         {
-            logger.LogWarning("Process did not exit within {Timeout} after Kill: commandId={Id}, pid={Pid}",
-                timeout, commandId, SafeGetPid(process));
+            logger.LogWarning("Process did not exit within {Timeout} after Kill: commandId={Id}, pid={Pid}", timeout, commandId, SafeGetPid(process));
             return false;
         }
         catch (Exception ex)

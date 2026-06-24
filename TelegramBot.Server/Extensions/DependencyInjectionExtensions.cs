@@ -131,17 +131,8 @@ public static class DependencyInjectionExtensions
         {
             var options = sp.GetRequiredService<IOptions<HealthCheckOptions>>();
             var logger = sp.GetRequiredService<ILogger<HealthCheckHostedService>>();
-            var notifications = sp.GetRequiredService<Channel<NotificationItem>>();
-            var svc = HealthCheckServiceFactory.Create(options, logger, connectionString);
 
-            svc.AdditionalChecks["notificationChannel"] = _ =>
-                Task.FromResult(new HealthComponentStatus
-                {
-                    Status = notifications.Reader.Completion.IsCompleted ? "unhealthy" : "healthy",
-                    Message = notifications.Reader.Completion.IsCompleted ? "notification channel completed" : null,
-                });
-
-            return svc;
+            return HealthCheckServiceFactory.Create(options, logger, connectionString);
         });
 
         return services;
