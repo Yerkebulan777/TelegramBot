@@ -28,7 +28,8 @@ public static class Program
 
         try
         {
-            var host = Host.CreateDefaultBuilder(args)
+            using var host = Host.CreateDefaultBuilder(args)
+
                 .ConfigureAppConfiguration((context, config) =>
                 {
                     _=config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
@@ -55,20 +56,21 @@ public static class Program
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), "Worker:Commands executable paths are required")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ArgumentsTemplate)), "Worker:Commands argument templates are required")
                         .ValidateOnStart();
+
                     _=services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
                     _=services.Configure<DialogDismisserOptions>(context.Configuration.GetSection(DialogDismisserOptions.SectionName));
                     _=services.Configure<FileSystemOptions>(context.Configuration.GetSection(FileSystemOptions.SectionName));
 
                     // BIM-интеграция (Revit + Navisworks)
                     _=services.AddSingleton<RevitVersionDetector>();
+                    _=services.AddSingleton<NavisworksPathResolver>();
                     _=services.AddSingleton<RevitPathResolver>();
                     _=services.AddSingleton<DialogDismisser>();
-                    _=services.AddSingleton<NavisworksPathResolver>();
 
                     // Компоненты выполнения команд (декомпозиция CommandExecutionService)
+                    _=services.AddSingleton<SessionCompletionTracker>();
                     _=services.AddSingleton<PartitionPoolManager>();
                     _=services.AddSingleton<CommandPreparer>();
-                    _=services.AddSingleton<SessionCompletionTracker>();
                     _=services.AddSingleton<ProcessRunner>();
 
                     _=services.AddHostedService<CommandExecutionService>();
@@ -80,12 +82,14 @@ public static class Program
                         .Validate(options => options.Port is >0 and <=65535, "Port must be between 1 and 65535");
 
                     var connectionString = context.Configuration.GetConnectionString("Postgres") ?? DataAccessBase.DefaultConnectionString;
+
                     _=services.AddHostedService(sp =>
                     {
                         var options = sp.GetRequiredService<IOptions<HealthCheckOptions>>();
                         var logger = sp.GetRequiredService<ILogger<HealthCheckHostedService>>();
                         var bimOptions = sp.GetRequiredService<IOptions<BimIntegrationOptions>>().Value;
                         var processRunner = sp.GetRequiredService<ProcessRunner>();
+
                         var svc = HealthCheckServiceFactory.Create(options, logger, connectionString);
 
                         svc.AdditionalChecks["bimInstallRoot"] = _ =>
@@ -108,7 +112,17 @@ public static class Program
                     });
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>
-                    SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker"))
+                {
+                    SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker");
+
+                    // Отдельный файл для BIM-специфичных логов (Revit, Navisworks — TelegramBot.Worker.BimLib.*)
+                    var logBasePath = SerilogSetup.GetConfiguredLogBasePath(context.Configuration);
+                    _ = loggerConfiguration.WriteTo.Logger(lc => lc
+                        .MinimumLevel.Information()
+                        .Enrich.FromLogContext()
+                        .Filter.ByIncludingOnly(BimLibLogFilter.IsBimLibEvent)
+                        .WriteToRollingFile(Path.Combine("Worker", "BimLib"), logBasePath));
+                })
                 .Build();
 
             // Initialize WinApiHelper logger for safe P/Invoke error logging
@@ -121,10 +135,10 @@ public static class Program
             var taskDir = fileSystemOptions.GetEffectiveTaskDirectory();
             try
             {
-                Directory.CreateDirectory(taskDir);
+                _=Directory.CreateDirectory(taskDir);
                 Log.Information("TaskDirectory ready: {Path}", taskDir);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 Log.Error(ex, "Failed to create TaskDirectory '{Path}'. Command execution will likely fail.", taskDir);
                 throw;
