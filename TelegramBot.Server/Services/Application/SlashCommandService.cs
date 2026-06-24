@@ -699,11 +699,21 @@ public sealed partial class SlashCommandService(
         if (rvtDirs.Length == 0)
             return [];
 
-        var scanTasks = rvtDirs
-            .Select(dir => Task.Run(() => EnumerateValidRvtFiles(dir), cancellationToken));
+        var scanResults = new string[rvtDirs.Length][];
+        var parallelOptions = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Math.Max(1, _options.RvtScanMaxDegreeOfParallelism),
+        };
 
-        var results = await Task.WhenAll(scanTasks);
-        var allFiles = results.SelectMany(f => f).ToList();
+        await Parallel.ForAsync(0, rvtDirs.Length, parallelOptions, (index, ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            scanResults[index] = EnumerateValidRvtFiles(rvtDirs[index]).ToArray();
+            return ValueTask.CompletedTask;
+        });
+
+        var allFiles = scanResults.SelectMany(files => files).ToList();
         return RevitFileDeduplicator.Deduplicate(allFiles);
     }
 

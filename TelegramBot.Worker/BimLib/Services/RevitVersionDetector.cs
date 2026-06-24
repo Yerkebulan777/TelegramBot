@@ -1,4 +1,5 @@
 using OpenMcdf;
+using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using System.Text;
 using TelegramBot.Worker.BimLib.Models;
@@ -19,6 +20,9 @@ public sealed class RevitVersionDetector(
     RevitPathResolver pathResolver,
     ILogger<RevitVersionDetector> logger)
 {
+    private const int MaxCacheEntries = 4096;
+    private readonly ConcurrentDictionary<CacheKey, RevitDetectedVersion> _cache = new();
+
     /// <inheritdoc/>
     public Task<RevitDetectedVersion?> DetectVersionAsync(string filePath, CancellationToken ct = default)
     {
@@ -29,17 +33,45 @@ public sealed class RevitVersionDetector(
             return Task.FromResult<RevitDetectedVersion?>(null);
         }
 
-        if (!File.Exists(filePath))
+        FileInfo fileInfo;
+        try
+        {
+            fileInfo = new FileInfo(filePath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            logger.LogWarning(ex, "DetectVersion failed: invalid path '{Path}'", filePath);
+            return Task.FromResult<RevitDetectedVersion?>(null);
+        }
+
+        if (!fileInfo.Exists)
         {
             logger.LogWarning("DetectVersion failed: file not found '{Path}'", filePath);
             return Task.FromResult<RevitDetectedVersion?>(null);
         }
 
-        var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
+        var ext = fileInfo.Extension.ToLowerInvariant();
         if (ext is not (".rvt" or ".rfa" or ".rte"))
         {
             logger.LogDebug("DetectVersion skipped: unsupported extension '{Ext}' for '{Path}'", ext, filePath);
             return Task.FromResult<RevitDetectedVersion?>(null);
+        }
+
+        CacheKey cacheKey;
+        try
+        {
+            cacheKey = CacheKey.From(fileInfo);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "DetectVersion failed: cannot read file metadata '{Path}'", filePath);
+            return Task.FromResult<RevitDetectedVersion?>(null);
+        }
+
+        if (_cache.TryGetValue(cacheKey, out var cached))
+        {
+            logger.LogDebug("Detected Revit {Year} from cache for '{Path}'", cached.Year, filePath);
+            return Task.FromResult<RevitDetectedVersion?>(cached);
         }
 
         try
@@ -62,11 +94,14 @@ public sealed class RevitVersionDetector(
 
             logger.LogDebug("Detected Revit {Year} from '{Path}'", year, filePath);
 
-            return Task.FromResult<RevitDetectedVersion?>(new RevitDetectedVersion
+            var detected = new RevitDetectedVersion
             {
                 Year = year,
                 ExecutablePath = pathResolver.ResolveExecutablePath(year)
-            });
+            };
+
+            AddToCache(cacheKey, detected);
+            return Task.FromResult<RevitDetectedVersion?>(detected);
         }
         catch (OperationCanceledException)
         {
@@ -77,6 +112,16 @@ public sealed class RevitVersionDetector(
             logger.LogWarning(ex, "DetectVersion failed for '{Path}'", filePath);
             return Task.FromResult<RevitDetectedVersion?>(null);
         }
+    }
+
+    private void AddToCache(CacheKey key, RevitDetectedVersion value)
+    {
+        if (_cache.Count >= MaxCacheEntries)
+        {
+            _cache.Clear();
+        }
+
+        _cache[key] = value;
     }
 
     /// <summary>
@@ -169,5 +214,16 @@ public sealed class RevitVersionDetector(
         }
 
         return null;
+    }
+
+    private readonly record struct CacheKey(string FullPath, DateTime LastWriteTimeUtc, long Length)
+    {
+        public static CacheKey From(FileInfo fileInfo)
+        {
+            return new CacheKey(
+                Path.GetFullPath(fileInfo.FullName).ToUpperInvariant(),
+                fileInfo.LastWriteTimeUtc,
+                fileInfo.Length);
+        }
     }
 }

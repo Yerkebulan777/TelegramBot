@@ -24,6 +24,7 @@ internal static partial class SqlQueries
                 Status TEXT NOT NULL DEFAULT 'pending',
                 ProjectName TEXT,
                 CompletionNotified BOOLEAN NOT NULL DEFAULT FALSE,
+                StartNotified BOOLEAN NOT NULL DEFAULT FALSE,
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 FilesAmount INTEGER,
                 UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -36,6 +37,7 @@ internal static partial class SqlQueries
             ADD COLUMN IF NOT EXISTS Status TEXT NOT NULL DEFAULT 'pending',
             ADD COLUMN IF NOT EXISTS ProjectName TEXT,
             ADD COLUMN IF NOT EXISTS CompletionNotified BOOLEAN NOT NULL DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS StartNotified BOOLEAN NOT NULL DEFAULT FALSE,
             ADD COLUMN IF NOT EXISTS FilesAmount INTEGER,
             ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
@@ -145,6 +147,8 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_pending_priority ON Commands(Status, Priority ASC, CreatedAt ASC, CommandId ASC)
                 WHERE Status = 'pending';
             CREATE INDEX IF NOT EXISTS idx_commands_partition_status ON Commands(Partition, Status);
+            CREATE INDEX IF NOT EXISTS idx_commands_processing_partition ON Commands(Partition)
+                WHERE Status = 'processing';
             CREATE INDEX IF NOT EXISTS idx_commands_claim_partition ON Commands(Status, Partition, Priority ASC, CreatedAt ASC, CommandId ASC)
                 WHERE Status = 'pending';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);

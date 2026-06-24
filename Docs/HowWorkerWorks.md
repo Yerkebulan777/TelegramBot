@@ -147,8 +147,8 @@ Worker использует один `SemaphoreSlim` внутри `CommandExecut
 
    3f. Освобождение _launchGate
 
-   3g. UpdateCommandStatus(Processing) + NotifySessionStartedAsync
-       → pg_notify 'session_started' → Server шлёт "⚙️ Задание запущено"
+   3g. MarkProcessStartedAndNotifyOnceAsync
+       → ProcessId + StartNotified + pg_notify 'session_started' → Server шлёт "⚙️ Задание запущено"
 
 4. WaitAndHandleResultAsync:
 
@@ -462,32 +462,7 @@ _=services.AddSingleton<ProcessRunner>();
 // Hosted services
 _=services.AddHostedService<CommandExecutionService>();
 _=services.AddHostedService<SessionCleanupService>();
-
-// Health check HTTP-сервер (через фабрику, не прямая регистрация HealthCheckHostedService)
-_=services.AddOptions<HealthCheckOptions>()
-    .Bind(context.Configuration.GetSection(HealthCheckOptions.SectionName))
-    .Validate(options => options.Port is >0 and <=65535, ...);
-_=services.AddHostedService(sp =>
-{
-    var options = sp.GetRequiredService<IOptions<HealthCheckOptions>>();
-    var logger = sp.GetRequiredService<ILogger<HealthCheckHostedService>>();
-    return HealthCheckServiceFactory.Create(options, logger, connectionString);
-});
 ```
-
----
-
-## Health Check
-
-Worker поднимает HTTP-сервер на порту **5001** (Server — на 5000). Дополнительные checks в
-`AdditionalChecks`:
-
-| Check | Описание | Unhealthy |
-|-------|----------|-----------|
-| `bimInstallRoot` | Проверяет существование `BimIntegration:RevitInstallRoot` | Директория не найдена |
-| `activeProcesses` | Количество активных внешних процессов (информационно) | Всегда `healthy` |
-
-Endpoints: `/health/live` (всегда 200), `/health/ready` (с DB-проверкой), `/health` (подробный JSON).
 
 ---
 
@@ -511,7 +486,7 @@ Server.CreateSessionWithCommandsAsync
   → pg_notify('new_tasks', correlationId)
     → Worker.ClaimPendingCommandsAsync (claim'ит по batch'у)
       → ProcessRunner.RunAsync
-        → Process.Start + UpdateCommandStatus(Processing) + pg_notify('session_started', correlationId)
+        → Process.Start + MarkProcessStartedAndNotifyOnceAsync + pg_notify('session_started', correlationId)
           → Server "⚙️ Задание запущено"
         → ResultFile от плагина → Status=Done/Failed
           → SessionCompletionTracker.OnCommandCompletedAsync

@@ -51,6 +51,30 @@ public sealed class CommandDataService(
             "update status");
     }
 
+    /// <summary>Записывает PID запущенного процесса и один раз уведомляет Server о старте сессии.</summary>
+    public async Task<bool> MarkProcessStartedAndNotifyOnceAsync(int commandId, int processId, int sessionId, string correlationId, long userId)
+    {
+        try
+        {
+            await using var conn = await CreateOpenConnectionAsync();
+            var notified = await conn.ExecuteScalarAsync<int>(
+                SqlQueries.Commands.MarkProcessStartedAndNotifyOnce,
+                new
+                {
+                    CommandId = commandId,
+                    ProcessId = processId,
+                    Payload = $"{sessionId}|{correlationId}|{userId}",
+                });
+
+            return notified > 0;
+        }
+        catch (Exception e)
+        {
+            Logger.LogWarning(e, "Failed to mark process started for command {CommandId}", commandId);
+            return false;
+        }
+    }
+
     /// <summary>Планирует повторную попытку.</summary>
     public async Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage)
     {
@@ -111,22 +135,6 @@ public sealed class CommandDataService(
             SqlQueries.Commands.CountDuplicatePairs,
             new { CommandTexts = commandTexts.ToArray(), FilePaths = filePaths.ToArray() });
         return count > 0;
-    }
-
-    /// <summary>Отправляет pg_notify о старте первого процесса сессии.</summary>
-    public async Task NotifySessionStartedAsync(int sessionId, string correlationId, long userId)
-    {
-        try
-        {
-            await using var conn = await CreateOpenConnectionAsync();
-            _=await conn.ExecuteAsync(
-                "SELECT pg_notify('session_started', @Payload)",
-                new { Payload = $"{sessionId}|{correlationId}|{userId}" });
-        }
-        catch (Exception e)
-        {
-            Logger.LogWarning(e, "Failed to send session_started notify for session {SessionId}", sessionId);
-        }
     }
 
     /// <summary>Выполняет SQL-команду с обработкой ошибок и возвратом признака успеха.</summary>

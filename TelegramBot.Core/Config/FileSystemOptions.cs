@@ -21,6 +21,11 @@ public sealed class FileSystemOptions
     public string SectionFolderPattern { get; set; } = @"^(\d{2}|\d{3}|I{1,3})_";
 
     /// <summary>
+    /// Максимальная параллельность сканирования 01_RVT директорий при создании задания.
+    /// </summary>
+    public int RvtScanMaxDegreeOfParallelism { get; set; } = 4;
+
+    /// <summary>
     /// Путь к директории логов. Если не задан (null или пусто),
     /// используется дефолтный путь: %USERPROFILE%\Documents\TelegramBot\Logs.
     /// </summary>

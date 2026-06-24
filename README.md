@@ -29,7 +29,6 @@ Telegram-бот для навигации по файловой системе �
 - Дедупликация Revit-файлов по префиксу имени и числовым токенам
 - Запрос доступа с подтверждением администратором
 - Умный retry: классификация ошибок (`InvalidFileError` → сразу Failed, `ProcessCrashError` → retry с экспоненциальной задержкой)
-- Health check endpoints: `/health/live`, `/health/ready`, `/health`; Worker добавляет checks `bimInstallRoot` и `activeProcesses`
 - Декомпозиция выполнения команд: `CommandExecutionService` (LISTEN/NOTIFY + лимит параллельности), `CommandPreparer` (валидация + BIM-резолвинг), `ProcessRunner` (запуск + timeout + retry), `SessionCompletionTracker` (DB confirmation)
 
 ## Технологии
@@ -55,43 +54,6 @@ Telegram-бот для навигации по файловой системе �
 4. Мульти-выбор разделов (папки, подходящие под `SectionFolderPattern`)
 5. Worker сканирует `01_RVT` внутри разделов, дедуплицирует, фильтрует по размеру (>50MB) и формату имени
 6. `Confirm` → вставка в `Commands` + `pg_notify('new_tasks', correlationId)` → Worker забирает пачку
-
-## Health Check Endpoints
-
-Оба приложения (Server и Worker) предоставляют HTTP-endpoints для мониторинга:
-
-| Endpoint | Server | Worker | Описание |
-|----------|--------|--------|----------|
-| `GET /health/live` | :5000 | :5001 | Liveness — процесс жив (всегда 200) |
-| `GET /health/ready` | :5000 | :5001 | Readiness — проверка PostgreSQL (200 или 503) |
-| `GET /health` | :5000 | :5001 | Подробный JSON-отчёт |
-
-Пример ответа `/health`:
-```json
-{
-  "status": "healthy",
-  "service": "TelegramBot.Server",
-  "timestamp": "2026-06-12T12:00:00Z",
-  "uptime": "2d 14h 30m",
-  "version": "1.0.0.0",
-  "checks": [
-    { "name": "database", "status": "healthy" },
-    { "name": "process", "status": "healthy" },
-    { "name": "notificationChannel", "status": "healthy" }
-  ]
-}
-```
-
-Worker добавляет в `/health` две BIM-проверки:
-
-| Check | Описание | Unhealthy |
-|-------|----------|-----------|
-| `bimInstallRoot` | Проверяет существование `BimIntegration:RevitInstallRoot` | Директория не найдена |
-| `activeProcesses` | Показывает количество активных внешних процессов Worker | Всегда `healthy` (информационно) |
-
-Server добавляет `notificationChannel` — проверяет, что `Channel<NotificationItem>` не закрыт.
-
-Отдельных `/debug/*` endpoints и Prometheus exporter в текущем коде нет.
 
 ## BIM-плагины
 
@@ -131,9 +93,9 @@ Worker запускает внешние исполнители и обмени�
 | `FileSystem` | `RvtDirectoryName` | Имя папки с RVT внутри раздела (default `01_RVT`) |
 | `FileSystem` | `ProjectDirectoryName` | Имя папки проекта (default `01_PROJECT`) |
 | `FileSystem` | `SectionFolderPattern` | Regex для папок-разделов (default `^(\d{2}|\d{3}\|I{1,3})_`) |
+| `FileSystem` | `RvtScanMaxDegreeOfParallelism` | Лимит параллельного сканирования `01_RVT` директорий (default `4`) |
 | `FileSystem` | `LogDirectory` | Опционально: путь к логам (default `%USERPROFILE%\Documents\TelegramBot\Logs`) |
 | `FileSystem` | `TaskDirectory` | Опционально: папка для task/result XML (default `%USERPROFILE%\Documents\TelegramBot\TaskDirectory`). **Только Worker** |
-| `HealthCheck` | `Port` / `ServiceName` / `CacheSeconds` / `DbCheckTimeoutSeconds` | Health-сервер (default `5000` / `TelegramBot.Server` / `10` / `5`) |
 
 ### Worker — `TelegramBot.Worker/appsettings.json`
 
@@ -150,12 +112,11 @@ Worker запускает внешние исполнители и обмени�
 | `Worker` | `PermanentFailureExitCodes` | HashSet exit-кодов, считающихся permanent (default пуст) |
 | `Worker` | `FallbackPollingIntervalSeconds` | Polling fallback при потере LISTEN/NOTIFY (default `300` = 5 мин) |
 | `Worker` | `CleanupIntervalSeconds` | Интервал фоновой очистки истёкших Lease (default `300`) |
-| `Worker` | `HealthCheckIntervalSeconds` | Интервал проверки здоровья активных процессов (default `30`) |
+| `Worker` | `ProcessMonitorIntervalSeconds` | Интервал мониторинга активных внешних процессов и авто-закрытия диалогов (default `30`) |
 | `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
 | `Worker` | `LaunchStaggerSeconds` | Пауза между запусками внешних процессов (default `5`). Предотвращает коллизию devtools-порта CEF при параллельном старте Revit. `0` отключает |
 | `Worker` | `Partitions` | Backward-compatible словарь лимитов; Worker использует сумму значений как общий лимит параллельных команд. Логические очередные partition живут в БД (`Commands.Partition`). Default: `{0: 5, 1: 3, 2: 2, 3: 1}` → `11` |
 | `Worker.Commands` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}` |
-| `HealthCheck` | `Port` / `ServiceName` / `CacheSeconds` / `DbCheckTimeoutSeconds` | Health-сервер (default `5001` / `TelegramBot.Worker` / `10` / `5`) |
 
 #### Как сейчас работают `Worker:Partitions`
 

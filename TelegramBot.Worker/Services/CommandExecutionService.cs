@@ -39,7 +39,7 @@ public sealed class CommandExecutionService(
 
     private CancellationTokenSource? _shutdownCts;
     private Task? _cleanupTask;
-    private Task? _healthTask;
+    private Task? _processMonitorTask;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -50,7 +50,7 @@ public sealed class CommandExecutionService(
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
         _cleanupTask = StartCleanupTaskAsync();
-        _healthTask = StartHealthMonitoringTaskAsync();
+        _processMonitorTask = StartProcessMonitoringTaskAsync();
 
         try
         {
@@ -166,12 +166,12 @@ public sealed class CommandExecutionService(
             cycle: () => commandDataService.ReleaseExpiredLeasesAsync());
     }
 
-    private Task StartHealthMonitoringTaskAsync()
+    private Task StartProcessMonitoringTaskAsync()
     {
         return StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: _workerOptions.HealthCheckIntervalSeconds,
-            disabledMessage: interval => $"HealthCheckIntervalSeconds = {interval}, process health monitoring disabled",
-            cycleName: "process health check cycle",
+            intervalSeconds: _workerOptions.ProcessMonitorIntervalSeconds,
+            disabledMessage: interval => $"ProcessMonitorIntervalSeconds = {interval}, process monitoring disabled",
+            cycleName: "process monitor cycle",
             cycle: () =>
             {
                 CheckProcessesHealth();
@@ -296,7 +296,7 @@ public sealed class CommandExecutionService(
         int Remaining() => Math.Max(1, ShutdownBudgetSeconds - (int)(DateTime.UtcNow - shutdownStartedAt).TotalSeconds);
 #pragma warning disable VSTHRD003
         await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
-        await WaitForBackgroundTaskCompletionAsync(_healthTask, "Health monitoring task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
+        await WaitForBackgroundTaskCompletionAsync(_processMonitorTask, "Process monitoring task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 #pragma warning restore VSTHRD003
         await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 

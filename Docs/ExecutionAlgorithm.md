@@ -48,7 +48,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 ### Pipeline команды
 
 1. `SlashCommandService.ConfirmFileSelectionAsync` собирает файлы через `RevitFileDeduplicator` (parallel
-   `Task.WhenAll` по разделам), проверяет:
+   `Parallel.ForAsync` по разделам с лимитом `FileSystem:RvtScanMaxDegreeOfParallelism`), проверяет:
    - **Rate limit** (`CountQueuedFilesByUserSinceAsync` — сумма `FilesAmount` за 24ч, default ≤1000)
    - **Duplicate guard** (`HasDuplicateCommandsAsync` — активные pending/processing с теми же
      `(CommandText, FilePath)`)
@@ -72,8 +72,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      - `StartProcessAsync` — захват `_launchGate` (SemaphoreSlim 1/1) → `Process.Start` → регистрация в
        `_activeProcesses` (ДО stagger-задержки, чтобы health-check и shutdown видели процесс) →
        `Task.Delay(LaunchStaggerSeconds)` с `CancellationToken.None` (gate освобождается даже при shutdown)
-       → освобождение gate → `UpdateStatus=processing` + `NotifySessionStartedAsync`
-       (`pg_notify('session_started', SessionId|CorrelationId|UserId)`)
+      → освобождение gate → `MarkProcessStartedAndNotifyOnceAsync`
+      (`ProcessId` + идемпотентный `pg_notify('session_started', SessionId|CorrelationId|UserId)`)
      - `WaitAndHandleResultAsync` — `OutputDataReceived` (64KB лимит, `truncated` флаг) +
        `WaitForExitAsync` + `TryReadResultFile`:
        - `Valid` + `status="done"` → `Done`
@@ -124,6 +124,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `ProjectName` | `TEXT` | Имя проекта из `GetCurrentProjectName(session)` |
 | `FilesAmount` | `INTEGER` | Количество файлов в сессии (для `CountQueuedFilesByUserSinceAsync`) |
 | `CompletionNotified` | `BOOLEAN NOT NULL DEFAULT FALSE` | Идемпотентность enqueue completion event в `NotificationOutbox` при multi-worker |
+| `StartNotified` | `BOOLEAN NOT NULL DEFAULT FALSE` | Идемпотентность уведомления "Задание запущено" |
 | `CreatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
 | `UpdatedAt` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
 
@@ -196,6 +197,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 | `idx_commands_pending_priority` | `Status, Priority ASC, CreatedAt ASC, CommandId ASC` | partial `WHERE Status = 'pending'` |
 | `idx_commands_claim_partition` | `Status, Partition, Priority ASC, CreatedAt ASC, CommandId ASC` | partial `WHERE Status = 'pending'`. Критичен для производительности `ClaimAndReturn` (DISTINCT ON + ORDER BY) |
 | `idx_commands_partition_status` | `Partition, Status` | |
+| `idx_commands_processing_partition` | `Partition` | partial `WHERE Status = 'processing'`; ускоряет исключение уже выполняемых partition |
 | `idx_commands_unique` | `SessionId, CommandText, FilePath` | UNIQUE |
 | `idx_tracked_messages_session` | `SessionId` | |
 | `idx_tracked_messages_chat` | `ChatId` | |
@@ -287,7 +289,28 @@ WHERE CommandId = @CommandId
 ### Уведомление о старте сессии (Worker → Server)
 
 ```sql
-SELECT pg_notify('session_started', @Payload);
+WITH command_updated AS (
+    UPDATE Commands
+    SET ProcessId = @ProcessId
+    WHERE CommandId = @CommandId
+      AND Status = 'processing'
+    RETURNING SessionId
+),
+session_marked AS (
+    UPDATE Sessions s
+    SET StartNotified = TRUE,
+        UpdatedAt = NOW()
+    FROM command_updated cu
+    WHERE s.SessionId = cu.SessionId
+      AND s.StartNotified = FALSE
+      AND s.Status != 'Deleted'
+    RETURNING s.SessionId
+),
+notified AS (
+    SELECT pg_notify('session_started', @Payload)
+    FROM session_marked
+)
+SELECT COUNT(*)::int FROM notified;
 -- Payload: "SessionId|CorrelationId|UserId"
 ```
 
@@ -316,7 +339,8 @@ notified AS (
     SELECT pg_notify('command_completed', @Payload)
     FROM marked
 )
-SELECT COUNT(*)::int FROM outbox;
+SELECT (SELECT COUNT(*)::int FROM outbox)
+FROM (SELECT COUNT(*) FROM notified) force_notify;
 ```
 
 `command_completed` — только wake-up сигнал. Durable-событие хранится в `NotificationOutbox`.
@@ -455,7 +479,7 @@ SELECT COUNT(*)::int FROM deleted_sessions;
 | Канал | Payload | Отправитель | Получатель | Назначение |
 |-------|---------|-------------|------------|------------|
 | `new_tasks` | `CorrelationId` | `SessionDataService.CreateSessionWithCommandsAsync` | `CommandExecutionService.RunListenerLoopAsync` | Wake-up: новые команды в очереди |
-| `session_started` | `SessionId\|CorrelationId\|UserId` | `CommandDataService.NotifySessionStartedAsync` (внутри `ProcessRunner.StartProcessAsync`) | `CommandNotificationService.OnSessionStarted` | Server шлёт "⚙️ Задание запущено" пользователю |
+| `session_started` | `SessionId\|CorrelationId\|UserId` | `CommandDataService.MarkProcessStartedAndNotifyOnceAsync` (внутри `ProcessRunner.StartProcessAsync`) | `CommandNotificationService.OnSessionStarted` | Server шлёт "⚙️ Задание запущено" пользователю |
 | `command_completed` | `SessionId\|CorrelationId` | `SessionDataService.NotifySessionCompletedOnceAsync` (атомарно с `CompletionNotified=TRUE` + outbox insert) | `CommandNotificationService.OnNotificationReceived` | Wake-up: Server drain'ит `NotificationOutbox` и шлёт итоговую сводку |
 
 ---

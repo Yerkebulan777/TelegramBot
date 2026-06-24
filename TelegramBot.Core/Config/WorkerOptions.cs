@@ -50,9 +50,9 @@ public sealed class WorkerOptions
     public int CleanupIntervalSeconds { get; set; } = 300;
 
     /// <summary>
-    /// Интервал проверки здоровья active процессов в секундах (по умолчанию 30).
+    /// Интервал мониторинга active процессов в секундах (по умолчанию 30).
     /// </summary>
-    public int HealthCheckIntervalSeconds { get; set; } = 30;
+    public int ProcessMonitorIntervalSeconds { get; set; } = 30;
 
     /// <summary>
     /// Пауза между запусками внешних процессов в секундах (по умолчанию 5).

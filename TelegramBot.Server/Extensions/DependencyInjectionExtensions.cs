@@ -2,7 +2,6 @@ using Microsoft.Extensions.Options;
 using System.Threading.Channels;
 using Telegram.Bot;
 using TelegramBot.Core.Config;
-using TelegramBot.Core.Health;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Services;
 using TelegramBot.Data;
@@ -24,8 +23,7 @@ public static class DependencyInjectionExtensions
            .AddApplicationServices()
            .AddInfrastructureServices()
            .AddConfiguration(configuration)
-           .AddTelegramServices()
-           .AddHealthCheckServices(configuration);
+           .AddTelegramServices();
     }
 
     private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
@@ -42,10 +40,6 @@ public static class DependencyInjectionExtensions
 
         _=services.AddOptions<RateLimitOptions>()
             .Bind(configuration.GetSection(RateLimitOptions.SectionName));
-
-        _=services.AddOptions<HealthCheckOptions>()
-            .Bind(configuration.GetSection(HealthCheckOptions.SectionName))
-            .Validate(options => options.Port is >0 and <=65535, "Port must be between 1 and 65535");
 
         return services;
     }
@@ -119,21 +113,6 @@ public static class DependencyInjectionExtensions
         _=services.AddHostedService<TelegramBotHostedService>();
         _=services.AddHostedService<CommandNotificationService>();
         _=services.AddHostedService<NotificationSenderService>();
-
-        return services;
-    }
-
-    private static IServiceCollection AddHealthCheckServices(this IServiceCollection services, IConfiguration configuration)
-    {
-        var connectionString = configuration.GetConnectionString("Postgres") ?? DataAccessBase.DefaultConnectionString;
-
-        _=services.AddHostedService(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<HealthCheckOptions>>();
-            var logger = sp.GetRequiredService<ILogger<HealthCheckHostedService>>();
-
-            return HealthCheckServiceFactory.Create(options, logger, connectionString);
-        });
 
         return services;
     }

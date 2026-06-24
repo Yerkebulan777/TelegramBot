@@ -151,6 +151,7 @@ internal static partial class SqlQueries
                 SELECT pg_notify('command_completed', @Payload)
                 FROM marked
             )
-            SELECT COUNT(*)::int FROM outbox;";
+            SELECT (SELECT COUNT(*)::int FROM outbox)
+            FROM (SELECT COUNT(*) FROM notified) force_notify;";
     }
 }

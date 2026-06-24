@@ -164,8 +164,12 @@ public sealed class ProcessRunner(
         {
             _ = _launchGate.Release();
         }
-        _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Processing, process.Id);
-        _ = commandDataService.NotifySessionStartedAsync(cmd.SessionId, cmd.CorrelationId, cmd.UserId);
+        _ = await commandDataService.MarkProcessStartedAndNotifyOnceAsync(
+            cmd.CommandId,
+            process.Id,
+            cmd.SessionId,
+            cmd.CorrelationId,
+            cmd.UserId);
 
         return process;
     }

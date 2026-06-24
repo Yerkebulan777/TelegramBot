@@ -4,7 +4,6 @@ using Serilog.Events;
 using System.Runtime.Versioning;
 using System.Text;
 using TelegramBot.Core.Config;
-using TelegramBot.Core.Health;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Data;
 using TelegramBot.Worker.BimLib.Config;
@@ -50,6 +49,7 @@ public static class Program
                         .Validate(options => options.MaxRetries >= 0, "Worker:MaxRetries must be greater than or equal to 0")
                         .Validate(options => options.RetryDelayBaseSeconds > 0, "Worker:RetryDelayBaseSeconds must be greater than 0")
                         .Validate(options => options.FallbackPollingIntervalSeconds > 0, "Worker:FallbackPollingIntervalSeconds must be greater than 0")
+                        .Validate(options => options.ProcessMonitorIntervalSeconds >= 0, "Worker:ProcessMonitorIntervalSeconds must be greater than or equal to 0")
                         .Validate(options => options.LaunchStaggerSeconds >= 0, "Worker:LaunchStaggerSeconds must be greater than or equal to 0")
                         .Validate(options => options.Partitions.Count > 0, "Worker:Partitions must contain at least one entry")
                         .Validate(options => options.Partitions.All(p => p.Value > 0), "Worker:Partitions values must be greater than 0")
@@ -74,21 +74,6 @@ public static class Program
 
                     _=services.AddHostedService<CommandExecutionService>();
                     _=services.AddHostedService<SessionCleanupService>();
-
-                    // Health check HTTP-сервер
-                    _=services.AddOptions<HealthCheckOptions>()
-                        .Bind(context.Configuration.GetSection(HealthCheckOptions.SectionName))
-                        .Validate(options => options.Port is >0 and <=65535, "Port must be between 1 and 65535");
-
-                    var connectionString = context.Configuration.GetConnectionString("Postgres") ?? DataAccessBase.DefaultConnectionString;
-
-                    _=services.AddHostedService(sp =>
-                    {
-                        var options = sp.GetRequiredService<IOptions<HealthCheckOptions>>();
-                        var logger = sp.GetRequiredService<ILogger<HealthCheckHostedService>>();
-
-                        return HealthCheckServiceFactory.Create(options, logger, connectionString);
-                    });
                 })
                 .UseSerilog((context, services, loggerConfiguration) =>
                 {

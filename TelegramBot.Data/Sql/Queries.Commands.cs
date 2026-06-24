@@ -76,6 +76,29 @@ internal static partial class SqlQueries
             WHERE CommandId = @CommandId
               AND Status != 'Deleted';";
 
+        internal const string MarkProcessStartedAndNotifyOnce = @"
+            WITH command_updated AS (
+                UPDATE Commands
+                SET ProcessId = @ProcessId
+                WHERE CommandId = @CommandId
+                  AND Status = 'processing'
+                RETURNING SessionId
+            ),
+            session_marked AS (
+                UPDATE Sessions s
+                SET StartNotified = TRUE,
+                    UpdatedAt = NOW()
+                FROM command_updated cu
+                WHERE s.SessionId = cu.SessionId
+                  AND s.StartNotified = FALSE
+                  AND s.Status != 'Deleted'
+                RETURNING s.SessionId
+            ),
+            notified AS (
+                SELECT pg_notify('session_started', @Payload)
+                FROM session_marked
+            )
+            SELECT COUNT(*)::int FROM notified;";
 
         internal const string ClaimAndReturn = @"
             WITH candidates AS (
