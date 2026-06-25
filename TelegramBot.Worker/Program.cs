@@ -40,8 +40,6 @@ public static class Program
                     _=services.AddSingleton<CommandDataService>();
                     _=services.AddSingleton<SessionDataService>();
                     _=services.AddSingleton<MessageTrackingDataService>();
-                    _=services.AddSingleton<DatabaseInitializerService>();
-
                     _=services.AddOptions<WorkerOptions>()
                         .Bind(context.Configuration.GetSection(WorkerOptions.SectionName))
                         .Validate(options => options.ProcessTimeoutMinutes > 0, "Worker:ProcessTimeoutMinutes must be greater than 0")
@@ -50,8 +48,7 @@ public static class Program
                         .Validate(options => options.FallbackPollingIntervalSeconds > 0, "Worker:FallbackPollingIntervalSeconds must be greater than 0")
                         .Validate(options => options.ProcessMonitorIntervalSeconds >= 0, "Worker:ProcessMonitorIntervalSeconds must be greater than or equal to 0")
                         .Validate(options => options.LaunchStaggerSeconds >= 0, "Worker:LaunchStaggerSeconds must be greater than or equal to 0")
-                        .Validate(options => options.Partitions.Count > 0, "Worker:Partitions must contain at least one entry")
-                        .Validate(options => options.Partitions.All(p => p.Value > 0), "Worker:Partitions values must be greater than 0")
+                        .Validate(options => options.MaxConcurrentCommands > 0, "Worker:MaxConcurrentCommands must be greater than 0")
                         .Validate(options => options.Commands.Count > 0, "Worker:Commands must contain at least one command")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), "Worker:Commands executable paths are required")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ArgumentsTemplate)), "Worker:Commands argument templates are required")
@@ -106,7 +103,6 @@ public static class Program
                 throw new InvalidOperationException(message, ex);
             }
 
-            await host.InitializeDatabaseAsync();
             await host.RunAsync();
         }
         catch (Exception ex)

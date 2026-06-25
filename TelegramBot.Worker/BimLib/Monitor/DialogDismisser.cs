@@ -12,9 +12,15 @@ namespace TelegramBot.Worker.BimLib.Monitor;
 /// <list type="number">
 ///   <item>Поиск top-level окон по известным заголовкам (KnownDialogPatterns)</item>
 ///   <item>Поиск окон класса #32770 (стандартный класс диалогов)</item>
-///   <item>Поиск дочерних окон с кнопками Button</item>
+///   <item>Поиск top-level окон с любыми дочерними контролами</item>
 /// </list>
-/// Если диалог не удаётся закрыть за MaxDismissAttempts попыток — процесс завершается принудительно.
+/// Закрытие — 4 стратегии:
+/// <list type="number">
+///   <item>Клик известной кнопки по тексту (CloseButtonTexts) среди ВСЕХ дочерних окон</item>
+///   <item>Клик первой enabled кнопки/контрола среди ВСЕХ дочерних окон</item>
+///   <item>WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE</item>
+///   <item>Принудительное завершение процесса (после MaxDismissAttempts)</item>
+/// </list>
 /// </summary>
 public sealed class DialogDismisser(
     ILogger<DialogDismisser> logger,
@@ -39,11 +45,12 @@ public sealed class DialogDismisser(
             return false;
         }
 
-        // Логируем ВСЕ найденные диалоги для анализа
+        // Логируем ВСЕ найденные диалоги + их дочерние окна для диагностики
         foreach (var hwndDlg in dialogs)
         {
             var info = WindowInfo.FromHandle(hwndDlg);
             logger.LogDebug("Dialog detected: {Info}", info);
+            WindowUtil.LogAllChildWindows(logger, hwndDlg, $"DialogDismisser PID={processId}");
         }
 
         var dismissed = false;
@@ -58,7 +65,7 @@ public sealed class DialogDismisser(
                 continue;
             }
 
-            // Стратегия 1: поиск и клик по известному тексту кнопки
+            // Стратегия 1: поиск и клик по известному тексту кнопки (среди ВСЕХ child-окон)
             if (TryClickKnownButton(hwndDlg))
             {
                 logger.LogInformation("Dialog dismissed: {Title} via known button", info.WindowTitle);
@@ -66,15 +73,23 @@ public sealed class DialogDismisser(
                 continue;
             }
 
-            // Стратегия 2: клик первой доступной enabled кнопки (fallback)
+            // Стратегия 2: клик первой доступной enabled кнопки/контрола (среди ВСЕХ child-окон)
             if (TryClickFirstButton(hwndDlg))
             {
                 logger.LogInformation("Dialog dismissed: {Title} via fallback button", info.WindowTitle);
                 dismissed = true;
+                continue;
+            }
+
+            // Стратегия 3: WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE
+            if (TryCloseDialogViaWindowMessage(hwndDlg))
+            {
+                logger.LogInformation("Dialog dismissed: {Title} via WM_CLOSE/SC_CLOSE", info.WindowTitle);
+                dismissed = true;
             }
             else
             {
-                logger.LogWarning("Cannot dismiss dialog: {Info} — no clickable buttons found", info);
+                logger.LogWarning("Cannot dismiss dialog: {Info} — all strategies failed", info);
             }
         }
 
@@ -134,8 +149,9 @@ public sealed class DialogDismisser(
             _ = found.Add(w);
         }
 
-        // Стратегия C: дочерние окна с кнопками (диалоги, не попавшие в A/B)
-        // Ищем top-level окна процесса, у которых есть дочерние Button
+        // Стратегия C: top-level окна с любыми дочерними контролами (не только Button)
+        // Family Editor и кастомные Revit-диалоги могут использовать классы
+        // отличные от "Button" (RevitBitmapButton, ToolbarWindow32 и т.д.)
         var allProcessWindows = WindowUtil.GetTopLevelWindows(processId: processId);
         foreach (var w in allProcessWindows)
         {
@@ -144,8 +160,15 @@ public sealed class DialogDismisser(
                 continue;
             }
 
-            var buttons = WindowUtil.EnumerateChildWindows(w, "Button");
-            if (buttons.Count > 0)
+            // Ищем ЛЮБЫЕ дочерние окна с непустым текстом — признак кликабельного контрола
+            var allChildren = WindowUtil.EnumerateChildWindows(w);
+            var hasClickableChildren = allChildren.Any(child =>
+            {
+                var text = WindowUtil.GetWindowTitle(child);
+                return !string.IsNullOrEmpty(text);
+            });
+
+            if (hasClickableChildren)
             {
                 _ = found.Add(w);
             }
@@ -165,29 +188,39 @@ public sealed class DialogDismisser(
             title.Contains(ex, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>Ищет кнопку с известным текстом и кликает её.</summary>
+    /// <summary>
+    /// Ищет кнопку/контрол с известным текстом среди ВСЕХ дочерних окон (не только "Button").
+    /// Для найденного контрола применяет BM_CLICK + WM_COMMAND + BN_CLICKED.
+    /// </summary>
     private bool TryClickKnownButton(IntPtr hwndDlg)
     {
-        var buttons = WindowUtil.EnumerateChildWindows(hwndDlg, "Button");
-        if (buttons.Count == 0)
+        // Ищем среди ВСЕХ дочерних окон, не только класса "Button"
+        var allChildren = WindowUtil.EnumerateChildWindows(hwndDlg);
+        if (allChildren.Count == 0)
         {
             return false;
         }
 
-        foreach (var hwndBtn in buttons)
+        foreach (var child in allChildren)
         {
-            var btnText = WindowUtil.GetWindowTitle(hwndBtn);
-            if (string.IsNullOrEmpty(btnText))
+            var childText = WindowUtil.GetWindowTitle(child);
+            if (string.IsNullOrEmpty(childText))
             {
                 continue;
             }
 
-            var cleanText = btnText.Replace("&", "").Trim();
+            var cleanText = childText.Replace("&", "").Trim();
 
             if (_options.CloseButtonTexts.Any(name =>
                 string.Equals(cleanText, name, StringComparison.OrdinalIgnoreCase)))
             {
-                WindowUtil.SendButtonClick(hwndBtn);
+                logger.LogDebug(
+                    "Known button found: text='{Text}', hwnd={Hwnd}, class='{Class}'",
+                    cleanText, child, WindowUtil.GetWindowClassName(child));
+
+                // Отправляем оба типа клика для максимальной совместимости
+                WindowUtil.SendButtonClick(child);
+                WindowUtil.SendButtonCommandClick(hwndDlg, child);
                 return true;
             }
         }
@@ -195,27 +228,80 @@ public sealed class DialogDismisser(
         return false;
     }
 
-    /// <summary>Fallback: кликает первую доступную enabled кнопку.</summary>
+    /// <summary>
+    /// Fallback: кликает первый доступный enabled дочерний контрол с непустым текстом.
+    /// Ищет среди ВСЕХ классов окон (не только "Button").
+    /// </summary>
     private static bool TryClickFirstButton(IntPtr hwndDlg)
     {
-        var buttons = WindowUtil.EnumerateChildWindows(hwndDlg, "Button");
-        if (buttons.Count == 0)
+        var allChildren = WindowUtil.EnumerateChildWindows(hwndDlg);
+        if (allChildren.Count == 0)
         {
             return false;
         }
 
-        foreach (var hwndBtn in buttons)
+        // Сначала ищем enabled контролы с непустым текстом
+        foreach (var child in allChildren)
         {
-            if (!User32.IsWindowEnabledSafe(hwndBtn))
+            if (!User32.IsWindowEnabledSafe(child))
             {
                 continue;
             }
 
-            WindowUtil.SendButtonClick(hwndBtn);
+            var text = WindowUtil.GetWindowTitle(child);
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            WindowUtil.SendButtonClick(child);
+            WindowUtil.SendButtonCommandClick(hwndDlg, child);
+            return true;
+        }
+
+        // Если ни один с текстом не найден — кликаем первый enabled (любой)
+        foreach (var child in allChildren)
+        {
+            if (!User32.IsWindowEnabledSafe(child))
+            {
+                continue;
+            }
+
+            WindowUtil.SendButtonClick(child);
+            WindowUtil.SendButtonCommandClick(hwndDlg, child);
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Закрывает диалог через отправку WM_CLOSE и WM_SYSCOMMAND + SC_CLOSE.
+    /// Используется как последняя попытка перед KillProcess.
+    /// </summary>
+    private static bool TryCloseDialogViaWindowMessage(IntPtr hwndDlg)
+    {
+        try
+        {
+            // Сначала пробуем WM_CLOSE
+            User32.PostMessageSafe(hwndDlg, Win32Consts.WmClose, IntPtr.Zero, IntPtr.Zero);
+
+            // Затем WM_SYSCOMMAND + SC_CLOSE (закрытие через системное меню)
+            User32.PostMessageSafe(hwndDlg, Win32Consts.WmSysCommand,
+                new IntPtr(Win32Consts.ScClose), IntPtr.Zero);
+
+            // Ждём немного, чтобы проверить, закрылось ли окно
+            Thread.Sleep(500);
+
+            // Если окно всё ещё существует — считаем что не закрылось
+            return !User32.IsWindowEnabledSafe(hwndDlg) && !User32.IsWindowVisibleSafe(hwndDlg);
+        }
+        catch (Exception ex)
+        {
+            WinApiHelper.LogError(nameof(TryCloseDialogViaWindowMessage), ex,
+                $"hWnd={hwndDlg}");
+            return false;
+        }
     }
 
     /// <summary>Принудительно завершает процесс по ID.</summary>

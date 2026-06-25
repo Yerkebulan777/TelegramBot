@@ -142,8 +142,7 @@ internal static partial class SqlQueries
             UPDATE Commands c
             SET Status = 'processing', 
                 Lease = @LeaseExpiry,
-                StartedAt = NOW(),
-                Partition = selected.Partition
+                StartedAt = NOW()
             FROM selected
             WHERE c.CommandId = selected.CommandId
               AND c.Status = 'pending'

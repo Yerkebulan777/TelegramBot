@@ -30,6 +30,13 @@ internal static class User32
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -206,6 +213,47 @@ internal static class User32
             },
             $"SendMessage(0x{msg:X})",
             IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// Safe: posts a message asynchronously. Never blocks, even if target window is unresponsive.
+    /// Returns <c>true</c> on success, <c>false</c> on failure.
+    /// </summary>
+    internal static bool PostMessageSafe(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            var result = PostMessage(hWnd, msg, wParam, lParam);
+            if (!result)
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error != 0)
+                {
+                    WinApiHelper.LogWarning(nameof(PostMessage), $"msg=0x{msg:X}, hWnd={hWnd}", error);
+                }
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            WinApiHelper.LogError(nameof(PostMessage), ex, $"msg=0x{msg:X}, hWnd={hWnd}");
+            return false;
+        }
+    }
+
+    /// <summary>Safe: retrieves window long value. Returns 0 on failure.</summary>
+    internal static int GetWindowLongSafe(IntPtr hWnd, int nIndex)
+    {
+        try
+        {
+            return GetWindowLong(hWnd, nIndex);
+        }
+        catch (Exception ex)
+        {
+            WinApiHelper.LogError(nameof(GetWindowLong), ex, $"hWnd={hWnd}, index={nIndex}");
+            return 0;
+        }
     }
 
     /// <summary>Safe: checks window visibility. Returns <c>false</c> on failure.</summary>

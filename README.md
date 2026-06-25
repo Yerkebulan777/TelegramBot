@@ -115,14 +115,13 @@ Worker запускает внешние исполнители и обмени�
 | `Worker` | `ProcessMonitorIntervalSeconds` | Интервал мониторинга активных внешних процессов и авто-закрытия диалогов (default `30`) |
 | `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
 | `Worker` | `LaunchStaggerSeconds` | Пауза между запусками внешних процессов (default `5`). Предотвращает коллизию devtools-порта CEF при параллельном старте Revit. `0` отключает |
-| `Worker` | `Partitions` | Backward-compatible словарь лимитов; Worker использует сумму значений как общий лимит параллельных команд. Логические очередные partition живут в БД (`Commands.Partition`). Default: `{0: 5, 1: 3, 2: 2, 3: 1}` → `11` |
+| `Worker` | `MaxConcurrentCommands` | Лимит параллельных команд (default `5`). Логические партиции файлов живут в БД (`Commands.Partition`). |
 | `Worker.Commands` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}` |
 
-#### Как сейчас работают `Worker:Partitions`
+#### Как работает `Worker:MaxConcurrentCommands`
 
-Название осталось для совместимости с существующим `appsettings.json`. Worker не маршрутизирует команды по
-partition-key и не держит отдельные пулы по приоритетам. В [CommandExecutionService.cs](TelegramBot.Worker/Services/CommandExecutionService.cs)
-создаётся один `SemaphoreSlim`, а общий лимит считается как `Sum(Partitions.Values)`. Приоритет команды
+В [CommandExecutionService.cs](TelegramBot.Worker/Services/CommandExecutionService.cs)
+создаётся один `SemaphoreSlim` на это число слотов. Приоритет команды
 влияет только на порядок SQL claim'а: меньший `Priority` забирается раньше.
 
 Очередные partition назначает и обслуживает PostgreSQL. При вставке команды `Commands.Partition` строится

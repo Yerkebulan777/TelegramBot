@@ -69,16 +69,9 @@ public sealed class WorkerOptions
     public int CompletedSessionRetentionDays { get; set; } = 30;
 
     /// <summary>
-    /// Лимит параллельных команд. Для обратной совместимости читается как словарь;
-    /// ключи не используются для routing, итоговый лимит равен сумме значений.
+    /// Лимит параллельных команд (по умолчанию 5).
     /// </summary>
-    public SortedDictionary<int, int> Partitions { get; set; } = new()
-    {
-        [0] = 5,
-        [1] = 3,
-        [2] = 2,
-        [3] = 1,
-    };
+    public int MaxConcurrentCommands { get; set; } = 5;
 
     /// <summary>
     /// Маппинг кодов команд (CommandText) на конфигурацию исполняемого файла.

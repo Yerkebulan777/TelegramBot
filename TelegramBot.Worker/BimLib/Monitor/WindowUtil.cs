@@ -122,28 +122,87 @@ internal static class WindowUtil
         return result;
     }
 
-    /// <summary>Отправляет клик по кнопке (BM_CLICK или fallback) с защитой от зависания.</summary>
+    /// <summary>
+    /// Отправляет клик по кнопке через PostMessage (асинхронно, не блокируется).
+    /// Использует PostMessage вместо SendMessage, чтобы не подвисать на модальных диалогах Revit.
+    /// </summary>
     internal static void SendButtonClick(IntPtr hwndButton)
     {
         try
         {
-            // Пробуем BM_CLICK (с таймаутом)
-            _ = User32.SendMessageSafe(hwndButton, Win32Consts.BmClick, IntPtr.Zero, IntPtr.Zero);
+            // PostMessage(BM_CLICK) — асинхронно, не ждёт обработки очередью диалога
+            _ = User32.PostMessageSafe(hwndButton, Win32Consts.BmClick, IntPtr.Zero, IntPtr.Zero);
 
-            // Если кнопка не реагирует — пробуем установить состояние и отправить LBUTTON
+            // Если кнопка всё ещё enabled — дополнительно имитируем нажатие через PostMessage
             if (!User32.IsWindowEnabledSafe(hwndButton))
             {
                 return;
             }
 
-            // Fallback: имитация нажатия (с таймаутами)
-            _ = User32.SendMessageSafe(hwndButton, Win32Consts.BmSetState, 1, IntPtr.Zero);
-            _ = User32.SendMessageSafe(hwndButton, Win32Consts.WmLButtonDown, IntPtr.Zero, IntPtr.Zero);
-            _ = User32.SendMessageSafe(hwndButton, Win32Consts.WmLButtonUp, IntPtr.Zero, IntPtr.Zero);
+            // Fallback: имитация нажатия (асинхронно, PostMessage)
+            _ = User32.PostMessageSafe(hwndButton, Win32Consts.BmSetState, 1, IntPtr.Zero);
+            _ = User32.PostMessageSafe(hwndButton, Win32Consts.WmLButtonDown, IntPtr.Zero, IntPtr.Zero);
+            _ = User32.PostMessageSafe(hwndButton, Win32Consts.WmLButtonUp, IntPtr.Zero, IntPtr.Zero);
         }
         catch (Exception ex)
         {
             WinApiHelper.LogError(nameof(SendButtonClick), ex, $"hWnd={hwndButton}");
+        }
+    }
+
+    /// <summary>
+    /// Отправляет WM_COMMAND + BN_CLICKED родителю диалога — стандартный Win32 способ нажатия кнопки.
+    /// Многие кастомные контролы (RevitBitmapButton и др.) не обрабатывают BM_CLICK,
+    /// но обязаны реагировать на WM_COMMAND с BN_CLICKED.
+    /// </summary>
+    internal static void SendButtonCommandClick(IntPtr hwndDlg, IntPtr hwndButton)
+    {
+        try
+        {
+            var ctrlId = User32.GetWindowLongSafe(hwndButton, Win32Consts.GWL_ID);
+            // HIWORD(wParam) = BN_CLICKED (0), LOWORD(wParam) = control ID
+            var wParam = new IntPtr((ctrlId & 0xFFFF) | (Win32Consts.BnClicked << 16));
+            _ = User32.PostMessageSafe(hwndDlg, Win32Consts.WmCommand, wParam, hwndButton);
+        }
+        catch (Exception ex)
+        {
+            WinApiHelper.LogError(nameof(SendButtonCommandClick), ex,
+                $"dlg={hwndDlg}, btn={hwndButton}");
+        }
+    }
+
+    /// <summary>
+    /// Логирует все дочерние окна указанного родителя с их классами, заголовками и состоянием.
+    /// Используется для диагностики, почему кнопки не находятся/не нажимаются.
+    /// </summary>
+    internal static void LogAllChildWindows(ILogger logger, IntPtr hwndDlg, string context)
+    {
+        try
+        {
+            var allChildren = EnumerateChildWindows(hwndDlg);
+            var buttons = EnumerateChildWindows(hwndDlg, "Button");
+
+            logger.LogDebug(
+                "[DlgDiag] {Context}: hwndDlg={Hwnd}, totalChildren={Total}, buttonClassChildren={BtnCount}",
+                context, hwndDlg, allChildren.Count, buttons.Count);
+
+            foreach (var child in allChildren)
+            {
+                var childClass = GetWindowClassName(child);
+                var childText = GetWindowTitle(child);
+                var isEnabled = User32.IsWindowEnabledSafe(child);
+                var isVisible = User32.IsWindowVisibleSafe(child);
+                var ctrlId = User32.GetWindowLongSafe(child, Win32Consts.GWL_ID);
+
+                logger.LogDebug(
+                    "[DlgDiag]   Child: hwnd={Hwnd}, class='{Class}', title='{Title}', " +
+                    "enabled={Enabled}, visible={Visible}, ctrlId={CtrlId}",
+                    child, childClass, childText, isEnabled, isVisible, ctrlId);
+            }
+        }
+        catch (Exception ex)
+        {
+            WinApiHelper.LogError(nameof(LogAllChildWindows), ex, $"hWnd={hwndDlg}");
         }
     }
 

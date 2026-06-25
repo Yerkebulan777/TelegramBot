@@ -261,8 +261,7 @@ Claim-запрос делает всё в одной транзакции:
 4. Сортирует кандидатов по `Priority ASC, CreatedAt ASC, CommandId ASC`.
 5. Закрывает гонки между worker-ами через `pg_try_advisory_xact_lock(1234568, hashtext(Partition))`
    (per-partition advisory lock, namespace отличный от lease cleanup 1234567) и `FOR UPDATE SKIP LOCKED`.
-6. Обновляет выбранные строки в `processing`, проставляет `Lease` + `StartedAt = NOW()` + `Partition =
-   selected.Partition` (backfill для legacy строк с NULL Partition) и возвращает команды worker-у.
+6. Обновляет выбранные строки в `processing`, проставляет `Lease` + `StartedAt = NOW()` и возвращает команды worker-у.
 
 **Lease:** `LeaseExpiry = NOW() + ProcessTimeoutMinutes + 5min` (дополнительные 5 мин — буфер для crash
 recovery). `ProcessTimeoutMinutes` = 180 (3ч) по умолчанию.
@@ -489,11 +488,7 @@ SELECT COUNT(*)::int FROM deleted_sessions;
 Меньше значение `Priority` = выше приоритет. Приоритет используется в SQL при claim'е:
 `ORDER BY Priority ASC, CreatedAt ASC, CommandId ASC`.
 
-`WorkerOptions.Partitions` оставлен для обратной совместимости с конфигом. Worker больше не создаёт
-отдельные пулы по threshold; ключи словаря не используются для routing, итоговый лимит параллельных команд
-равен сумме значений.
-
-Default `{0:5, 1:3, 2:2, 3:1}` даёт общий лимит `11`.
+`WorkerOptions.MaxConcurrentCommands` задаёт лимит параллельных команд (default `5`).
 
 ---
 
@@ -614,10 +609,8 @@ fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Nav
 4. **Настроить общий лимит параллельности** (опционально):
 
    ```json
-   "Partitions": { "0": 5, "1": 3, "2": 2, "3": 1 }
+   "MaxConcurrentCommands": 5
    ```
-
-   Ключи (`"0"`, `"1"`, ...) сейчас legacy; важна только сумма значений.
 
 5. **Добавить `CommandDefinition`** в `TelegramBot.Server/Models/CommandDefinition.cs` +
    `CommandCatalog.GetByGroup(...)` для отображения в меню.

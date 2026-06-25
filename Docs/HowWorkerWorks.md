@@ -98,9 +98,9 @@ Worker не маршрутизирует команды сам. Он счита�
 
 ## Лимит параллельности
 
-Worker использует один `SemaphoreSlim` внутри `CommandExecutionService`. `Worker:Partitions` оставлен для
-обратной совместимости с конфигом; ключи словаря не используются для routing, итоговый лимит равен сумме
-значений. Логические партиции очереди хранятся в `Commands.Partition` и обслуживаются БД внутри claim-запроса.
+Worker использует один `SemaphoreSlim` внутри `CommandExecutionService`. `Worker:MaxConcurrentCommands`
+задаёт лимит параллельных команд. Логические партиции очереди
+хранятся в `Commands.Partition` и обслуживаются БД внутри claim-запроса.
 
 ---
 
@@ -436,8 +436,8 @@ _=services.AddOptions<WorkerOptions>()
     .Validate(options => options.RetryDelayBaseSeconds > 0, ...)
     .Validate(options => options.FallbackPollingIntervalSeconds > 0, ...)
     .Validate(options => options.LaunchStaggerSeconds >= 0, ...)
-    .Validate(options => options.Partitions.Count > 0, ...)
-    .Validate(options => options.Partitions.All(p => p.Value > 0), ...)
+    .Validate(options => options.MaxConcurrentCommands.Count > 0, ...)
+    .Validate(options => options.MaxConcurrentCommands.All(p => p.Value > 0), ...)
     .Validate(options => options.Commands.Count > 0, ...)
     .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), ...)
     .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ArgumentsTemplate)), ...)

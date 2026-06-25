@@ -30,7 +30,7 @@ public sealed class CommandExecutionService(
     private readonly HashSet<Task> _runningTasks = [];
     private readonly object _runningTasksLock = new();
     private readonly SemaphoreSlim _drainGate = new(1, 1);
-    private readonly int _maxConcurrentCommands = Math.Max(1, workerOptions.Value.Partitions.Sum(p => p.Value));
+    private readonly int _maxConcurrentCommands = Math.Max(1, workerOptions.Value.MaxConcurrentCommands);
     private SemaphoreSlim? _commandSlots;
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
@@ -300,9 +300,13 @@ public sealed class CommandExecutionService(
 #pragma warning restore VSTHRD003
         await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 
+        // _commandSlots dispose строго ПОСЛЕ ожидания runningTasks — иначе
+        // ProcessWithPoolAsync может выбросить ObjectDisposedException в Release().
+        try { _commandSlots?.Dispose(); }
+        catch (ObjectDisposedException) { /* игнорируем — уже мог быть dispose'd */ }
+
         _shutdownCts?.Dispose();
         _drainGate.Dispose();
-        _commandSlots?.Dispose();
 
         logger.LogInformation("Worker shutdown completed");
     }
