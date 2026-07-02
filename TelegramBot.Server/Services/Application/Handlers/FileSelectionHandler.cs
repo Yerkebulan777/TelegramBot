@@ -72,7 +72,7 @@ public sealed class FileSelectionHandler(
         var filePath = fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
-            await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
+            _=await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
                 outputService, messageTrackingService,
                 context.UserId, context.Session,
                 "⚠ Error: File not found.",

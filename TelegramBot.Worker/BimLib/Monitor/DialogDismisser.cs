@@ -284,10 +284,10 @@ public sealed class DialogDismisser(
         try
         {
             // Сначала пробуем WM_CLOSE
-            User32.PostMessageSafe(hwndDlg, Win32Consts.WmClose, IntPtr.Zero, IntPtr.Zero);
+            _=User32.PostMessageSafe(hwndDlg, Win32Consts.WmClose, IntPtr.Zero, IntPtr.Zero);
 
             // Затем WM_SYSCOMMAND + SC_CLOSE (закрытие через системное меню)
-            User32.PostMessageSafe(hwndDlg, Win32Consts.WmSysCommand,
+            _=User32.PostMessageSafe(hwndDlg, Win32Consts.WmSysCommand,
                 new IntPtr(Win32Consts.ScClose), IntPtr.Zero);
 
             // Ждём немного, чтобы проверить, закрылось ли окно

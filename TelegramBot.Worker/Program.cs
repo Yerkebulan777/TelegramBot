@@ -94,7 +94,7 @@ public static class Program
             var taskDir = fileSystemOptions.GetEffectiveTaskDirectory();
             try
             {
-                Directory.CreateDirectory(taskDir);
+                _=Directory.CreateDirectory(taskDir);
                 Log.Information("TaskDirectory ready: {Path}", taskDir);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
