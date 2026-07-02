@@ -1,7 +1,6 @@
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
-using TelegramBot.Data;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
