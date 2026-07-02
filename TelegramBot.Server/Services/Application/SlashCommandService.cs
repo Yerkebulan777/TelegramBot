@@ -572,27 +572,17 @@ public sealed partial class SlashCommandService(
 
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
     {
-        Message? warning;
-
-        if (session.IsFileSelectionActive)
-        {
-            warning = await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
+        var warning = session.IsFileSelectionActive
+            ? await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
                 outputService, dataServices.MessageTracking,
                 userId, session, message,
-                keyboardBuilder.GetFileActionsReplyKeyboardAsync);
-        }
-        else if (session.CommandSelectionMessageId.HasValue || session.PendingCommand.Count > 0)
-        {
-            warning = await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
+                keyboardBuilder.GetFileActionsReplyKeyboardAsync)
+            : session.CommandSelectionMessageId.HasValue || session.PendingCommand.Count > 0
+                ? await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
                 outputService, dataServices.MessageTracking,
                 userId, session, message,
-                keyboardBuilder.GetCommandActionsReplyKeyboardAsync);
-        }
-        else
-        {
-            warning = await TrackMessageAsync(outputService.SendMessageAsync(userId, message), session);
-        }
-
+                keyboardBuilder.GetCommandActionsReplyKeyboardAsync)
+                : await TrackMessageAsync(outputService.SendMessageAsync(userId, message), session);
         await CleanupCurrentViewAsync(userId, session, warning?.Id);
     }
 
@@ -697,9 +687,11 @@ public sealed partial class SlashCommandService(
             .ToArray();
 
         if (rvtDirs.Length == 0)
+        {
             return [];
+        }
 
-        var scanResults = new string[rvtDirs.Length][];
+        var scanResults = new (string Path, int Depth)[rvtDirs.Length][];
         var parallelOptions = new ParallelOptions
         {
             CancellationToken = cancellationToken,
@@ -717,14 +709,14 @@ public sealed partial class SlashCommandService(
         return RevitFileDeduplicator.Deduplicate(allFiles);
     }
 
-    private static IEnumerable<string> EnumerateValidRvtFiles(string rvtDir)
+    private static IEnumerable<(string Path, int Depth)> EnumerateValidRvtFiles(string rvtDir)
     {
         try
         {
             return new DirectoryInfo(rvtDir)
                 .EnumerateFiles("*.rvt", _rvtEnumOptions)
                 .Where(IsValidRevitFile)
-                .Select(fi => fi.FullName)
+                .Select(fi => (fi.FullName, GetDepth(rvtDir, fi.DirectoryName!)))
                 .ToArray();
         }
         catch (IOException)
@@ -735,6 +727,12 @@ public sealed partial class SlashCommandService(
         {
             return [];
         }
+    }
+
+    private static int GetDepth(string rvtDir, string fileDir)
+    {
+        var relative = Path.GetRelativePath(rvtDir, fileDir);
+        return relative == "." ? 0 : relative.Count(c => c is '\\' or '/') + 1;
     }
 
     private static bool IsValidRevitFile(FileInfo fi)

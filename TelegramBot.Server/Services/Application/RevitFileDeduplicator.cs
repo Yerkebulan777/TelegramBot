@@ -8,24 +8,27 @@ public static partial class RevitFileDeduplicator
     private static partial Regex RvtNumberPattern();
 
     /// <summary>
-    /// Removes duplicate Revit files by exact file name first, then by matching numeric tokens within a prefix group.
-    /// The shortest name wins inside each group; equal-length names keep their original order.
+    /// Removes duplicate Revit files by exact file name first, then by matching numeric tokens
+    /// within a prefix group (only when the name-length difference is ≤5 characters).
+    /// Files closer to the RVT root (lower depth) win over subfolder duplicates;
+    /// among equal depth the shortest name wins, equal-length names keep their original order.
     /// </summary>
-    public static List<string> Deduplicate(IReadOnlyCollection<string> files)
+    public static List<string> Deduplicate(IReadOnlyCollection<(string Path, int Depth)> files)
     {
-        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var candidates = new List<RevitFileCandidate>(files.Count);
+        var byName = new Dictionary<string, (string Path, int Depth)>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var path in files)
+        foreach (var (path, depth) in files)
         {
             var name = Path.GetFileNameWithoutExtension(path);
-            if (!seenNames.Add(name))
+            if (!byName.TryGetValue(name, out var existing) || depth < existing.Depth)
             {
-                continue;
+                byName[name] = (path, depth);
             }
-
-            candidates.Add(new RevitFileCandidate(path, name, ExtractNumbers(name)));
         }
+
+        var candidates = byName
+            .Select(entry => new RevitFileCandidate(entry.Value.Path, entry.Key, entry.Value.Depth, ExtractNumbers(entry.Key)))
+            .ToList();
 
         var result = new List<string>(candidates.Count);
 
@@ -35,12 +38,13 @@ public static partial class RevitFileDeduplicator
         {
             var accepted = new List<RevitFileCandidate>();
 
-            foreach (var candidate in group.OrderBy(candidate => candidate.Name.Length))
+            foreach (var candidate in group.OrderBy(candidate => candidate.Depth).ThenBy(candidate => candidate.Name.Length))
             {
                 var isDuplicate = false;
                 foreach (var acceptedCandidate in accepted)
                 {
-                    if (acceptedCandidate.Numbers.Overlaps(candidate.Numbers))
+                    if (Math.Abs(acceptedCandidate.Name.Length - candidate.Name.Length) <= 5
+                        && acceptedCandidate.Numbers.Overlaps(candidate.Numbers))
                     {
                         isDuplicate = true;
                         break;
@@ -73,5 +77,5 @@ public static partial class RevitFileDeduplicator
         return result;
     }
 
-    private sealed record RevitFileCandidate(string Path, string Name, HashSet<long> Numbers);
+    private sealed record RevitFileCandidate(string Path, string Name, int Depth, HashSet<long> Numbers);
 }
