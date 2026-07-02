@@ -9,6 +9,12 @@ public sealed class DialogDismisserOptions
     public const string SectionName = "DialogDismisser";
 
     /// <summary>
+    /// Включает автоматическое закрытие диалогов. false — DialogDismisser ничего не делает
+    /// (для диагностики, чтобы проверить, не он ли сам убивает Revit-процессы).
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
     /// Максимальное количество неудачных попыток закрыть диалог перед завершением процесса.
     /// Значение 0 отключает принудительное завершение.
     /// </summary>

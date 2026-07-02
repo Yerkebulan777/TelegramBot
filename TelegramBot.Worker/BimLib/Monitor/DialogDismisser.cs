@@ -37,6 +37,11 @@ public sealed class DialogDismisser(
     /// </summary>
     internal bool DismissDialogsForProcess(uint processId)
     {
+        if (!_options.Enabled)
+        {
+            return false;
+        }
+
         var dialogs = FindDialogs(processId);
         if (dialogs.Count == 0)
         {
@@ -65,18 +70,24 @@ public sealed class DialogDismisser(
                 continue;
             }
 
+            // Содержимое диалога — единственный способ понять, ЧТО Revit показал
+            // (у многих диалогов пустой заголовок, а Debug-уровень обычно выключен).
+            var content = DescribeDialogContent(hwndDlg);
+
             // Стратегия 1: поиск и клик по известному тексту кнопки (среди ВСЕХ child-окон)
-            if (TryClickKnownButton(hwndDlg))
+            if (TryClickKnownButton(hwndDlg, out var knownButton))
             {
-                logger.LogInformation("Dialog dismissed: {Title} via known button", info.WindowTitle);
+                logger.LogInformation("Dialog dismissed: title='{Title}', button='{Button}', strategy=known, pid={Pid}, content=[{Content}]",
+                    info.WindowTitle, knownButton, processId, content);
                 dismissed = true;
                 continue;
             }
 
             // Стратегия 2: клик первой доступной enabled кнопки/контрола (среди ВСЕХ child-окон)
-            if (TryClickFirstButton(hwndDlg))
+            if (TryClickFirstButton(hwndDlg, out var fallbackButton))
             {
-                logger.LogInformation("Dialog dismissed: {Title} via fallback button", info.WindowTitle);
+                logger.LogInformation("Dialog dismissed: title='{Title}', button='{Button}', strategy=fallback, pid={Pid}, content=[{Content}]",
+                    info.WindowTitle, fallbackButton, processId, content);
                 dismissed = true;
                 continue;
             }
@@ -84,7 +95,8 @@ public sealed class DialogDismisser(
             // Стратегия 3: WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE
             if (TryCloseDialogViaWindowMessage(hwndDlg))
             {
-                logger.LogInformation("Dialog dismissed: {Title} via WM_CLOSE/SC_CLOSE", info.WindowTitle);
+                logger.LogInformation("Dialog dismissed: title='{Title}', strategy=WM_CLOSE, pid={Pid}, content=[{Content}]",
+                    info.WindowTitle, processId, content);
                 dismissed = true;
             }
             else
@@ -152,10 +164,14 @@ public sealed class DialogDismisser(
         // Стратегия C: top-level окна с любыми дочерними контролами (не только Button)
         // Family Editor и кастомные Revit-диалоги могут использовать классы
         // отличные от "Button" (RevitBitmapButton, ToolbarWindow32 и т.д.)
+        // ВАЖНО: главное окно Revit тоже top-level и содержит дочерние контролы с текстом
+        // (лента, статус-бар, InfoCenter) — его нужно явно исключить, иначе fallback-клик
+        // жмёт случайные контролы главного окна вплоть до "Выход из программы".
+        var mainWindow = GetMainWindowHandle(processId);
         var allProcessWindows = WindowUtil.GetTopLevelWindows(processId: processId);
         foreach (var w in allProcessWindows)
         {
-            if (found.Contains(w))
+            if (found.Contains(w) || w == mainWindow)
             {
                 continue;
             }
@@ -181,6 +197,21 @@ public sealed class DialogDismisser(
             .ToList();
     }
 
+    /// <summary>Получает handle главного окна процесса. Возвращает IntPtr.Zero при ошибке.</summary>
+    private static IntPtr GetMainWindowHandle(uint processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            return process.MainWindowHandle;
+        }
+        catch (Exception ex)
+        {
+            WinApiHelper.LogError(nameof(GetMainWindowHandle), ex, $"processId={processId}");
+            return IntPtr.Zero;
+        }
+    }
+
     /// <summary>Проверяет, исключён ли заголовок диалога из автозакрытия.</summary>
     private bool IsExcluded(string title)
     {
@@ -192,8 +223,10 @@ public sealed class DialogDismisser(
     /// Ищет кнопку/контрол с известным текстом среди ВСЕХ дочерних окон (не только "Button").
     /// Для найденного контрола применяет BM_CLICK + WM_COMMAND + BN_CLICKED.
     /// </summary>
-    private bool TryClickKnownButton(IntPtr hwndDlg)
+    private bool TryClickKnownButton(IntPtr hwndDlg, out string? clickedButtonText)
     {
+        clickedButtonText = null;
+
         // Ищем среди ВСЕХ дочерних окон, не только класса "Button"
         var allChildren = WindowUtil.EnumerateChildWindows(hwndDlg);
         if (allChildren.Count == 0)
@@ -221,6 +254,7 @@ public sealed class DialogDismisser(
                 // Отправляем оба типа клика для максимальной совместимости
                 WindowUtil.SendButtonClick(child);
                 WindowUtil.SendButtonCommandClick(hwndDlg, child);
+                clickedButtonText = cleanText;
                 return true;
             }
         }
@@ -232,8 +266,10 @@ public sealed class DialogDismisser(
     /// Fallback: кликает первый доступный enabled дочерний контрол с непустым текстом.
     /// Ищет среди ВСЕХ классов окон (не только "Button").
     /// </summary>
-    private static bool TryClickFirstButton(IntPtr hwndDlg)
+    private static bool TryClickFirstButton(IntPtr hwndDlg, out string? clickedButtonText)
     {
+        clickedButtonText = null;
+
         var allChildren = WindowUtil.EnumerateChildWindows(hwndDlg);
         if (allChildren.Count == 0)
         {
@@ -256,6 +292,7 @@ public sealed class DialogDismisser(
 
             WindowUtil.SendButtonClick(child);
             WindowUtil.SendButtonCommandClick(hwndDlg, child);
+            clickedButtonText = text.Replace("&", "").Trim();
             return true;
         }
 
@@ -269,10 +306,43 @@ public sealed class DialogDismisser(
 
             WindowUtil.SendButtonClick(child);
             WindowUtil.SendButtonCommandClick(hwndDlg, child);
+            clickedButtonText = "<no text>";
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Краткое содержимое диалога: тексты дочерних контролов (static-текст сообщения, кнопки),
+    /// склеенные через " | ", максимум 300 символов. Даёт понять, ЧТО показал Revit,
+    /// даже когда заголовок диалога пуст.
+    /// </summary>
+    private static string DescribeDialogContent(IntPtr hwndDlg)
+    {
+        const int maxLength = 300;
+        var parts = new List<string>();
+        var total = 0;
+
+        foreach (var child in WindowUtil.EnumerateChildWindows(hwndDlg))
+        {
+            var text = WindowUtil.GetWindowTitle(child);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var clean = text.Replace("&", "").Replace('\r', ' ').Replace('\n', ' ').Trim();
+            parts.Add(clean);
+            total += clean.Length + 3;
+            if (total >= maxLength)
+            {
+                parts.Add("...");
+                break;
+            }
+        }
+
+        return parts.Count == 0 ? "<empty>" : string.Join(" | ", parts);
     }
 
     /// <summary>
