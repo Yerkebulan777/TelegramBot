@@ -9,7 +9,6 @@
 | [Docs/CriticalReview.md](Docs/CriticalReview.md) | Известные архитектурные риски |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт BIM-плагинов |
-| [Docs/HowWorkerWorks.md](Docs/HowWorkerWorks.md) | Архитектура Worker |
 
 ## Build & Verify
 
@@ -51,8 +50,7 @@ When changing code, keep docs in sync:
 2. Update `Docs/ExecutionAlgorithm.md` if SQL queries, DB schema, or pipeline changes
 3. Update `Docs/BimPluginContract.md` if TaskFile/ResultFile, ArgumentsTemplate, or contract changes
 4. Update `Docs/CriticalReview.md` if addressing or discovering new risks
-5. Update `Docs/HowWorkerWorks.md` if Worker internals change (ProcessRunner, CommandExecutionService, etc.)
-6. Update `README.md` if config, commands, or general overview changes
+5. Update `README.md` if config, commands, or general overview changes
 
 All docs live in the repo root and `Docs/` — keep path references consistent.
 
