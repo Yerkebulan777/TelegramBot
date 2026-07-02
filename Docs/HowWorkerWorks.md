@@ -169,6 +169,12 @@ Worker использует один `SemaphoreSlim` внутри `CommandExecut
        - NotFound → fallback на exit code: 0 = Done (с громким warning о нарушении контракта AddIn),
          иначе HandleFailureAsync с FormatExitCode (decimal + hex + NTSTATUS имя краша, например ACCESS_VIOLATION)
 
+   4d. При крашевом exit code (NTSTATUS < 0) — `RevitJournalHelper.TryGetCrashEvidence()`:
+       находит журнал Revit (`%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit {год}\Journals`),
+       изменённый за время жизни процесса, и логирует строки с маркерами ошибок
+       (ExceptionCode, Fatal, err и т.п.) + последние 15 строк (лимит 4KB). Это единственный
+       способ увидеть, ЧТО происходило внутри Revit перед смертью — stderr у GUI-процесса пуст.
+
 5. HandleFailureAsync:
    - Вызов: `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes, ex)`
      (4 параметра: текст ошибки, exit code, список permanent-кодов, исключение)
@@ -253,7 +259,7 @@ restart `NotificationSenderService` подхватит все неотправл
 | `RevitVersionDetector` | Парсит OLE-stream `BasicFileInfo` из `.rvt`/`.rfa` через **OpenMcdf** (без запуска Revit), извлекает год (`Format: YYYY`). Поддерживает 2017–2026 |
 | `RevitPathResolver` | Ищет `Revit.exe` в реестре Windows: `HKLM\SOFTWARE\Autodesk\Revit\{version}` (fallback `\Revit{version}` и `WOW6432Node`) |
 | `NavisworksPathResolver` | То же для `FileConvert.exe` / `Roamer.exe` / `Navisworks.exe` |
-| `DialogDismisser` | Находит модальные окна Revit через `EnumWindows` (класс `#32770`) и кликает «OK»/«Close»/«Cancel» по тексту. Исключает информационные диалоги через `ExclusionDialogTitles` |
+| `DialogDismisser` | Находит модальные окна Revit через `EnumWindows` (класс `#32770`) и кликает «OK»/«Close»/«Cancel» по тексту. Исключает информационные диалоги через `ExclusionDialogTitles`. В лог `Dialog dismissed` пишет заголовок, кликнутую кнопку, стратегию (known/fallback/WM_CLOSE) и содержимое диалога (тексты child-контролов, до 300 символов) — иначе безымянные диалоги неотличимы друг от друга |
 | `ProcessHealthHelper` | `CheckHealth(Process, logger, context)`: `Healthy` / `NotResponding` / `Error` по `IsResponding` + memory sampling |
 
 Логи BimLib идут в отдельный файл `Worker/BimLib/log-{date}.txt` через `BimLibLogFilter` (фильтр по

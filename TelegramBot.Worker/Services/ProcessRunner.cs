@@ -312,6 +312,20 @@ public sealed class ProcessRunner(
             var errorMessage = $"Process exited with code {process.ExitCode}";
             logger.LogWarning("Command exit: id={Id}, correlationId={CorrelationId}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, FormatExitCode(process.ExitCode), sw.ElapsedMilliseconds);
+
+            // Крашевый exit code (NTSTATUS < 0) — вытаскиваем хвост журнала Revit:
+            // Worker-лог не видит, что происходило внутри процесса, а журнал видит.
+            if (process.ExitCode < 0)
+            {
+                var processStartUtc = DateTime.UtcNow - sw.Elapsed;
+                var journalEvidence = RevitJournalHelper.TryGetCrashEvidence(process.StartInfo.FileName, processStartUtc);
+                if (journalEvidence != null)
+                {
+                    logger.LogWarning("Revit journal evidence for crashed command {Id} (correlationId={CorrelationId}):\n{Evidence}",
+                        cmd.CommandId, cmd.CorrelationId, journalEvidence);
+                }
+            }
+
             await HandleFailureAsync(cmd, errorMessage, null, sw, process.ExitCode);
         }
     }
