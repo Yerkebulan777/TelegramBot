@@ -111,10 +111,12 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return (clampedPage, totalPages);
     }
 
-    private static string FilterLabel(string title, string currentFilter, string filterKey) =>
-        string.Equals(filterKey, currentFilter, StringComparison.OrdinalIgnoreCase)
+    private static string FilterLabel(string title, string currentFilter, string filterKey)
+    {
+        return string.Equals(filterKey, currentFilter, StringComparison.OrdinalIgnoreCase)
             ? $"🔹 {title}"
             : title;
+    }
 
     public Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
     {

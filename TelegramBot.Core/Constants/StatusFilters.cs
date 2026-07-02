@@ -24,9 +24,11 @@ public static class StatusFilters
     public static IReadOnlyList<StatusFilterDescriptor> AllDescriptors => s_descriptors;
 
     /// <summary>Возвращает заголовок по ключу фильтра; для неизвестного — AllTitle.</summary>
-    public static string GetTitle(string filter) =>
-        s_descriptors.FirstOrDefault(d => string.Equals(d.Key, filter, StringComparison.OrdinalIgnoreCase))?.Title
+    public static string GetTitle(string filter)
+    {
+        return s_descriptors.FirstOrDefault(d => string.Equals(d.Key, filter, StringComparison.OrdinalIgnoreCase))?.Title
             ?? AllTitle;
+    }
 }
 
 public sealed record StatusFilterDescriptor(string Key, string Title);

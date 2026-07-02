@@ -45,12 +45,9 @@ public sealed class FileSystemOptions
     /// </summary>
     public string GetEffectiveTaskDirectory()
     {
-        if (!string.IsNullOrWhiteSpace(TaskDirectory))
-        {
-            return TaskDirectory;
-        }
-
-        return Path.Combine(
+        return !string.IsNullOrWhiteSpace(TaskDirectory)
+            ? TaskDirectory
+            : Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Documents",
             "TelegramBot",
