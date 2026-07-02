@@ -66,7 +66,7 @@ Worker запускает внешние исполнители и обмени�
 | `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
 | `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task` и писать `ResultFile` |
 
-> ⚠️ **Эталонный контракт** (всегда проверять при изменениях) живёт в `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd`.
+> ⚠️ **Эталонный контракт** (всегда проверять при изменениях) живёт в `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd`.
 >
 > Наш [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — worker-side отражение этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
 
@@ -104,7 +104,7 @@ Worker запускает внешние исполнители и обмени�
 | `Serilog` | — | Console + Seq + rolling file |
 | `DialogDismisser` | `Enabled` / `MaxDismissAttempts` / `KnownDialogPatterns` / `CloseButtonTexts` / `ExclusionDialogTitles` | Настройки авто-закрытия модальных окон Revit/Navisworks. ⚠️ `Enabled: false` — **временно отключён** для тестирования на реальных задачах (проверка гипотезы, не крашит ли он Revit через P/Invoke `EnumWindows`/`PostMessage`) |
 | `FileSystem` | `LogDirectory` | Опционально: путь к логам |
-| `BimIntegration` | `MinSupportedVersion` / `MaxSupportedVersion` / `RevitInstallRoot` | Поиск Revit в реестре (default `2018`–`2026`, `C:\Program Files\Autodesk`) |
+| `BimIntegration` | `MinSupportedVersion` / `MaxSupportedVersion` | Допустимый диапазон версий при поиске Revit/Navisworks в реестре (default `2018`–`2026`). `RevitInstallRoot` — legacy-поле, сейчас не используется |
 | `ConnectionStrings.Postgres` | — | DSN PostgreSQL |
 | `Worker` | `ProcessTimeoutMinutes` | Общий таймаут команды (default `180` = 3ч; используется также для расчёта Lease `+5min`) |
 | `Worker` | `MaxRetries` | Кол-во retry перед `Failed` (default `5`) |

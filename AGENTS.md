@@ -152,12 +152,11 @@ BimLib is a **Windows-only** set of modules located inside the Worker project (`
 
 | Folder | Contents |
 |--------|----------|
-| `Config/` | `BimIntegrationOptions` — min/max supported Revit version (default 2018–2026), `RevitInstallRoot`; `DialogDismisserOptions` — `MaxDismissAttempts`, `KnownDialogPatterns`, `CloseButtonTexts`, `ExclusionDialogTitles` |
+| `Config/` | `BimIntegrationOptions` — min/max supported Revit version (default 2018–2026); legacy `RevitInstallRoot` сейчас не используется, поиск идёт через реестр. `DialogDismisserOptions` — `Enabled`, `MaxDismissAttempts`, `KnownDialogPatterns`, `CloseButtonTexts`, `ExclusionDialogTitles` |
 | `Models/` | `RevitDetectedVersion` (Year, ExecutablePath), `RevitProcessHealth` (status: `Healthy`/`NotResponding`/`Error`, MemoryMb, Duration) |
 | `Monitor/` | `ProcessHealthHelper` (static `CheckHealth`), `DialogDismisser`, `WindowUtil`, `WindowInfo` |
 | `Native/` | P/Invoke WinAPI: `User32`, `Win32Types`, `WinApiHelper` (с настраиваемым `ILogger` для safe error logging) |
 | `Services/` | `RevitVersionDetector`, `RevitPathResolver`, `NavisworksPathResolver` |
-| `Interfaces/` | (пусто) — все интерфейсы удалены в v1.4, остались только concrete-классы |
 
 **Key services:**
 
@@ -210,7 +209,7 @@ services.AddSingleton<NavisworksPathResolver>();
 
 **LaunchStaggerGate:** В `ProcessRunner` добавлен `SemaphoreSlim _launchGate` (capacity 1), сериализующий
 момент `Process.Start()` для всех типов команд. После `Start()` gate удерживается `LaunchStaggerSeconds`
-(default 5), чтобы встроенный CEF-компонент Revit успел забиндить devtools-порт. `Task.Delay` использует
+(default 30), чтобы встроенный CEF-компонент Revit успел забиндить devtools-порт. `Task.Delay` использует
 `CancellationToken.None`, чтобы gate всегда освобождался даже при shutdown. Процесс регистрируется в
 `_activeProcesses` **до** stagger-задержки, чтобы health-check и shutdown-kill видели его сразу.
 
@@ -222,7 +221,6 @@ services.AddSingleton<UserDataService>();
 services.AddSingleton<CommandDataService>();
 services.AddSingleton<SessionDataService>();
 services.AddSingleton<MessageTrackingDataService>();
-services.AddSingleton<DatabaseInitializerService>();
 services.AddSingleton<CommandPreparer>();
 services.AddSingleton<SessionCompletionTracker>();
 services.AddSingleton<ProcessRunner>();
@@ -237,7 +235,7 @@ services.AddHostedService<SessionCleanupService>();
 ## Important notes for AI agents
 
 - BimLib is `[SupportedOSPlatform("windows")]` — Windows only (Registry + P/Invoke). OpenMcdf 3.x парсит .rvt OLE streams. Worker и Server тоже помечены — Server дополнительно делает runtime check `RuntimeInformation.IsOSPlatform(OSPlatform.Windows)`.
-- `RevitDetectedVersion.Year` диапазон: `2017..2026` (константа в `RevitVersionDetector`); `BimIntegrationOptions.MinSupportedVersion`/`MaxSupportedVersion` — default `2018`–`2026`.
+- `RevitVersionDetector` извлекает год из `BasicFileInfo`; допустимый для запуска диапазон задают `BimIntegrationOptions.MinSupportedVersion`/`MaxSupportedVersion` (default `2018`–`2026`).
 - `RevitProcessStatus` enum: `Healthy`, `NotResponding`, `Error`.
 - Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete-классы only).
 - Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(5).
@@ -250,7 +248,7 @@ services.AddHostedService<SessionCleanupService>();
 Полный контракт исполнителей описан в [Docs/BimPluginContract.md](Docs/BimPluginContract.md).
 
 > ⚠️ **CANONICAL CONTRACT (эталон)** находится в:
-> `C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md`
+> `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\Docs\BimPluginContract.md`
 > + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd` рядом с ним.
 >
 > [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — **worker-side отражение** этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
@@ -352,11 +350,9 @@ Worker → Revit.exe opens as GUI
 | Helper | Location | Purpose |
 |--------|----------|---------|
 | `HandlerHelpers` | `Server/Services/Application/Handlers/HandlerHelpers.cs` | `SendActionsReplyKeyboardAsync()` — общий reply-keyboard + tracking для SlashCommandService, FileNavigationHandler, CommandSelectionHandler |
-| `ProcessHealthHelper` | `Worker/BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — общий для Revit и Navisworks process trackers |
+| `ProcessHealthHelper` | `Worker/BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — проверка активных внешних процессов из `CommandExecutionService` |
 | `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` (public static) — для сервисов, не наследующих `DataAccessBase` (`CommandNotificationService`) |
-| `BimLibLogFilter` | `Worker/Services/BimLibLogFilter.cs` | Serilog filter: события с `SourceContext` начинающимся на `"TelegramBot.Worker.BimLib` → отдельный rolling file |
-| `PostgresReconnectLoop` | `TelegramBot.Data/PostgresReconnectLoop.cs` | Outer retry loop для переподключения PostgreSQL (5 сек); используется в `CommandExecutionService` и `CommandNotificationService` |
-| `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | `IsPermanentFailure(message, exitCode, codes)`, `IsPermanentException(ex)`: классификация ошибок → `InvalidFileError` (Failed без retry) vs `ProcessCrashError` (retry) |
+| `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | `IsPermanentFailure(message, exitCode, codes, exception)`: классификация ошибок → permanent (Failed без retry) vs transient (retry) |
 | `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Best-effort удаление `task_{CommandId}_{token}.xml` и `result_{CommandId}_{token}.xml` для указанной попытки |
 | `DataAccessBase` | `TelegramBot.Data/DataAccessBase.cs` | Base-класс с protected `CreateOpenConnectionAsync()`, `DefaultConnectionString` |
 
@@ -424,7 +420,7 @@ CommandNotificationService (Server) ── LISTEN command_completed ──▶ Ch
 NotificationSenderService ──▶ Claim NotificationOutbox ──▶ SessionDataService.GetSessionCompletionSummaryAsync() ──▶ SendMessageAsync ──▶ Mark outbox sent
 ```
 
-**In-memory счётчик сессий:** `SessionCompletionTracker._sessionRemaining` (`ConcurrentDictionary<int, int>`) как batch-local счётчик. При `ClaimPendingCommandsAsync` счётчик заполняется по `GroupBy(SessionId)`, при каждом выходе захваченной команды из `processing` (Done/Failed/retry) атомарно декрементится через `AddOrUpdate`. Уведомление отправляется только когда `remaining == 0` И БД подтверждает отсутствие `pending`/`processing` (`CountPendingProcessingBySessionAsync`).
+**Проверка завершения сессии:** после каждого выхода команды из `processing` (`Done`/`Failed`/retry) `SessionCompletionTracker` запрашивает `CountPendingProcessingBySessionAsync`. Уведомление создаётся только когда БД подтверждает отсутствие `pending`/`processing`; in-memory счётчика нет.
 
 **Идемпотентность через `Sessions.CompletionNotified` + `NotificationOutbox`:** `SessionDataService.NotifySessionCompletedOnceAsync` атомарно выставляет `CompletionNotified = TRUE`, вставляет `NotificationOutbox(EventType='session_completed')` и отправляет `pg_notify('command_completed')` как wake-up только для первой успешной попытки (`UPDATE ... WHERE CompletionNotified = FALSE RETURNING SessionId`). Итоговая Telegram-сводка отправляется из durable outbox, а не напрямую из `NOTIFY`.
 
@@ -504,7 +500,7 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutb
 
 **Session completion summary:** `SessionDataService.GetSessionCompletionSummaryAsync` → UserId/Username/SessionId/CorrelationId/ProjectName + TotalFiles/DoneFiles/FailedFiles + `DurationSeconds = EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))` + `FailedFilePaths` (list).
 
-**`CountPendingProcessingBySessionAsync` (v1.7):** корректно обрабатывает случай, когда команд в сессии > `DefaultBatchSize` (5) или несколько воркеров. `SessionCompletionTracker` использует для DB confirmation после обнуления in-memory счётчика.
+**`CountPendingProcessingBySessionAsync` (v1.7):** `SessionCompletionTracker` вызывает его после завершения каждой команды; поэтому сессии с числом команд больше `DefaultBatchSize` (5) и несколько воркеров обрабатываются корректно.
 
 **Advisory lock** для `ReleaseExpiredLeasesAsync`: `pg_try_advisory_lock(1234567)` — namespace `telegram_bot_lease_cleanup`. Предотвращает race между несколькими воркерами, освобождающими истёкшие Lease.
 
@@ -595,7 +591,7 @@ Namespaces must match folder structure:
 - Do not swallow unknown exceptions — log at `LogError` or rethrow
 - Avoid empty `catch` blocks
 - Callback exceptions: `CallbackDispatcher` catches + logs with `elapsedMs`; **`CallbackHandlerBase` does not** (no double logging)
-- Worker: outer retry loop reconnects on PostgreSQL connection loss (5 sec delay, `PostgresReconnectLoop`)
+- Worker и Server держат собственные outer retry loops для PostgreSQL LISTEN-соединений
 
 ### Logging
 
@@ -605,7 +601,7 @@ Namespaces must match folder structure:
   _logger.LogInformation("Received command '{Command}' from {UserId}", command, userId);
   ```
 - Log levels: `LogDebug` for diagnostics, `LogInformation` for normal flow, `LogWarning` for recoverable issues, `LogError` / `Log.Fatal` for failures
-- BimLib-специфичные логи автоматически идут в отдельный файл (`Worker\BimLib\log-{date}.txt`) через `BimLibLogFilter`
+- BimLib-специфичные логи идут в отдельный файл (`Worker\BimLib\log-{date}.txt`) через вложенную Serilog-конфигурацию в `Worker/Program.cs`
 
 ### Collections & Thread Safety
 
@@ -661,7 +657,6 @@ Previously, linked CTS вызывал немедленное прерывани�
 #### Каждый функционал — одна реализация
 - ✅ `SendErrorAsync`/`SendNotificationAsync` — удалены
 - ✅ `DefaultConnectionString` — вынесен в `DataAccessBase`
-- ✅ Reconnect-циклы — вынесены в `PostgresReconnectLoop`
 - ✅ `SessionDataService`/`CommandDataService` — единая DI-регистрация (обёрнуты в `DataServices` на Server)
 - ✅ `_handlerMap` в `CallbackDispatcher` — O(1) lookup вместо O(n) линейного перебора
 - ✅ `RevitFileDeduplicator` — extracted из `SlashCommandService` (тестируемо, переиспользуемо)
