@@ -128,15 +128,19 @@ public sealed class ProcessRunner(
 
         logger.LogInformation("Command start: id={Id}, correlationId={CorrelationId}, command={Cmd}, attempt={Attempt}",
             cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
-        logger.LogInformation(
-            "External process start: id={Id}, correlationId={CorrelationId}, exe={ExecutablePath}, args={Arguments}, workingDirectory={WorkingDirectory}, taskFile={TaskFilePath}, expectedResultFile={ResultFilePath}",
-            cmd.CommandId, cmd.CorrelationId, startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory, taskFilePath, resultFilePath);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         await _launchGate.WaitAsync(ct);
         try
         {
             _ = process.Start();
+
+            // Логируем ПОСЛЕ реального Process.Start() (внутри gate), а не до —
+            // иначе при staggered-запуске лог создаёт ложное впечатление, что процессы
+            // стартуют одновременно, хотя фактический старт растянут gate'ом.
+            logger.LogInformation(
+                "External process start: id={Id}, correlationId={CorrelationId}, exe={ExecutablePath}, args={Arguments}, workingDirectory={WorkingDirectory}, taskFile={TaskFilePath}, expectedResultFile={ResultFilePath}",
+                cmd.CommandId, cmd.CorrelationId, startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory, taskFilePath, resultFilePath);
 
             // Регистрируем сразу после Start() — до stagger-задержки, иначе health-check
             // и shutdown-kill (PerformGracefulShutdownAsync) не увидят процесс, остановленный
@@ -391,7 +395,7 @@ public sealed class ProcessRunner(
         {
             logger.LogWarning("Killing timed-out process: commandId={Id}, correlationId={CorrelationId}, pid={Pid}, elapsed={Elapsed:F1}s",
                 cmd.CommandId, cmd.CorrelationId, process.Id, sw.Elapsed.TotalSeconds);
-            await ProcessKillHelper.KillAsync(process, TimeSpan.FromSeconds(PerProcessKillTimeoutSeconds), logger, cmd.CommandId);
+            _=await ProcessKillHelper.KillAsync(process, TimeSpan.FromSeconds(PerProcessKillTimeoutSeconds), logger, cmd.CommandId);
         }
 
         logger.LogError("Command {CommandId} ({Cmd}) timed out: correlationId={CorrelationId}, timeout={Timeout} min, elapsed={Elapsed:F1}s",
