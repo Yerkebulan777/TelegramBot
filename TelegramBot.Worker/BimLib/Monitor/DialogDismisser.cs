@@ -140,6 +140,12 @@ public sealed class DialogDismisser(
     {
         var found = new HashSet<IntPtr>();
 
+        // Главное окно Revit нужно исключать из ВСЕХ стратегий поиска, а не только
+        // из C: его заголовок ("ProjectName - Autodesk Revit 2023") содержит подстроку
+        // "Autodesk Revit" из KnownDialogPatterns, поэтому Strategy A ловила его как
+        // диалог и закрывала через WM_CLOSE/SC_CLOSE — фактически завершая Revit.
+        var mainWindow = GetMainWindowHandle(processId);
+
         // Стратегия A: top-level окна, чей заголовок содержит известные паттерны
         foreach (var pattern in _options.KnownDialogPatterns)
         {
@@ -148,7 +154,10 @@ public sealed class DialogDismisser(
                 processId: processId);
             foreach (var w in byTitle)
             {
-                _ = found.Add(w);
+                if (w != mainWindow)
+                {
+                    _ = found.Add(w);
+                }
             }
         }
 
@@ -158,16 +167,15 @@ public sealed class DialogDismisser(
             processId: processId);
         foreach (var w in byClass)
         {
-            _ = found.Add(w);
+            if (w != mainWindow)
+            {
+                _ = found.Add(w);
+            }
         }
 
         // Стратегия C: top-level окна с любыми дочерними контролами (не только Button)
         // Family Editor и кастомные Revit-диалоги могут использовать классы
         // отличные от "Button" (RevitBitmapButton, ToolbarWindow32 и т.д.)
-        // ВАЖНО: главное окно Revit тоже top-level и содержит дочерние контролы с текстом
-        // (лента, статус-бар, InfoCenter) — его нужно явно исключить, иначе fallback-клик
-        // жмёт случайные контролы главного окна вплоть до "Выход из программы".
-        var mainWindow = GetMainWindowHandle(processId);
         var allProcessWindows = WindowUtil.GetTopLevelWindows(processId: processId);
         foreach (var w in allProcessWindows)
         {

@@ -82,7 +82,7 @@ finally
   Иначе следующий старт зависнет на disposed/cancelled semaphore.
 - Gate применяется ко всем типам команд, без спец-кейсов по `CommandText` — лишняя пауза для не-Revit
   процессов не критична.
-- `LaunchStaggerSeconds` (default `5`) настраивается через `Worker:LaunchStaggerSeconds` в `appsettings.json`.
+- `LaunchStaggerSeconds` (default `30`) настраивается через `Worker:LaunchStaggerSeconds` в `appsettings.json`.
   `0` отключает gate (эквивалент старому поведению).
 
 ---

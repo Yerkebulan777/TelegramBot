@@ -241,7 +241,7 @@ services.AddHostedService<SessionCleanupService>();
 - Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete-классы only).
 - Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(5).
 - `WorkerOptions.RevitDispatcherCommand` = `"WORKER"` — константа-диспетчер для Revit AddIn. Реальная команда (`PDF`, `DWG`, ...) передаётся только в `TaskFile.commandText`, не в CLI args.
-- `WorkerOptions.LaunchStaggerSeconds` (default `5`) — пауза между запусками внешних процессов для предотвращения коллизии CEF devtools-порта Revit. `0` отключает.
+- `WorkerOptions.LaunchStaggerSeconds` (default `30`) — пауза между запусками внешних процессов для предотвращения коллизии CEF devtools-порта Revit. `0` отключает.
 - `SessionManager.GetOrCreateSession()` no longer calls `RemoveSession()` (была race с `AcquireUserLockAsync`). Background `CleanUpExpiredSessionsAsync` безопасно обрабатывает оба dictionary.
 
 ### How BIM Command Plugins Actually Work

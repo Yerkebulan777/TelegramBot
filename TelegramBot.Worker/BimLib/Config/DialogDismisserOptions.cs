@@ -25,7 +25,6 @@ public sealed class DialogDismisserOptions
     /// Окна, заголовок которых содержит хотя бы один из этих паттернов, считаются диалогами.
     /// </summary>
     public string[] KnownDialogPatterns { get; set; } = [
-        "Autodesk Revit",
         "Error",
         "Warning",
         "Information",

@@ -114,7 +114,7 @@ Worker запускает внешние исполнители и обмени�
 | `Worker` | `CleanupIntervalSeconds` | Интервал фоновой очистки истёкших Lease (default `300`) |
 | `Worker` | `ProcessMonitorIntervalSeconds` | Интервал мониторинга активных внешних процессов и авто-закрытия диалогов (default `30`) |
 | `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
-| `Worker` | `LaunchStaggerSeconds` | Пауза между запусками внешних процессов (default `5`). Предотвращает коллизию devtools-порта CEF при параллельном старте Revit. `0` отключает |
+| `Worker` | `LaunchStaggerSeconds` | Пауза между запусками внешних процессов (default `30`). Предотвращает коллизию devtools-порта CEF при параллельном старте Revit. `0` отключает |
 | `Worker` | `MaxConcurrentCommands` | Лимит параллельных команд (default `5`). Логические партиции файлов живут в БД (`Commands.Partition`). |
 | `Worker.Commands` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}` |
 
