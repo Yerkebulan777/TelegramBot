@@ -22,9 +22,7 @@ namespace TelegramBot.Worker.BimLib.Monitor;
 ///   <item>Принудительное завершение процесса (после MaxDismissAttempts)</item>
 /// </list>
 /// </summary>
-public sealed class DialogDismisser(
-    ILogger<DialogDismisser> logger,
-    IOptions<DialogDismisserOptions> optionsAccessor)
+public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<DialogDismisserOptions> optionsAccessor)
 {
     private readonly DialogDismisserOptions _options = optionsAccessor.Value;
     private readonly ConcurrentDictionary<uint, int> _dismissAttempts = new();

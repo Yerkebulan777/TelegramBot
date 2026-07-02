@@ -16,9 +16,11 @@ public abstract class DataAccessBase
     /// <c>Max Pool Size</c> намеренно не задан (default=100 достаточно для текущей нагрузки:
     /// Server: Parallel.ForEachAsync DOP=10 + notification; Worker: drain loop + cleanup + health).
     /// <c>Multiplexing</c> не задан (default=true в Npgsql 6+).
+    /// <c>Timeout=30</c> — budget на cold-start TCP-handshake под пиковой нагрузкой (default 15s
+    /// недостаточен при 5+ параллельных Revit: localhost-connect таймаутился при старте Worker).
     /// </remarks>
     public const string DefaultConnectionString =
-        "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Minimum Pool Size=2;Connection Idle Lifetime=300";
+        "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Timeout=30;Minimum Pool Size=2;Connection Idle Lifetime=300";
 
     private readonly string _connectionString;
 
