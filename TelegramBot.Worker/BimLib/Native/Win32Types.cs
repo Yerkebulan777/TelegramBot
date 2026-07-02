@@ -22,5 +22,5 @@ internal static class Win32Consts
     internal const int ScClose = 0xF060;
 
     // GetWindowLong index
-    internal const int GWL_ID = (-12);
+    internal const int GWL_ID = -12;
 }

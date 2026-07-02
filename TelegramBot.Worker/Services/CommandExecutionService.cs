@@ -133,7 +133,7 @@ public sealed class CommandExecutionService(
 
         try
         {
-            await conn.WaitAsync(timeout, ct);
+            _=await conn.WaitAsync(timeout, ct);
             return notificationReceived;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -163,7 +163,7 @@ public sealed class CommandExecutionService(
             intervalSeconds: _workerOptions.CleanupIntervalSeconds,
             disabledMessage: interval => $"CleanupIntervalSeconds = {interval}, lease cleanup disabled",
             cycleName: "lease cleanup cycle",
-            cycle: () => commandDataService.ReleaseExpiredLeasesAsync());
+            cycle: commandDataService.ReleaseExpiredLeasesAsync);
     }
 
     private Task StartProcessMonitoringTaskAsync()

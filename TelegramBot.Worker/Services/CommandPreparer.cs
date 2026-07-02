@@ -314,7 +314,7 @@ public sealed class CommandPreparer(
         try
         {
             // Гарантируем, что директория существует.
-            Directory.CreateDirectory(_taskDirectory);
+            _=Directory.CreateDirectory(_taskDirectory);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
