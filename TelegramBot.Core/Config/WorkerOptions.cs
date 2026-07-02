@@ -55,12 +55,15 @@ public sealed class WorkerOptions
     public int ProcessMonitorIntervalSeconds { get; set; } = 30;
 
     /// <summary>
-    /// Пауза между запусками внешних процессов в секундах (по умолчанию 5).
+    /// Пауза между запусками внешних процессов в секундах (по умолчанию 10).
     /// Revit держит встроенный Chromium (CEF) для devtools-порта; одновременный
     /// Process.Start() нескольких Revit.exe ведёт к коллизии порта и ACCESS_VIOLATION.
+    /// 5с оказалось недостаточно на практике — предыдущий Revit не всегда успевает
+    /// освободить порт 8088 (см. tcp_socket_win.cc bind() errors в логах даже при
+    /// работающем stagger), поднято до 10.
     /// 0 отключает stagger (старая, нестабильная при параллельном Revit поведение).
     /// </summary>
-    public int LaunchStaggerSeconds { get; set; } = 5;
+    public int LaunchStaggerSeconds { get; set; } = 10;
 
     /// <summary>
     /// Через сколько дней автоматически скрывать сессии без pending/processing команд.
