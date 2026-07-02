@@ -83,8 +83,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
        - `NotFound` (нет result файла) → fallback по exit code (`0` = Done, иначе `HandleFailureAsync`)
      - `CleanupTempFiles` в `finally` (per-attempt)
 5. `HandleFailureAsync`:
-   - `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes)` или
-     `IsPermanentException(ex)` → `Failed` сразу
+   - `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes, exception)`
+     → `Failed` сразу для permanent-ошибки
    - Иначе если `RetryCount < MaxRetries` (default 5) → `ScheduleRetryAsync` с
      `NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (default 60→120→240→480→960s)
    - Иначе `Failed` после исчерпания
