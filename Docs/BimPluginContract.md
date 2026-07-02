@@ -3,10 +3,14 @@
 > CANONICAL CONTRACT (эталон):
 >
 > ```text
-> C:\Users\y.zhumabayev\Yandex.Disk\Repository\RevitBIMFusion\Docs\BimPluginContract.md
+> C:\Users\y.zhumabayev\Repository\RevitBIMFusion\Docs\BimPluginContract.md
 > ```
 >
 > Этот документ — worker-side отражение эталонного XML-контракта для `TelegramBot.Worker`.
+>
+> **Проверено:** 2026-07-02 — контракт полностью синхронизирован с эталоном (построчное
+> сравнение полей/типов/namespace/порядка). Рассинхронизация контракта **исключена** как
+> причина крашей Revit `ACCESS_VIOLATION` (см. [RevitCrashes.md](RevitCrashes.md), Гипотеза 6).
 
 ## Соответствие эталону
 
@@ -51,6 +55,13 @@ Worker создаёт `task_{CommandId}_{AttemptToken}.xml` в `TaskDirectory` �
 
 `options` сейчас поддерживает только `continueOnError` (`bool`) для PDF/DWG. `openFolder`, `addBookmarks`,
 `paperFormat`, `orientation`, `dpi` не входят в контракт.
+
+> ⚠️ **Уточнение по `options` (проверка 2026-07-02):** Worker **никогда не записывает** элемент
+> `<options>` в task-файл (`CommandPreparer.CreateTaskFile` не устанавливает `Options`). AddIn
+> (эталон) **никогда не читает** `task.Options` — опции открытия (`Audit=true`,
+> `DetachAndPreserveWorksets`) захардкожены в `TaskExecutor.CreateWorkerOpenOptions`. Таким образом,
+> расхождение типов (`TaskFileOptions` у Worker vs `Dictionary<string,string>` у эталона) — это
+> «мёртвый код» с обеих сторон, который не влияет на обмен. Поле оставлено для будущих расширений.
 
 ## ResultFile
 
