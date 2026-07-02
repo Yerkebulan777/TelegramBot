@@ -10,6 +10,7 @@ Guidance for agentic coding agents working in this repository.
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, схема БД, SQL-запросы |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
 | [Docs/CriticalReview.md](Docs/CriticalReview.md) | Статус критичных замечаний и остаточные риски |
+| [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | 🔴 Расследование крашей Revit (`ACCESS_VIOLATION`) — симптомы, гипотезы, методы исправления |
 | **AGENTS.md** (текущий файл) | Архитектура, BimLib, DI, code style, константы для AI-агентов |
 
 ## Project Overview
@@ -168,7 +169,7 @@ BimLib is a **Windows-only** set of modules located inside the Worker project (`
 | `RevitProcessTracker` | _Удалён в v1.x — мониторинг Revit делегирован `ProcessHealthHelper` (вызывается из `CommandExecutionService.CheckProcessesHealth`)._ |
 | `NavisworksProcessTracker` | _Удалён в v1.x — `CommandExecutionService` использует `ProcessHealthHelper` напрямую._ |
 | `ProcessHealthHelper` | Статический `CheckHealth(Process, ILogger, context)`: `RevitingResponseStatus` по IsResponding + memory sampling |
-| `DialogDismisser` | Авто-закрывает модальные окна Revit/Navisworks (#32770): ищет окна по `KnownDialogPatterns`, нажимает кнопки из `CloseButtonTexts`. Исключает информационные диалоги (`ExclusionDialogTitles`) |
+| `DialogDismisser` | Авто-закрывает модальные окна Revit/Navisworks (#32770): ищет окна по `KnownDialogPatterns`, нажимает кнопки из `CloseButtonTexts`. Исключает информационные диалоги (`ExclusionDialogTitles`). ⚠️ **Временно отключён** (`DialogDismisser:Enabled = false`) для тестирования на реальных задачах — проверяется гипотеза о крашах Revit (`ACCESS_VIOLATION`) от P/Invoke; при `Enabled=false` метод делает ранний `return` до любых Win32-вызовов |
 
 **DI registration** в `Worker/Program.cs`:
 ```csharp

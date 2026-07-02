@@ -13,7 +13,7 @@ Telegram-бот для навигации по файловой системе �
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Worker-side отражение контракта BIM-плагинов (полное соответствие эталону в `RevitBIMFusion/Docs/`) |
 | [Docs/CriticalReview.md](Docs/CriticalReview.md) | Статус критичных замечаний и остаточные риски |
-| [Docs/HowWorkerWorks.md](Docs/HowWorkerWorks.md) | Подробное описание архитектуры Worker |
+| [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | 🔴 Расследование крашей Revit (`ACCESS_VIOLATION`) — симптомы, гипотезы, методы исправления |
 
 ## Обзор
 
@@ -102,7 +102,7 @@ Worker запускает внешние исполнители и обмени�
 | Секция | Поле | Описание |
 |--------|------|----------|
 | `Serilog` | — | Console + Seq + rolling file |
-| `DialogDismisser` | `MaxDismissAttempts` / `KnownDialogPatterns` / `CloseButtonTexts` / `ExclusionDialogTitles` | Настройки авто-закрытия модальных окон Revit/Navisworks |
+| `DialogDismisser` | `Enabled` / `MaxDismissAttempts` / `KnownDialogPatterns` / `CloseButtonTexts` / `ExclusionDialogTitles` | Настройки авто-закрытия модальных окон Revit/Navisworks. ⚠️ `Enabled: false` — **временно отключён** для тестирования на реальных задачах (проверка гипотезы, не крашит ли он Revit через P/Invoke `EnumWindows`/`PostMessage`) |
 | `FileSystem` | `LogDirectory` | Опционально: путь к логам |
 | `BimIntegration` | `MinSupportedVersion` / `MaxSupportedVersion` / `RevitInstallRoot` | Поиск Revit в реестре (default `2018`–`2026`, `C:\Program Files\Autodesk`) |
 | `ConnectionStrings.Postgres` | — | DSN PostgreSQL |

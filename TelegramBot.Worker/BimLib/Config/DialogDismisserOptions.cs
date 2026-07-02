@@ -10,7 +10,12 @@ public sealed class DialogDismisserOptions
 
     /// <summary>
     /// Включает автоматическое закрытие диалогов. false — DialogDismisser ничего не делает
-    /// (для диагностики, чтобы проверить, не он ли сам убивает Revit-процессы).
+    /// (ранний return в <see cref="Monitor.DialogDismisser.DismissDialogsForProcess"/> до любых
+    /// P/Invoke-вызовов). Используется для диагностики: чтобы проверить, не он ли сам убивает
+    /// Revit-процессы через Win32 API.
+    /// ⚠️ ВРЕМЕННО ОТКЛЮЧЕНО (<c>false</c> в appsettings.json) для тестирования на реальных
+    /// задачах — проверяется гипотеза о крашах Revit (<c>ACCESS_VIOLATION</c>) от P/Invoke.
+    /// После диагностики вернуть <c>true</c>.
     /// </summary>
     public bool Enabled { get; set; } = true;
 
