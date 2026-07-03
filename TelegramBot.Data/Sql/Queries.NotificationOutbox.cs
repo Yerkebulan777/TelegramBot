@@ -51,5 +51,11 @@ internal static partial class SqlQueries
                 UpdatedAt = NOW()
             WHERE OutboxId = @OutboxId
               AND Status = 'processing';";
+
+        // Session-level advisory lock: mutual exclusion между репликами Server при drain'е outbox.
+        // Освобождается явно через ReleaseSenderLock (или автоматически при разрыве соединения).
+        internal const string TryAcquireSenderLock = "SELECT pg_try_advisory_lock(@LockId);";
+
+        internal const string ReleaseSenderLock = "SELECT pg_advisory_unlock(@LockId);";
     }
 }

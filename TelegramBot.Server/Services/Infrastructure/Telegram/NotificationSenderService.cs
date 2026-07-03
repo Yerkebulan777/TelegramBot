@@ -96,6 +96,18 @@ public sealed class NotificationSenderService(
 
     private async Task DrainCompletionOutboxAsync(CancellationToken stoppingToken)
     {
+        // Single-writer mutual exclusion: только одна реплика Server одновременно drain'ит outbox.
+        // Session-level advisory lock удерживается на весь drain-цикл; отпускается через await using.
+        // При multi-instance вторая реплика получает null и пропускает цикл — её polling tick
+        // (30 сек) повторит попытку. Это устраняет гонку между репликами при перекрывающихся окнах
+        // LockedUntil (см. ранее CriticalReview п.2 — теперь исправлено).
+        await using var lockHolder = await notificationOutboxDataService.TryAcquireSenderLockAsync();
+        if (lockHolder == null)
+        {
+            logger.LogDebug("Outbox drain skipped: another server replica holds sender lock");
+            return;
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var items = await notificationOutboxDataService.ClaimPendingAsync(
