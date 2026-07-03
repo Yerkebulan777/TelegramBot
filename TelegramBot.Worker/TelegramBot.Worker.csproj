@@ -23,4 +23,8 @@
     <ProjectReference Include="..\TelegramBot.Data\TelegramBot.Data.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Schemas\TaskFile.schema.xsd" />
+  </ItemGroup>
+
 </Project>
