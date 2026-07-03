@@ -25,7 +25,8 @@ public enum ResultStatus
 
 /// <summary>
 /// Результат от BIM-плагина. Плагин пишет <c>result_{projectName}_{commandId}.xml</c> в TaskDirectory.
-/// Worker читает после завершения процесса. Если файла нет — статус определяется по exit code.
+/// Worker читает после завершения процесса. Для Revit-команд файл обязателен; fallback по exit code
+/// разрешён только для console/wrapper-команд.
 /// </summary>
 /// <remarks>
 /// Формат полностью соответствует <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> и

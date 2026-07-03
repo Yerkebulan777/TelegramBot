@@ -1,7 +1,7 @@
 # Алгоритм выполнения команд
 
 > **Связанные документы:** [AGENTS.md](../AGENTS.md) — архитектура проекта, BimLib, DI |
-> [BimPluginContract.md](BimPluginContract.md) — контракт BIM-плагинов | [README.md](../README.md) — общее
+> [Эталонный BIM-контракт](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | [README.md](../README.md) — общее
 > описание
 
 ## Архитектура
@@ -72,7 +72,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      - `CommandPreparer.PrepareAsync` — валидация FilePath (path traversal, reparse-point, extension, root
        containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`,
        `NavisworksPathResolver`)
-     - `CreateTaskFile` — atomic write `task_{projectName}_{commandId}.xml` (`.tmp` → `File.Move`); перед Move — runtime XSD-валидация через `TaskFileValidator` (embedded `Schemas/TaskFile.schema.xsd`); abort при drift модель↔XSD
+     - `CreateTaskFile` — atomic write `task_{projectName}_{commandId}.xml` (`.tmp` → `File.Move`); перед Move — runtime XSD-валидация через `TaskFileValidator` (эталонная XSD встраивается из `RevitBIMFusion/Docs` при сборке); abort при drift модель↔XSD
      - `StartProcessAsync` — захват `_launchGate` (SemaphoreSlim 1/1) → `Process.Start` → регистрация в
        `_activeProcesses` (ДО stagger-задержки, чтобы health-check и shutdown видели процесс) →
        `Task.Delay(LaunchStaggerSeconds)` с `CancellationToken.None` (gate освобождается даже при shutdown)
@@ -84,7 +84,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
        - `Valid` + `status="failed"` → `HandleFailureAsync` (классификация + retry/fail)
        - `Valid` + `status="cancelled"` → permanent `Failed` без retry
        - `Invalid` (битый XML / unknown status) → rename в `.bad` → `HandleFailureAsync`
-       - `NotFound` (нет result файла) → fallback по exit code (`0` = Done, иначе `HandleFailureAsync`)
+       - `NotFound` для Revit-команды → `HandleFailureAsync` даже при exit code `0`
+       - `NotFound` для console/wrapper-команды → fallback по exit code (`0` = Done, иначе `HandleFailureAsync`)
      - `CleanupTempFiles` в `finally` (per-attempt)
 5. `HandleFailureAsync`:
    - `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes, exception)`
@@ -591,8 +592,8 @@ ORDER BY s.CreatedAt DESC;
 1. `CommandPreparer.GetTaskFilePaths()` выводит `projectName` из `cmd.FilePath` (имя файла без расширения,
    невалидные символы → `_`).
 2. `CommandPreparer.CreateTaskFile()` создаёт `task_{projectName}_{commandId}.xml` (atomic write `.tmp` →
-   `File.Move`; перед Move — runtime XSD-валидация через `TaskFileValidator` из embedded
-   `Schemas/TaskFile.schema.xsd`).
+   `File.Move`; перед Move — runtime XSD-валидация через `TaskFileValidator` по эталонной XSD,
+   встроенной при сборке).
 3. Для Revit `CommandPreparer.CreateProcessStartInfo()` оставляет arguments пустыми и записывает абсолютный
    TaskFile path в process-scoped `REVITBIMFUSION_TASK_FILE`. AddIn читает его в `OnStartup`, подписывает
    one-shot `Idling` и запускает handler на Revit UI thread. Реальная команда остаётся в `TaskFile.commandText`.
@@ -610,7 +611,7 @@ TaskFile path в `REVITBIMFUSION_TASK_FILE`; CLI dispatcher не использ�
 полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может
 работать только через fallback по exit code.
 
-Подробности: [BimPluginContract.md](BimPluginContract.md).
+Подробности: [эталонный BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md).
 
 ### Добавление новой команды
 

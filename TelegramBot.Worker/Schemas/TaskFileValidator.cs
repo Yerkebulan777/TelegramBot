@@ -5,7 +5,7 @@ using System.Xml.Schema;
 namespace TelegramBot.Worker.Schemas;
 
 /// <summary>
-/// Runtime-валидация task-файла по XSD (<c>Schemas/TaskFile.schema.xsd</c>, embedded resource).
+/// Runtime-валидация task-файла по эталонной XSD из <c>RevitBIMFusion/Docs</c>, embedded resource.
 /// Ловит drift между C#-моделью <c>TaskFile</c> и XML-контрактом до того, как файл попадёт
 /// в TaskDirectory к плагину. Используется <c>CommandPreparer.CreateTaskFile</c>.
 /// </summary>
@@ -49,7 +49,7 @@ public static class TaskFileValidator
         using var stream = assembly.GetManifestResourceStream(ManifestResourceName)
             ?? throw new InvalidOperationException(
                 $"Embedded XSD resource not found: {ManifestResourceName}. " +
-                "Ensure Schemas/TaskFile.schema.xsd is configured as EmbeddedResource in TelegramBot.Worker.csproj.");
+                "Ensure RevitBIMFusion/Docs/TaskFile.schema.xsd is configured as EmbeddedResource in TelegramBot.Worker.csproj.");
 
         var schema = XmlSchema.Read(stream, (_, e) =>
             throw new InvalidOperationException($"TaskFile.schema.xsd is itself invalid: {e.Message}"))

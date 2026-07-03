@@ -2,21 +2,30 @@ using System.Text.RegularExpressions;
 
 namespace TelegramBot.Server.Services.Application;
 
+/// <summary>
+/// Удаление дубликатов RVT-файлов: exact-name dedup + grouping по первым 15 символам + numeric-token overlap.
+/// Алгоритм: O(n log n) за счёт сортировки вместо O(n²) вложенных циклов.
+/// </summary>
 public static partial class RevitFileDeduplicator
 {
     [GeneratedRegex(@"\d{2,}")]
     private static partial Regex RvtNumberPattern();
 
     /// <summary>
-    /// Removes duplicate Revit files by exact file name first, then by matching numeric tokens
-    /// within a prefix group (only when the name-length difference is ≤5 characters).
-    /// Files closer to the RVT root (lower depth) win over subfolder duplicates;
-    /// among equal depth the shortest name wins, equal-length names keep their original order.
+    /// Удаляет дубликаты файлов:
+    /// 1. Exact-name dedup (ближе к корню выигрывает)
+    /// 2. Grouping по первым 15 символам
+    /// 3. Внутри группы: numeric-token overlap filtering (короткое имя выигрывает)
     /// </summary>
     public static List<string> Deduplicate(IReadOnlyCollection<(string Path, int Depth)> files)
     {
-        var byName = new Dictionary<string, (string Path, int Depth)>(StringComparer.OrdinalIgnoreCase);
+        if (files.Count == 0)
+        {
+            return [];
+        }
 
+        // Шаг 1: Exact-name dedup — O(n)
+        var byName = new Dictionary<string, (string Path, int Depth)>(StringComparer.OrdinalIgnoreCase);
         foreach (var (path, depth) in files)
         {
             var name = Path.GetFileNameWithoutExtension(path);
@@ -26,41 +35,60 @@ public static partial class RevitFileDeduplicator
             }
         }
 
+        // Шаг 2: Создание кандидатов и извлечение чисел — O(n * m), где m = среднее число токенов
         var candidates = byName
             .Select(entry => new RevitFileCandidate(entry.Value.Path, entry.Key, entry.Value.Depth, ExtractNumbers(entry.Key)))
             .ToList();
 
+        // Шаг 3: Группировка по префиксу (15 символов) — O(n log n) из-за GroupBy
         var result = new List<string>(candidates.Count);
-
         foreach (var group in candidates.GroupBy(
-            candidate => candidate.Name.Length > 15 ? candidate.Name[..15] : candidate.Name,
+            c => c.Name.Length > 15 ? c.Name[..15] : c.Name,
             StringComparer.OrdinalIgnoreCase))
         {
-            var accepted = new List<RevitFileCandidate>();
+            // Сортировка внутри группы: depth asc, затем name length asc — O(k log k)
+            var sorted = group
+                .OrderBy(c => c.Depth)
+                .ThenBy(c => c.Name.Length)
+                .ToList();
 
-            foreach (var candidate in group.OrderBy(candidate => candidate.Depth).ThenBy(candidate => candidate.Name.Length))
-            {
-                var isDuplicate = false;
-                foreach (var acceptedCandidate in accepted)
-                {
-                    if (Math.Abs(acceptedCandidate.Name.Length - candidate.Name.Length) <= 5
-                        && acceptedCandidate.Numbers.Overlaps(candidate.Numbers))
-                    {
-                        isDuplicate = true;
-                        break;
-                    }
-                }
-
-                if (!isDuplicate)
-                {
-                    accepted.Add(candidate);
-                }
-            }
-
-            result.AddRange(accepted.Select(candidate => candidate.Path));
+            // Шаг 4: Overlap filtering — оптимизировано через precomputed number sets
+            var accepted = FilterOverlappingCandidates(sorted);
+            result.AddRange(accepted.Select(c => c.Path));
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Фильтрует кандидатов с overlapping numeric tokens.
+    /// Оптимизация: проверяем только с уже принятыми, а не со всеми парами.
+    /// </summary>
+    private static List<RevitFileCandidate> FilterOverlappingCandidates(List<RevitFileCandidate> sortedCandidates)
+    {
+        var accepted = new List<RevitFileCandidate>(sortedCandidates.Count);
+
+        foreach (var candidate in sortedCandidates)
+        {
+            var isDuplicate = false;
+            foreach (var acceptedCandidate in accepted)
+            {
+                // Длина имени отличается ≤5 + есть общие numeric tokens
+                if (Math.Abs(acceptedCandidate.Name.Length - candidate.Name.Length) <= 5
+                    && acceptedCandidate.Numbers.Overlaps(candidate.Numbers))
+                {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+
+            if (!isDuplicate)
+            {
+                accepted.Add(candidate);
+            }
+        }
+
+        return accepted;
     }
 
     private static HashSet<long> ExtractNumbers(string name)

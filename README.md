@@ -11,7 +11,7 @@ Telegram-бот для навигации по файловой системе �
 |----------|----------|
 | [AGENTS.md](AGENTS.md) | Архитектура, BimLib, DI, code style, константы |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
-| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Worker-side отражение контракта BIM-плагинов (полное соответствие эталону в `RevitBIMFusion/Docs/`) |
+| [RevitBIMFusion/Docs/BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Единственный эталонный контракт BIM-плагинов |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | 🔴 Расследование крашей Revit (`ACCESS_VIOLATION`) — симптомы, гипотезы, методы исправления |
 
 ## Обзор
@@ -65,9 +65,9 @@ Worker запускает внешние исполнители и обмени�
 | `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
 | `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task` и писать `ResultFile` |
 
-> ⚠️ **Эталонный контракт** (всегда проверять при изменениях) живёт в `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd`.
+> ⚠️ **Единственный эталонный контракт** живёт в `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd`.
 >
-> Наш [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — worker-side отражение этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
+> Worker встраивает эталонную `TaskFile.schema.xsd` в DLL непосредственно при сборке. Локально репозитории должны лежать рядом; для другого расположения задайте `BIM_CONTRACT_DIRECTORY`.
 
 ## Конфигурация
 
@@ -194,7 +194,7 @@ Worker обменивается XML (`task_*.xml` / `result_*.xml`) с CAD-пл�
 
 Если `TaskDirectory` не задан или `null` — используется дефолтный путь. Worker создаёт папку автоматически на старте; если создать не удалось — процесс падает с понятной ошибкой.
 
-**Важно:** BIM-плагин (Revit AddIn, Navisworks wrapper, python agent) должен писать result-файл по пути из task-файла (`resultFilePath`), а не по своему `Path.GetTempPath()`. Для Revit отсутствие ResultFile всегда считается ошибкой; fallback по exit code остаётся только у console/wrapper-команд. Полный контракт — в [Docs/BimPluginContract.md](Docs/BimPluginContract.md#taskdirectory).
+**Важно:** BIM-плагин (Revit AddIn, Navisworks wrapper, python agent) должен писать result-файл по пути из task-файла (`resultFilePath`), а не по своему `Path.GetTempPath()`. Для Revit отсутствие ResultFile всегда считается ошибкой; fallback по exit code остаётся только у console/wrapper-команд. Полный контракт — в [RevitBIMFusion/Docs/BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md#taskdirectory).
 
 Полный список параметров — `appsettings.json` в проектах Server и Worker.
 

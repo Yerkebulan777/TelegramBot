@@ -63,6 +63,9 @@ public static class Program
 
                     _=services.AddSingleton<SessionCompletionTracker>();
                     _=services.AddSingleton<CommandPreparer>();
+                    _=services.AddSingleton<ProcessStarter>();
+                    _=services.AddSingleton<OutputCollector>();
+                    _=services.AddSingleton<ResultAnalyzer>();
                     _=services.AddSingleton<ProcessRunner>();
 
                     _=services.AddHostedService<CommandExecutionService>();

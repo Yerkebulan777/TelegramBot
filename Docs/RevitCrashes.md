@@ -4,7 +4,7 @@
 > Worker больше не использует `/command`: TaskFile передаётся через `REVITBIMFUSION_TASK_FILE`,
 > а AddIn запускает handler один раз из `UIControlledApplication.Idling`.
 > **Дата обнаружения:** 2026-07-02.
-> **Связанные документы:** [BimPluginContract.md](BimPluginContract.md) — контракт Worker ↔ Revit AddIn,
+> **Связанные документы:** [эталонный BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) — контракт Worker ↔ Revit AddIn,
 > [AGENTS.md](../AGENTS.md#accepted-design-constraints) — принятые архитектурные ограничения.
 
 ---
@@ -67,7 +67,7 @@ Revit-маршрутизация `/command <name>` требует **статич
 у него нет к чему привязать `argv[2]="WORKER"` — и он трактует аргумент как путь к файлу.
 
 **Это снимает вопрос «почему `/command` не работает»** — он не может работать при текущем манифесте.
-Дока `Docs/BimPluginContract.md` утверждала, что `args[2]="WORKER"` «существует только чтобы удовлетворить
+Эталонный `RevitBIMFusion/Docs/BimPluginContract.md` утверждал, что `args[2]="WORKER"` «существует только чтобы удовлетворить
 выбор external-command в Revit API» — это допущение **неверно** и должно быть исправлено.
 
 ### Почему предыдущие гипотезы не нашли причину
@@ -326,7 +326,7 @@ Network License Manager может отказывать в лицензии → 
 - Краш происходит **до** выполнения WORKER-команды, значит парсинг task-файла вообще не успевает
   начаться.
 
-**Вывод:** контракт **исключён** из списка подозреваемых. См. [BimPluginContract.md](BimPluginContract.md)
+**Вывод:** контракт **исключён** из списка подозреваемых. См. [эталонный BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md)
 для актуального состояния контракта.
 
 ---
@@ -370,8 +370,8 @@ Network License Manager может отказывать в лицензии → 
 
 **Цель:** Полностью устранить window между `Process.Start()` и реальной готовностью Revit AddIn.
 
-**Стоимость:** Средняя — требует протокола handshake между Worker и AddIn (изменение контракта
-[BimPluginContract.md](BimPluginContract.md)).
+**Стоимость:** Средняя — требует протокола handshake между Worker и AddIn (изменение
+[эталонного контракта](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md)).
 
 ### Метод D: Лечить AddIn — включить Revit-логирование и найти исключение
 

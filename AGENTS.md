@@ -8,7 +8,7 @@ Guidance for agentic coding agents working in this repository.
 |----------|----------|
 | [README.md](README.md) | Обзор проекта, запуск, конфигурация, команды бота |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, схема БД, SQL-запросы |
-| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
+| [RevitBIMFusion/Docs/BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Единственный эталонный контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | 🔴 Расследование крашей Revit (`ACCESS_VIOLATION`) — симптомы, гипотезы, методы исправления |
 | **AGENTS.md** (текущий файл) | Архитектура, BimLib, DI, code style, константы для AI-агентов |
 
@@ -72,6 +72,58 @@ dotnet format TelegramBot.slnx
 
 ## Architecture & Request Flow
 
+```
+Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
+             -> Update channel (bounded 200) -> Parallel.ForEachAsync (MaxDegree=10)
+             -> TelegramUpdateMapper (Update -> MessageDto | CallbackQueryDto)
+             -> per-user SemaphoreSlim (SessionManager.AcquireUserLockAsync)
+             -> CommandAppService.HandleUserCommandAsync (text commands)
+                ├── /start bypasses access check → registration or help
+                └── other commands → BotUsers.Status must be Approved
+             -> CommandAppService.HandleCallbackAsync (inline keyboard callbacks)
+                ├── REQACCESS/APPROVEUSER/REJECTUSER bypass access check
+                └── all other callbacks → user must be Approved
+                → CallbackDispatcher (O(1) prefix→handler map)
+                   → ICallbackHandler chain
+```
+
+### Server Components — Refactored Architecture (v1.8+)
+
+**Strategy Pattern** для обработки команд (SRP compliance):
+
+| Слой | Компонент | Роль |
+|------|-----------|------|
+| **Strategies** | `CommandValidator` | Валидация пользовательского контекста, нормализация команд, optimistic admin refresh |
+| **Strategies** | `CommandStrategyResolver` | Определение стратегии выполнения (`Start`, `AccessDenied`, `CommandSelectionAction`, `SlashCommand`) |
+| **Strategies** | `CommandExecutor` | Выполнение бизнес-логики по стратегии, делегирование `SlashCommandService` |
+| **Strategies** | `UserCommandContext` | Immutable контекст команды |
+| **Strategies** | `CommandExecutionResult` | Immutable результат выполнения |
+| **Application** | `SlashCommandService` | Бизнес-логика: file selection, RVT collection, job submission, rate limiting |
+| **Application** | `CallbackDispatcher` | O(1) lookup префикса → handler (кэшированный `Dictionary<prefix, handler>`) |
+| **Application** | `SessionManager` | `ConcurrentDictionary<long, UserSession>`. Per-user `SemaphoreSlim` для сериализации. Lazy + background cleanup (раз в 30 мин) |
+| **Application** | `RevitFileDeduplicator` | Удаление дубликатов RVT: exact-name dedup + grouping по 15-char prefix + numeric-token overlap (**O(n log n)**) |
+| **Application** | `SessionsListRenderer` | Рендеринг списка сессий для `/status` с фильтрацией и нумерацией |
+| **Core.Services** | `MessageTrackingService` | Централизованный трекинг сообщений (устраняет дублирование `TrackMessageAsync`) |
+| **Core.Helpers** | `StringBuilderExtensions` | `AppendBounded()` — лимит 64KB для stdout/stderr |
+| **Core.Helpers** | `ExitCodeFormatter` | Форматирование exit code: decimal + hex + NTSTATUS name |
+| **Core.Helpers** | `CollectionExtensions` | `TryRemoveIfIdle()` для безопасного удаления из `ConcurrentDictionary` |
+| **Application.Handlers** | 6 `ICallbackHandler` implementations | `AccessRequestHandler`, `FileNavigationHandler`, `FileSelectionHandler`, `CommandToggleHandler`, `CommandSelectionHandler`, `SessionManagementHandler` |
+| **Application.Handlers** | `HandlerHelpers` | Статические helper'ы: `SendActionsReplyKeyboardAsync`, `SendWarningWithReplyKeyboardAsync` |
+| **Infrastructure** | `DataServices` | Aggregate-обёртка: `Sessions` / `Commands` / `MessageTracking` |
+| **Infrastructure** | `FileSystemBrowser` | Навигация по `RootPath` → проекты → `01_PROJECT/<project>/<раздел>/` → `01_RVT/*.rvt` |
+| **Infrastructure** | `TelegramOutputService` | Обёртка над `ITelegramBotClient`: HTTP 429 retry |
+| **Infrastructure** | `KeyboardBuilder` | Inline- и reply-клавиатуры |
+| **Infrastructure** | `CommandNotificationService` | `BackgroundService`: LISTEN `command_completed` + `session_started` |
+| **Infrastructure** | `NotificationSenderService` | `BackgroundService`: durable outbox для completion notifications |
+
+**DI registration** — в `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`:
+
+```csharp
+.AddConfiguration()          // FileSystemOptions, BotOptions, RateLimitOptions
+.AddCallbackHandlers()       // 6 ICallbackHandler + CallbackDispatcher
+.AddApplicationServices()    // CommandAppService, AuthorizationMiddleware, RateLimiter, SlashCommandService, SessionManager, SessionsListRenderer, MessageTrackingService
+.AddInfrastructureServices() // UserDataService, CommandDataService, SessionDataService, MessageTrackingDataService, NotificationOutboxDataService, DataServices, DatabaseInitializerService, FileSystemBrowser
+.AddTelegramServices()       // ITelegramBotClient, ITelegramOutputService, TelegramUpdateMapper, KeyboardBuilder, Channel<NotificationItem>, 3 hosted services
 ```
 Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
              -> Update channel (bounded 200) -> Parallel.ForEachAsync (MaxDegree=10)
@@ -185,15 +237,18 @@ services.AddSingleton<NavisworksPathResolver>();
 - `TelegramBot.Worker.BimLib.Native`
 - `TelegramBot.Worker.BimLib.Services`
 
-### Worker Components
+### Worker Components — Refactored Architecture (v1.9+)
 
 `CommandExecutionService` — slim orchestrator, делегирующий на:
 
 | Component | Role |
 |-----------|------|
-| `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `MarkProcessStartedAndNotifyOnceAsync` (ProcessId + idempotent `session_started` pg_notify), `ScheduleRetryAsync` (NextRetryAt + RetryCount), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
-| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/NWC/DATA/IFC/BIMDOC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`; **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd` перед Move — abort при drift модель↔XSD), `CreateProcessStartInfo` передаёт Revit TaskFile через process-scoped `REVITBIMFUSION_TASK_FILE`, **без `{FilePath}`** — путь к `.rvt` только в TaskFile. |
-| `ProcessRunner` | `RunAsync(cmd, ct)`: `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, пишет ProcessId и идемпотентно шлёт `session_started` через `MarkProcessStartedAndNotifyOnceAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый XML) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
+| `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `MarkProcessStartedAndNotifyOnceAsync` (ProcessId + idempotent `session_started` pg_notify), `ScheduleRetryAsync`, `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
+| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath`, 3) `ResolveExecutablePathAsync`. Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`; **runtime XSD-валидация** через `TaskFileValidator` по embedded эталонной `TaskFile.schema.xsd`), `CreateProcessStartInfo` передаёт Revit TaskFile через process-scoped `REVITBIMFUSION_TASK_FILE` |
+| `ProcessStarter` | Запуск процесса: `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой, регистрирует в `_activeProcesses` **до** stagger-задержки, пишет ProcessId и идемпотентно шлёт `session_started`) |
+| `OutputCollector` | Потоковая обработка stdout/stderr: `SetupProcessOutput` (подписывается на `OutputDataReceived`/`ErrorDataReceived` с 64KB лимитом + `truncated` флаг), `LogOutput` |
+| `ResultAnalyzer` | Анализ результата: `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый XML), `DetermineResult` (plugin result vs exit code fallback) |
+| `ProcessRunner` | Координатор: `RunAsync` → `StartProcessAsync` → `WaitAndHandleResultAsync` → `HandleTimeoutAsync` / `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `OnCommandCompletedAsync`: `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
 
@@ -244,105 +299,21 @@ services.AddHostedService<SessionCleanupService>();
 
 ### How BIM Command Plugins Actually Work
 
-Полный контракт исполнителей описан в [Docs/BimPluginContract.md](Docs/BimPluginContract.md).
+Полный контракт исполнителей описан только в [RevitBIMFusion/Docs/BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md).
 
 > ⚠️ **CANONICAL CONTRACT (эталон)** находится в:
 > `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\Docs\BimPluginContract.md`
 > + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd` рядом с ним.
 >
-> [Docs/BimPluginContract.md](Docs/BimPluginContract.md) — **worker-side отражение** этой границы. **Реализация полностью соответствует эталону.** При изменениях в `TaskFile` / `ResultFile` / `Worker:Commands:ArgumentsTemplate` / `CommandPreparer.CreateTaskFile` / `ProcessRunner.TryReadResultFile` **обязательно** сверяйся с эталоном и обновляй эталон + плагин + код **синхронно**.
+> Локальной копии контракта нет. Worker встраивает `TaskFile.schema.xsd` напрямую из эталонного каталога при сборке. По умолчанию ожидается соседний репозиторий `RevitBIMFusion`; другой путь задаётся через `BIM_CONTRACT_DIRECTORY`.
 
-Кратко: Worker запускает внешний процесс и обменивается с ним через XML-файлы в **TaskDirectory** (по умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`, настраивается через `FileSystem:TaskDirectory`):
+Worker-specific invariants:
 
-| Файл | Кто создаёт | Кто читает | Назначение |
-|------|------------|------------|------------|
-| `task_{projectName}_{commandId}.xml` | Worker (`CommandPreparer.CreateTaskFile`, atomic write) | Плагин | Задание: что и с каким файлом делать |
-| `result_{projectName}_{commandId}.xml` | Плагин (atomic write) | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка/отмена + выходные файлы |
-
-**TaskFile** (`TelegramBot.Core.Models.TaskFile`):
-```xml
-<taskFile>
-  <commandId>42</commandId>
-  <commandText>PDF</commandText>
-  <filePath>B:\project.rvt</filePath>
-  <resultFilePath>C:\Users\svc\Documents\TelegramBot\TaskDirectory\result_project_42.xml</resultFilePath>
-</taskFile>
-```
-- `commandId` — ID команды в БД
-- `commandText` — тип экспорта (`PDF`, `DWG`, `NWC`, `DATA`, `IFC`, `BIMDOC`, `CLASHREP`, `AUTORES`)
-- `filePath` — полный путь к исходному файлу. AddIn открывает его сам через `OpenOptions { Audit = true, DetachAndPreserveWorksets }`. **Не передаётся в CLI args** (только в TaskFile).
-- `resultFilePath` — путь в **TaskDirectory**, куда плагин должен записать результат
-- `options` — зарезервированный пустой XML element; дочерние элементы пока запрещены XSD
-
-**ResultFile** (`TelegramBot.Core.Models.ResultFile`):
-```xml
-<resultFile>
-  <status>done</status>
-  <outputFiles>B:\project.pdf</outputFiles>
-</resultFile>
-```
-- `status` — enum `ResultStatus { Done, Failed, Cancelled }`, XML value `done`/`failed`/`cancelled`
-- `errorMessage` — короткое сообщение об ошибке (при `failed`/`cancelled`)
-- `errorDetails` — полный stack trace (для неожиданных исключений)
-- `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.xsd`)
-
-**Алгоритм:**
-1. `CommandPreparer.GetTaskFilePaths` выводит `projectName` из `cmd.FilePath` (имя файла без расширения, невалидные символы → `_`)
-2. `CommandPreparer.CreateTaskFile` пишет `task_{projectName}_{commandId}.xml` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`; перед Move — **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
-3. Для Revit Worker запускает `Revit.exe` без контрактных CLI-аргументов и задаёт `REVITBIMFUSION_TASK_FILE` в `ProcessStartInfo.Environment`. AddIn читает путь в `OnStartup` и запускает handler один раз из `Idling`. **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile.
-4. Исполнитель читает task-файл, выполняет команду, пишет `result_{projectName}_{commandId}.xml` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
-5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
-   - `status="done"` → `Done`
-   - `status="failed"` → `HandleFailureAsync` (retry/error classification); `errorMessage` в лог, `errorDetails` в Debug-лог
-   - `status="cancelled"` → permanent `Failed` без retry
-   - Битый XML / unreadable / неизвестный status → rename в `.bad` → `HandleFailureAsync`
-   - result XML отсутствует — для Revit это ошибка независимо от exit code; console/wrapper-команды используют fallback `0` = `Done`
-6. Файлы текущей попытки очищаются в `finally` блока `ProcessRunner.RunAsync()` (через `CommandPreparer.CleanupTempFiles`)
-
-Revit AddIn обязан записать result-файл; чистый exit code не считается результатом. Fallback по exit code остаётся только для console/wrapper-команд.
-
-#### Revit startup handoff
-
-Worker запускает `Revit.exe` без контрактных аргументов и передаёт TaskFile в environment дочернего процесса:
-
-```text
-REVITBIMFUSION_TASK_FILE=C:\...\task_building_42.xml
-```
-
-Доступные плейсхолдеры:
-| Плейсхолдер | Описание |
-|-------------|----------|
-| `{CommandText}` | Тип экспорта для console/wrapper-команд |
-| `{FilePath}` | Полный путь к исходному файлу |
-| `{CommandId}` | ID команды в БД |
-| `{TaskFilePath}` | Полный путь к `task_{projectName}_{commandId}.xml` |
-| `{ResultFilePath}` | Полный путь к `result_{projectName}_{commandId}.xml` |
-
-Плейсхолдеры применяются только к console/wrapper-командам. У Revit-команд `ArgumentsTemplate` пустой.
-
-> Имя файла — `task_{projectName}_{commandId}.xml`, без attempt-токена. Retry одной команды перезаписывает файл предыдущей попытки; AddIn имя не парсит, путь получает из environment.
-
-#### Revit without AddIn (broken flow):
-
-```
-Worker → Revit.exe opens as GUI
-         ↓
-         Revit just sits there, showing an empty project
-         ↓
-         3 hours later → Worker kills it → Command timed out → Failed
-```
-
-`DialogDismisser` только закрывает известные модальные окна Revit/Navisworks. Без RevitBIMFusion AddIn environment handoff никто не прочитает, и Revit останется открытым до timeout.
-
-#### Other command types:
-
-| Type | Executable | stdout/stderr | Result mechanism |
-|------|-----------|---------------|------------------|
-| PDF, DWG, NWC, DATA, IFC, BIMDOC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile через environment + ResultFile XML; IFC/BIMDOC пока unsupported |
-| CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
-| AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task`/`--result`, fallback to exit code |
-
-**Temp-file cleanup:** Temp-файлы (`task_*.xml`, `result_*.xml`) очищаются в `finally` блоке `ProcessRunner.RunAsync()` через `CommandPreparer.CleanupTempFiles(commandId, filePath)`.
+- Revit получает абсолютный путь к TaskFile только через process-scoped `REVITBIMFUSION_TASK_FILE`; CLI-аргументы пусты.
+- Revit-команды обязаны записать ResultFile; fallback по exit code разрешён только console/wrapper-командам.
+- TaskFile валидируется по эталонной XSD, встроенной в Worker непосредственно из `RevitBIMFusion/Docs` при сборке.
+- Task/result-файлы живут в настроенном `TaskDirectory`, пишутся атомарно и очищаются best-effort после попытки.
+- При изменении границы обновляются эталон, плагин и код Worker; локальное отражение контракта не создаётся.
 
 ### Shared Static Helpers
 
@@ -352,9 +323,14 @@ Worker → Revit.exe opens as GUI
 | `ProcessHealthHelper` | `Worker/BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — проверка активных внешних процессов из `CommandExecutionService` |
 | `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` (public static) — для сервисов, не наследующих `DataAccessBase` (`CommandNotificationService`) |
 | `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | `IsPermanentFailure(message, exitCode, codes, exception)`: классификация ошибок → permanent (Failed без retry) vs transient (retry) |
-| `TaskFileValidator` | `TelegramBot.Worker/Schemas/TaskFileValidator.cs` | `Validate(XmlReader)` — runtime XSD-валидация task-файла (lazy `XmlSchemaSet` из embedded `Schemas/TaskFile.schema.xsd`); используется в `CommandPreparer.CreateTaskFile` |
-| `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Best-effort удаление `task_{CommandId}_{token}.xml` и `result_{CommandId}_{token}.xml` для указанной попытки |
+| `TaskFileValidator` | `TelegramBot.Worker/Schemas/TaskFileValidator.cs` | `Validate(XmlReader)` — runtime XSD-валидация task-файла (lazy `XmlSchemaSet` из эталонной XSD, встроенной при сборке); используется в `CommandPreparer.CreateTaskFile` |
+| `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Best-effort удаление `task_{projectName}_{commandId}.xml` и `result_{projectName}_{commandId}.xml` для указанной попытки |
 | `DataAccessBase` | `TelegramBot.Data/DataAccessBase.cs` | Base-класс с protected `CreateOpenConnectionAsync()`, `DefaultConnectionString` |
+| `StringBuilderExtensions` | `TelegramBot.Core/Helpers/StringBuilderExtensions.cs` | `AppendBounded()` — лимит 64KB для stdout/stderr в `OutputCollector` |
+| `ExitCodeFormatter` | `TelegramBot.Core/Helpers/ExitCodeFormatter.cs` | `Format()` — форматирование exit code: decimal + hex + NTSTATUS name |
+| `CollectionExtensions` | `TelegramBot.Core/Helpers/CollectionExtensions.cs` | `TryRemoveIfIdle()` — безопасное удаление из `ConcurrentDictionary` с проверкой predicate |
+| `ProcessKillHelper` | `TelegramBot.Worker/Helpers/ProcessKillHelper.cs` | `KillAsync()` — унифицированное завершение процесса с ограниченным ожиданием выхода |
+| `RevitJournalHelper` | `TelegramBot.Worker/Helpers/RevitJournalHelper.cs` | `TryGetCrashEvidence()` — извлечение диагностики из журнала Revit после краша процесса |
 
 ---
 
@@ -661,7 +637,10 @@ Previously, linked CTS вызывал немедленное прерывани�
 - ✅ `DefaultConnectionString` — вынесен в `DataAccessBase`
 - ✅ `SessionDataService`/`CommandDataService` — единая DI-регистрация (обёрнуты в `DataServices` на Server)
 - ✅ `_handlerMap` в `CallbackDispatcher` — O(1) lookup вместо O(n) линейного перебора
-- ✅ `RevitFileDeduplicator` — extracted из `SlashCommandService` (тестируемо, переиспользуемо)
+- ✅ `RevitFileDeduplicator` — extracted из `SlashCommandService` (тестируемо, переиспользуемо), **O(n log n)**
+- ✅ `MessageTrackingService` — централизованный трекинг сообщений (устраняет дублирование `TrackMessageAsync`)
+- ✅ `ProcessStarter`/`OutputCollector`/`ResultAnalyzer` — вынесены из `ProcessRunner` (SRP compliance)
+- ✅ `CommandValidator`/`CommandStrategyResolver`/`CommandExecutor` — вынесены из `SlashCommandService` (SRP compliance)
 
 #### Производительность
 - ✅ **Batch-обработка Telegram:** `Parallel.ForEachAsync` с `MaxDegreeOfParallelism=10` + bounded `Channel<Update>` (200)

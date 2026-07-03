@@ -103,9 +103,19 @@ jobs:
   build:
     runs-on: windows-latest  # Worker требует Windows
     needs: [validate-issue-refs]
+    env:
+      BIM_CONTRACT_DIRECTORY: ${{ github.workspace }}\.contract\RevitBIMFusion\Docs
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Checkout canonical BIM contract
+      uses: actions/checkout@v4
+      with:
+        repository: Yerkebulan777/RevitBIMFusion
+        ref: master
+        path: .contract/RevitBIMFusion
+        sparse-checkout: Docs
 
     - name: Validate BIM XML Schemas (TaskFile + ResultFile)
       shell: pwsh

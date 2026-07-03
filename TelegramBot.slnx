@@ -1,6 +1,5 @@
 <Solution>
   <Folder Name="/Docs/">
-    <File Path="Docs/BimPluginContract.md" />
     <File Path="Docs/CriticalReview.md" />
     <File Path="Docs/ExecutionAlgorithm.md" />
   </Folder>

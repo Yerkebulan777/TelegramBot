@@ -26,6 +26,8 @@ concurrency:
 jobs:
   qodana:
     runs-on: ubuntu-latest
+    env:
+      BIM_CONTRACT_DIRECTORY: ${{ github.workspace }}/.contract/RevitBIMFusion/Docs
     permissions:
       contents: write
       pull-requests: write
@@ -36,6 +38,14 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}  # анализировать реальный коммит PR, не merge-коммит
         fetch-depth: 0  # полная история нужна для инкрементального анализа PR
+
+    - name: Checkout canonical BIM contract
+      uses: actions/checkout@v4
+      with:
+        repository: Yerkebulan777/RevitBIMFusion
+        ref: master
+        path: .contract/RevitBIMFusion
+        sparse-checkout: Docs
 
     - name: Cache Qodana
       uses: actions/cache@v4

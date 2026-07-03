@@ -4,12 +4,10 @@ using TelegramBot.Core.Models;
 namespace TelegramBot.Server.Services.Application;
 
 /// <summary>
-/// Менеджер сессий пользователей с потокобезопасной блокировкой и очисткой.
-/// Семафоры очищаются фоновым CleanUpExpiredSessionsAsync и Dispose().
+/// Менеджер сессий пользователей с потокобезопасной блокировкой и фоновой очисткой.
 /// </summary>
 public class SessionManager : IDisposable
 {
-    // Фоновая очистка раз в 30 минут — основной cleanup идёт лениво при доступе
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(30);
 
     private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
@@ -68,17 +66,14 @@ public class SessionManager : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!_sessions.TryGetValue(key, out var session))
+            if (!_sessions.TryGetValue(key, out var session) ||
+                now - session.LastActivity <= _sessionTimeout)
             {
                 continue;
             }
 
-            if (now - session.LastActivity <= _sessionTimeout)
-            {
-                continue;
-            }
-
-            if (!_sessionLocks.TryGetValue(key, out var sessionLock) || !await sessionLock.WaitAsync(0, cancellationToken))
+            if (!_sessionLocks.TryGetValue(key, out var sessionLock) ||
+                !await sessionLock.WaitAsync(0, cancellationToken))
             {
                 continue;
             }
@@ -97,29 +92,14 @@ public class SessionManager : IDisposable
             {
                 if (lockRemoved)
                 {
-                    try
-                    {
-                        sessionLock.Dispose();
-                    }
-                    catch (ObjectDisposedException ex)
-                    {
-                        _logger?.LogTrace(ex, "Session lock already disposed during cleanup for user {UserId}", key);
-                    }
+                    try { sessionLock.Dispose(); }
+                    catch (ObjectDisposedException) { /* already disposed */ }
                 }
                 else
                 {
-                    try
-                    {
-                        _ = sessionLock.Release();
-                    }
-                    catch (ObjectDisposedException ex)
-                    {
-                        _logger?.LogTrace(ex, "Session lock already disposed on release for user {UserId}", key);
-                    }
-                    catch (SemaphoreFullException ex)
-                    {
-                        _logger?.LogTrace(ex, "Session lock already at max count for user {UserId}", key);
-                    }
+                    try { _ = sessionLock.Release(); }
+                    catch (ObjectDisposedException) { /* already disposed */ }
+                    catch (SemaphoreFullException) { /* already released */ }
                 }
             }
         }
@@ -153,14 +133,8 @@ public class SessionManager : IDisposable
 
         foreach (var (userId, semaphore) in _sessionLocks)
         {
-            try
-            {
-                semaphore.Dispose();
-            }
-            catch (ObjectDisposedException ex)
-            {
-                _logger?.LogTrace(ex, "Session lock already disposed for user {UserId} during shutdown", userId);
-            }
+            try { semaphore.Dispose(); }
+            catch (ObjectDisposedException) { /* already disposed */ }
         }
         _sessionLocks.Clear();
     }
@@ -169,19 +143,9 @@ public class SessionManager : IDisposable
     {
         public void Dispose()
         {
-            try
-            {
-                _ = _sessionLock.Release();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Семафор уже Disposed (shutdown снёс его в SessionManager.Dispose).
-            }
-            catch (SemaphoreFullException)
-            {
-                // Release() вызван повторно — для SemaphoreSlim не должно случаться,
-                // но на всякий случай проглатываем как уже-учтённое.
-            }
+            try { _ = _sessionLock.Release(); }
+            catch (ObjectDisposedException) { /* already disposed */ }
+            catch (SemaphoreFullException) { /* already released */ }
         }
     }
 }

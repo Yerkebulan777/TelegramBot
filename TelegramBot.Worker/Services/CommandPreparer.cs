@@ -35,7 +35,7 @@ public sealed class CommandPreparer(
     /// Используется как CommandPreparer'ом при записи task-файла и ProcessRunner'ом при чтении result-файла,
     /// чтобы оба компонента использовали одну и ту же директорию (настраиваемую через <c>FileSystem:TaskDirectory</c>).
     /// Схема имени — <c>task_{projectName}_{commandId}.xml</c> — 1:1 с эталоном RevitBIMFusion
-    /// (см. BimPluginContract.md §TaskFile Location); AddIn имя файла не парсит, читает путь из CLI args,
+    /// (см. BimPluginContract.md §TaskFile Location); AddIn имя файла не парсит, читает путь из environment variable,
     /// так что схема — чисто диагностическая, retry одной команды перезаписывает файл предыдущей попытки.
     /// </summary>
     public (string resultFilePath, string taskFilePath) GetTaskFilePaths(int commandId, string filePath)
@@ -285,12 +285,15 @@ public sealed class CommandPreparer(
     {
         var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
 
-        var args = cfg.ArgumentsTemplate
-            .Replace("{CommandText}", cmd.CommandText)
-            .Replace("{FilePath}", cmd.FilePath)
-            .Replace("{CommandId}", cmd.CommandId.ToString())
-            .Replace("{TaskFilePath}", taskFilePath)
-            .Replace("{ResultFilePath}", resultFilePath);
+        var isRevitCommand = IsRevitCommand(cmd.CommandText);
+        var args = isRevitCommand
+            ? string.Empty
+            : cfg.ArgumentsTemplate
+                .Replace("{CommandText}", cmd.CommandText)
+                .Replace("{FilePath}", cmd.FilePath)
+                .Replace("{CommandId}", cmd.CommandId.ToString())
+                .Replace("{TaskFilePath}", taskFilePath)
+                .Replace("{ResultFilePath}", resultFilePath);
 
         var workingDir = cfg.WorkingDirectory switch
         {
@@ -314,7 +317,7 @@ public sealed class CommandPreparer(
             StandardErrorEncoding = Encoding.GetEncoding(1251)
         };
 
-        if (IsRevitCommand(cmd.CommandText))
+        if (isRevitCommand)
         {
             startInfo.Environment[WorkerOptions.RevitTaskFileEnvironmentVariable] = Path.GetFullPath(taskFilePath);
         }

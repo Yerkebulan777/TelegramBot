@@ -7,7 +7,7 @@
 | [AGENTS.md](AGENTS.md) | Основной файл: архитектура, DI, BimLib, code style, константы (включая «Accepted design constraints») |
 | [README.md](README.md) | Обзор, команды, конфигурация, запуск |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
-| [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт BIM-плагинов |
+| [RevitBIMFusion/Docs/BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Единственный эталонный контракт BIM-плагинов |
 
 ## Build & Verify
 
@@ -47,11 +47,11 @@ dotnet format TelegramBot.slnx
 When changing code, keep docs in sync:
 1. Update `AGENTS.md` if architecture, DI, handlers, or constants change
 2. Update `Docs/ExecutionAlgorithm.md` if SQL queries, DB schema, or pipeline changes
-3. Update `Docs/BimPluginContract.md` if TaskFile/ResultFile, ArgumentsTemplate, or contract changes
+3. Update `RevitBIMFusion/Docs/BimPluginContract.md` if TaskFile/ResultFile, ArgumentsTemplate, or contract changes
 4. Update the «Accepted design constraints» section in `AGENTS.md` if introducing or removing a by-design limitation
 5. Update `README.md` if config, commands, or general overview changes
 
-All docs live in the repo root and `Docs/` — keep path references consistent.
+The BIM plugin contract lives only in `RevitBIMFusion/Docs`; other docs live in this repo root and `Docs/`.
 
 ---
 

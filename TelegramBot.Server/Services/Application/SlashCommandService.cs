@@ -8,11 +8,12 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;
+using TelegramBot.Core.Services;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
-using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Application.Handlers;
+using TelegramBot.Server.Services.Application.Strategies;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 using Message = Telegram.Bot.Types.Message;
 
@@ -24,6 +25,10 @@ public sealed partial class SlashCommandService(
     KeyboardBuilder keyboardBuilder,
     AuthorizationMiddleware accessValidator,
     SessionsListRenderer sessionsListRenderer,
+    MessageTrackingService messageTrackingService,
+    CommandValidator commandValidator,
+    CommandStrategyResolver strategyResolver,
+    CommandExecutor commandExecutor,
     IOptions<FileSystemOptions> fileSystemOptions,
     IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger)
@@ -60,12 +65,10 @@ public sealed partial class SlashCommandService(
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
-        var context = await ValidateUserContextAsync(message.UserId, message.Text!, message, session);
-        var strategy = ResolveCommandStrategy(context);
-        var result = await ExecuteBusinessLogicAsync(context, strategy, cancellationToken);
-        var responseMessage = await FormatResponseMessageAsync(result);
-
-        await SendSafeResponseAsync(context.ChatId, responseMessage, context.Session);
+        var context = await commandValidator.ValidateAsync(message, session, message.UserId, message.Text!, cancellationToken);
+        var strategy = strategyResolver.Resolve(context);
+        var result = await commandExecutor.ExecuteAsync(context, strategy, cancellationToken);
+        await SendSafeResponseAsync(context.ChatId, result.ResponseMessage, session);
         await LogCommandExecutionAsync(context, strategy, result);
     }
 
@@ -114,154 +117,6 @@ public sealed partial class SlashCommandService(
 
                 break;
         }
-    }
-
-    private async Task<UserCommandContext> ValidateUserContextAsync(long userId, string command, MessageDto message, UserSession session)
-    {
-        var username = message.Username;
-
-        var text = NormalizeCommandText(command);
-
-        ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
-
-        logger.LogDebug("Command received: command={Command}, user={Username} ({UserId})", text, username, userId);
-
-        var access = await accessValidator.ValidateAsync(userId);
-        var user = access.User;
-        if (text == "/start" && !access.IsActive)
-        {
-            _ = await accessValidator.RefreshApprovedAdminUserAsync(userId, username, user);
-            access = await accessValidator.ValidateAsync(userId);
-            user = access.User;
-        }
-
-        return new UserCommandContext(
-            message,
-            session,
-            userId,
-            message.ChatId == 0 ? userId : message.ChatId,
-            command,
-            text,
-            username,
-            user,
-            text == "/start" || access.IsActive);
-    }
-
-    private static CommandStrategy ResolveCommandStrategy(UserCommandContext context)
-    {
-        return context.IsActive switch
-        {
-            false => CommandStrategy.AccessDenied,
-            true => context.Command switch
-            {
-                "/start" => CommandStrategy.Start,
-                _ when IsCommandSelectionAction(context.RawText) => CommandStrategy.CommandSelectionAction,
-                _ => CommandStrategy.SlashCommand
-            }
-        };
-    }
-
-    private async Task<CommandExecutionResult> ExecuteBusinessLogicAsync(
-        UserCommandContext context,
-        CommandStrategy strategy,
-        CancellationToken cancellationToken)
-    {
-        if (context.Command.StartsWith('/'))
-        {
-            await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
-        }
-
-        switch (strategy)
-        {
-            case CommandStrategy.AccessDenied:
-                return CommandExecutionResult.AccessDenied();
-
-            case CommandStrategy.Start:
-                context.Session.Reset(_options.RootPath);
-                if (context.IsActive)
-                {
-                    await SendHelpMessageAsync(context.UserId, context.Session);
-                }
-                else
-                {
-                    await SendRegistrationMessageAsync(context.UserId, context.Session);
-                }
-
-                return CommandExecutionResult.Handled();
-
-            case CommandStrategy.CommandSelectionAction:
-                var handled = await HandleCommandSelectionActionsAsync(
-                    context.UserId,
-                    context.Username,
-                    context.RawText,
-                    context.Session,
-                    cancellationToken);
-
-                if (handled)
-                {
-                    return CommandExecutionResult.Handled();
-                }
-
-                await HandleSlashCommandAsync(context.Command, context.Message, context.Session, context.Username);
-                return CommandExecutionResult.Handled();
-
-            case CommandStrategy.SlashCommand:
-                await HandleSlashCommandAsync(context.Command, context.Message, context.Session, context.Username);
-                return CommandExecutionResult.Handled();
-
-            default:
-                throw new InvalidOperationException($"Unknown command strategy '{strategy}'.");
-        }
-    }
-
-    private static Task<string?> FormatResponseMessageAsync(CommandExecutionResult result)
-    {
-        return Task.FromResult(result.Status == CommandExecutionStatus.AccessDenied
-            ? "У вас нет доступа. Введите /start для запроса доступа."
-            : null);
-    }
-
-    private async Task SendSafeResponseAsync(long chatId, string? message, UserSession session)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return;
-        }
-
-        try
-        {
-            _=await TrackMessageAsync(outputService.SendMessageAsync(chatId, message), session);
-        }
-        catch (ApiRequestException ex)
-        {
-            logger.LogWarning(ex, "Failed to send command response to {ChatId}", chatId);
-        }
-    }
-
-    private Task LogCommandExecutionAsync(
-        UserCommandContext context,
-        CommandStrategy strategy,
-        CommandExecutionResult result)
-    {
-        if (result.Status == CommandExecutionStatus.AccessDenied)
-        {
-            logger.LogWarning(
-                "Command rejected: command={Command}, user={Username} ({UserId}), reason=access_denied",
-                context.Command,
-                context.Username,
-                context.UserId);
-        }
-        else
-        {
-            logger.LogDebug(
-                "Command handled: command={Command}, user={Username} ({UserId}), strategy={Strategy}",
-                context.Command,
-                context.Username,
-                context.UserId,
-                strategy);
-        }
-
-        return Task.CompletedTask;
     }
 
     private static bool IsCommandSelectionAction(string messageText)
@@ -775,42 +630,5 @@ public sealed partial class SlashCommandService(
             return false;
         }
     }
-
-    private enum CommandStrategy
-    {
-        Start,
-        AccessDenied,
-        CommandSelectionAction,
-        SlashCommand,
-    }
-
-    private enum CommandExecutionStatus
-    {
-        Handled,
-        AccessDenied
-    }
-
-    private sealed record UserCommandContext(
-        MessageDto Message,
-        UserSession Session,
-        long UserId,
-        long ChatId,
-        string RawText,
-        string Command,
-        string Username,
-        BotUser? User,
-        bool IsActive);
-
-    private sealed record CommandExecutionResult(CommandExecutionStatus Status)
-    {
-        public static CommandExecutionResult Handled()
-        {
-            return new CommandExecutionResult(CommandExecutionStatus.Handled);
-        }
-
-        public static CommandExecutionResult AccessDenied()
-        {
-            return new CommandExecutionResult(CommandExecutionStatus.AccessDenied);
-        }
-    }
 }
+

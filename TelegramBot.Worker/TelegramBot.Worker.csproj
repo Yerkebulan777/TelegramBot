@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>TelegramBot.Worker</RootNamespace>
+    <BimContractDirectory Condition="'$(BimContractDirectory)' == ''">$(BIM_CONTRACT_DIRECTORY)</BimContractDirectory>
+    <BimContractDirectory Condition="'$(BimContractDirectory)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\RevitBIMFusion\Docs'))</BimContractDirectory>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,7 +26,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Schemas\TaskFile.schema.xsd" />
+    <EmbeddedResource Include="$(BimContractDirectory)\TaskFile.schema.xsd"
+                      LogicalName="TelegramBot.Worker.Schemas.TaskFile.schema.xsd" />
   </ItemGroup>
 
 </Project>
