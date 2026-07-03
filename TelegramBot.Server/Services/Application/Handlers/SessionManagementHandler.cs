@@ -3,7 +3,6 @@ using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
-using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
@@ -13,7 +12,7 @@ public sealed class SessionManagementHandler(
     CommandDataService commandDataService,
     MessageTrackingDataService messageTrackingDataService,
     KeyboardBuilder keyboardBuilder,
-    ITelegramOutputService outputService,
+    TelegramOutputService outputService,
     SessionsListRenderer sessionsListRenderer,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -31,27 +30,27 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.CommandsPage
     ];
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {
-            CallbackPrefixes.SessionDetails => await HandleSessionDetailsAsync(context),
-            CallbackPrefixes.DeleteSession => await HandleDeleteSessionConfirmationAsync(context),
-            CallbackPrefixes.DeleteCommand => await HandleDeleteCommandConfirmationAsync(context),
-            CallbackPrefixes.ConfirmDeleteSession => await HandleDeleteSessionAsync(context),
-            CallbackPrefixes.ConfirmDeleteCommand => await HandleDeleteCommandAsync(context),
-            CallbackPrefixes.DeleteSessionByType => await HandleDeleteByTypeConfirmationAsync(context),
-            CallbackPrefixes.ConfirmDeleteSessionByType => await HandleDeleteByTypeAsync(context),
-            CallbackPrefixes.StatusFilter => await HandleStatusFilterAsync(context),
-            CallbackPrefixes.StatusPage => await HandleStatusPageAsync(context),
-            CallbackPrefixes.CommandsPage => await HandleCommandsPageAsync(context),
-            _ => false
+            CallbackPrefixes.SessionDetails => HandleSessionDetailsAsync(context),
+            CallbackPrefixes.DeleteSession => HandleDeleteSessionConfirmationAsync(context),
+            CallbackPrefixes.DeleteCommand => HandleDeleteCommandConfirmationAsync(context),
+            CallbackPrefixes.ConfirmDeleteSession => HandleDeleteSessionAsync(context),
+            CallbackPrefixes.ConfirmDeleteCommand => HandleDeleteCommandAsync(context),
+            CallbackPrefixes.DeleteSessionByType => HandleDeleteByTypeConfirmationAsync(context),
+            CallbackPrefixes.ConfirmDeleteSessionByType => HandleDeleteByTypeAsync(context),
+            CallbackPrefixes.StatusFilter => HandleStatusFilterAsync(context),
+            CallbackPrefixes.StatusPage => HandleStatusPageAsync(context),
+            CallbackPrefixes.CommandsPage => HandleCommandsPageAsync(context),
+            _ => Task.CompletedTask
         };
     }
 
     // ────────────────────────── Filter ──────────────────────────
 
-    private async Task<bool> HandleStatusFilterAsync(CallbackContext context)
+    private async Task HandleStatusFilterAsync(CallbackContext context)
     {
         var filter = string.IsNullOrEmpty(context.ParsedCallback.Argument)
             ? StatusFilters.All
@@ -61,26 +60,24 @@ public sealed class SessionManagementHandler(
         // Сброс страницы при смене фильтра — новый список может быть короче.
         context.Session.StatusPage = 0;
         await ShowSessionsListAsync(context);
-        return true;
     }
 
     // ────────────────────────── Page ──────────────────────────
 
-    private async Task<bool> HandleStatusPageAsync(CallbackContext context)
+    private async Task HandleStatusPageAsync(CallbackContext context)
     {
         if (!int.TryParse(context.ParsedCallback.Argument, out var page) || page < 0)
         {
             LogInvalidInput("page", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return true;
+            return;
         }
 
         context.Session.StatusPage = page;
         await ShowSessionsListAsync(context);
-        return true;
     }
 
     /// <summary>Страница списка файлов внутри сессии. Аргумент: "sessionId:filter:page".</summary>
-    private async Task<bool> HandleCommandsPageAsync(CallbackContext context)
+    private async Task HandleCommandsPageAsync(CallbackContext context)
     {
         var parts = context.ParsedCallback.Argument.Split(':', 3);
         if (parts.Length < 3
@@ -88,11 +85,10 @@ public sealed class SessionManagementHandler(
             || !int.TryParse(parts[2], out var page) || page < 0)
         {
             LogInvalidInput("sessionId:filter:page", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return true;
+            return;
         }
 
         await RenderCommandsViewAsync(context, sessionId, parts[1], page);
-        return true;
     }
 
     /// <summary>Загружает команды сессии и редактирует сообщение клавиатурой/текстом списка файлов.</summary>
@@ -102,7 +98,7 @@ public sealed class SessionManagementHandler(
 
         var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
         var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
-        var keyboard = await keyboardBuilder.GetSessionCommandsKeyboardAsync(sessionCommands, sessionId, filter, page);
+        var keyboard = keyboardBuilder.GetSessionCommandsKeyboard(sessionCommands, sessionId, filter, page);
         await outputService.EditMessageTextWithKeyboardAsync(
             context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
         context.Session.StatusMessageId = context.MessageId;
@@ -110,11 +106,11 @@ public sealed class SessionManagementHandler(
 
     // ────────────────────────── Session Details ──────────────────────────
 
-    private async Task<bool> HandleSessionDetailsAsync(CallbackContext context)
+    private async Task HandleSessionDetailsAsync(CallbackContext context)
     {
         if (!TryParseCompoundId(context, out var sessionId, out var filter))
         {
-            return true;
+            return;
         }
 
         filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
@@ -126,7 +122,7 @@ public sealed class SessionManagementHandler(
             session.SessionId = sessionId;
 
             var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
-            var keyboard = await keyboardBuilder.GetSessionStatusKeyboardAsync(sessionStatus, sessionId);
+            var keyboard = keyboardBuilder.GetSessionStatusKeyboard(sessionStatus, sessionId);
             await outputService.EditMessageTextWithKeyboardAsync(
                 context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;
@@ -138,16 +134,15 @@ public sealed class SessionManagementHandler(
             await RenderCommandsViewAsync(context, sessionId, filter);
         }
 
-        return true;
     }
 
     // ────────────────────── Delete Confirmation dialogs ──────────────────────
 
-    private async Task<bool> HandleDeleteSessionConfirmationAsync(CallbackContext context)
+    private async Task HandleDeleteSessionConfirmationAsync(CallbackContext context)
     {
         if (!TryParseId(context, out var sessionId))
         {
-            return true;
+            return;
         }
 
         Logger.LogInformation("{Username} requested delete confirmation for session {SessionId}",
@@ -161,21 +156,20 @@ public sealed class SessionManagementHandler(
             context.UserId, context.MessageId,
             $"Удалить сессию #{sessionId} и все её команды?", keyboard);
 
-        return true;
     }
 
-    private async Task<bool> HandleDeleteCommandConfirmationAsync(CallbackContext context)
+    private async Task HandleDeleteCommandConfirmationAsync(CallbackContext context)
     {
         if (!TryParseCompoundId(context, out var commandId, out var filter))
         {
-            return true;
+            return;
         }
 
         filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
         var sessionId = await ResolveSessionByCommandAsync(context, commandId);
         if (!sessionId.HasValue)
         {
-            return true;
+            return;
         }
 
         Logger.LogInformation("{Username} requested delete confirmation for command {CommandId}",
@@ -189,16 +183,15 @@ public sealed class SessionManagementHandler(
             context.UserId, context.MessageId,
             $"Удалить команду #{commandId}?", keyboard);
 
-        return true;
     }
 
-    private async Task<bool> HandleDeleteByTypeConfirmationAsync(CallbackContext context)
+    private async Task HandleDeleteByTypeConfirmationAsync(CallbackContext context)
     {
         if (!TryParseCompoundId(context, out var sessionId, out var commandType)
             || string.IsNullOrEmpty(commandType))
         {
             LogInvalidInput("ID:Type", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return true;
+            return;
         }
 
         Logger.LogInformation("{Username} requested delete confirmation for type {CommandType} in session {SessionId}",
@@ -212,35 +205,33 @@ public sealed class SessionManagementHandler(
             context.UserId, context.MessageId,
             $"Удалить все команды типа «{commandType}» из сессии #{sessionId}?", keyboard);
 
-        return true;
     }
 
     // ────────────────────── Delete Execution ──────────────────────
 
-    private async Task<bool> HandleDeleteSessionAsync(CallbackContext context)
+    private async Task HandleDeleteSessionAsync(CallbackContext context)
     {
         if (!TryParseId(context, out var sessionId))
         {
-            return true;
+            return;
         }
 
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
         if (!await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
         {
-            return true;
+            return;
         }
 
         await ShowSessionsListAsync(context);
 
-        return true;
     }
 
-    private async Task<bool> HandleDeleteCommandAsync(CallbackContext context)
+    private async Task HandleDeleteCommandAsync(CallbackContext context)
     {
         if (!TryParseCompoundId(context, out var commandId, out var filter))
         {
-            return true;
+            return;
         }
 
         filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
@@ -249,22 +240,21 @@ public sealed class SessionManagementHandler(
         var sessionId = await ResolveSessionByCommandAsync(context, commandId);
         if (!sessionId.HasValue || !await commandDataService.DeleteCommandAsync(commandId, context.UserId, IsAdmin))
         {
-            return true;
+            return;
         }
 
         context.Session.SessionId = sessionId.Value;
         await HandlePostDeletionAsync(context, sessionId.Value, filter);
 
-        return true;
     }
 
-    private async Task<bool> HandleDeleteByTypeAsync(CallbackContext context)
+    private async Task HandleDeleteByTypeAsync(CallbackContext context)
     {
         if (!TryParseCompoundId(context, out var sessionId, out var commandType)
             || string.IsNullOrEmpty(commandType))
         {
             LogInvalidInput("ID:Type", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return true;
+            return;
         }
 
         Logger.LogInformation("{Username} delete all commands of type {CommandType} in session {SessionId}",
@@ -280,7 +270,6 @@ public sealed class SessionManagementHandler(
         context.Session.SessionId = sessionId;
         await HandlePostDeletionAsync(context, sessionId, "ALL");
 
-        return true;
     }
 
     // ────────────────────── Shared Helpers ──────────────────────

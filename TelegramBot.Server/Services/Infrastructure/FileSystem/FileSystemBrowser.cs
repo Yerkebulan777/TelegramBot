@@ -42,7 +42,7 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         return paths;
     }
 
-    public Task<InlineKeyboardMarkup> GetSectionsViewAsync(long userId, string path)
+    public InlineKeyboardMarkup GetSectionsView(long userId, string path)
     {
         var session = sessions.GetOrCreateSession(userId);
 
@@ -54,7 +54,7 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
             ? BuildSectionKeyboard(session, path)
             : BuildProjectKeyboard(session, path);
 
-        return Task.FromResult(keyboard);
+        return keyboard;
     }
 
     public List<string> GetSectionFolderPaths(string path)

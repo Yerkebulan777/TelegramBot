@@ -1,25 +1,24 @@
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Server.Interfaces;
-using Message = Telegram.Bot.Types.Message;
+using TelegramBot.Server.Services.Application;
+using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Middleware;
 
 public sealed class AuthorizationMiddleware(
     UserDataService userDataService,
-    MessageTrackingDataService messageTrackingDataService,
-    ITelegramOutputService outputService,
+    MessageTrackingService messageTrackingService,
+    TelegramOutputService outputService,
     ILogger<AuthorizationMiddleware> logger)
 {
     public async Task<AccessValidationResult> ValidateAsync(long userId)
     {
         var user = await userDataService.GetUserAsync(userId);
         var isAdmin = user?.Role == UserRole.Admin && user.Status == UserAccessStatus.Approved;
-        var isBanned = user?.Status == UserAccessStatus.Blocked;
-        var isActive = user?.Status == UserAccessStatus.Approved && !isBanned;
+        var isActive = user?.Status == UserAccessStatus.Approved;
 
-        return new AccessValidationResult(user, isAdmin, isBanned, isActive);
+        return new AccessValidationResult(user, isAdmin, isActive);
     }
 
     public bool BypassesAccessCheck(string callbackPrefix)
@@ -38,7 +37,7 @@ public sealed class AuthorizationMiddleware(
             return true;
         }
 
-        _ = await TrackMessageAsync(
+        _ = await messageTrackingService.TrackAsync(
             outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."),
             session);
 
@@ -79,23 +78,9 @@ public sealed class AuthorizationMiddleware(
         return await userDataService.GetUserAsync(userId);
     }
 
-    private async Task<Message?> TrackMessageAsync(Task<Message?> task, UserSession session)
-    {
-#pragma warning disable VSTHRD003 // Foreign Task passed as parameter — intentionally awaited here
-        var msg = await task;
-#pragma warning restore VSTHRD003
-        if (msg != null)
-        {
-            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await messageTrackingDataService.TrackMessageAsync(msg.Chat.Id, msg.MessageId, sessionId);
-        }
-
-        return msg;
-    }
 }
 
 public sealed record AccessValidationResult(
     BotUser? User,
     bool IsAdmin,
-    bool IsBanned,
     bool IsActive);

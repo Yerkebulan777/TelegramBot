@@ -15,33 +15,33 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
     public const int SessionsPageSize = 15;
     private const int MaxListButtonTextLength = 64;
 
-    public Task<InlineKeyboardMarkup> GetSelectionKeyboardAsync(long userId, UserSession session)
+    public InlineKeyboardMarkup GetSelectionKeyboard(long userId, UserSession session)
     {
-        return fileNavigationService.GetSectionsViewAsync(userId, session.CurrentPath);
+        return fileNavigationService.GetSectionsView(userId, session.CurrentPath);
     }
 
-    public Task<InlineKeyboardMarkup> GetCommandKeyboardAsync(CommandGroup group, UserSession session)
+    public InlineKeyboardMarkup GetCommandKeyboard(CommandGroup group, UserSession session)
     {
-        return Task.FromResult(BuildSelectableCommandsKeyboard(session, CommandCatalog.GetByGroup(group)));
+        return BuildSelectableCommandsKeyboard(session, CommandCatalog.GetByGroup(group));
     }
 
-    public Task<ReplyKeyboardMarkup> GetCommandActionsReplyKeyboardAsync()
+    public ReplyKeyboardMarkup GetCommandActionsReplyKeyboard()
     {
-        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Apply, ButtonTexts.Cancel));
+        return BuildActionsReplyKeyboard(ButtonTexts.Apply, ButtonTexts.Cancel);
     }
 
     /// <summary>
     /// Reply-клавиатура действий при выборе файлов/разделов (Confirm + Cancel).
     /// Используется и на уровне проекта, и на уровне разделов — набор кнопок идентичен.
     /// </summary>
-    public Task<ReplyKeyboardMarkup> GetFileActionsReplyKeyboardAsync()
+    public ReplyKeyboardMarkup GetFileActionsReplyKeyboard()
     {
-        return Task.FromResult(BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel));
+        return BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel);
     }
 
     /// <summary>Строит клавиатуру списка сессий с фильтрами и постраничной навигацией.</summary>
     /// <param name="page">Запрошенная страница (0-based). Клампится в валидный диапазон.</param>
-    public Task<InlineKeyboardMarkup> GetSessionsListKeyboardAsync(
+    public InlineKeyboardMarkup GetSessionsListKeyboard(
         List<SessionsList> sessionsList, string currentFilter, int page = 0)
     {
         var total = sessionsList.Count;
@@ -96,7 +96,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             }
         }
 
-        return Task.FromResult(new InlineKeyboardMarkup(buttons));
+        return new InlineKeyboardMarkup(buttons);
     }
 
     /// <summary>Вычисляет (clampedPage, totalPages) для отображения в тексте сообщения /status.</summary>
@@ -118,7 +118,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             : title;
     }
 
-    public Task<InlineKeyboardMarkup> GetSessionStatusKeyboardAsync(SessionStatus sessionStatus, int sessionId)
+    public InlineKeyboardMarkup GetSessionStatusKeyboard(SessionStatus sessionStatus, int sessionId)
     {
         var buttons = new List<List<InlineKeyboardButton>>
         {
@@ -128,10 +128,10 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
                 InlineKeyboardButton.WithCallbackData("🗑 Удалить", $"{CallbackPrefixes.DeleteSession}{sessionId}")
             }
         };
-        return Task.FromResult(new InlineKeyboardMarkup(buttons));
+        return new InlineKeyboardMarkup(buttons);
     }
 
-    public Task<InlineKeyboardMarkup> GetSessionCommandsKeyboardAsync(
+    public InlineKeyboardMarkup GetSessionCommandsKeyboard(
         List<SessionCommands> sessionCommands, int sessionId, string selectedFilter, int page = 0)
     {
         var buttons = new List<List<InlineKeyboardButton>>();
@@ -231,7 +231,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             buttons.Add(navRow);
         }
 
-        return Task.FromResult(new InlineKeyboardMarkup(buttons));
+        return new InlineKeyboardMarkup(buttons);
     }
 
     private static string GetCommandStatusIcon(string status)

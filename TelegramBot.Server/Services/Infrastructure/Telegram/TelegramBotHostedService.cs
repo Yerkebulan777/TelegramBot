@@ -155,7 +155,7 @@ public class TelegramBotHostedService(
     /// </summary>
     private async Task ProcessUpdateAsync(Update update, CancellationToken ct)
     {
-        var dto = await inputService.MapAsync(update);
+        var dto = inputService.Map(update);
         logger.LogDebug("Update processing: id={UpdateId}, type={UpdateType}, dto={DtoType}",
             update.Id, update.Type, dto?.GetType().Name ?? "null");
 

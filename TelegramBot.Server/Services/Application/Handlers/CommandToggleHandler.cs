@@ -1,5 +1,4 @@
 using TelegramBot.Core.Models;
-using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
@@ -7,7 +6,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class CommandToggleHandler(
     KeyboardBuilder keyboardBuilder,
-    ITelegramOutputService outputService,
+    TelegramOutputService outputService,
     ILogger<CommandToggleHandler> logger) : CallbackHandlerBase(logger)
 {
     public override IEnumerable<string> GetSupportedPrefixes()
@@ -15,11 +14,11 @@ public sealed class CommandToggleHandler(
         return CommandCatalog.All.Select(c => c.Prefix);
     }
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         if (!CommandCatalog.TryGetByPrefix(context.ParsedCallback.Prefix, out var command))
         {
-            return false;
+            return;
         }
 
         if (context.Session.ContainsPendingCommand(command.Code))
@@ -31,9 +30,8 @@ public sealed class CommandToggleHandler(
             context.Session.AddPendingCommand(command.Code, command.Name);
         }
 
-        var keyboard = await keyboardBuilder.GetCommandKeyboardAsync(command.Group, context.Session);
+        var keyboard = keyboardBuilder.GetCommandKeyboard(command.Group, context.Session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        return true;
     }
 }

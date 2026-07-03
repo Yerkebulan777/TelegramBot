@@ -14,7 +14,7 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
         return SupportedPrefixes;
     }
 
-    public abstract Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
+    public abstract Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
 
     protected void LogInvalidInput(string fieldName, object? value, string? username, long userId)
     {

@@ -21,7 +21,7 @@ public static class CommandCatalog
         new(CommandCodes.Pdf, "Export to PDF", CallbackPrefixes.Pdf, CommandGroup.Export),
         new(CommandCodes.Dwg, "Export to DWG", CallbackPrefixes.Dwg, CommandGroup.Export),
         new(CommandCodes.Nwc, "Export to NWC", CallbackPrefixes.Nwc, CommandGroup.Export),
-        new(CommandCodes.Data, "Export model data", CallbackPrefixes.Data, CommandGroup.Export),
+        new(CommandCodes.Data, "Export DATA", CallbackPrefixes.Data, CommandGroup.Export),
         new(CommandCodes.Ifc, "Export to IFC", CallbackPrefixes.Ifc, CommandGroup.Export),
         new(CommandCodes.BimDoc, "BIM Doctor", CallbackPrefixes.BimDoc, CommandGroup.Automation),
         new(CommandCodes.ClashRep, "Clash Report", CallbackPrefixes.ClashRep, CommandGroup.Automation),

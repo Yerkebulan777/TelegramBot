@@ -5,7 +5,6 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Services;
 using TelegramBot.Data;
-using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Services.Application;
 using TelegramBot.Server.Services.Application.Handlers;
@@ -64,6 +63,7 @@ public static class DependencyInjectionExtensions
         _=services.AddSingleton<RateLimiter>();
         _=services.AddSingleton<SlashCommandService>();
         _=services.AddSingleton<SessionsListRenderer>();
+        _=services.AddSingleton<MessageTrackingService>();
         _=services.AddSingleton<SessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
         return services;
     }
@@ -75,7 +75,6 @@ public static class DependencyInjectionExtensions
         _=services.AddSingleton<SessionDataService>();
         _=services.AddSingleton<MessageTrackingDataService>();
         _=services.AddSingleton<NotificationOutboxDataService>();
-        _=services.AddSingleton<DataServices>();
         _=services.AddSingleton<DatabaseInitializerService>();
         _=services.AddSingleton<FileSystemBrowser>();
 
@@ -93,14 +92,7 @@ public static class DependencyInjectionExtensions
                 : (ITelegramBotClient)new TelegramBotClient(botOptions.Token);
         });
 
-        _=services.AddSingleton<ITelegramOutputService>(sp =>
-        {
-            var botClient = sp.GetRequiredService<ITelegramBotClient>();
-            var messageTrackingService = sp.GetRequiredService<MessageTrackingDataService>();
-            var logger = sp.GetRequiredService<ILogger<TelegramOutputService>>();
-
-            return new TelegramOutputService(botClient, messageTrackingService, logger);
-        });
+        _=services.AddSingleton<TelegramOutputService>();
         _=services.AddSingleton<TelegramUpdateMapper>();
         _=services.AddSingleton<KeyboardBuilder>();
         _=services.AddSingleton(_ => Channel.CreateBounded<NotificationItem>(new BoundedChannelOptions(256)

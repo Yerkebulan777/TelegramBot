@@ -5,8 +5,7 @@ using TelegramBot.Worker.BimLib.Config;
 namespace TelegramBot.Worker.BimLib.Services;
 
 /// <summary>
-/// Определяет установленные версии Navisworks через Windows Registry
-/// (HKLM\SOFTWARE\Autodesk\Navisworks\R{version}) и резолвит пути к Navisworks.exe и FileConvert.exe.
+/// Резолвит последнюю поддерживаемую установку Navisworks через Windows Registry.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class NavisworksPathResolver(
@@ -15,78 +14,29 @@ public sealed class NavisworksPathResolver(
 {
     private readonly BimIntegrationOptions _options = options.Value;
 
-    /// <inheritdoc/>
-    public IReadOnlyList<int> GetInstalledVersions()
+    public string? ResolveLatestExecutable()
     {
-        var versions = new List<int>();
-
-        for (var year = _options.MinSupportedVersion; year <= _options.MaxSupportedVersion; year++)
+        for (var year = _options.MaxSupportedVersion; year >= _options.MinSupportedVersion; year--)
         {
-            var path = ResolveNavisworksPath(year);
-            if (path != null)
+            var installDir = GetNavisworksDirectory(year);
+            if (installDir == null)
             {
-                versions.Add(year);
+                continue;
             }
-        }
 
-        var result = versions.OrderByDescending(v => v).ToList();
-        logger.LogDebug("Found installed Navisworks versions: {Versions}", string.Join(", ", result));
-        return result;
-    }
-
-    /// <inheritdoc/>
-    public string? ResolveNavisworksPath(int versionYear)
-    {
-        var installDir = GetNavisworksDirectory(versionYear);
-        if (installDir == null)
-        {
-            logger.LogDebug("Navisworks {Year} not installed", versionYear);
-            return null;
-        }
-
-        // Navisworks может называться Roamer.exe или Navisworks.exe
-        var candidates = new[] { "Roamer.exe", "Navisworks.exe" };
-        foreach (var exe in candidates)
-        {
-            var path = Path.Combine(installDir, exe);
-            if (File.Exists(path))
+            foreach (var relativePath in new[] { "FileConvert.exe", @"FileConvert\FileConvert.exe", "Roamer.exe", "Navisworks.exe" })
             {
-                logger.LogDebug("Navisworks {Year} found at '{Path}'", versionYear, path);
-                return path;
+                var path = Path.Combine(installDir, relativePath);
+                if (File.Exists(path))
+                {
+                    logger.LogDebug("Navisworks {Year} executable found at '{Path}'", year, path);
+                    return path;
+                }
             }
+
+            logger.LogWarning("Navisworks {Year} installed but no executable found in '{Dir}'", year, installDir);
         }
 
-        logger.LogWarning("Navisworks {Year} installed but no executable found in '{Dir}'", versionYear, installDir);
-        return null;
-    }
-
-    /// <inheritdoc/>
-    public string? ResolveFileConvertPath(int versionYear)
-    {
-        // FileConvert.exe может быть в корне установки или в подпапке
-        var installDir = GetNavisworksDirectory(versionYear);
-        if (installDir == null)
-        {
-            return null;
-        }
-
-        // Пробуем корень установки
-        var path = Path.Combine(installDir, "FileConvert.exe");
-        if (File.Exists(path))
-        {
-            logger.LogDebug("FileConvert.exe for Navisworks {Year} found at '{Path}'", versionYear, path);
-            return path;
-        }
-
-        // Пробуем подпапку FileConvert
-        path = Path.Combine(installDir, "FileConvert", "FileConvert.exe");
-        if (File.Exists(path))
-        {
-            logger.LogDebug("FileConvert.exe for Navisworks {Year} found at '{Path}'", versionYear, path);
-            return path;
-        }
-
-        logger.LogWarning("FileConvert.exe not found for Navisworks {Year}", versionYear);
         return null;
     }
 

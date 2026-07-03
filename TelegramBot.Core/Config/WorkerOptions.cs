@@ -80,16 +80,6 @@ public sealed class WorkerOptions
     /// Маппинг кодов команд (CommandText) на конфигурацию исполняемого файла.
     /// По умолчанию: PDF/DWG/NWC/DATA/IFC/BIMDOC → Revit.exe, CLASHREP → FileConvert.exe, AUTORES → python ai_agent.py
     /// </summary>
-    public Dictionary<string, CommandConfig> Commands { get; set; } = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Revit получает TaskFile через process-scoped environment variable; CLI-аргументы не используются.
-        ["PDF"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
-        ["DWG"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
-        ["NWC"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
-        ["DATA"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
-        ["IFC"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
-        ["BIMDOC"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
-        ["CLASHREP"] = new() { ExecutablePath = "FileConvert.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".nwc", ".nwd", ".nwf"] },
-        ["AUTORES"] = new() { ExecutablePath = "python", ArgumentsTemplate = "ai_agent.py --command \"{CommandText}\" --task \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".ifc", ".nwc"], WorkingDirectory = "." },
-    };
+    public Dictionary<string, CommandConfig> Commands { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 }

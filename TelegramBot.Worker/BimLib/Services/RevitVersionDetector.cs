@@ -24,13 +24,12 @@ public sealed class RevitVersionDetector(
     private readonly ConcurrentDictionary<CacheKey, RevitDetectedVersion> _cache = new();
 
     /// <inheritdoc/>
-    public Task<RevitDetectedVersion?> DetectVersionAsync(string filePath, CancellationToken ct = default)
+    public RevitDetectedVersion? DetectVersion(string filePath, CancellationToken ct = default)
     {
-        // Note: OpenMcdf не поддерживает async, поэтому метод синхронный с Task.FromResult
         if (string.IsNullOrWhiteSpace(filePath))
         {
             logger.LogWarning("DetectVersion failed: empty path");
-            return Task.FromResult<RevitDetectedVersion?>(null);
+            return null;
         }
 
         FileInfo fileInfo;
@@ -41,20 +40,20 @@ public sealed class RevitVersionDetector(
         catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
         {
             logger.LogWarning(ex, "DetectVersion failed: invalid path '{Path}'", filePath);
-            return Task.FromResult<RevitDetectedVersion?>(null);
+            return null;
         }
 
         if (!fileInfo.Exists)
         {
             logger.LogWarning("DetectVersion failed: file not found '{Path}'", filePath);
-            return Task.FromResult<RevitDetectedVersion?>(null);
+            return null;
         }
 
         var ext = fileInfo.Extension.ToLowerInvariant();
         if (ext is not (".rvt" or ".rfa" or ".rte"))
         {
             logger.LogDebug("DetectVersion skipped: unsupported extension '{Ext}' for '{Path}'", ext, filePath);
-            return Task.FromResult<RevitDetectedVersion?>(null);
+            return null;
         }
 
         CacheKey cacheKey;
@@ -65,13 +64,13 @@ public sealed class RevitVersionDetector(
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             logger.LogWarning(ex, "DetectVersion failed: cannot read file metadata '{Path}'", filePath);
-            return Task.FromResult<RevitDetectedVersion?>(null);
+            return null;
         }
 
         if (_cache.TryGetValue(cacheKey, out var cached))
         {
             logger.LogDebug("Detected Revit {Year} from cache for '{Path}'", cached.Year, filePath);
-            return Task.FromResult<RevitDetectedVersion?>(cached);
+            return cached;
         }
 
         try
@@ -83,13 +82,13 @@ public sealed class RevitVersionDetector(
             if (versionText == null)
             {
                 logger.LogDebug("DetectVersion failed: no Format: line found in '{Path}'", filePath);
-                return Task.FromResult<RevitDetectedVersion?>(null);
+                return null;
             }
 
             if (!int.TryParse(versionText, out var year))
             {
                 logger.LogWarning("DetectVersion failed: could not parse year '{Version}' from '{Path}'", versionText, filePath);
-                return Task.FromResult<RevitDetectedVersion?>(null);
+                return null;
             }
 
             logger.LogDebug("Detected Revit {Year} from '{Path}'", year, filePath);
@@ -101,7 +100,7 @@ public sealed class RevitVersionDetector(
             };
 
             AddToCache(cacheKey, detected);
-            return Task.FromResult<RevitDetectedVersion?>(detected);
+            return detected;
         }
         catch (OperationCanceledException)
         {
@@ -110,7 +109,7 @@ public sealed class RevitVersionDetector(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "DetectVersion failed for '{Path}'", filePath);
-            return Task.FromResult<RevitDetectedVersion?>(null);
+            return null;
         }
     }
 
@@ -168,7 +167,7 @@ public sealed class RevitVersionDetector(
     /// Открывает .rvt-файл как OLE Compound File через OpenMcdf,
     /// читает поток "BasicFileInfo" и преобразует его в читаемый текст.
     /// Между маркерами данные в Unicode (UTF-16 LE).
-    /// Исключения от OpenMcdf пробрасываются наружу — outer catch в DetectVersionAsync
+    /// Исключения от OpenMcdf пробрасываются наружу — outer catch в DetectVersion
     /// логирует их как Warning с контекстом вызова.
     /// </summary>
     private static string? GetBasicFileInfoText(string filePath)

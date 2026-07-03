@@ -11,7 +11,7 @@ namespace TelegramBot.Worker.Services;
 
 /// <summary>
 /// Background service: orchestrator для событийной обработки очереди команд через PostgreSQL LISTEN/NOTIFY.
-/// Делегирует выполнение специализированным компонентам: ProcessRunner и SessionCompletionTracker.
+/// Делегирует выполнение специализированному ProcessRunner.
 /// </summary>
 public sealed class CommandExecutionService(
     CommandDataService commandDataService,
@@ -31,7 +31,6 @@ public sealed class CommandExecutionService(
     private readonly object _runningTasksLock = new();
     private readonly SemaphoreSlim _drainGate = new(1, 1);
     private readonly int _maxConcurrentCommands = Math.Max(1, workerOptions.Value.MaxConcurrentCommands);
-    private SemaphoreSlim? _commandSlots;
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? DataAccessBase.DefaultConnectionString;
@@ -43,8 +42,6 @@ public sealed class CommandExecutionService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _commandSlots = new SemaphoreSlim(_maxConcurrentCommands, _maxConcurrentCommands);
-
         logger.LogInformation("Worker starting: maxConcurrentCommands={MaxConcurrentCommands}", _maxConcurrentCommands);
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -300,11 +297,6 @@ public sealed class CommandExecutionService(
 #pragma warning restore VSTHRD003
         await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 
-        // _commandSlots dispose строго ПОСЛЕ ожидания runningTasks — иначе
-        // ProcessWithPoolAsync может выбросить ObjectDisposedException в Release().
-        try { _commandSlots?.Dispose(); }
-        catch (ObjectDisposedException) { /* игнорируем — уже мог быть dispose'd */ }
-
         _shutdownCts?.Dispose();
         _drainGate.Dispose();
 
@@ -477,7 +469,7 @@ public sealed class CommandExecutionService(
 
                 foreach (var cmd in claimed)
                 {
-                    var task = ProcessWithPoolAsync(cmd, ct);
+                    var task = ProcessCommandAsync(cmd, ct);
 
                     lock (_runningTasksLock)
                     {
@@ -512,9 +504,8 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private async Task ProcessWithPoolAsync(PendingCommand cmd, CancellationToken ct)
+    private async Task ProcessCommandAsync(PendingCommand cmd, CancellationToken ct)
     {
-        await _commandSlots!.WaitAsync(ct);
         try
         {
             await processRunner.RunAsync(cmd, ct);
@@ -523,10 +514,6 @@ public sealed class CommandExecutionService(
         {
             logger.LogError(ex, "Error executing command {CommandId}, correlationId={CorrelationId}",
                 cmd.CommandId, cmd.CorrelationId);
-        }
-        finally
-        {
-            _ = _commandSlots.Release();
         }
     }
 

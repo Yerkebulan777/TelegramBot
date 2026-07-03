@@ -36,10 +36,10 @@ dotnet format TelegramBot.slnx
 - **Windows-only**: BimLib uses Registry + P/Invoke. `[SupportedOSPlatform("windows")]` everywhere.
 - **PostgreSQL 18** via Dapper + Npgsql. Use `await using var conn = await CreateOpenConnectionAsync()`.
 - **Soft-delete only**: `Status = 'Deleted'`, never `DELETE FROM`.
-- **No single-implementation interfaces** (except `ICallbackHandler` and `ITelegramOutputService`).
+- **No single-implementation interfaces** (except polymorphic `ICallbackHandler`).
 - **Primary constructors** preferred (C# 12). No redundant `private readonly` fields for direct captures.
 - **Async methods** always suffixed with `Async`, no `async void`, no `ConfigureAwait(false)`.
-- **Worker staggering**: `ProcessRunner._launchGate` serializes `Process.Start()` with `LaunchStaggerSeconds` (default 30s) to prevent Revit CEF port collision.
+- **Worker staggering**: `ProcessStarter._launchGate` serializes `Process.Start()` with `LaunchStaggerSeconds` (default 30s) to prevent Revit CEF port collision.
 - **Revit handoff**: TaskFile path is passed per process through `REVITBIMFUSION_TASK_FILE`; the real command lives in `TaskFile.commandText`.
 
 ## Documentation Updates

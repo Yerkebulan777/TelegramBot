@@ -86,7 +86,7 @@ public sealed class CommandPreparer(
             return null;
         }
 
-        var (resolvedPath, resolutionError) = await ResolveExecutablePathAsync(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
+        var (resolvedPath, resolutionError) = ResolveExecutablePath(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
         if (resolvedPath == null)
         {
             logger.LogWarning("Command failed: id={Id}, correlationId={CorrelationId}, command={Cmd}, reason=executable_not_found, error={Error}",
@@ -204,12 +204,12 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>Пытается определить версию Revit/Navisworks через BimLib и вернуть полный путь к исполняемому файлу.</summary>
-    private async Task<(string? resolvedPath, string? errorMessage)> ResolveExecutablePathAsync(
+    private (string? resolvedPath, string? errorMessage) ResolveExecutablePath(
         PendingCommand cmd, string configuredPath, string commandText, CancellationToken ct)
     {
         if (IsRevitCommand(commandText))
         {
-            return await ResolveRevitPathAsync(cmd, commandText, ct) ?? (configuredPath, null);
+            return ResolveRevitPath(cmd, commandText, ct) ?? (configuredPath, null);
         }
 
         if (commandText is CommandCodes.ClashRep)
@@ -221,12 +221,12 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>Резолвит путь к Revit.exe через BimLib.</summary>
-    private async Task<(string? resolvedPath, string? errorMessage)?> ResolveRevitPathAsync(
+    private (string? resolvedPath, string? errorMessage)? ResolveRevitPath(
         PendingCommand cmd, string commandText, CancellationToken ct)
     {
         try
         {
-            var version = await versionDetector.DetectVersionAsync(cmd.FilePath!, ct);
+            var version = versionDetector.DetectVersion(cmd.FilePath!, ct);
             if (version?.ExecutablePath != null)
             {
                 logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Revit {Year})",
@@ -254,22 +254,16 @@ public sealed class CommandPreparer(
     {
         try
         {
-            var versions = navisworksPathResolver.GetInstalledVersions();
-            if (versions.Count == 0)
+            var path = navisworksPathResolver.ResolveLatestExecutable();
+            if (path == null)
             {
                 var msg = "Navisworks не установлен на сервере. Пожалуйста, установите Navisworks или обратитесь к администратору.";
                 logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
                 return (null, msg);
             }
 
-            var nwPath = navisworksPathResolver.ResolveFileConvertPath(versions[0])
-                          ?? navisworksPathResolver.ResolveNavisworksPath(versions[0]);
-            if (nwPath != null)
-            {
-                logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Navisworks {Year})",
-                    commandText, nwPath, versions[0]);
-                return (nwPath, null);
-            }
+            logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path}", commandText, path);
+            return (path, null);
         }
         catch (Exception ex)
         {

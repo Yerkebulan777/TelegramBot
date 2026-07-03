@@ -34,10 +34,8 @@ public static class Program
                 })
                 .ConfigureServices((context, services) =>
                 {
-                    _=services.AddSingleton<UserDataService>();
                     _=services.AddSingleton<CommandDataService>();
                     _=services.AddSingleton<SessionDataService>();
-                    _=services.AddSingleton<MessageTrackingDataService>();
                     _=services.AddOptions<WorkerOptions>()
                         .Bind(context.Configuration.GetSection(WorkerOptions.SectionName))
                         .Validate(options => options.ProcessTimeoutMinutes > 0, "Worker:ProcessTimeoutMinutes must be greater than 0")
@@ -61,7 +59,6 @@ public static class Program
                     _=services.AddSingleton<RevitPathResolver>();
                     _=services.AddSingleton<DialogDismisser>();
 
-                    _=services.AddSingleton<SessionCompletionTracker>();
                     _=services.AddSingleton<CommandPreparer>();
                     _=services.AddSingleton<ProcessStarter>();
                     _=services.AddSingleton<OutputCollector>();

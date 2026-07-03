@@ -32,17 +32,9 @@ public sealed class RateLimiter
         lock (requestWindow)
         {
             // Очистка expired записей в той же критической секции
-            while (requestWindow.Timestamps.TryPeek(out var timestamp) && now - timestamp > _window)
+            while (requestWindow.Timestamps.Count > 0 && now - requestWindow.Timestamps.Peek() > _window)
             {
-                _ = requestWindow.Timestamps.TryDequeue(out _);
-            }
-
-            // Если все записи истекли и пользователь не превысил лимит — словарь нам больше не нужен.
-            // Удаляем entry ДО проверки лимита, чтобы избежать утечки памяти под нагрузкой
-            // (предыдущая версия проверяла IsEmpty после Enqueue — ветка была мёртвой).
-            if (requestWindow.Timestamps.IsEmpty)
-            {
-                _ = _requests.TryRemove(userId, out _);
+                _ = requestWindow.Timestamps.Dequeue();
             }
 
             // Проверка лимита и добавление нового timestamp
@@ -59,6 +51,6 @@ public sealed class RateLimiter
 
     private sealed class RequestWindow
     {
-        public ConcurrentQueue<DateTime> Timestamps { get; } = new();
+        public Queue<DateTime> Timestamps { get; } = new();
     }
 }

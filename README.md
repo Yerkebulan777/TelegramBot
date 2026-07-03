@@ -28,7 +28,7 @@ Telegram-бот для навигации по файловой системе �
 - Дедупликация Revit-файлов по префиксу имени и числовым токенам
 - Запрос доступа с подтверждением администратором
 - Умный retry: классификация ошибок (`InvalidFileError` → сразу Failed, `ProcessCrashError` → retry с экспоненциальной задержкой)
-- Декомпозиция выполнения команд: `CommandExecutionService` (LISTEN/NOTIFY + лимит параллельности), `CommandPreparer` (валидация + BIM-резолвинг), `ProcessRunner` (запуск + timeout + retry), `SessionCompletionTracker` (DB confirmation)
+- Декомпозиция выполнения команд: `CommandExecutionService` (LISTEN/NOTIFY + лимит параллельности), `CommandPreparer` (валидация + BIM-резолвинг), `ProcessRunner` (запуск + timeout + retry + DB-проверка завершения сессии)
 
 ## Технологии
 
@@ -103,7 +103,7 @@ Worker запускает внешние исполнители и обмени�
 | `Serilog` | — | Console + Seq + rolling file |
 | `DialogDismisser` | `Enabled` / `MaxDismissAttempts` / `KnownDialogPatterns` / `CloseButtonTexts` / `ExclusionDialogTitles` | Настройки авто-закрытия модальных окон Revit/Navisworks. ⚠️ `Enabled: false` — **временно отключён** для тестирования на реальных задачах (проверка гипотезы, не крашит ли он Revit через P/Invoke `EnumWindows`/`PostMessage`) |
 | `FileSystem` | `LogDirectory` | Опционально: путь к логам |
-| `BimIntegration` | `MinSupportedVersion` / `MaxSupportedVersion` | Допустимый диапазон версий при поиске Revit/Navisworks в реестре (default `2018`–`2026`). `RevitInstallRoot` — legacy-поле, сейчас не используется |
+| `BimIntegration` | `MinSupportedVersion` / `MaxSupportedVersion` | Допустимый диапазон версий при поиске Revit/Navisworks в реестре (default `2018`–`2026`) |
 | `ConnectionStrings.Postgres` | — | DSN PostgreSQL |
 | `Worker` | `ProcessTimeoutMinutes` | Общий таймаут команды (default `180` = 3ч; используется также для расчёта Lease `+5min`) |
 | `Worker` | `MaxRetries` | Кол-во retry перед `Failed` (default `5`) |

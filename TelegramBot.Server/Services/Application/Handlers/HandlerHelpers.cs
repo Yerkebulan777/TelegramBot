@@ -1,8 +1,7 @@
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Models;
-using TelegramBot.Data;
-using TelegramBot.Server.Interfaces;
+using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
@@ -18,11 +17,11 @@ internal static class HandlerHelpers
     /// с переданной reply-клавиатурой и сохраняет messageId в сессии.
     /// </summary>
     public static async Task SendActionsReplyKeyboardAsync(
-        ITelegramOutputService outputService,
-        MessageTrackingDataService messageTrackingService,
+        TelegramOutputService outputService,
+        MessageTrackingService messageTrackingService,
         long userId,
         UserSession session,
-        Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
+        Func<ReplyKeyboardMarkup> keyboardFactory)
     {
         if (session.LastActionsMessageId.HasValue)
         {
@@ -30,13 +29,12 @@ internal static class HandlerHelpers
             session.LastActionsMessageId = null;
         }
 
-        var replyKeyboard = await keyboardFactory();
-        var message = await outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard);
+        var replyKeyboard = keyboardFactory();
+        var message = await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard), session);
         if (message != null)
         {
             session.LastActionsMessageId = message.Id;
-            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await messageTrackingService.TrackMessageAsync(userId, message.Id, sessionId);
         }
     }
 
@@ -44,10 +42,10 @@ internal static class HandlerHelpers
     /// Упрощённая перегрузка, принимающая CallbackContext вместо отдельных параметров.
     /// </summary>
     public static Task SendActionsReplyKeyboardAsync(
-        ITelegramOutputService outputService,
-        MessageTrackingDataService messageTrackingService,
+        TelegramOutputService outputService,
+        MessageTrackingService messageTrackingService,
         CallbackContext context,
-        Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
+        Func<ReplyKeyboardMarkup> keyboardFactory)
     {
         return SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context.UserId, context.Session, keyboardFactory);
     }
@@ -57,20 +55,15 @@ internal static class HandlerHelpers
     /// Используется вместо дублирующихся блоков в FileSelectionHandler, FileNavigationHandler и SlashCommandService.
     /// </summary>
     public static async Task<Message?> SendWarningWithReplyKeyboardAsync(
-        ITelegramOutputService outputService,
-        MessageTrackingDataService messageTrackingService,
+        TelegramOutputService outputService,
+        MessageTrackingService messageTrackingService,
         long userId,
         UserSession session,
         string message,
-        Func<Task<ReplyKeyboardMarkup>> keyboardFactory)
+        Func<ReplyKeyboardMarkup> keyboardFactory)
     {
-        var replyKeyboard = await keyboardFactory();
-        var sentMessage = await outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard);
-        if (sentMessage != null)
-        {
-            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await messageTrackingService.TrackMessageAsync(userId, sentMessage.Id, sessionId);
-        }
-        return sentMessage;
+        var replyKeyboard = keyboardFactory();
+        return await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard), session);
     }
 }

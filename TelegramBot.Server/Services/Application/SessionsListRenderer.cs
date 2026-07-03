@@ -1,7 +1,7 @@
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
-using TelegramBot.Server.Interfaces;
+using TelegramBot.Data;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application;
@@ -11,17 +11,17 @@ namespace TelegramBot.Server.Services.Application;
 /// Используется из <see cref="SlashCommandService"/> (исходный /status) и <see cref="Handlers.SessionManagementHandler"/> (фильтры/возврат).
 /// </summary>
 public sealed class SessionsListRenderer(
-    DataServices dataServices,
+    SessionDataService sessionDataService,
     KeyboardBuilder keyboardBuilder,
-    ITelegramOutputService outputService,
+    TelegramOutputService outputService,
     ILogger<SessionsListRenderer> logger)
 {
     /// <summary>Строит текст сообщения и клавиатуру для текущего фильтра и страницы.</summary>
     private async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
         string filter, int page, CancellationToken cancellationToken = default)
     {
-        var sessionsTask = dataServices.Sessions.GetSessionsListFilteredAsync(filter);
-        var countTask = dataServices.Sessions.CountSessionsFilteredAsync(filter);
+        var sessionsTask = sessionDataService.GetSessionsListFilteredAsync(filter);
+        var countTask = sessionDataService.CountSessionsFilteredAsync(filter);
         await Task.WhenAll(sessionsTask, countTask);
 
         var sessions = await sessionsTask;
@@ -32,7 +32,7 @@ public sealed class SessionsListRenderer(
             ? $"{StatusFilters.GetTitle(filter)} (всего {total} • стр. {clampedPage + 1}/{totalPages})"
             : $"{StatusFilters.GetTitle(filter)} (всего {total})";
 
-        var keyboard = await keyboardBuilder.GetSessionsListKeyboardAsync(sessions, filter, clampedPage);
+        var keyboard = keyboardBuilder.GetSessionsListKeyboard(sessions, filter, clampedPage);
         return (text, keyboard);
     }
 

@@ -2,7 +2,6 @@ using System.Text;
 using System.Threading.Channels;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
-using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
@@ -13,7 +12,7 @@ public sealed class NotificationSenderService(
     Channel<NotificationItem> notificationChannel,
     SessionDataService sessionDataService,
     NotificationOutboxDataService notificationOutboxDataService,
-    ITelegramOutputService telegramOutput,
+    TelegramOutputService telegramOutput,
     ILogger<NotificationSenderService> logger) : BackgroundService
 {
     private static readonly TimeSpan OutboxLeaseDuration = TimeSpan.FromMinutes(5);

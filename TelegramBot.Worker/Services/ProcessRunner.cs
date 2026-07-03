@@ -20,8 +20,8 @@ public sealed class ProcessRunner(
     ProcessStarter processStarter,
     OutputCollector outputCollector,
     ResultAnalyzer resultAnalyzer,
-    SessionCompletionTracker sessionCompletionTracker,
     CommandDataService commandDataService,
+    SessionDataService sessionDataService,
     IOptions<WorkerOptions> workerOptions,
     ILogger<ProcessRunner> logger)
 {
@@ -53,7 +53,7 @@ public sealed class ProcessRunner(
             if (commandCfg == null)
             {
                 // PrepareAsync уже записал Failed в БД
-                await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+                await NotifySessionCompletionAsync(cmd);
                 return;
             }
 
@@ -132,12 +132,12 @@ public sealed class ProcessRunner(
         if (commandResult.IsSuccess)
         {
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
-            await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+            await NotifySessionCompletionAsync(cmd);
         }
         else if (commandResult.IsCancelled)
         {
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
-            await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+            await NotifySessionCompletionAsync(cmd);
         }
         else if (commandResult.IsFailure)
         {
@@ -162,7 +162,7 @@ public sealed class ProcessRunner(
 
         _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
             errorMessage: $"Process timed out after {_workerOptions.ProcessTimeoutMinutes} min");
-        await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+        await NotifySessionCompletionAsync(cmd);
     }
 
     /// <summary>
@@ -179,7 +179,7 @@ public sealed class ProcessRunner(
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed with permanent error (no retry): correlationId={CorrelationId}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
-            await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+            await NotifySessionCompletionAsync(cmd);
         }
         else if (cmd.RetryCount < _workerOptions.MaxRetries)
         {
@@ -190,14 +190,42 @@ public sealed class ProcessRunner(
             logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
-            await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+            await NotifySessionCompletionAsync(cmd);
         }
         else
         {
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Command {Cmd} ({Id}) failed after attempts: correlationId={CorrelationId}, attempt={Attempt}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
-            await sessionCompletionTracker.OnCommandCompletedAsync(cmd);
+            await NotifySessionCompletionAsync(cmd);
+        }
+    }
+
+    private async Task NotifySessionCompletionAsync(PendingCommand cmd)
+    {
+        try
+        {
+            var remainingInDb = await sessionDataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
+            if (remainingInDb > 0)
+            {
+                logger.LogDebug(
+                    "Session {SessionId}: {Remaining} commands still pending/processing, skipping notification, correlationId={CorrelationId}",
+                    cmd.SessionId, remainingInDb, cmd.CorrelationId);
+                return;
+            }
+
+            var notified = await sessionDataService.NotifySessionCompletedOnceAsync(cmd.SessionId, cmd.CorrelationId);
+            if (!notified)
+            {
+                logger.LogDebug(
+                    "Session {SessionId}: completion notification already sent or session deleted, correlationId={CorrelationId}",
+                    cmd.SessionId, cmd.CorrelationId);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to notify session completion: session={SessionId}, correlationId={CorrelationId}",
+                cmd.SessionId, cmd.CorrelationId);
         }
     }
 }

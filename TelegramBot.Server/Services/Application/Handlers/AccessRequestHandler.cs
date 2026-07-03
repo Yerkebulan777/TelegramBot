@@ -4,14 +4,14 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
+using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class AccessRequestHandler(
     UserDataService userDataService,
-    ITelegramOutputService outputService,
+    TelegramOutputService outputService,
     AuthorizationMiddleware accessValidator,
     IOptions<BotOptions> botOptions,
     ILogger<AccessRequestHandler> logger) : CallbackHandlerBase(logger)
@@ -25,18 +25,18 @@ public sealed class AccessRequestHandler(
         CallbackPrefixes.RejectUser
     ];
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {
-            CallbackPrefixes.RequestAccess => await HandleRequestAccessAsync(context),
-            CallbackPrefixes.ApproveUser => await HandleApproveAsync(context),
-            CallbackPrefixes.RejectUser => await HandleRejectAsync(context),
-            _ => false
+            CallbackPrefixes.RequestAccess => HandleRequestAccessAsync(context),
+            CallbackPrefixes.ApproveUser => HandleApproveAsync(context),
+            CallbackPrefixes.RejectUser => HandleRejectAsync(context),
+            _ => Task.CompletedTask
         };
     }
 
-    private async Task<bool> HandleRequestAccessAsync(CallbackContext context)
+    private async Task HandleRequestAccessAsync(CallbackContext context)
     {
         var access = await accessValidator.ValidateAsync(context.UserId);
         var existing = access.User;
@@ -45,14 +45,14 @@ public sealed class AccessRequestHandler(
         {
             await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
                 "У вас уже есть доступ. Введите /help для просмотра команд.");
-            return true;
+            return;
         }
 
         if (existing?.Status == UserAccessStatus.Pending)
         {
             await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
                 "Ваш запрос уже отправлен. Ожидайте подтверждения администратора.");
-            return true;
+            return;
         }
 
         var now = DateTime.UtcNow;
@@ -85,10 +85,9 @@ public sealed class AccessRequestHandler(
                 keyboard);
         }
 
-        return true;
     }
 
-    private Task<bool> HandleApproveAsync(CallbackContext context)
+    private Task HandleApproveAsync(CallbackContext context)
     {
         return HandleAccessDecisionAsync(context,
                 UserAccessStatus.Approved,
@@ -96,7 +95,7 @@ public sealed class AccessRequestHandler(
                 "Доступ предоставлен! Введите /help для просмотра доступных команд.");
     }
 
-    private Task<bool> HandleRejectAsync(CallbackContext context)
+    private Task HandleRejectAsync(CallbackContext context)
     {
         return HandleAccessDecisionAsync(context,
                 UserAccessStatus.Rejected,
@@ -104,7 +103,7 @@ public sealed class AccessRequestHandler(
                 "Ваш запрос на доступ отклонён. Обратитесь к администратору.");
     }
 
-    private async Task<bool> HandleAccessDecisionAsync(
+    private async Task HandleAccessDecisionAsync(
         CallbackContext context,
         UserAccessStatus newStatus,
         Func<string, string> adminMessage,
@@ -115,20 +114,20 @@ public sealed class AccessRequestHandler(
         {
             Logger.LogWarning("Access decision rejected: user={Username} ({UserId}), reason=not_admin", context.Username, context.UserId);
             await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Недостаточно прав.");
-            return true;
+            return;
         }
 
         if (!long.TryParse(context.ParsedCallback.Argument, out var targetUserId))
         {
             LogInvalidInput("user ID", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return true;
+            return;
         }
 
         var user = await userDataService.GetUserAsync(targetUserId);
         if (user == null)
         {
             await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, "Пользователь не найден.");
-            return true;
+            return;
         }
 
         user.Status = newStatus;
@@ -139,6 +138,5 @@ public sealed class AccessRequestHandler(
         await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId, adminMessage(displayName));
         _=await outputService.SendMessageAsync(targetUserId, userMessage);
 
-        return true;
     }
 }

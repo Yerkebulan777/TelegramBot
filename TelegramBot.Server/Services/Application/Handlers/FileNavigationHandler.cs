@@ -2,16 +2,14 @@ using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
-using TelegramBot.Data;
-using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class FileNavigationHandler(
     KeyboardBuilder keyboardBuilder,
-    ITelegramOutputService outputService,
-    MessageTrackingDataService messageTrackingService,
+    TelegramOutputService outputService,
+    MessageTrackingService messageTrackingService,
     IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -19,7 +17,7 @@ public sealed class FileNavigationHandler(
 
     protected override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.GoToParent];
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
@@ -28,7 +26,7 @@ public sealed class FileNavigationHandler(
         if (string.IsNullOrEmpty(newPath))
         {
             await SendErrorWithKeyboardAsync(context, "⚠ Error: Path not found.");
-            return true;
+            return;
         }
 
         if (!_options.IsPathWithinRoot(newPath))
@@ -37,20 +35,19 @@ public sealed class FileNavigationHandler(
                 context.Username, context.UserId, newPath);
             await SendErrorWithKeyboardAsync(context, "⚠ Error: Недопустимый путь.");
             session.CurrentPath = _options.RootPath;
-            return true;
+            return;
         }
 
         session.ClearSelectedFiles();
         session.CurrentPath = newPath;
         await outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
 
-        var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
-            keyboardBuilder.GetFileActionsReplyKeyboardAsync);
+            keyboardBuilder.GetFileActionsReplyKeyboard);
 
-        return true;
     }
 
     private Task SendErrorWithKeyboardAsync(CallbackContext context, string message)
@@ -58,6 +55,6 @@ public sealed class FileNavigationHandler(
         return HandlerHelpers.SendWarningWithReplyKeyboardAsync(
             outputService, messageTrackingService,
             context.UserId, context.Session, message,
-            keyboardBuilder.GetFileActionsReplyKeyboardAsync);
+            keyboardBuilder.GetFileActionsReplyKeyboard);
     }
 }

@@ -36,17 +36,13 @@ public class TelegramUpdateMapper
         };
     }
 
-    public Task<object?> MapAsync(Update update)
+    public object? Map(Update update)
     {
         if (update.Message?.Text != null && update.Message.From != null)
         {
-            return Task.FromResult<object?>(MapMessage(update.Message));
-        }
-        else if (update.CallbackQuery != null)
-        {
-            return Task.FromResult<object?>(MapCallback(update.CallbackQuery));
+            return MapMessage(update.Message);
         }
 
-        return Task.FromResult<object?>(null);
+        return update.CallbackQuery != null ? MapCallback(update.CallbackQuery) : null;
     }
 }

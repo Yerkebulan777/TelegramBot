@@ -2,16 +2,14 @@ using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
-using TelegramBot.Data;
-using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
 public sealed class CommandSelectionHandler(
     KeyboardBuilder keyboardBuilder,
-    ITelegramOutputService outputService,
-    MessageTrackingDataService messageTrackingService,
+    TelegramOutputService outputService,
+    MessageTrackingService messageTrackingService,
     IOptions<FileSystemOptions> options,
     ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -23,23 +21,23 @@ public sealed class CommandSelectionHandler(
         CallbackPrefixes.CancelCommandSelection
     ];
 
-    public override async Task<bool> HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public override Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         return context.ParsedCallback.Prefix switch
         {
-            CallbackPrefixes.ApplyCommands => await HandleApplyCommandsAsync(context, cancellationToken),
-            CallbackPrefixes.CancelCommandSelection => await HandleCancelCommandSelectionAsync(context, cancellationToken),
-            _ => false
+            CallbackPrefixes.ApplyCommands => HandleApplyCommandsAsync(context, cancellationToken),
+            CallbackPrefixes.CancelCommandSelection => HandleCancelCommandSelectionAsync(context, cancellationToken),
+            _ => Task.CompletedTask
         };
     }
 
-    private async Task<bool> HandleApplyCommandsAsync(CallbackContext context, CancellationToken cancellationToken)
+    private async Task HandleApplyCommandsAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
 
         if (session.PendingCommand.Count == 0)
         {
-            return true;
+            return;
         }
 
         Logger.LogDebug("User {Username} ({UserId}) applied command selection: [{Commands}]",
@@ -49,16 +47,15 @@ public sealed class CommandSelectionHandler(
         session.IsFileSelectionActive = true;
         session.FileSelectionMessageId = context.MessageId;
 
-        var keyboard = await keyboardBuilder.GetSelectionKeyboardAsync(context.UserId, session);
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
-            keyboardBuilder.GetFileActionsReplyKeyboardAsync);
+            keyboardBuilder.GetFileActionsReplyKeyboard);
 
-        return true;
     }
 
-    private async Task<bool> HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
+    private async Task HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         Logger.LogDebug("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
 
@@ -68,6 +65,5 @@ public sealed class CommandSelectionHandler(
         // Удаляем все отслеживаемые сообщения, ничего не выводим
         await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
 
-        return true;
     }
 }

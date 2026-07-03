@@ -15,12 +15,10 @@ public class SessionManager : IDisposable
     private readonly TimeSpan _sessionTimeout;
     private readonly PeriodicTimer _cleanupTimer;
     private readonly CancellationTokenSource _cleanupCts = new();
-    private readonly ILogger<SessionManager>? _logger;
 
-    public SessionManager(TimeSpan sessionTimeout, ILogger<SessionManager>? logger = null)
+    public SessionManager(TimeSpan sessionTimeout)
     {
         _sessionTimeout = sessionTimeout;
-        _logger = logger;
         _cleanupTimer = new PeriodicTimer(CleanupInterval);
         _ = RunCleanupLoopAsync(_cleanupCts.Token);
     }
@@ -60,8 +58,6 @@ public class SessionManager : IDisposable
     private async Task CleanUpExpiredSessionsAsync(CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        var cleanedCount = 0;
-
         foreach (var key in _sessions.Keys.ToList())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -85,7 +81,6 @@ public class SessionManager : IDisposable
                 {
                     _ = _sessions.TryRemove(key, out _);
                     lockRemoved = _sessionLocks.TryRemove(key, out _);
-                    cleanedCount++;
                 }
             }
             finally
@@ -104,10 +99,6 @@ public class SessionManager : IDisposable
             }
         }
 
-        if (cleanedCount > 0)
-        {
-            _logger?.LogInformation("Cleaned up {Count} expired sessions", cleanedCount);
-        }
     }
 
     private async Task RunCleanupLoopAsync(CancellationToken cancellationToken)
@@ -139,11 +130,11 @@ public class SessionManager : IDisposable
         _sessionLocks.Clear();
     }
 
-    private sealed class SessionLockReleaser(SemaphoreSlim _sessionLock) : IDisposable
+    private sealed class SessionLockReleaser(SemaphoreSlim sessionLock) : IDisposable
     {
         public void Dispose()
         {
-            try { _ = _sessionLock.Release(); }
+            try { _ = sessionLock.Release(); }
             catch (ObjectDisposedException) { /* already disposed */ }
             catch (SemaphoreFullException) { /* already released */ }
         }

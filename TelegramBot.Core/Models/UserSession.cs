@@ -1,7 +1,7 @@
 namespace TelegramBot.Core.Models;
 
 /// <summary>
-/// Represents a user session with thread-safe collections and DB-backed message tracking.
+/// Represents a user session with DB-backed message tracking.
 /// </summary>
 public class UserSession
 {
@@ -11,43 +11,15 @@ public class UserSession
     public string CurrentPath { get; set; } = Directory.GetCurrentDirectory();
 
 
-    private readonly object _commandLock = new();
     private readonly List<string> _pendingCommand = [];
     private readonly List<string> _pendingCommandName = [];
-
-    private readonly object _selectionLock = new();
     private readonly HashSet<string> _selectedFiles = new(StringComparer.OrdinalIgnoreCase);
 
-    // Public read-only wrappers with thread-safe access
-    public IReadOnlyList<string> PendingCommand
-    {
-        get
-        {
-            lock (_commandLock)
-            {
-                return [.. _pendingCommand];
-            }
-        }
-    }
+    public IReadOnlyList<string> PendingCommand => _pendingCommand;
 
-    public IReadOnlyList<string> PendingCommandName
-    {
-        get
-        {
-            lock (_commandLock)
-            {
-                return [.. _pendingCommandName];
-            }
-        }
-    }
+    public IReadOnlyList<string> PendingCommandName => _pendingCommandName;
 
-    public IReadOnlySet<string> GetSelectedFiles()
-    {
-        lock (_selectionLock)
-        {
-            return new HashSet<string>(_selectedFiles, StringComparer.OrdinalIgnoreCase);
-        }
-    }
+    public IReadOnlySet<string> GetSelectedFiles() => _selectedFiles;
 
     /// <summary>Текущий фильтр в /status: ALL, ACTIVE, DONE, FAILED.</summary>
     public string StatusFilter { get; set; } = "ALL";
@@ -70,77 +42,58 @@ public class UserSession
     // Command manipulation methods
     public void AddPendingCommand(string code, string displayName)
     {
-        lock (_commandLock)
-        {
-            _pendingCommand.Add(code);
-            _pendingCommandName.Add(displayName);
-        }
+        _pendingCommand.Add(code);
+        _pendingCommandName.Add(displayName);
     }
 
     public bool RemovePendingCommand(string code)
     {
-        lock (_commandLock)
+        var index = _pendingCommand.IndexOf(code);
+        if (index >= 0)
         {
-            var index = _pendingCommand.IndexOf(code);
-            if (index >= 0)
-            {
-                _pendingCommand.RemoveAt(index);
-                _pendingCommandName.RemoveAt(index);
-                return true;
-            }
-            return false;
+            _pendingCommand.RemoveAt(index);
+            _pendingCommandName.RemoveAt(index);
+            return true;
         }
+
+        return false;
     }
 
     public bool ContainsPendingCommand(string code)
     {
-        lock (_commandLock)
-        {
-            return _pendingCommand.Contains(code);
-        }
+        return _pendingCommand.Contains(code);
     }
 
     public void ClearPendingCommands()
     {
-        lock (_commandLock)
-        {
-            _pendingCommand.Clear();
-            _pendingCommandName.Clear();
-        }
+        _pendingCommand.Clear();
+        _pendingCommandName.Clear();
     }
 
     // File selection methods
     public void AddSelectedFiles(IEnumerable<string> filePaths)
     {
-        lock (_selectionLock)
+        foreach (var filePath in filePaths)
         {
-            foreach (var filePath in filePaths)
-            {
-                _ = _selectedFiles.Add(filePath);
-            }
+            _ = _selectedFiles.Add(filePath);
         }
     }
 
     public bool ToggleSelectedFile(string filePath)
     {
-        lock (_selectionLock)
+        if (_selectedFiles.Contains(filePath))
         {
-            if (_selectedFiles.Contains(filePath))
-            {
-                _=_selectedFiles.Remove(filePath);
-                return false;
-            }
-            _=_selectedFiles.Add(filePath);
-            return true;
+            _=_selectedFiles.Remove(filePath);
+            return false;
         }
+
+        _=_selectedFiles.Add(filePath);
+        return true;
     }
 
     public void ClearSelectedFiles()
     {
-        lock (_selectionLock)
-        {
-            _selectedFiles.Clear();
-        }
+        _selectedFiles.Clear();
     }
 
     /// <summary>

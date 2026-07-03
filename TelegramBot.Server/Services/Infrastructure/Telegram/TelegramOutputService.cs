@@ -6,14 +6,13 @@ using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
-using TelegramBot.Server.Interfaces;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
 public class TelegramOutputService(
     ITelegramBotClient botClient,
     MessageTrackingDataService messageTrackingService,
-    ILogger<TelegramOutputService> logger) : ITelegramOutputService
+    ILogger<TelegramOutputService> logger)
 {
     private const int MaxRetries = 2;
 

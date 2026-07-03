@@ -9,96 +9,33 @@ namespace TelegramBot.Server.Services.Application;
 /// </summary>
 public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, ILogger<CallbackDispatcher> logger)
 {
-    // Кэш префикс → handler для быстрого поиска (O(1) вместо O(n)).
-    // Префиксы уникальны между хендлерами (см. CallbackPrefixes), поэтому коллизий быть не может.
     private readonly Dictionary<string, ICallbackHandler> _handlerMap =
         handlers
-            .SelectMany(h => GetSupportedPrefixes(h).Select(p => (p, h)))
-            .GroupBy(x => x.p)
-            .ToDictionary(g => g.Key, g => g.First().h);
-
-    /// <summary>Возвращает поддерживаемые префиксы из хендлера.</summary>
-    private static IEnumerable<string> GetSupportedPrefixes(ICallbackHandler handler)
-    {
-        try
-        {
-            return handler.GetSupportedPrefixes();
-        }
-        catch
-        {
-            return [];
-        }
-    }
+            .SelectMany(handler => handler.GetSupportedPrefixes().Select(prefix => (prefix, handler)))
+            .ToDictionary(item => item.prefix, item => item.handler);
 
     /// <summary>
     /// Отправляет callback соответствующему хендлеру.
-    /// Логирование улучшено: добавлены детали о найденном хендлере и времени выполнения.
     /// </summary>
-    public async Task<bool> DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public async Task DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
-        var prefix = context.ParsedCallback.Prefix;
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-        if (!_handlerMap.TryGetValue(prefix, out var handler))
+        if (!_handlerMap.TryGetValue(context.ParsedCallback.Prefix, out var handler))
         {
-            logger.LogDebug(
-                "Callback ignored: prefix={Prefix}, user={Username} ({UserId}), reason=no_handler",
-                prefix,
-                context.Username,
-                context.UserId);
-            return false;
+            logger.LogDebug("Callback ignored: prefix={Prefix}", context.ParsedCallback.Prefix);
+            return;
         }
-
-        logger.LogDebug(
-            "Callback dispatch: prefix={Prefix}, handler={HandlerName}, user={Username} ({UserId})",
-            prefix,
-            handler.GetType().Name,
-            context.Username,
-            context.UserId);
 
         try
         {
-            var handled = await handler.HandleAsync(context, cancellationToken);
-            stopwatch.Stop();
-
-            if (handled)
-            {
-                logger.LogDebug(
-                    "Callback handled: prefix={Prefix}, handler={HandlerName}, user={Username} ({UserId}), elapsedMs={ElapsedMs}",
-                    prefix,
-                    handler.GetType().Name,
-                    context.Username,
-                    context.UserId,
-                    stopwatch.ElapsedMilliseconds);
-                return true;
-            }
-
-            logger.LogDebug(
-                "Callback not handled by handler: prefix={Prefix}, handler={HandlerName}, user={Username} ({UserId}), elapsedMs={ElapsedMs}",
-                prefix,
-                handler.GetType().Name,
-                context.Username,
-                context.UserId,
-                stopwatch.ElapsedMilliseconds);
-            return false;
+            await handler.HandleAsync(context, cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            logger.LogInformation(
-                "Callback '{Prefix}' handling was cancelled after {ElapsedMs}ms",
-                prefix,
-                stopwatch.ElapsedMilliseconds);
             throw;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex,
-                "Error in handler {HandlerName} for callback '{Prefix}' after {ElapsedMs}ms",
-                handler.GetType().Name,
-                prefix,
-                stopwatch.ElapsedMilliseconds);
-            // Continue processing - don't rethrow to prevent stopping update handling
-            return false;
+            logger.LogError(ex, "Error in handler {HandlerName}", handler.GetType().Name);
         }
     }
 }

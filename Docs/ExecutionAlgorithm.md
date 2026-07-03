@@ -94,7 +94,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      `NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount + random(0, RetryDelayBaseSeconds)`
      (base 60→120→240→480→960s, jitter против thundering herd при массовом сбое)
    - Иначе `Failed` после исчерпания
-6. `SessionCompletionTracker.OnCommandCompletedAsync`:
+6. `ProcessRunner.NotifySessionCompletionAsync`:
    - `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync`
      (`CompletionNotified=TRUE`, `NotificationOutbox` insert,
      `pg_notify('command_completed', SessionId|CorrelationId)` если первый раз)

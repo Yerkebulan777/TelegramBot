@@ -1,13 +1,13 @@
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;
 using TelegramBot.Core.Services;
-using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
+using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application;
 
 public sealed class CommandAppService(
-    ITelegramOutputService outputService,
+    TelegramOutputService outputService,
     AuthorizationMiddleware accessValidator,
     CallbackDispatcher callbackDispatcher,
     SlashCommandService slashCommandService,
@@ -78,7 +78,7 @@ public sealed class CommandAppService(
             Session = session
         };
 
-        _=await callbackDispatcher.DispatchAsync(context, cancellationToken);
+        await callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
 }

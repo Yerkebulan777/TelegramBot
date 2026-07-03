@@ -1,7 +1,11 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Serilog;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
+using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Extensions;
 
@@ -37,8 +41,15 @@ public static class Program
                     SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Server"))
                 .Build();
 
-            await host.InitializeDatabaseAsync();
-            await host.SeedAdminUsersAsync();
+            await host.Services.GetRequiredService<DatabaseInitializerService>().InitializeDatabaseAsync();
+
+            var adminIds = host.Services.GetRequiredService<IOptions<BotOptions>>().Value.AdminUserIds;
+            if (adminIds.Length > 0)
+            {
+                await host.Services.GetRequiredService<UserDataService>().UpsertUsersBatchAsync(
+                    adminIds, (int)UserRole.Admin, (int)UserAccessStatus.Approved);
+            }
+
             await host.RunAsync();
         }
         catch (Exception ex)
