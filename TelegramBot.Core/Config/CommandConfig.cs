@@ -7,12 +7,12 @@ public sealed class CommandConfig
     public string ExecutablePath { get; set; } = "";
 
     /// <summary>
-    /// Шаблон аргументов командной строки.
+    /// Шаблон аргументов командной строки. Может быть пустым.
     /// Поддерживаемые плейсхолдеры: {CommandText}, {FilePath}, {CommandId}, {TaskFilePath}, {ResultFilePath}.
-    /// Для RevitBIMFusion Revit AddIn вместо {CommandText} должен передаваться fixed dispatcher WORKER;
-    /// реальная команда остаётся в TaskFile.commandText.
+    /// Для RevitBIMFusion шаблон пустой: TaskFile передаётся через
+    /// process-scoped environment variable REVITBIMFUSION_TASK_FILE.
     /// </summary>
-    public string ArgumentsTemplate { get; set; } = "\"{FilePath}\"";
+    public string ArgumentsTemplate { get; set; } = "";
 
     /// <summary>Разрешённые расширения файлов (например, .rvt, .rfa). null — любое расширение.</summary>
     public List<string>? AllowedExtensions { get; set; }

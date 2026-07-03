@@ -8,11 +8,7 @@
         <xs:element name="filePath" type="xs:string" />
         <xs:element name="resultFilePath" type="xs:string" />
         <xs:element name="options" minOccurs="0">
-          <xs:complexType>
-            <xs:sequence>
-              <xs:element name="continueOnError" type="xs:boolean" minOccurs="0" />
-            </xs:sequence>
-          </xs:complexType>
+          <xs:complexType />
         </xs:element>
       </xs:sequence>
     </xs:complexType>

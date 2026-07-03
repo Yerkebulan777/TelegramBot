@@ -9,10 +9,9 @@ public sealed class WorkerOptions
     public const string SectionName = "Worker";
 
     /// <summary>
-    /// Literal dispatcher expected by RevitBIMFusion's WorkerCommand AddIn.
-    /// The actual export command is read from TaskFile.commandText.
+    /// Process-scoped environment variable used to pass TaskFile to RevitBIMFusion.
     /// </summary>
-    public const string RevitDispatcherCommand = "WORKER";
+    public const string RevitTaskFileEnvironmentVariable = "REVITBIMFUSION_TASK_FILE";
 
     /// <summary>
     /// Максимальное время выполнения одной команды в минутах (по умолчанию 180 = 3 часа).
@@ -79,19 +78,17 @@ public sealed class WorkerOptions
 
     /// <summary>
     /// Маппинг кодов команд (CommandText) на конфигурацию исполняемого файла.
-    /// По умолчанию: PDF/DWG/IFC/BIMDOC/NWC → Revit.exe, CLASHREP → FileConvert.exe, AUTORES → python ai_agent.py
+    /// По умолчанию: PDF/DWG/NWC/DATA/IFC/BIMDOC → Revit.exe, CLASHREP → FileConvert.exe, AUTORES → python ai_agent.py
     /// </summary>
     public Dictionary<string, CommandConfig> Commands { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Шаблоны аргументов НЕ передают {FilePath} в CLI — путь к исходному файлу передаётся только в TaskFile.filePath.
-        // Это гарантирует, что плагин (AddIn/wrapper) сам откроет файл с правильными OpenOptions (Audit=true, DetachFromCentral).
-        // Revit AddIn ожидает fixed dispatcher WORKER в args[2]; реальный commandText берётся из TaskFile.
-        // См. …\RevitBIMFusion\Docs\BimPluginContract.md §CLI Arguments.
-        ["PDF"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = $"/command \"{RevitDispatcherCommand}\" \"{{TaskFilePath}}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["DWG"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = $"/command \"{RevitDispatcherCommand}\" \"{{TaskFilePath}}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["IFC"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = $"/command \"{RevitDispatcherCommand}\" \"{{TaskFilePath}}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["BIMDOC"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = $"/command \"{RevitDispatcherCommand}\" \"{{TaskFilePath}}\"", AllowedExtensions = [".rvt", ".rfa"] },
-        ["NWC"] = new() { ExecutablePath = "Revit.exe", ArgumentsTemplate = $"/command \"{RevitDispatcherCommand}\" \"{{TaskFilePath}}\"", AllowedExtensions = [".rvt", ".rfa"] },
+        // Revit получает TaskFile через process-scoped environment variable; CLI-аргументы не используются.
+        ["PDF"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
+        ["DWG"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
+        ["NWC"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
+        ["DATA"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
+        ["IFC"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
+        ["BIMDOC"] = new() { ExecutablePath = "Revit.exe", AllowedExtensions = [".rvt"] },
         ["CLASHREP"] = new() { ExecutablePath = "FileConvert.exe", ArgumentsTemplate = "/command \"{CommandText}\" \"{TaskFilePath}\"", AllowedExtensions = [".nwc", ".nwd", ".nwf"] },
         ["AUTORES"] = new() { ExecutablePath = "python", ArgumentsTemplate = "ai_agent.py --command \"{CommandText}\" --task \"{TaskFilePath}\"", AllowedExtensions = [".rvt", ".ifc", ".nwc"], WorkingDirectory = "." },
     };

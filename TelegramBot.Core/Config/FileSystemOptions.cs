@@ -45,13 +45,13 @@ public sealed class FileSystemOptions
     /// </summary>
     public string GetEffectiveTaskDirectory()
     {
-        return !string.IsNullOrWhiteSpace(TaskDirectory)
+        return Path.GetFullPath(!string.IsNullOrWhiteSpace(TaskDirectory)
             ? TaskDirectory
             : Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Documents",
             "TelegramBot",
-            "TaskDirectory");
+            "TaskDirectory"));
     }
 
     /// <summary>Возвращает полный путь к RVT-директории для раздела.</summary>

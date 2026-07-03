@@ -4,6 +4,9 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element name="status">
+          <xs:annotation>
+            <xs:documentation>done means complete success; incomplete exports are failed. There is no partial-success state.</xs:documentation>
+          </xs:annotation>
           <xs:simpleType>
             <xs:restriction base="xs:string">
               <xs:enumeration value="done" />

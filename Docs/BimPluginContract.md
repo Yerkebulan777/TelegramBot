@@ -8,10 +8,9 @@
 >
 > Этот документ — worker-side отражение эталонного XML-контракта для `TelegramBot.Worker`.
 >
-> **Проверено:** 2026-07-03 — построчное сравнение с эталоном (структурная версия §1–§11), включая
-> схему имени файла. Полное совпадение: поля DTO, XML-схема, CLI args, имя task/result-файла.
-> Рассинхронизация контракта **исключена** как причина крашей Revit `ACCESS_VIOLATION`
-> (см. [RevitCrashes.md](RevitCrashes.md), Гипотеза 6).
+> **Версия контракта:** 2026-07-03. Revit не поддерживает запуск AddIn-команд через
+> `/command`; TaskFile передаётся дочернему процессу через environment variable
+> `REVITBIMFUSION_TASK_FILE`, а AddIn запускает задачу один раз из события `Idling`.
 
 ## Соответствие эталону
 
@@ -40,28 +39,20 @@ Worker создаёт task-файл в `TaskDirectory` до запуска пр�
   <commandText>PDF</commandText>
   <filePath>C:/Projects/building.rvt</filePath>
   <resultFilePath>C:/Tasks/result_building_42.xml</resultFilePath>
-  <options>
-    <continueOnError>false</continueOnError>
-  </options>
+  <options />
 </taskFile>
 ```
 
 | Поле | Тип | Обязательное | Описание |
 |------|-----|:------------:|----------|
 | `commandId` | `int` | да для Worker | ID команды из таблицы `Commands`. В эталоне `commandId` также служит **correlationId** — то же значение фигурирует в имени result-файла и per-task логе |
-| `commandText` | `string` | да | `PDF`, `DWG`, `NWC`, `IFC`, `BIMDOC`, `CLASHREP`, `AUTORES` |
+| `commandText` | `string` | да | `PDF`, `DWG`, `NWC`, `DATA`, `IFC`, `BIMDOC`, `CLASHREP`, `AUTORES` |
 | `filePath` | `string` | да | Абсолютный путь к исходному файлу. Revit AddIn открывает `.rvt` сам через `Audit=true` и `DetachAndPreserveWorksets` |
 | `resultFilePath` | `string` | да | Абсолютный путь, куда исполнитель обязан записать `ResultFile`. AddIn не имеет права вычислять путь сам |
-| `options` | XML element | нет | Closed whitelist параметров |
+| `options` | empty XML element | нет | Зарезервировано; дочерние элементы пока запрещены XSD |
 
-`options` сейчас поддерживает только `continueOnError` (`bool`) для PDF/DWG. `openFolder`, `addBookmarks`,
-`paperFormat`, `orientation`, `dpi` не входят в контракт. Формат печати/ориентация/DPI/буклеты в эталоне
-владеет сам AddIn (auto-detect по размеру листа, bookmarks всегда включены) — не параметры контракта.
-
-> ⚠️ Worker никогда не записывает `<options>` (`CommandPreparer.CreateTaskFile` не устанавливает
-> `Options`), AddIn никогда не читает `task.Options` — open-опции (`Audit=true`,
-> `DetachAndPreserveWorksets`) захардкожены в `TaskExecutor.CreateWorkerOpenOptions`. Мёртвый код с
-> обеих сторон, на обмен не влияет. Поле оставлено для будущих расширений.
+Worker обычно опускает `<options>`. Если элемент присутствует, он должен быть пустым.
+Параметры печати и открытия документа принадлежат AddIn и не передаются через контракт.
 
 ## ResultFile
 
@@ -90,49 +81,46 @@ Worker создаёт task-файл в `TaskDirectory` до запуска пр�
 | `status` | enum | `done`, `failed`, `cancelled`. `done` означает, что команда выполнена **полностью**; частично выполненный экспорт — всегда `failed` (частичного успеха контракт не допускает) |
 | `errorMessage` | `string?` | Короткое сообщение для пользователя. Бот показывает как есть. Формат в эталоне: `<Категория> in <Место>: <причина>` — категория выводится из типа исключения, место — первый non-system stack frame |
 | `errorDetails` | `string?` | Полная диагностика/stack trace для поддержки |
-| `outputFiles` | `string?` | Одна строка, не массив. Для PDF/NWC — файл, для DWG — папка экспорта |
+| `outputFiles` | `string?` | Одна строка, не массив. Для PDF/NWC/DATA — файл, для DWG — папка экспорта |
 
 Null/empty optional elements исполнитель опускает.
 
-## CLI Arguments
+## Revit Startup Handoff
 
-Revit запускается строго с четырьмя аргументами:
+Revit не предоставляет документированный CLI-механизм запуска `IExternalCommand`.
+Конструкция `/command "WORKER"` запрещена: Revit трактует `WORKER` как имя открываемого файла,
+и `WorkerCommand.Execute` не вызывается.
+
+Worker запускает Revit без контрактных аргументов:
 
 ```text
-Revit.exe /command "WORKER" "{TaskFilePath}"
+Revit.exe
 ```
 
-| Позиция | Значение |
-|:-------:|----------|
-| 0 | `Revit.exe` или полный путь |
-| 1 | literal `/command` |
-| 2 | fixed dispatcher `WORKER` |
-| 3 | абсолютный путь к task-файлу (`.xml`) |
+Абсолютный путь к TaskFile передаётся только в environment дочернего процесса:
 
-`args[2]` не является типом экспорта. Реальная команда читается только из `taskFile/commandText`.
-Путь к `.rvt` не передаётся в CLI args и живёт только в `taskFile/filePath`. Лишние флаги
-(`/language`, `/nosplash` и т.п.) между dispatcher'ом и путём к task-файлу запрещены — argv строго
-позиционный.
-
-Плейсхолдеры `ArgumentsTemplate`:
-
-| Плейсхолдер | Описание |
-|-------------|----------|
-| `{CommandText}` | Код команды для console/wrapper-команд; не dispatcher Revit AddIn |
-| `{TaskFilePath}` | Полный путь к task-файлу |
-| `{ResultFilePath}` | Полный путь к result-файлу |
-| `{CommandId}` | ID команды |
-| `{FilePath}` | Не используется Revit AddIn; путь передаётся в `taskFile/filePath` |
-
-Текущие шаблоны Worker для Revit-команд:
-
-```json
-"PDF":    "/command \"WORKER\" \"{TaskFilePath}\""
-"DWG":    "/command \"WORKER\" \"{TaskFilePath}\""
-"IFC":    "/command \"WORKER\" \"{TaskFilePath}\""
-"BIMDOC": "/command \"WORKER\" \"{TaskFilePath}\""
-"NWC":    "/command \"WORKER\" \"{TaskFilePath}\""
+```text
+REVITBIMFUSION_TASK_FILE=C:\Users\svc\Documents\TelegramBot\TaskDirectory\task_building_42.xml
 ```
+
+Environment создаётся отдельно для каждого `ProcessStartInfo`, поэтому параллельные процессы Revit
+не разделяют TaskFile. Глобальная environment variable уровня пользователя или машины запрещена.
+
+AddIn выполняет следующий flow:
+
+1. `Application.OnStartup` читает `REVITBIMFUSION_TASK_FILE`.
+2. Путь должен быть абсолютным, иметь расширение `.xml` и указывать на существующий файл.
+3. AddIn подписывает one-shot обработчик `Idling`.
+4. Обработчик отписывается **до** выполнения и запускает Worker bridge на Revit UI thread.
+5. Реальная команда (`PDF`, `DWG`, `NWC`, `DATA`) читается только из `taskFile/commandText`.
+6. После записи ResultFile AddIn закрывает headless-процесс Revit.
+
+Путь к `.rvt` не передаётся в process arguments и живёт только в `taskFile/filePath`.
+Ручной запуск через кнопку `Worker` сохраняет file-picker fallback и не использует environment handoff.
+
+Для Revit-команд `Worker:Commands:*:ArgumentsTemplate` пустой. Плейсхолдеры
+`{CommandText}`, `{TaskFilePath}`, `{ResultFilePath}`, `{CommandId}` и `{FilePath}`
+остаются допустимыми только для console/wrapper-команд, не для Revit AddIn.
 
 ## TaskDirectory
 
@@ -166,9 +154,9 @@ Worker пишет task-файл как `{path}.tmp` → rename в целевой
 **Ответственность за удаление (обновлено в эталоне):**
 
 - **TaskFile** — теперь удаляет **AddIn** после успешной записи `ResultFile`, но только в headless-режиме
-  (`TaskFilePathResolver.IsHeadlessLaunch()`; в debug/`OpenFileDialog`-режиме файл сохраняется для анализа).
-  Реализовано в `WorkerCommandHandler.TryDeleteTaskFile`. Сбой удаления логируется как warning и не влияет
-  на уже записанный `ResultFile`.
+  (параметр `isHeadless=true`, переданный из `Application.RunWorkerCommandOnce`; в debug/`OpenFileDialog`-режиме
+  файл сохраняется для анализа). Реализовано в `WorkerCommandHandler.TryDeleteTaskFile`. Сбой удаления
+  логируется как warning и не влияет на уже записанный `ResultFile`.
 - **ResultFile** — по-прежнему удаляет **Worker** после того, как прочитал и обработал результат.
 
 Worker's `CommandPreparer.CleanupTempFiles` по-прежнему best-effort удаляет оба файла (task и result) после
@@ -225,10 +213,11 @@ result-файла» уже покрывает этот случай.
 | `PDF` | Export sheets to PDF | supported |
 | `DWG` | Export to AutoCAD DWG | supported |
 | `NWC` | Export to Navisworks NWC | supported |
+| `DATA` | Export element data snapshot to SQLite (`06_DATA/<model>.db`) | supported |
 | `IFC` | Export to IFC | planned |
 | `BIMDOC` | BIM documentation | planned |
 | `CLASHREP` | Clash report | planned |
 | `AUTORES` | Automatic clash resolution | planned |
 
-Unknown/planned команды возвращают `NotImplemented:` в `errorMessage`; Worker классифицирует это как
+Unknown/planned команды возвращают `Unsupported command:` в `errorMessage`; Worker классифицирует это как
 permanent failure без retry.

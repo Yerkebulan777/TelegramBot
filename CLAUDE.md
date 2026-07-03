@@ -40,7 +40,7 @@ dotnet format TelegramBot.slnx
 - **Primary constructors** preferred (C# 12). No redundant `private readonly` fields for direct captures.
 - **Async methods** always suffixed with `Async`, no `async void`, no `ConfigureAwait(false)`.
 - **Worker staggering**: `ProcessRunner._launchGate` serializes `Process.Start()` with `LaunchStaggerSeconds` (default 30s) to prevent Revit CEF port collision.
-- **Revit dispatcher**: `WorkerOptions.RevitDispatcherCommand = "WORKER"` — real command in `TaskFile.commandText`, not CLI args.
+- **Revit handoff**: TaskFile path is passed per process through `REVITBIMFUSION_TASK_FILE`; the real command lives in `TaskFile.commandText`.
 
 ## Documentation Updates
 

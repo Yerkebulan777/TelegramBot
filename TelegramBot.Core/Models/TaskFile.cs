@@ -21,8 +21,8 @@ public sealed class TaskFile
     public required int CommandId { get; set; }
 
     /// <summary>
-    /// Тип команды (код экспорта): <c>"PDF"</c>, <c>"DWG"</c>, <c>"IFC"</c>, <c>"BIMDOC"</c>,
-    /// <c>"NWC"</c>, <c>"CLASHREP"</c>, <c>"AUTORES"</c>.
+    /// Тип команды (код экспорта): <c>"PDF"</c>, <c>"DWG"</c>, <c>"NWC"</c>, <c>"DATA"</c>,
+    /// <c>"IFC"</c>, <c>"BIMDOC"</c>, <c>"CLASHREP"</c>, <c>"AUTORES"</c>.
     /// Соответствует <see cref="Constants.CommandCodes"/>.
     /// </summary>
     [XmlElement("commandText")]
@@ -42,20 +42,4 @@ public sealed class TaskFile
     [XmlElement("resultFilePath")]
     public required string ResultFilePath { get; set; }
 
-    /// <summary>
-    /// Дополнительные опции команды. Closed whitelist — в текущей реализации поддерживается только
-    /// <c>continueOnError</c> (bool) для PDF/DWG. Неизвестные ключи находятся вне контракта.
-    /// Сериализуется как XML-элемент <c>options</c> или опускается.
-    /// </summary>
-    [XmlElement("options")]
-    public TaskFileOptions? Options { get; set; }
-}
-
-public sealed class TaskFileOptions
-{
-    [XmlElement("continueOnError")]
-    public bool ContinueOnError { get; set; }
-
-    [XmlIgnore]
-    public bool ContinueOnErrorSpecified { get; set; }
 }

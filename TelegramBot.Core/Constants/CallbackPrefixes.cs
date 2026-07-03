@@ -20,6 +20,9 @@ public static class CallbackPrefixes
     /// <summary>Выбор файла NWC.</summary>
     public const string Nwc = "NWC:";
 
+    /// <summary>Экспорт данных модели.</summary>
+    public const string Data = "DATA:";
+
     /// <summary>Выбор файла IFC.</summary>
     public const string Ifc = "IFC:";
 

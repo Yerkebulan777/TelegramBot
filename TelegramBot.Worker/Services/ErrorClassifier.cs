@@ -28,6 +28,8 @@ public static class ErrorClassifier
         "permission denied",
         "path not found",
         "invalid file path",
+        "unsupported command:",
+        "notimplemented:",
         "no such directory",
         "cannot access",
         "файл не найден",

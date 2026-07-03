@@ -192,7 +192,7 @@ services.AddSingleton<NavisworksPathResolver>();
 | Component | Role |
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `MarkProcessStartedAndNotifyOnceAsync` (ProcessId + idempotent `session_started` pg_notify), `ScheduleRetryAsync` (NextRetryAt + RetryCount), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
-| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`; **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd` перед Move — abort при drift модель↔XSD), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER` (`WorkerOptions.RevitDispatcherCommand`), **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
+| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/NWC/DATA/IFC/BIMDOC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`; **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd` перед Move — abort при drift модель↔XSD), `CreateProcessStartInfo` передаёт Revit TaskFile через process-scoped `REVITBIMFUSION_TASK_FILE`, **без `{FilePath}`** — путь к `.rvt` только в TaskFile. |
 | `ProcessRunner` | `RunAsync(cmd, ct)`: `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, пишет ProcessId и идемпотентно шлёт `session_started` через `MarkProcessStartedAndNotifyOnceAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый XML) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `OnCommandCompletedAsync`: `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
@@ -237,8 +237,8 @@ services.AddHostedService<SessionCleanupService>();
 - `RevitVersionDetector` извлекает год из `BasicFileInfo`; допустимый для запуска диапазон задают `BimIntegrationOptions.MinSupportedVersion`/`MaxSupportedVersion` (default `2018`–`2026`).
 - `RevitProcessStatus` enum: `Healthy`, `NotResponding`, `Error`.
 - Removed BimLib interfaces: `IRevitPathResolver`, `IRevitProcessTracker`, `INavisworksProcessTracker`, `IRevitVersionDetector`, `INavisworksPathResolver` (concrete-классы only).
-- Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(5).
-- `WorkerOptions.RevitDispatcherCommand` = `"WORKER"` — константа-диспетчер для Revit AddIn. Реальная команда (`PDF`, `DWG`, ...) передаётся только в `TaskFile.commandText`, не в CLI args.
+- Команды помечены priority через `SlashCommandService._commandPriorityMap` (`FrozenDictionary<string, int>`): PDF=Critical(1), DWG=High(2), NWC/DATA/IFC/BIMDOC/CLASHREP=Medium(3), AUTORES=Low(4), default=Default(5).
+- `WorkerOptions.RevitTaskFileEnvironmentVariable` = `"REVITBIMFUSION_TASK_FILE"` — process-scoped путь к TaskFile для Revit AddIn. Реальная команда (`PDF`, `DWG`, `NWC`, `DATA`) находится в `TaskFile.commandText`.
 - `WorkerOptions.LaunchStaggerSeconds` (default `30`) — пауза между запусками внешних процессов для предотвращения коллизии CEF devtools-порта Revit. `0` отключает.
 - `SessionManager.GetOrCreateSession()` no longer calls `RemoveSession()` (была race с `AcquireUserLockAsync`). Background `CleanUpExpiredSessionsAsync` безопасно обрабатывает оба dictionary.
 
@@ -265,14 +265,14 @@ services.AddHostedService<SessionCleanupService>();
   <commandId>42</commandId>
   <commandText>PDF</commandText>
   <filePath>B:\project.rvt</filePath>
-  <resultFilePath>C:\Users\svc\Documents\TelegramBot\TaskDirectory\result_42_6f1c2b3a.xml</resultFilePath>
+  <resultFilePath>C:\Users\svc\Documents\TelegramBot\TaskDirectory\result_project_42.xml</resultFilePath>
 </taskFile>
 ```
 - `commandId` — ID команды в БД
-- `commandText` — тип экспорта (`PDF`, `DWG`, `IFC`, `BIMDOC`, `NWC`, `CLASHREP`, `AUTORES`)
+- `commandText` — тип экспорта (`PDF`, `DWG`, `NWC`, `DATA`, `IFC`, `BIMDOC`, `CLASHREP`, `AUTORES`)
 - `filePath` — полный путь к исходному файлу. AddIn открывает его сам через `OpenOptions { Audit = true, DetachAndPreserveWorksets }`. **Не передаётся в CLI args** (только в TaskFile).
 - `resultFilePath` — путь в **TaskDirectory**, куда плагин должен записать результат
-- `options` — XML element (closed whitelist; поддерживается только `continueOnError` для PDF/DWG)
+- `options` — зарезервированный пустой XML element; дочерние элементы пока запрещены XSD
 
 **ResultFile** (`TelegramBot.Core.Models.ResultFile`):
 ```xml
@@ -289,38 +289,38 @@ services.AddHostedService<SessionCleanupService>();
 **Алгоритм:**
 1. `CommandPreparer.GetTaskFilePaths` выводит `projectName` из `cmd.FilePath` (имя файла без расширения, невалидные символы → `_`)
 2. `CommandPreparer.CreateTaskFile` пишет `task_{projectName}_{commandId}.xml` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`; перед Move — **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
-3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{TaskFilePath}`/`{ResultFilePath}`). Для Revit AddIn `args[2]` всегда `WORKER`, реальная команда берётся из `TaskFile.commandText`. **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile (см. эталон §CLI Arguments).
+3. Для Revit Worker запускает `Revit.exe` без контрактных CLI-аргументов и задаёт `REVITBIMFUSION_TASK_FILE` в `ProcessStartInfo.Environment`. AddIn читает путь в `OnStartup` и запускает handler один раз из `Idling`. **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile.
 4. Исполнитель читает task-файл, выполняет команду, пишет `result_{projectName}_{commandId}.xml` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
 5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
    - `status="done"` → `Done`
    - `status="failed"` → `HandleFailureAsync` (retry/error classification); `errorMessage` в лог, `errorDetails` в Debug-лог
    - `status="cancelled"` → permanent `Failed` без retry
    - Битый XML / unreadable / неизвестный status → rename в `.bad` → `HandleFailureAsync`
-   - result XML отсутствует — fallback по exit code: `0` = `Done`, иначе `HandleFailureAsync`
+   - result XML отсутствует — для Revit это ошибка независимо от exit code; console/wrapper-команды используют fallback `0` = `Done`
 6. Файлы текущей попытки очищаются в `finally` блока `ProcessRunner.RunAsync()` (через `CommandPreparer.CleanupTempFiles`)
 
-Исполнитель должен записать result-файл и завершиться с exit code `0` при успехе. Если result-файл не найден — Worker использует fallback по exit code.
+Revit AddIn обязан записать result-файл; чистый exit code не считается результатом. Fallback по exit code остаётся только для console/wrapper-команд.
 
-#### Command-line arguments
+#### Revit startup handoff
 
-Плагин получает аргументы командной строки (шаблон `ArgumentsTemplate` в `appsettings.json`):
+Worker запускает `Revit.exe` без контрактных аргументов и передаёт TaskFile в environment дочернего процесса:
 
-```
-Revit.exe /command "WORKER" "C:\Temp\task_building_42.xml"
+```text
+REVITBIMFUSION_TASK_FILE=C:\...\task_building_42.xml
 ```
 
 Доступные плейсхолдеры:
 | Плейсхолдер | Описание |
 |-------------|----------|
-| `{CommandText}` | Тип экспорта для console/wrapper-команд; для Revit AddIn не используется как dispatcher |
+| `{CommandText}` | Тип экспорта для console/wrapper-команд |
 | `{FilePath}` | Полный путь к исходному файлу |
 | `{CommandId}` | ID команды в БД |
 | `{TaskFilePath}` | Полный путь к `task_{projectName}_{commandId}.xml` |
 | `{ResultFilePath}` | Полный путь к `result_{projectName}_{commandId}.xml` |
 
-**Рекомендуемый подход:** плагин должен читать task-файл, а не полагаться только на аргументы командной строки — XML содержит полную структурированную информацию.
+Плейсхолдеры применяются только к console/wrapper-командам. У Revit-команд `ArgumentsTemplate` пустой.
 
-> Имя файла — `task_{projectName}_{commandId}.xml`, без attempt-токена (1:1 с эталоном RevitBIMFusion). Retry одной команды перезаписывает файл предыдущей попытки; принятый trade-off ради совпадения имени с эталоном (AddIn имя файла не парсит, путь читает из `args[3]`).
+> Имя файла — `task_{projectName}_{commandId}.xml`, без attempt-токена. Retry одной команды перезаписывает файл предыдущей попытки; AddIn имя не парсит, путь получает из environment.
 
 #### Revit without AddIn (broken flow):
 
@@ -332,13 +332,13 @@ Worker → Revit.exe opens as GUI
          3 hours later → Worker kills it → Command timed out → Failed
 ```
 
-`DialogDismisser` только закрывает известные модальные окна Revit/Navisworks. Без Revit AddIn Revit не знает что делать с `/command` и просто открывается GUI, игнорируя аргументы.
+`DialogDismisser` только закрывает известные модальные окна Revit/Navisworks. Без RevitBIMFusion AddIn environment handoff никто не прочитает, и Revit останется открытым до timeout.
 
 #### Other command types:
 
 | Type | Executable | stdout/stderr | Result mechanism |
 |------|-----------|---------------|------------------|
-| PDF, DWG, IFC, BIMDOC, NWC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile + ResultFile XML exchange |
+| PDF, DWG, NWC, DATA, IFC, BIMDOC | `Revit.exe` + Revit AddIn | **No** — GUI app | TaskFile через environment + ResultFile XML; IFC/BIMDOC пока unsupported |
 | CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
 | AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task`/`--result`, fallback to exit code |
 
@@ -364,8 +364,8 @@ All constants are located in `TelegramBot.Core/Constants/`. Use these instead of
 
 | File | Purpose | Key Constants |
 |------|---------|---------------|
-| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `StatusPage`, `CommandsPage`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
-| `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |
+| `CallbackPrefixes.cs` | Inline keyboard callback prefixes | `GoToParent`, `File`, `Pdf`/`Dwg`/`Nwc`/`Data`/`Ifc`/`BimDoc`/`ClashRep`/`AutoRes`, `SessionDetails`, `DeleteSession`, `DeleteCommand`, `ConfirmDeleteSession`, `ConfirmDeleteCommand`, `DeleteSessionByType`, `ConfirmDeleteSessionByType`, `RequestAccess`, `ApproveUser`, `RejectUser`, `StatusFilter`, `StatusPage`, `CommandsPage`, `SelectAllSectionFolders`, `ApplyCommands`, `CancelCommandSelection` |
+| `CommandCodes.cs` | Export command identifiers | `Pdf`, `Dwg`, `Nwc`, `Data`, `Ifc`, `BimDoc`, `ClashRep`, `AutoRes` |
 | `Statuses.cs` | Entity statuses (commands/sessions) | `Pending`, `Processing`, `Done`, `Failed`, `Deleted`, `FinalStatuses` (set), `ActiveStatuses` (set) |
 | `CommandPriorities.cs` | Worker queue priority levels | `Critical`=1, `High`=2, `Medium`=3, `Low`=4, `Default`=5 |
 | `ButtonTexts.cs` | Reply keyboard button labels | `Apply` ("✅ Применить"), `Confirm` ("✅ Подтвердить"), `Cancel` ("❌ Отмена") |
@@ -464,7 +464,7 @@ Handler hierarchy (порядок не имеет значения — выбо�
 - `AccessRequestHandler` — `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:`
 - `FileNavigationHandler` — `GOTOPARENT:`
 - `FileSelectionHandler` — `FILE:`, `SELECTALLSECTIONS:`
-- `CommandToggleHandler` — `PDF:`, `DWG:`, `IFC:`, `BIMDOC:`, `NWC:`, `CLASHREP:`, `AUTORES:`
+- `CommandToggleHandler` — `PDF:`, `DWG:`, `NWC:`, `DATA:`, `IFC:`, `BIMDOC:`, `CLASHREP:`, `AUTORES:`
 - `CommandSelectionHandler` — `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:`
 - `SessionManagementHandler` — `SESSIONDETAILS:`, `DELETESESSION:`, `DELETECOMMAND:`, `CONFIRMDELETESESSION:`, `CONFIRMDELETECOMMAND:`, `DELETESESSIONBYTYPE:`, `CONFIRMDELETESESSIONBYTYPE:`, `STATUSFILTER:`, `STATUSPAGE:`, `CMDPAGE:`
 

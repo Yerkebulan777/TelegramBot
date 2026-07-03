@@ -19,7 +19,7 @@ Telegram-бот для навигации по файловой системе �
 .NET 10 background service с long-polling, PostgreSQL-очередью и отдельным Worker для выполнения BIM/AI-задач. Доступные функции:
 
 - Навигация по файловой системе через inline-клавиатуры (проекты → разделы → файлы)
-- **Экспорт** (`/export`): `PDF`, `DWG`, `NWC`, `IFC`
+- **Экспорт** (`/export`): `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
 - **Автоматизация** (`/automation`): `BIMDOC` (BIM-документирование), `CLASHREP` (Clash Reports), `AUTORES` (AutoResolve)
 - Управление сессиями через `/status`: фильтры (Все / Активные / Завершённые / С ошибками), удаление сессий и отдельных команд
 - Уведомления о завершении сессий: Worker идемпотентно пишет событие в `NotificationOutbox`, `command_completed` будит Server, Server отправляет сводку и помечает событие отправленным
@@ -41,7 +41,7 @@ Telegram-бот для навигации по файловой системе �
 | Команда | Описание |
 |---------|----------|
 | `/start` | Регистрация, запрос доступа |
-| `/export` | Меню экспорта (`PDF`/`DWG`/`NWC`/`IFC`) |
+| `/export` | Меню экспорта (`PDF`/`DWG`/`NWC`/`DATA`/`IFC`) |
 | `/automation` | Меню автоматизации (`BIMDOC`/`CLASHREP`/`AUTORES`) |
 | `/status` | Просмотр и управление сессиями с фильтрами |
 | `/help` | Справка |
@@ -60,8 +60,8 @@ Worker запускает внешние исполнители и обмени�
 
 | Команды | Исполнитель | stdout/stderr | Важное |
 |---------|-------------|---------------|--------|
-| `PDF`, `DWG`, `IFC`, `BIMDOC` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Без AddIn Revit просто откроется как GUI и команда завершится таймаутом. Worker определяет версию файла через OLE-стрим `BasicFileInfo` (OpenMcdf) и ищет соответствующий `Revit.exe` в реестре Windows |
-| `NWC` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Экспорт NWC выполняется AddIn по `TaskFile.commandText`; CLI dispatcher всегда `WORKER` |
+| `PDF`, `DWG`, `NWC`, `DATA` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Worker передаёт TaskFile через `REVITBIMFUSION_TASK_FILE`; AddIn запускает экспорт один раз из `Idling`. `DATA` пишет SQLite в `06_DATA/<model>.db` |
+| `IFC`, `BIMDOC` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Зарезервированы, текущий AddIn возвращает `Unsupported command:` без retry |
 | `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
 | `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task` и писать `ResultFile` |
 
@@ -115,7 +115,7 @@ Worker запускает внешние исполнители и обмени�
 | `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
 | `Worker` | `LaunchStaggerSeconds` | Пауза между запусками внешних процессов (default `30`). Предотвращает коллизию devtools-порта CEF при параллельном старте Revit. `0` отключает |
 | `Worker` | `MaxConcurrentCommands` | Лимит параллельных команд (default `5`). Логические партиции файлов живут в БД (`Commands.Partition`). |
-| `Worker.Commands` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}` |
+| `Worker.Commands` | `PDF` / `DWG` / `NWC` / `DATA` / `IFC` / `BIMDOC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}`; у Revit-команд `ArgumentsTemplate` пустой |
 
 #### Как работает `Worker:MaxConcurrentCommands`
 
@@ -179,7 +179,7 @@ Worker обменивается XML (`task_*.xml` / `result_*.xml`) с CAD-пл�
 │   └── Worker\
 │       ├── BimLib\
 │       └── (Serilog-логи Worker)
-└── TaskDirectory\           ← task_{CommandId}_{token}.xml + result_{CommandId}_{token}.xml
+└── TaskDirectory\           ← task_{projectName}_{commandId}.xml + result_{projectName}_{commandId}.xml
 ```
 
 **Override** через опциональный параметр `FileSystem:TaskDirectory` (только Worker):
@@ -194,7 +194,7 @@ Worker обменивается XML (`task_*.xml` / `result_*.xml`) с CAD-пл�
 
 Если `TaskDirectory` не задан или `null` — используется дефолтный путь. Worker создаёт папку автоматически на старте; если создать не удалось — процесс падает с понятной ошибкой.
 
-**Важно:** BIM-плагин (Revit AddIn, Navisworks wrapper, python agent) должен писать result-файл по пути из task-файла (`resultFilePath`), а не по своему `Path.GetTempPath()` — иначе Worker не найдёт файл и отработает только по exit code. Полный контракт — в [Docs/BimPluginContract.md](Docs/BimPluginContract.md#расположение-файлов-taskdirectory).
+**Важно:** BIM-плагин (Revit AddIn, Navisworks wrapper, python agent) должен писать result-файл по пути из task-файла (`resultFilePath`), а не по своему `Path.GetTempPath()`. Для Revit отсутствие ResultFile всегда считается ошибкой; fallback по exit code остаётся только у console/wrapper-команд. Полный контракт — в [Docs/BimPluginContract.md](Docs/BimPluginContract.md#taskdirectory).
 
 Полный список параметров — `appsettings.json` в проектах Server и Worker.
 

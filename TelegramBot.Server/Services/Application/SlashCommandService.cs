@@ -34,6 +34,7 @@ public sealed partial class SlashCommandService(
             ["PDF"] = CommandPriorities.Critical,
             ["DWG"] = CommandPriorities.High,
             ["NWC"] = CommandPriorities.Medium,
+            ["DATA"] = CommandPriorities.Medium,
             ["IFC"] = CommandPriorities.Medium,
             ["BIMDOC"] = CommandPriorities.Medium,
             ["CLASHREP"] = CommandPriorities.Medium,

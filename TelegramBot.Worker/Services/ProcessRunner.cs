@@ -106,8 +106,7 @@ public sealed class ProcessRunner(
     private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
         // Создаём task-файл для CAD-плагина перед запуском процесса.
-        // Если запись не удалась — AddIn не получит filePath (контракт BimPluginContract §CLI Arguments
-        // запрещает передачу .rvt-пути в CLI args), и команда гарантированно упадёт. Fail-fast
+        // Если запись не удалась — AddIn не получит filePath, и команда гарантированно упадёт. Fail-fast
         // с IOException, чтобы ErrorClassifier пометил это как permanent failure без retry:
         // проблема инфраструктурная (TaskDirectory недоступен/переполнен/заблокирован антивирусом),
         // повторная попытка ничего не даст.
@@ -282,20 +281,13 @@ public sealed class ProcessRunner(
             return;
         }
 
-        // Fallback: exit code (для команд без плагина, который пишет result-файл)
-        if (process.ExitCode == 0)
+        // Fallback по exit code допустим только для console/wrapper-команд.
+        // Revit AddIn обязан писать ResultFile: чистый exit code без результата не доказывает выполнение.
+        if (process.ExitCode == 0 && !CommandPreparer.IsRevitCommand(cmd.CommandText))
         {
-            // Процесс завершился с кодом 0, но result-файл не был найден и не распарсен.
-            // Это типичный симптом нарушения контракта BimPlugin со стороны AddIn: он
-            // получил CLI args, но TaskFilePathResolver не нашёл task-файл по строгому layout:
-            // args[1] == /command, args[2] == WORKER, args[3] == task-файл. Например,
-            // если Worker передал commandText вместо WORKER, AddIn считает argv malformed и
-            // вернул Result.Cancelled без записи ResultFile. Логируем громко с
-            // подсказкой — это ускоряет диагностику, когда плагин «молча» падает.
             logger.LogWarning(
                 "Process exited cleanly (exitCode=0) but no result file was written for command {Id} (correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}). " +
-                "Possible causes: AddIn's TaskFilePathResolver did not match the CLI args layout, or AddIn wrote ResultFile to a different path. " +
-                "Verify the AddIn version matches the ArgumentsTemplate in appsettings.json.",
+                "The command does not require the Revit ResultFile contract, falling back to exit code.",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);
 
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
@@ -305,7 +297,9 @@ public sealed class ProcessRunner(
         }
         else
         {
-            var errorMessage = $"Process exited with code {process.ExitCode}";
+            var errorMessage = process.ExitCode == 0
+                ? "Revit exited without writing the required ResultFile"
+                : $"Process exited with code {process.ExitCode}";
             logger.LogWarning("Command exit: id={Id}, correlationId={CorrelationId}, command={Cmd}, exitCode={ExitCode}, elapsedMs={ElapsedMs}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, FormatExitCode(process.ExitCode), sw.ElapsedMilliseconds);
 
@@ -352,8 +346,7 @@ public sealed class ProcessRunner(
             using var stream = File.OpenRead(path);
             result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
 
-            // Status — enum (Done/Failed/Cancelled). required поле → если десериализация прошла, status всегда валиден.
-            if (Enum.IsDefined(result.Status))
+            if (result.Status is ResultStatus.Done or ResultStatus.Failed or ResultStatus.Cancelled)
             {
                 // Удаляем ТОЛЬКО после успешного парсинга
                 File.Delete(path);

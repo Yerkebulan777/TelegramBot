@@ -7,6 +7,9 @@ namespace TelegramBot.Core.Models;
 /// </summary>
 public enum ResultStatus
 {
+    /// <summary>Внутренний sentinel для отсутствующего обязательного XML-элемента status.</summary>
+    Unknown,
+
     /// <summary>Команда выполнена успешно.</summary>
     [XmlEnum("done")]
     Done,
@@ -21,7 +24,7 @@ public enum ResultStatus
 }
 
 /// <summary>
-/// Результат от BIM-плагина. Плагин пишет <c>result_{CommandId}_{AttemptToken}.xml</c> в TaskDirectory.
+/// Результат от BIM-плагина. Плагин пишет <c>result_{projectName}_{commandId}.xml</c> в TaskDirectory.
 /// Worker читает после завершения процесса. Если файла нет — статус определяется по exit code.
 /// </summary>
 /// <remarks>

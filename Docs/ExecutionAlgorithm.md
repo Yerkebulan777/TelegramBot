@@ -143,7 +143,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 |---------|-----|----------|
 | `CommandId` | `SERIAL PK` | |
 | `SessionId` | `INTEGER NOT NULL` | FK на `Sessions` |
-| `CommandText` | `TEXT NOT NULL` | `PDF` / `DWG` / `IFC` / `BIMDOC` / `NWC` / `CLASHREP` / `AUTORES` |
+| `CommandText` | `TEXT NOT NULL` | `PDF` / `DWG` / `NWC` / `DATA` / `IFC` / `BIMDOC` / `CLASHREP` / `AUTORES` |
 | `FilePath` | `TEXT` | Полный путь к исходному файлу |
 | `ExecutionOrder` | `INTEGER NOT NULL` | Порядок в батче (1..N) |
 | `Status` | `TEXT NOT NULL DEFAULT 'pending'` | |
@@ -593,19 +593,20 @@ ORDER BY s.CreatedAt DESC;
 2. `CommandPreparer.CreateTaskFile()` создаёт `task_{projectName}_{commandId}.xml` (atomic write `.tmp` →
    `File.Move`; перед Move — runtime XSD-валидация через `TaskFileValidator` из embedded
    `Schemas/TaskFile.schema.xsd`).
-3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в
-   `ArgumentsTemplate`. Для Revit AddIn шаблон должен быть `/command "WORKER" "{TaskFilePath}"`; реальная
-   команда остаётся в `TaskFile.commandText`.
+3. Для Revit `CommandPreparer.CreateProcessStartInfo()` оставляет arguments пустыми и записывает абсолютный
+   TaskFile path в process-scoped `REVITBIMFUSION_TASK_FILE`. AddIn читает его в `OnStartup`, подписывает
+   one-shot `Idling` и запускает handler на Revit UI thread. Реальная команда остаётся в `TaskFile.commandText`.
 4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает
    `result_{projectName}_{commandId}.xml`. Имя без attempt-токена — retry перезаписывает файл предыдущей
    попытки (1:1 с эталоном RevitBIMFusion).
-5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл существует, но не
+5. Если Revit result-файл отсутствует, попытка считается ошибочной независимо от exit code. Fallback по exit
+   code остаётся только для console/wrapper-команд. Если result-файл существует, но не
    читается или содержит битый XML, попытка считается ошибочной и проходит через `ErrorClassifier`
    (permanent → `Failed`, transient → `ScheduleRetry`). `status` — обязательное enum-поле
    (`done`/`failed`/`cancelled`), `cancelled` трактуется как permanent failure без retry.
 
-Revit требует установленный AddIn: `Revit.exe` сам не выполняет `/command`. RevitBIMFusion AddIn ожидает
-fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Navisworks/FileConvert
+Revit требует установленный AddIn: `Revit.exe` сам не выполняет BIM-команду. RevitBIMFusion AddIn ожидает
+TaskFile path в `REVITBIMFUSION_TASK_FILE`; CLI dispatcher не используется. Для Navisworks/FileConvert
 полноценный `TaskFile + ResultFile` контракт тоже требует обёртку или плагин; чистый `FileConvert.exe` может
 работать только через fallback по exit code.
 
@@ -626,9 +627,9 @@ fixed dispatcher `WORKER` в `args[2]` и task-файл в `args[3]`. Для Nav
    }
    ```
 
-   Если команда использует Revit AddIn — `ArgumentsTemplate` должен содержать
-   `WorkerOptions.RevitDispatcherCommand` (`"WORKER"`) как `args[2]`:
-   `/command \"WORKER\" \"{TaskFilePath}\"`
+   Если команда использует Revit AddIn — `ArgumentsTemplate` должен быть пустым. Добавьте код команды
+   в `CommandPreparer.IsRevitCommand`: Worker сам передаст TaskFile через
+   `WorkerOptions.RevitTaskFileEnvironmentVariable`.
 
 2. **Настроить приоритет** — добавить запись в `_commandPriorityMap` в `SlashCommandService.cs`. Если не
    добавить — `Priority=5` (`Default`).

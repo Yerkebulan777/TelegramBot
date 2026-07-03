@@ -19,8 +19,6 @@ public static class Program
 {
     public static async Task Main(string[]? args)
     {
-        // Нужно для CP1251 в CommandPreparer.CreateProcessStartInfo: native Win32/Chromium
-        // сообщения об ошибках на ru-RU Windows приходят в этой кодировке, не UTF-8.
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
         SerilogSetup.ConfigureBootstrapLogger("Worker");
@@ -51,7 +49,6 @@ public static class Program
                         .Validate(options => options.MaxConcurrentCommands > 0, "Worker:MaxConcurrentCommands must be greater than 0")
                         .Validate(options => options.Commands.Count > 0, "Worker:Commands must contain at least one command")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), "Worker:Commands executable paths are required")
-                        .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ArgumentsTemplate)), "Worker:Commands argument templates are required")
                         .ValidateOnStart();
 
                     _=services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
@@ -71,6 +68,7 @@ public static class Program
                     _=services.AddHostedService<CommandExecutionService>();
                     _=services.AddHostedService<SessionCleanupService>();
                 })
+
                 .UseSerilog((context, services, loggerConfiguration) =>
                 {
                     SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker");
@@ -92,6 +90,7 @@ public static class Program
             // Путь настраивается через FileSystem:TaskDirectory; по умолчанию %USERPROFILE%\Documents\TelegramBot\TaskDirectory.
             var fileSystemOptions = host.Services.GetRequiredService<IOptions<FileSystemOptions>>().Value;
             var taskDir = fileSystemOptions.GetEffectiveTaskDirectory();
+
             try
             {
                 _=Directory.CreateDirectory(taskDir);
