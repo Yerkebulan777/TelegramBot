@@ -1,13 +1,128 @@
 # Revit Crashes — `ACCESS_VIOLATION` при выполнении команд
 
-> **Статус:** 🔴 **Открыто.** Системный баг: 100% запусков Revit крашатся до открытия файла задания.
+> **Статус:** 🔴 **Открыто. Найдена настоящая причина (2026-07-02, вечер).**
+> Системный баг: 100% запусков Revit крашатся, потому что **AddIn-команда `WorkerCommand` никогда не вызывается**.
 > **Дата обнаружения:** 2026-07-02.
 > **Связанные документы:** [BimPluginContract.md](BimPluginContract.md) — контракт Worker ↔ Revit AddIn,
-> [CriticalReview.md](CriticalReview.md) — известные архитектурные риски.
+> [AGENTS.md](../AGENTS.md#accepted-design-constraints) — принятые архитектурные ограничения.
 
 ---
 
-## Симптомы
+## 🔴 НАСТОЯЩАЯ ПРИЧИНА (найдена 2026-07-02, вечер)
+
+**Revit не поддерживает запуск AddIn-команд через CLI-аргумент `/command`.** Worker запускает:
+
+```
+Revit.exe /command "WORKER" "C:\...\task_42_abc.xml"
+```
+
+Но Revit интерпретирует `/command "WORKER"` как **встроенную команду открытия файла**
+(`ID_REVIT_FILE_OPEN`) с именем файла "WORKER" — а НЕ как запуск AddIn-команды `WorkerCommand`.
+
+**Доказательство из журнала** `journal.0135.txt:1384` (краш команды 3908 от 20:52):
+
+```
+Jrn.Command "Internal", "Открытие существующего проекта, ID_REVIT_FILE_OPEN"
+Jrn.Data "File Name", "IDOK", "WORKER"        ← Revit пытается открыть файл "WORKER"
+```
+
+В журналах **ни разу** не встречается `Execute external command` для `WorkerCommand` —
+AddIn-команда физически не запускается.
+
+### Замкнутый круг (почему 100% failure)
+
+1. Worker запускает `Revit.exe /command "WORKER" "task.xml"`
+2. Revit **игнорирует** `/command` для маршрутизации на AddIn (это не документированный механизм) →
+   пытается открыть файл "WORKER"
+3. `WorkerCommand` никогда не вызывается → `TaskFilePathResolver.TryResolve`
+   (который читает `Environment.GetCommandLineArgs()`) никогда не выполняется
+4. AddIn не читает task-файл, не открывает `.rvt`, не пишет result-файл
+5. Revit завершается (worker-process "closed cleanly", но основной процесс падает на выходе) →
+   exit code `0xC0000005 ACCESS_VIOLATION`
+6. Worker видит `Result file not found` + exit ≠ 0 → классифицирует как transient failure → retry
+7. Цикл повторяется 5 раз → `Failed`
+
+Это объясняет **все** наблюдаемые симптомы:
+- 100% failure rate (команда никогда не выполняется)
+- `Result file not found` всегда (AddIn не запускается, чтобы написать результат)
+- Краш "до открытия файла" (путь к `.rvt` в task-файле никогда не читается)
+- Одинаковое поведение на Revit 2019 и 2023 (механизм `/command` не работает в обеих версиях)
+- ~30 сек работы процесса (старт → инициализация → попытка открыть "WORKER" → закрытие → краш)
+
+### Почему `/command` не может работать — подтверждение из манифеста
+
+`WorkerCommand` **не зарегистрирован** как `<AddIn Type="Command">` в файле
+`RevitBIMFusion/RevitBIMFusion.addin`. Манифест содержит **только** `<AddIn Type="Application">`
+(точка входа `RevitBIMFusion.Application`, `AddInId=18E159D5-...`).
+
+`WorkerCommand` существует только как класс в сборке и регистрируется как **PushButton в рантайме**
+через `RibbonPanelBuilder.Create` (`RevitBIMFusion/Infrastructure/Ui/RibbonPanelBuilder.cs:20-26`):
+```csharp
+var buttonData = new PushButtonData("Worker", " Worker ", assemblyLocation, typeof(WorkerCommand).FullName)
+```
+
+Revit-маршрутизация `/command <name>` требует **статической регистрации** команды в `.addin`-манифесте
+(или чтобы команда была встроенной Revit). Поскольку у Revit нет записи `Type="Command"` для WorkerCommand,
+у него нет к чему привязать `argv[2]="WORKER"` — и он трактует аргумент как путь к файлу.
+
+**Это снимает вопрос «почему `/command` не работает»** — он не может работать при текущем манифесте.
+Дока `Docs/BimPluginContract.md` утверждала, что `args[2]="WORKER"` «существует только чтобы удовлетворить
+выбор external-command в Revit API» — это допущение **неверно** и должно быть исправлено.
+
+### Почему предыдущие гипотезы не нашли причину
+
+- **Гипотеза 1 (DialogDismisser):** не при чём — DismissDialogs вообще не вызывается, т.к.
+  WorkerCommand не запускается.
+- **Гипотеза 2 (stagger):** не при чём — stagger влияет на параллельность, но одиночный запуск
+  тоже падает по той же причине.
+- **Гипотеза 3 (OnStartup crash):** **исправлена** (commit `641306b` в RevitBIMFusion), но это был
+  вторичный эффект — OnStartup падал от другой причины. После фикса OnStartup отрабатывает успешно
+  (журнал 0135:1358 показывает `Starting External Application: RevitBIMFusion ... API_SUCCESS`),
+  но краш всё равно есть, потому что команда не вызывается.
+- **Гипотеза 6 (контракт):** не при чём — контракт синхронизирован, но не используется.
+
+### Критическое техническое ограничение (найдено в исследовании 2026-07-02)
+
+Прежде чем проектировать исправление, важно понимать фундаментальное ограничение Revit API:
+
+- **`UIApplication.OpenAndActivateDocument` ЗАПРЕЩЁН в event handler** (ExternalEvent, Idling).
+  Бросает исключение `"This operation must be called from the external command"`. Подтверждено
+  Autodesk forum (обе попытки — ExternalEvent и Idling — дают одинаковую ошибку) и
+  [The Building Coder — Idling Enhancements and External Events](https://jeremytammik.github.io/tbc/a/0743_external_event.htm).
+
+- **`Application.OpenDocumentFile` (возвращает `Document`, НЕ `UIDocument`) РАЗРЕШЁН** в event handler.
+  `Document` достаточен для любого экспорта — это **ключевой обходной путь** для headless-сценария.
+  Источник: [pyRevit batch discussion](https://discourse.pyrevitlabs.io/t/batch-process-cli-documentation-outdated/9409).
+
+- Цитата мейнтейнера RevitBatchProcessor: **«Revit is not built for batch processing, so one might
+  expect it to crash and die if it is force fed too many files in a single session.»** — desktop
+  batch требует перезапуска процесса. Источник:
+  [RevitBatchProcessor Issue #51](https://github.com/bvn-architecture/RevitBatchProcessor/issues/51).
+
+### Как на самом деле нужно запускать AddIn-команды (оценка подходов)
+
+Revit **не имеет** прямого CLI-механизма для вызова AddIn-команд. Оценка рабочих подходов по данным
+исследования канонических источников (The Building Coder, Autodesk forum, RevitBatchProcessor):
+
+| Метод | Годен для open+export | Стабильность | Ключевое ограничение |
+|-------|----------------------|--------------|----------------------|
+| **ExternalEvent + `OpenDocumentFile`** | ✅ | Высокая | Заменить `OpenAndActivateDocument` → `OpenDocumentFile`; `Document` достаточен для экспорта |
+| **`ApplicationInitialized` + `OpenAndActivateDocument`** | ✅ | Средняя | Единственный event-контекст где Activate разрешён (см. [jeremytammik/OpenProject](https://github.com/jeremytammik/OpenProject)); только для "первый документ при старте" |
+| **`PostCommand` custom AddIn-команды** | ✅ | Средняя | Недокументированный custom-lookup; version drift; нужна задержка до полного старта UI |
+| **RBP-стиль: external controller + restart** | ✅ | Самая высокая локально | Сложнее; нужен IPC/controller-процесс ([RevitBatchProcessor](https://github.com/bvn-architecture/RevitBatchProcessor)) |
+| **Design Automation for Revit (APS/Forge)** | ✅ | Самая высокая (true headless) | Облако; перенос кода; per-WorkItem стоимость ([APS DA API](https://aps.autodesk.com/en/docs/design-automation/v3)) |
+| **Journal-replay** | Технически да | Низкая | Хрупкий формат; modal-диалоги и локализация ломают replay |
+
+> **⚠️ Важно:** ранние версии этого документа предлагали «Idle-handler в OnStartup, где открывается
+> документ через `OpenAndActivateDocument`» — **этот подход НЕ сработает**, т.к. Activate запрещён в
+> event-контексте (см. ограничение выше). Правильный путь — ExternalEvent + `OpenDocumentFile`.
+>
+> Все локальные подходы всё равно запускают Revit с UI — у Revit нет true headless-режима.
+> См. [Creating Pipelines of Information with Revit Headless](https://e-verse.com/learn/revit-headless-in-the-pursuit-of-the-mythological-beast/).
+
+---
+
+## Симптомы (историческая справка)
 
 Worker запускает Revit (`Revit.exe /command "WORKER" <task-file.xml>`) для выполнения экспортных
 команд (`PDF`, `DWG`, `IFC`, `BIMDOC`, `NWC`). Процесс падает с кодом:
@@ -334,23 +449,105 @@ Network License Manager может отказывать в лицензии → 
 **Стоимость:** Средняя (нужен пересбор + redeploy AddIn в RevitBIMFusion-репозитории), но это
 **самое прямое исправление** найденной причины.
 
+### Метод H: Переработать механизм запуска AddIn-команды ⭐⭐ _ГЛАВНОЕ ИСПРАВЛЕНИЕ_
+
+**Что:** Корневая проблема — Revit не маршрутизирует `/command "WORKER"` на AddIn-команду
+(команда не зарегистрирована в `.addin`-манифесте как `Type="Command"`, см. секцию
+«Почему `/command` не может работать»). Нужно отказаться от CLI-маршрутизации и запускать
+логику экспорта программно.
+
+**Рекомендуемый вариант — ExternalEvent + `OpenDocumentFile` (минимальное изменение):**
+
+В `RevitBIMFusion/Application.cs` (`OnStartup`) проверять `Environment.GetCommandLineArgs()` на
+headless-запрос. Если найдено — не создавать Ribbon, а вместо этого:
+1. Создать `ExternalEvent.Create(handler)` где `handler: IExternalEventHandler`
+2. Вызвать `externalEvent.Raise()` — Revit диспетчирует handler в valid API context
+3. В `handler.Execute(UIApplication)`:
+   - Прочитать task-файл (`TaskFilePathResolver.TryResolve`)
+   - Открыть `.rvt` через **`application.Application.OpenDocumentFile(modelPath)`** (возвращает
+     `Document`, **НЕ** `OpenAndActivateDocument` — он запрещён в event-контексте)
+   - Выполнить экспорт через `TaskExecutor` (потребует адаптации под `Document` вместо `UIDocument`)
+   - Записать result-файл
+   - Закрыть документ и выйти из Revit (`RevitFileHelper.CloseRevitApplication` / `Process.Kill`)
+
+**Почему именно `OpenDocumentFile`, а не `OpenAndActivateDocument`:**
+`OpenAndActivateDocument` бросает исключение `"This operation must be called from the external
+command"` при вызове из event handler (ExternalEvent/Idling) — подтверждено Autodesk forum и
+[The Building Coder](https://jeremytammik.github.io/tbc/a/0743_external_event.htm).
+`OpenDocumentFile` возвращает `Document` (без UI-активации), и этого достаточно для экспорта —
+`ExportCoordinator` работает с `Document`, а не с UI. Источник обходного пути:
+[pyRevit batch discussion](https://discourse.pyrevitlabs.io/t/batch-process-cli-documentation-outdated/9409).
+
+```csharp
+// Псевдокод для Application.OnStartup (RevitBIMFusion)
+public override void OnStartup()
+{
+    TryRun("AssemblyResolver.Install", AssemblyResolver.Install);
+    TryRun("LogManager.ResolveLogger", () => _ = LogManager.ResolveLogger());
+    TryRun("AppServices.Initialize", AppServices.Initialize);
+
+    if (TaskFilePathResolver.IsHeadlessLaunch())
+    {
+        // Headless: ExternalEvent, БЕЗ Ribbon
+        _headlessEvent = ExternalEvent.Create(new HeadlessWorkerHandler());
+        _ = _headlessEvent.Raise();
+        return;
+    }
+
+    TryRun("RibbonPanelBuilder.Create", () => RibbonPanelBuilder.Create(Application));
+    TaskScheduler.UnobservedTaskException += LogUnobservedTaskException;
+}
+```
+
+**Альтернатива 1 — `ApplicationInitialized` + `OpenAndActivateDocument`:**
+Подписаться на `application.ApplicationInitialized` (единственный event-контекст, где Activate
+разрешён — см. [jeremytammik/OpenProject](https://github.com/jeremytammik/OpenProject)). Подходит
+только для "первый документ при старте", не для перебора файлов в одном сеансе.
+
+**Альтернатива 2 — RBP-стиль для batch (самая стабильная архитектура):**
+Внешний controller-процесс запускает `Revit.exe` per-file (или per-N-files), мониторит PID,
+рестартует при сбое. Revit нестабилен при batch — цитата мейнтейнера RevitBatchProcessor:
+«Revit is not built for batch processing». Источник:
+[RevitBatchProcessor](https://github.com/bvn-architecture/RevitBatchProcessor),
+[Building Coder обзор](https://jeremytammik.github.io/tbc/a/1801_revit_batch_processor.html).
+
+**Альтернатива 3 — Design Automation for Revit (APS/Forge):**
+Единственный true-headless Revit (без UI, облачный). Требует переупаковки AddIn под DA.
+Источник: [APS DA API](https://aps.autodesk.com/en/docs/design-automation/v3).
+
+**Цель:** Сделать так, чтобы логика экспорта **реально выполнялась** при запуске Revit из Worker.
+После этого контракт `TaskFile`/`ResultFile` начнёт работать как задумано.
+
+**Стоимость:**
+- **ExternalEvent + `OpenDocumentFile`** (рекомендуется как первый шаг): средняя. Изменения в
+  `RevitBIMFusion` — `Application.cs` + адаптация `TaskExecutor` под `Document` вместо `UIDocument`
+  (проверить, что `ExportCoordinator` не требует `UIDocument`). Worker-side не меняется.
+- **RBP-стиль**: высокая. Нужен внешний controller-процесс + IPC + restart-логика.
+
+> ⚠️ **Это исправление в репозитории `RevitBIMFusion`**. TelegramBot.Worker меняется минимально
+> (или не меняется вообще — он уже передаёт корректные аргументы, проблема только в маршрутизации).
+
 ---
 
 ## Рекомендуемый порядок диагностики
 
-1. **Сначала** — убедиться, что `DialogDismisser:Enabled = false` (уже сделано) и прогнать
-   тестовый батч. Если краши продолжатся → Гипотеза 1 опровергнута.
-2. **Параллельно** — поставить `MaxConcurrentCommands = 1` (Метод A). Самый дешёвый эксперимент,
-   который сузит круг причин (параллельность vs одиночный запуск).
-3. **Ключевая диагностика (Гипотеза 3)** — проверить наличие лог-файла AddIn
-   `C:\Users\<user>\Documents\RevitBIMFusion\RevitBIMFusion.log`. Если **отсутствует** → OnStartup
-   падает до создания логгера (подтверждение Гипотезы 3). Запустить Revit **вручную** (без `/command`)
-   — если в ручном режиме лог создаётся и AddIn работает, то проблема именно в headless-режиме.
-4. **Если Гипотеза 3 подтверждена** → применить Метод G (исправить OnStartup в RevitBIMFusion).
-   Это наиболее вероятный путь исправления по данным расследования.
-5. **Параллельно с Методом G** — ручной запуск Revit с теми же аргументами (Метод D, шаг 1) для
-   воспроизведения вне Worker.
-6. **Если** ни один Quick-Win не помог — переходить к архитектурным изменениям (Метод E).
+1. **✅ ГЛАВНАЯ ПРИЧИНА НАЙДЕНА (2026-07-02, вечер):** `WorkerCommand` не зарегистрирован в
+   `.addin`-манифесте как `Type="Command"`, поэтому Revit не маршрутизирует `/command "WORKER"`
+   на AddIn-команду и трактует аргумент как имя файла (см. «НАСТОЯЩАЯ ПРИЧИНА» в начале документа).
+   Применить **Метод H** — это единственное исправление, которое реально починит выполнение команд.
+2. **✅ Исправлено (commit `641306b`):** OnStartup в RevitBIMFusion больше не роняет Revit при
+   ошибках инициализации (Метод G). Это был вторичный эффект, но исправление полезно само по себе.
+3. **✅ Проверено и исключено:** DialogDismisser (Г1), stagger (Г2), контракт (Г6) — не причины.
+4. **Реализация Метода H — рекомендуемый путь:** ExternalEvent + `OpenDocumentFile` в `OnStartup`.
+   **Важно:** `OpenAndActivateDocument` из event-контекста запрещён (бросает исключение) — поэтому
+   `TaskExecutor` нужно адаптировать под `Document` вместо `UIDocument`. Альтернатива для batch —
+   архитектура RevitBatchProcessor (controller + restart).
+5. **После Метода H** — проверить, что логика экспорта реально выполняется: в журнале Revit должна
+   появиться запись об открытии `.rvt`-файла и экспорте, в `Documents\RevitBIMFusion\` должен
+   появиться лог-файл AddIn, а Worker должен получить `ResultFile` со `status=done`.
+6. **Если после Метода H краши продолжатся** — следующий suspect: нативные вызовы в
+   `TaskExecutor.Execute` (`OpenDocumentFile`, `LinkHelper`, PDF-экспортёр). Но это уже будет
+   "нормальный" краш выполнения команды, а не краш инициализации/маршрутизации.
 
 ---
 
@@ -360,23 +557,22 @@ Network License Manager может отказывать в лицензии → 
 
 | Файл | Роль |
 |------|------|
-| `TelegramBot.Worker/Services/ProcessRunner.cs` | `StartProcessAsync` — запуск Revit, `_launchGate`, stagger-задержка |
+| `TelegramBot.Worker/Services/ProcessRunner.cs` | `StartProcessAsync` — запуск Revit с `/command "WORKER" "{TaskFilePath}"`. **Сам запуск корректен** — проблема в том, что Revit не обрабатывает этот аргумент как запуск AddIn-команды. |
 | `TelegramBot.Worker/Services/CommandExecutionService.cs:252` | Вызов `dialogDismisser.DismissDialogsForProcess` в health-check-цикле |
 | `TelegramBot.Worker/BimLib/Monitor/DialogDismisser.cs:36` | `DismissDialogsForProcess` — ранний `return` при `Enabled=false` |
 | `TelegramBot.Worker/BimLib/Config/DialogDismisserOptions.cs` | `Enabled` toggle (по умолчанию `true`, сейчас `false` для тестов) |
 | `TelegramBot.Core/Config/WorkerOptions.cs:67` | `LaunchStaggerSeconds` (default 30) |
 | `TelegramBot.Worker/Services/CommandPreparer.cs` | `CreateTaskFile` — atomic write `task_{CommandId}_{AttemptToken}.xml` |
 
-### RevitBIMFusion AddIn (внешний репозиторий — главный suspect)
+### RevitBIMFusion AddIn (внешний репозиторий — где нужно исправление Метода H)
 
 | Файл | Роль |
 |------|------|
-| `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\RevitBIMFusion\Application.cs:12-26` | `OnStartup` — **главное место краша**: `RibbonPanelBuilder.Create` падает в headless-режиме, `catch` перебрасывает исключение |
-| `...\RevitBIMFusion\Infrastructure\Ui\RibbonPanelBuilder.cs:16-26` | `Create` — создание Ribbon-панели, падает без полного UI |
-| `...\WorkerBridge\Commands\WorkerCommandHandler.cs:23-41` | try/catch вокруг парсинга task-файла (безопасен, исключения перехватываются) |
+| `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\RevitBIMFusion\Application.cs` | `OnStartup` — **место для Метода H**: добавить проверку `IsHeadlessLaunch()` и idle-handler. OnStartup уже сделан устойчивым (commit `641306b`). |
+| `...\WorkerBridge\Services\TaskFilePathResolver.cs` | `IsHeadlessLaunch()` / `TryResolve()` — читает `Environment.GetCommandLineArgs()`, проверяет `/command WORKER`. **Сейчас вызывается только из `WorkerCommandHandler.Execute`, который никогда не запускается.** Нужно вызывать из idle-handler в OnStartup. |
+| `...\RevitBIMFusion\Infrastructure\Worker\TaskExecutor.cs` | `Execute` — открытие `.rvt` + экспорт. Должен вызываться из idle-handler. |
+| `...\WorkerBridge\Commands\WorkerCommandHandler.cs:23-41` | Логика выполнения (парсинг task-файла → `TaskExecutor.Execute` → result-файл). Эту логику нужно вынести в общий метод, вызываемый и из кнопки, и из idle-handler. |
 | `...\RevitBIMFusion.addin` | Манифест AddIn: `AddInId=18E159D5-...`, `FullClassName=RevitBIMFusion.Application` |
-| `C:\Users\y.zhumabayev\Documents\RevitBIMFusion\RevitBIMFusion.log` | Лог AddIn — **отсутствует** (диагностический признак краша в OnStartup) |
-| `%USERPROFILE%\AppData\Roaming\Autodesk\Revit\Addins\<year>\RevitBIMFusion\` | Deploy-цель сборки AddIn (проверить TFM: `net47` для R19, `net48` для R23) |
 
 ### Revit-журналы (для сопоставления с Worker-логом по времени)
 
