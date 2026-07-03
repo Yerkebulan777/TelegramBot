@@ -1,7 +1,5 @@
 using System.Diagnostics;
-using System.Text;
 using System.Xml.Serialization;
-using TelegramBot.Core.Constants;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Worker.Helpers;
@@ -183,8 +181,19 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             ElapsedMs = elapsedMs;
         }
 
-        public static CommandResult Success(long elapsedMs) => new(true, false, false, null, null, elapsedMs);
-        public static CommandResult Failure(string errorMessage, int? exitCode, long elapsedMs) => new(false, true, false, errorMessage, exitCode, elapsedMs);
-        public static CommandResult Cancelled(string errorMessage, long elapsedMs) => new(false, false, true, errorMessage, null, elapsedMs);
+        public static CommandResult Success(long elapsedMs)
+        {
+            return new(true, false, false, null, null, elapsedMs);
+        }
+
+        public static CommandResult Failure(string errorMessage, int? exitCode, long elapsedMs)
+        {
+            return new(false, true, false, errorMessage, exitCode, elapsedMs);
+        }
+
+        public static CommandResult Cancelled(string errorMessage, long elapsedMs)
+        {
+            return new(false, false, true, errorMessage, null, elapsedMs);
+        }
     }
 }

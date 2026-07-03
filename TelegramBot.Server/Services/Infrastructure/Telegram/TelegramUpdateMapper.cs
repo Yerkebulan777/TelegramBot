@@ -38,11 +38,8 @@ public class TelegramUpdateMapper
 
     public object? Map(Update update)
     {
-        if (update.Message?.Text != null && update.Message.From != null)
-        {
-            return MapMessage(update.Message);
-        }
-
-        return update.CallbackQuery != null ? MapCallback(update.CallbackQuery) : null;
+        return update.Message?.Text != null && update.Message.From != null
+            ? MapMessage(update.Message)
+            : update.CallbackQuery != null ? MapCallback(update.CallbackQuery) : null;
     }
 }

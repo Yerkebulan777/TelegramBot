@@ -31,10 +31,8 @@ public static class TaskFileValidator
 
         var errors = new List<string>();
         settings.ValidationEventHandler += (_, e) =>
-        {
             // Severity Error — нарушение контракта; Warning — напр. unmatched elements (не критично, но логируем).
             errors.Add($"{e.Severity}: {e.Message}");
-        };
 
         // Полностью читаем validating reader, чтобы сработали все validation-события.
         using var validatingReader = XmlReader.Create(reader, settings);
@@ -56,7 +54,7 @@ public static class TaskFileValidator
             ?? throw new InvalidOperationException("XmlSchema.Read returned null for TaskFile.schema.xsd");
 
         var set = new XmlSchemaSet();
-        set.Add(schema);
+        _=set.Add(schema);
         set.Compile();
         return set;
     }

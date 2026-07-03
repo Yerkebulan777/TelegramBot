@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
-using System.ComponentModel;
 using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;

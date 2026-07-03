@@ -121,8 +121,7 @@ public class SessionManager : IDisposable
         _cleanupCts.Cancel();
         _cleanupCts.Dispose();
         _cleanupTimer.Dispose();
-
-        foreach (var (userId, semaphore) in _sessionLocks)
+        foreach (var (_, semaphore) in _sessionLocks)
         {
             try { semaphore.Dispose(); }
             catch (ObjectDisposedException) { /* already disposed */ }

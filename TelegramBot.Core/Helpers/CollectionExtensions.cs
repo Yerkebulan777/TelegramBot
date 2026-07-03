@@ -16,16 +16,6 @@ public static class CollectionExtensions
         Func<TValue, bool> isIdlePredicate)
         where TKey : notnull
     {
-        if (!dictionary.TryGetValue(key, out var value))
-        {
-            return false;
-        }
-
-        if (!isIdlePredicate(value))
-        {
-            return false;
-        }
-
-        return dictionary.TryRemove(key, out _);
+        return dictionary.TryGetValue(key, out var value)&&isIdlePredicate(value)&&dictionary.TryRemove(key, out _);
     }
 }

@@ -19,7 +19,10 @@ public class UserSession
 
     public IReadOnlyList<string> PendingCommandName => _pendingCommandName;
 
-    public IReadOnlySet<string> GetSelectedFiles() => _selectedFiles;
+    public IReadOnlySet<string> GetSelectedFiles()
+    {
+        return _selectedFiles;
+    }
 
     /// <summary>Текущий фильтр в /status: ALL, ACTIVE, DONE, FAILED.</summary>
     public string StatusFilter { get; set; } = "ALL";
