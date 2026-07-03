@@ -68,7 +68,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      - `CommandPreparer.PrepareAsync` — валидация FilePath (path traversal, reparse-point, extension, root
        containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`,
        `NavisworksPathResolver`)
-     - `CreateTaskFile` — atomic write `task_{CommandId}_{attemptToken}.xml` (`.tmp` → `File.Move`)
+     - `CreateTaskFile` — atomic write `task_{CommandId}_{attemptToken}.xml` (`.tmp` → `File.Move`); перед Move — runtime XSD-валидация через `TaskFileValidator` (embedded `Schemas/TaskFile.schema.xsd`); abort при drift модель↔XSD
      - `StartProcessAsync` — захват `_launchGate` (SemaphoreSlim 1/1) → `Process.Start` → регистрация в
        `_activeProcesses` (ДО stagger-задержки, чтобы health-check и shutdown видели процесс) →
        `Task.Delay(LaunchStaggerSeconds)` с `CancellationToken.None` (gate освобождается даже при shutdown)
@@ -93,7 +93,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      (`CompletionNotified=TRUE`, `NotificationOutbox` insert,
      `pg_notify('command_completed', SessionId|CorrelationId)` если первый раз)
 7. Server: `CommandNotificationService.OnNotificationReceived` (sync handler) → wake-up в
-   `Channel<NotificationItem>` → `NotificationSenderService` claim'ит pending outbox-записи, отправляет
+   `Channel<NotificationItem>` → `NotificationSenderService` (под session-level advisory lock `1234569`
+   для single-writer между репликами) claim'ит pending outbox-записи, отправляет
    `SendMessageAsync` (project + counts + duration + failed files), затем помечает outbox-запись `sent`
 
 ---
@@ -348,9 +349,12 @@ FROM (SELECT COUNT(*) FROM notified) force_notify;
 источник данных для текста уведомления — `SessionDataService.GetSessionCompletionSummaryAsync()`, который
 читает из БД пользователя, проект, total/done/failed, длительность и список failed-файлов.
 
-`NotificationSenderService` читает outbox при старте, по wake-up и периодически каждые 30 секунд. Claim
-использует `FOR UPDATE SKIP LOCKED` + `LockedUntil`; после успешного Telegram send запись помечается
-`sent`, после ошибки возвращается в `pending` с backoff.
+`NotificationSenderService` читает outbox при старте, по wake-up и периодически каждые 30 секунд. Drain
+обёрнут в **session-level advisory lock** (`pg_try_advisory_lock(1234569)` через
+`NotificationOutboxDataService.TryAcquireSenderLockAsync` → `SenderLockHolder`) для single-writer mutual
+exclusion между репликами Server; реплика, не получившая lock, пропускает цикл. Claim использует
+`FOR UPDATE SKIP LOCKED` + `LockedUntil`; после успешного Telegram send запись помечается `sent`, после
+ошибки возвращается в `pending` с backoff.
 
 ### Очистка истёкших Lease (crash recovery)
 
@@ -368,7 +372,9 @@ WHERE "Status" = 'processing'
 **Advisory lock:** `pg_try_advisory_lock(1234567)` (namespace `telegram_bot_lease_cleanup`) — предотвращает
 race между несколькими воркерами. Освобождается в `finally`. Для claim-запроса используется отдельный
 namespace: `pg_try_advisory_xact_lock(1234568, hashtext(Partition))` с транзакционной (xact) блокировкой,
-которая автоматически освобождается при коммите транзакции.
+которая автоматически освобождается при коммите транзакции. Для single-writer mutual exclusion при drain'е
+`NotificationOutbox` (Server-side, multi-instance) — `pg_try_advisory_lock(1234569)` (namespace
+`telegram_bot_outbox_sender`), session-level, удерживается через `SenderLockHolder` на весь drain-цикл.
 
 ### Schedule retry
 
@@ -567,7 +573,9 @@ ORDER BY s.CreatedAt DESC;
 Для Revit/Navisworks/AI-команд Worker использует один механизм:
 
 1. `ProcessRunner.RunAsync()` генерирует `AttemptToken` (GUID без дефисов).
-2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.xml` (atomic write).
+2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.xml` (atomic write `.tmp` →
+   `File.Move`; перед Move — runtime XSD-валидация через `TaskFileValidator` из embedded
+   `Schemas/TaskFile.schema.xsd`).
 3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в
    `ArgumentsTemplate`. Для Revit AddIn шаблон должен быть `/command "WORKER" "{TaskFilePath}"`; реальная
    команда остаётся в `TaskFile.commandText`.

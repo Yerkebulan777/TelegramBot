@@ -8,6 +8,7 @@ using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Worker.BimLib.Services;
+using TelegramBot.Worker.Schemas;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
@@ -346,6 +347,30 @@ public sealed class CommandPreparer(
             using (var writer = XmlWriter.Create(tmpPath, settings))
             {
                 TaskFileSerializer.Serialize(writer, task, EmptyXmlNamespaces);
+            }
+
+            // Runtime-валидация по XSD перед atomic Move: ловит drift между C#-моделью TaskFile
+            // и XML-контрактом (…\RevitBIMFusion\Docs\TaskFile.schema.xsd) до того, как файл
+            // попадёт к плагину. При ошибке — abort (команда упадёт на старте, а не в плагине).
+            List<string>? validationErrors = null;
+            using (var reader = XmlReader.Create(tmpPath))
+            {
+                validationErrors = TaskFileValidator.Validate(reader);
+            }
+
+            if (validationErrors.Count > 0)
+            {
+                try { File.Delete(tmpPath); }
+                catch (Exception delEx) when (delEx is IOException or UnauthorizedAccessException)
+                {
+                    logger.LogWarning(delEx, "Failed to delete invalid tmp task file '{TmpPath}'", tmpPath);
+                }
+
+                logger.LogError(
+                    "Task file XSD validation failed for command {Id} (correlationId={CorrelationId}, command={Cmd}). " +
+                    "Drift between C# model and XSD contract. Errors: {Errors}",
+                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, string.Join("; ", validationErrors));
+                return false;
             }
 
             File.Move(tmpPath, taskFilePath, overwrite: true);

@@ -158,6 +158,15 @@ Worker пишет task-файл как `{path}.tmp` → rename в целевой
 Worker после завершения попытки очищает `task_*.xml` и `result_*.xml`. Если result-файл невалиден, Worker
 переименовывает его в `.bad` для диагностики.
 
+## Runtime Validation
+
+Перед atomic rename Worker валидирует tmp-task-файл по XSD (`TaskFileValidator.Validate`, embedded-копия
+`Docs/TaskFile.schema.xsd` в `TelegramBot.Worker/Schemas/`). При расхождении C#-модели `TaskFile` и схемы
+(tmp не проходит валидацию) Worker **abort'ит** создание task-файла: команда завершается `Failed` на этапе
+старта, плагин не получает невалидный файл. Это ловит drift модель↔XSD в рантайме, а не только при сборке.
+Result-файл от плагина Worker парсит через `XmlSerializer` и при невалидном XML/`status` переименовывает в
+`.bad` (см. «Как Worker трактует ResultFile»).
+
 ## Как Worker трактует ResultFile
 
 | Условие | Статус команды |
