@@ -65,8 +65,6 @@ public static class DependencyInjectionExtensions
         _=services.AddSingleton<SlashCommandService>();
         _=services.AddSingleton<SessionsListRenderer>();
         _=services.AddSingleton<SessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
-        _=services.AddSingleton<MessageTrackingService>();
-
         return services;
     }
 

@@ -8,12 +8,11 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;
-using TelegramBot.Core.Services;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Interfaces;
 using TelegramBot.Server.Middleware;
+using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Application.Handlers;
-using TelegramBot.Server.Services.Application.Strategies;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 using Message = Telegram.Bot.Types.Message;
 
@@ -25,10 +24,6 @@ public sealed partial class SlashCommandService(
     KeyboardBuilder keyboardBuilder,
     AuthorizationMiddleware accessValidator,
     SessionsListRenderer sessionsListRenderer,
-    MessageTrackingService messageTrackingService,
-    CommandValidator commandValidator,
-    CommandStrategyResolver strategyResolver,
-    CommandExecutor commandExecutor,
     IOptions<FileSystemOptions> fileSystemOptions,
     IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger)
@@ -65,11 +60,56 @@ public sealed partial class SlashCommandService(
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
-        var context = await commandValidator.ValidateAsync(message, session, message.UserId, message.Text!, cancellationToken);
-        var strategy = strategyResolver.Resolve(context);
-        var result = await commandExecutor.ExecuteAsync(context, strategy, cancellationToken);
-        await SendSafeResponseAsync(context.ChatId, result.ResponseMessage, session);
-        await LogCommandExecutionAsync(context, strategy, result);
+        var userId = message.UserId;
+        var username = message.Username;
+        var rawText = message.Text!;
+        var command = NormalizeCommandText(rawText);
+
+        ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
+        logger.LogDebug("Command received: command={Command}, user={Username} ({UserId})", command, username, userId);
+
+        var access = await accessValidator.ValidateAsync(userId);
+        if (command == "/start" && !access.IsActive)
+        {
+            _ = await accessValidator.RefreshApprovedAdminUserAsync(userId, username, access.User);
+            access = await accessValidator.ValidateAsync(userId);
+        }
+
+        if (command != "/start" && !access.IsActive)
+        {
+            logger.LogWarning("Command rejected: command={Command}, user={Username} ({UserId}), reason=access_denied",
+                command, username, userId);
+            var chatId = message.ChatId == 0 ? userId : message.ChatId;
+            await SendSafeResponseAsync(chatId, "У вас нет доступа. Введите /start для запроса доступа.", session);
+            return;
+        }
+
+        if (command.StartsWith('/'))
+        {
+            await outputService.ClearChatHistoryAsync(userId, session);
+        }
+
+        if (command == "/start")
+        {
+            session.Reset(_options.RootPath);
+            if (access.IsActive)
+            {
+                await SendHelpMessageAsync(userId, session);
+            }
+            else
+            {
+                await SendRegistrationMessageAsync(userId, session);
+            }
+            return;
+        }
+
+        if (IsCommandSelectionAction(rawText) &&
+            await HandleCommandSelectionActionsAsync(userId, username, rawText, session, cancellationToken))
+        {
+            return;
+        }
+
+        await HandleSlashCommandAsync(command, message, session, username);
     }
 
     private async Task HandleSlashCommandAsync(string command, MessageDto message, UserSession session, string username)
@@ -396,6 +436,18 @@ public sealed partial class SlashCommandService(
         _=await TrackMessageAsync(outputService.SendMessageWithKeyboardAsync(userId,
             "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
             keyboard), session);
+    }
+
+    private async Task SendSafeResponseAsync(long chatId, string message, UserSession session)
+    {
+        try
+        {
+            _ = await TrackMessageAsync(outputService.SendMessageAsync(chatId, message), session);
+        }
+        catch (ApiRequestException ex)
+        {
+            logger.LogWarning(ex, "Failed to send command response to {ChatId}", chatId);
+        }
     }
 
     private async Task SendHelpMessageAsync(long userId, UserSession session)

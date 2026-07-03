@@ -4,6 +4,7 @@ using System.Xml.Serialization;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
+using TelegramBot.Worker.Helpers;
 
 namespace TelegramBot.Worker.Services;
 

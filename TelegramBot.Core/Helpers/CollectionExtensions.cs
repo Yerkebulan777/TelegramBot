@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace TelegramBot.Core.Helpers;
 
 /// <summary>

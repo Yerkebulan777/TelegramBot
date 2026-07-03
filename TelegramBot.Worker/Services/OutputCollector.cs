@@ -15,33 +15,9 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
     /// <summary>
     /// Настраивает обработчики stdout/stderr для процесса.
     /// </summary>
-    public (StringBuilder Output, StringBuilder Error, IDisposable Subscription) SetupProcessOutput(Process process)
+    public ProcessOutputCapture SetupProcessOutput(Process process)
     {
-        var outputBuilder = new StringBuilder(capacity: 1024);
-        var errorBuilder = new StringBuilder(capacity: 1024);
-        var outputTruncated = false;
-        var errorTruncated = false;
-
-        void OnOutputDataReceived(object? sender, DataReceivedEventArgs e)
-        {
-            if (e.Data != null)
-            {
-                outputBuilder.AppendBounded(e.Data, ref outputTruncated, MaxOutputChars);
-            }
-        }
-
-        void OnErrorDataReceived(object? sender, DataReceivedEventArgs e)
-        {
-            if (e.Data != null)
-            {
-                errorBuilder.AppendBounded(e.Data, ref errorTruncated, MaxOutputChars);
-            }
-        }
-
-        process.OutputDataReceived += OnOutputDataReceived;
-        process.ErrorDataReceived += OnErrorDataReceived;
-
-        return (outputBuilder, errorBuilder, new OutputSubscription(process, OnOutputDataReceived, OnErrorDataReceived));
+        return new ProcessOutputCapture(process);
     }
 
     /// <summary>
@@ -78,26 +54,47 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
             : builder.ToString(0, builder.Length);
     }
 
-    private sealed class OutputSubscription : IDisposable
+    public sealed class ProcessOutputCapture : IDisposable
     {
         private readonly Process _process;
-        private readonly DataReceivedEventHandler _outputHandler;
-        private readonly DataReceivedEventHandler _errorHandler;
+        private bool _outputTruncated;
+        private bool _errorTruncated;
         private bool _disposed;
 
-        public OutputSubscription(Process process, DataReceivedEventHandler outputHandler, DataReceivedEventHandler errorHandler)
+        public ProcessOutputCapture(Process process)
         {
             _process = process;
-            _outputHandler = outputHandler;
-            _errorHandler = errorHandler;
+            process.OutputDataReceived += OnOutputDataReceived;
+            process.ErrorDataReceived += OnErrorDataReceived;
+        }
+
+        public StringBuilder Output { get; } = new(capacity: 1024);
+        public StringBuilder Error { get; } = new(capacity: 1024);
+        public bool OutputTruncated => _outputTruncated;
+        public bool ErrorTruncated => _errorTruncated;
+
+        private void OnOutputDataReceived(object? sender, DataReceivedEventArgs e)
+        {
+            if (e.Data != null)
+            {
+                Output.AppendBounded(e.Data, ref _outputTruncated, MaxOutputChars);
+            }
+        }
+
+        private void OnErrorDataReceived(object? sender, DataReceivedEventArgs e)
+        {
+            if (e.Data != null)
+            {
+                Error.AppendBounded(e.Data, ref _errorTruncated, MaxOutputChars);
+            }
         }
 
         public void Dispose()
         {
             if (!_disposed)
             {
-                _process.OutputDataReceived -= _outputHandler;
-                _process.ErrorDataReceived -= _errorHandler;
+                _process.OutputDataReceived -= OnOutputDataReceived;
+                _process.ErrorDataReceived -= OnErrorDataReceived;
                 _disposed = true;
             }
         }

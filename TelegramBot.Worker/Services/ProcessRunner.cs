@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using TelegramBot.Core.Config;
+using TelegramBot.Core.Constants;
+using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Worker.Helpers;
@@ -14,6 +16,7 @@ namespace TelegramBot.Worker.Services;
 /// Делегирует специализированным сервисам: ProcessStarter, OutputCollector, ResultAnalyzer.
 /// </summary>
 public sealed class ProcessRunner(
+    CommandPreparer commandPreparer,
     ProcessStarter processStarter,
     OutputCollector outputCollector,
     ResultAnalyzer resultAnalyzer,
@@ -74,7 +77,7 @@ public sealed class ProcessRunner(
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             // Для исключения при запуске процесса передаём exitCode = null — классификация по типу исключения
-            await HandleFailureAsync(cmd, ex.Message, ex, sw);
+            await HandleFailureAsync(cmd, ex.Message, sw, ex: ex);
         }
         finally
         {
@@ -93,7 +96,7 @@ public sealed class ProcessRunner(
     /// <summary>Запускает процесс по конфигурации команды.</summary>
     private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
-        var process = await processStarter.StartAsync(cmd, ct);
+        var process = await processStarter.StartAsync(cmd, commandCfg, ct);
         _activeProcesses[cmd.CommandId] = process;
         await processStarter.UpdateProcessStatusAsync(cmd.CommandId, cmd.SessionId, cmd.CorrelationId, cmd.UserId, process.Id);
         return process;

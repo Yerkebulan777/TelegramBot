@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
+using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
@@ -22,15 +24,9 @@ public sealed class ProcessStarter(
     /// <summary>
     /// Запускает процесс и возвращает его экземпляр.
     /// </summary>
-    public async Task<Process> StartAsync(PendingCommand cmd, CancellationToken ct)
+    public async Task<Process> StartAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
-        var commandCfg = await commandPreparer.PrepareAsync(cmd, ct);
-        if (commandCfg == null)
-        {
-            return null!; // PrepareAsync уже записал Failed
-        }
-
-        var (taskFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        var (resultFilePath, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
         if (!commandPreparer.CreateTaskFile(cmd))
         {
             throw new IOException(
@@ -39,7 +35,6 @@ public sealed class ProcessStarter(
         }
 
         var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg);
-        var (resultFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
 
         logger.LogInformation("Command start: id={Id}, correlationId={CorrelationId}, command={Cmd}, attempt={Attempt}",
             cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
