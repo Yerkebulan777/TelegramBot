@@ -9,7 +9,6 @@ Guidance for agentic coding agents working in this repository.
 | [README.md](README.md) | Обзор проекта, запуск, конфигурация, команды бота |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Спецификация алгоритма выполнения команд, схема БД, SQL-запросы |
 | [Docs/BimPluginContract.md](Docs/BimPluginContract.md) | Контракт Revit AddIn, Navisworks/FileConvert и AI-исполнителей |
-| [Docs/CriticalReview.md](Docs/CriticalReview.md) | Статус критичных замечаний и остаточные риски |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | 🔴 Расследование крашей Revit (`ACCESS_VIOLATION`) — симптомы, гипотезы, методы исправления |
 | **AGENTS.md** (текущий файл) | Архитектура, BimLib, DI, code style, константы для AI-агентов |
 
@@ -106,7 +105,7 @@ Telegram API -> TelegramBotHostedService (long-polling, parallel processing)
 | Infrastructure | `KeyboardBuilder` | Inline- и reply-клавиатуры: секции, команды, фильтры `/status`, сессии |
 | Infrastructure | `FileSystemBrowser` | Навигация по `RootPath` → проекты → `01_PROJECT/<project>/<раздел>/` → `01_RVT/*.rvt` |
 | Infrastructure | `CommandNotificationService` | `BackgroundService`: слушает PostgreSQL `LISTEN command_completed` и `LISTEN session_started`; `session_started` ставит direct item в `Channel<NotificationItem>`, `command_completed` ставит wake-up для outbox drain |
-| Infrastructure | `NotificationSenderService` | `BackgroundService`: шлёт "⚙️ Задание запущено" из channel; completion-сводки читает из `NotificationOutbox` при старте, по wake-up и polling каждые 30 сек; после Telegram send помечает запись `sent` |
+| Infrastructure | `NotificationSenderService` | `BackgroundService`: шлёт "⚙️ Задание запущено" из channel; completion-сводки читает из `NotificationOutbox` при старте, по wake-up и polling каждые 30 сек; drain защищён **session-level advisory lock** (`pg_try_advisory_lock`, id `1_234_569`) для single-writer mutual exclusion между репликами Server; после Telegram send помечает запись `sent` |
 | Application | `CommandAppService` | Rate-limit → session creation → post-restart cleanup → `SlashCommandService` |
 | Application | `SlashCommandService` | Обработка `/start`/`/export`/`/automation`/`/status`/`/help`, кнопок `Apply`/`Confirm`/`Cancel`. Сканирует `01_RVT/*.rvt` через `RevitFileDeduplicator`, проверяет daily limit, вставляет сессию в БД. Показывает индикатор «печатает…» |
 | Application | `RevitFileDeduplicator` | Удаляет дубликаты RVT-файлов: exact-name dedup + grouping по первым 15 символам имени + numeric-token overlap (короткое имя выигрывает) |
@@ -193,7 +192,7 @@ services.AddSingleton<NavisworksPathResolver>();
 | Component | Role |
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `MarkProcessStartedAndNotifyOnceAsync` (ProcessId + idempotent `session_started` pg_notify), `ScheduleRetryAsync` (NextRetryAt + RetryCount), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
-| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER` (`WorkerOptions.RevitDispatcherCommand`), **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
+| `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`; **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd` перед Move — abort при drift модель↔XSD), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER` (`WorkerOptions.RevitDispatcherCommand`), **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
 | `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, пишет ProcessId и идемпотентно шлёт `session_started` через `MarkProcessStartedAndNotifyOnceAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый XML) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `OnCommandCompletedAsync`: `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
@@ -289,7 +288,7 @@ services.AddHostedService<SessionCleanupService>();
 
 **Алгоритм:**
 1. Worker генерирует `attemptToken` (GUID без дефисов) для каждой попытки
-2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.xml` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
+2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.xml` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`; перед Move — **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
 3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{TaskFilePath}`/`{ResultFilePath}`). Для Revit AddIn `args[2]` всегда `WORKER`, реальная команда берётся из `TaskFile.commandText`. **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile (см. эталон §CLI Arguments).
 4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.xml` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
 5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
@@ -353,6 +352,7 @@ Worker → Revit.exe opens as GUI
 | `ProcessHealthHelper` | `Worker/BimLib/Monitor/ProcessHealthHelper.cs` | `CheckHealth()` — проверка активных внешних процессов из `CommandExecutionService` |
 | `NpgsqlHelper` | `TelegramBot.Data/NpgsqlHelper.cs` | `CreateOpenConnectionAsync()` (public static) — для сервисов, не наследующих `DataAccessBase` (`CommandNotificationService`) |
 | `ErrorClassifier` | `TelegramBot.Worker/Services/ErrorClassifier.cs` | `IsPermanentFailure(message, exitCode, codes, exception)`: классификация ошибок → permanent (Failed без retry) vs transient (retry) |
+| `TaskFileValidator` | `TelegramBot.Worker/Schemas/TaskFileValidator.cs` | `Validate(XmlReader)` — runtime XSD-валидация task-файла (lazy `XmlSchemaSet` из embedded `Schemas/TaskFile.schema.xsd`); используется в `CommandPreparer.CreateTaskFile` |
 | `CommandPreparer.CleanupTempFiles` | `TelegramBot.Worker/Services/CommandPreparer.cs` | Best-effort удаление `task_{CommandId}_{token}.xml` и `result_{CommandId}_{token}.xml` для указанной попытки |
 | `DataAccessBase` | `TelegramBot.Data/DataAccessBase.cs` | Base-класс с protected `CreateOpenConnectionAsync()`, `DefaultConnectionString` |
 
@@ -404,7 +404,7 @@ CommandExecutionService (Worker)
             _commandSlots.WaitAsync(ct)
             ProcessRunner.RunAsync(cmd):
                 CommandPreparer.PrepareAsync (validation + BimLib path resolution + Config clone)
-                CreateTaskFile (atomic write)
+                CreateTaskFile (atomic write + XSD validation)
                 StartProcessAsync (process start + MarkProcessStartedAndNotifyOnceAsync → ProcessId + StartNotified + pg_notify('session_started'))
                 WaitAndHandleResultAsync (OutputDataReceived 64KB + TryReadResultFile):
                     status="done" → UpdateStatus=Done
@@ -496,7 +496,7 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutb
 
 **Sessions — soft-delete flow:** `SessionDataService.DeleteSessionAsync` (UserId/IsAdmin) → `Status = 'Deleted'` + soft-delete всех команд. `SoftDeleteInactiveSessionsOlderThanAsync` (cutoff timestamp) → `Status = 'Deleted'` для сессий без `pending`/`processing` команд + cascade soft-delete команд.
 
-**Durable completion notification:** `SessionDataService.NotifySessionCompletedOnceAsync(sessionId, correlationId)` → atomic `UPDATE Sessions SET CompletionNotified=TRUE WHERE SessionId=@Id AND CompletionNotified=FALSE AND Status!='Deleted' RETURNING SessionId` → `INSERT NotificationOutbox(EventType='session_completed')` → `pg_notify('command_completed', SessionId|CorrelationId)` wake-up. `NotificationSenderService` claim'ит outbox через `FOR UPDATE SKIP LOCKED`, отправляет Telegram summary и помечает `sent`; ошибки возвращают запись в `pending` с backoff.
+**Durable completion notification:** `SessionDataService.NotifySessionCompletedOnceAsync(sessionId, correlationId)` → atomic `UPDATE Sessions SET CompletionNotified=TRUE WHERE SessionId=@Id AND CompletionNotified=FALSE AND Status!='Deleted' RETURNING SessionId` → `INSERT NotificationOutbox(EventType='session_completed')` → `pg_notify('command_completed', SessionId|CorrelationId)` wake-up. `NotificationSenderService` claim'ит outbox через `FOR UPDATE SKIP LOCKED`, отправляет Telegram summary и помечает `sent`; ошибки возвращают запись в `pending` с backoff. Drain-цикл защищён **session-level advisory lock** (`pg_try_advisory_lock(1234569)` → `SenderLockHolder`) для single-writer mutual exclusion между репликами Server; `NotificationOutboxDataService.TryAcquireSenderLockAsync` возвращает держатель, удерживающий соединение до dispose.
 
 **Session completion summary:** `SessionDataService.GetSessionCompletionSummaryAsync` → UserId/Username/SessionId/CorrelationId/ProjectName + TotalFiles/DoneFiles/FailedFiles + `DurationSeconds = EXTRACT(EPOCH FROM (MAX(CompletedAt) - MIN(StartedAt)))` + `FailedFilePaths` (list).
 
@@ -691,11 +691,14 @@ Previously, linked CTS вызывал немедленное прерывани�
 
 ---
 
-## Residual architectural concerns
+## Accepted design constraints
 
-См. подробности в [Docs/CriticalReview.md](Docs/CriticalReview.md):
-- **At-least-once Telegram delivery boundary** — если Telegram send уже прошёл, но Server упал до `NotificationOutbox.Status='sent'`, summary может отправиться повторно после retry
-- **Single-Writer assumption на Server** — в multi-instance сценарии потребуется distributed lock или ownership для outbox sender'а
+Принятые as-is ограничения, не считающиеся дефектами (by-design):
+
+- **At-least-once Telegram delivery** — если `SendMessageAsync` прошёл, но Server упал до `NotificationOutbox.Status='sent'`, после restart сводка отправится повторно. Окно уязвимости — один HTTP round-trip. Telegram API не поддерживает exactly-once; preventing дубликатов потребовало бы distributed transaction (2PC) между Server и Telegram, что неоправданно для уведомлений. Дубликат сводки — не критичное событие (та же информация повторно).
+- **`outputFiles` — singular string** — поле `ResultFile.OutputFiles` названо во множественном числе, но является `string?`, а не массивом. Это соответствует каноническому контракту в `RevitBIMFusion/Docs/ResultFile.schema.xsd` и явно задокументировано в XML-doc модели. Переименование нарушило бы внешний контракт с плагином/схемой/парсерами.
+
+> Ранее отслеживались в `Docs/CriticalReview.md` (удалён). П.2 (single-writer Server) исправлен через PostgreSQL advisory lock в `NotificationSenderService`; п.3 (XSD-валидация TaskFile) исправлен через embedded-схему в `CommandPreparer`; п.5 (`Worker:Partitions`) переименован в `Worker:MaxConcurrentCommands`.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
