@@ -25,13 +25,13 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
     /// </summary>
     public void LogOutput(PendingCommand cmd, StringBuilder outputBuilder, StringBuilder errorBuilder, bool outputTruncated, bool errorTruncated)
     {
-        if (outputBuilder.Length > 0)
+        if (outputBuilder.Length > 0 && logger.IsEnabled(LogLevel.Debug))
         {
             var outputInfo = outputTruncated
                 ? $"{TruncateOutput(outputBuilder)} [TRUNCATED: 64KB limit reached]"
                 : TruncateOutput(outputBuilder);
 
-            logger.LogDebug("Output [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Output}",
+            logger.LogDebug("Process stdout: command={Cmd}, id={Id}, correlationId={CorrelationId}, truncated={Truncated}, output={Output}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, outputTruncated, outputInfo);
         }
 
@@ -41,7 +41,7 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
                 ? $"{TruncateOutput(errorBuilder)} [TRUNCATED: 64KB limit reached]"
                 : TruncateOutput(errorBuilder);
 
-            logger.LogWarning("Stderr [{Cmd} {Id} {CorrelationId}, truncated={Truncated}]: {Error}",
+            logger.LogWarning("Process stderr: command={Cmd}, id={Id}, correlationId={CorrelationId}, truncated={Truncated}, error={Error}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, errorTruncated, errorInfo);
         }
     }

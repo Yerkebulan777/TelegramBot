@@ -1,5 +1,7 @@
 # Repository Simplification Design
 
+> **Статус:** реализованный design snapshot. Текущая архитектура и оставшиеся компоненты описаны в `AGENTS.md`.
+
 ## Goal
 
 Apply every accepted ponytail audit simplification while preserving observable bot and worker behavior. `DialogDismisser`, its Win32/PInvoke support, and the process monitoring that invokes it remain unchanged.

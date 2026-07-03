@@ -1,5 +1,7 @@
 # Worker Simplification Design
 
+> **Статус:** исторический proposal. Частично superseded реализацией от 2026-07-03. Текущие компоненты и DI описаны в `AGENTS.md`; этот файл не является operational source of truth.
+
 ## Goal
 
 Make `TelegramBot.Worker` explicit and easy to follow while preserving its external behavior and BIM plugin contract.

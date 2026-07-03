@@ -225,7 +225,8 @@ public sealed partial class SlashCommandService(
             return;
         }
 
-        logger.LogDebug("User {Username} ({UserId}) confirmed command selection: [{Commands}], opening file browser", username, userId, string.Join(", ", session.PendingCommand));
+        logger.LogDebug("Command selection confirmed: user={Username} ({UserId}), count={Count}",
+            username, userId, session.PendingCommand.Count);
 
         await outputService.ClearChatHistoryAsync(userId, session);
 

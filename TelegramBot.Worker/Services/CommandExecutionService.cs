@@ -237,13 +237,6 @@ public sealed class CommandExecutionService(
                         "Process not responding: commandId={Id}, pid={Pid}, memoryMb={MemoryMb}, duration={Duration}",
                         commandId, process.Id, health.MemoryMb, health.Duration);
                 }
-                else if (health.Status == BimLib.Models.RevitProcessStatus.Healthy)
-                {
-                    logger.LogDebug(
-                        "Process healthy: commandId={Id}, pid={Pid}, memoryMb={MemoryMb}, duration={Duration}",
-                        commandId, process.Id, health.MemoryMb, health.Duration);
-                }
-
                 try
                 {
                     _ = dialogDismisser.DismissDialogsForProcess((uint)process.Id);
@@ -335,26 +328,8 @@ public sealed class CommandExecutionService(
 
     private void LogActiveProcessesOnShutdown()
     {
-        var activeSnapshot = processRunner.ActiveProcesses.ToList();
-
-        if (activeSnapshot.Count == 0)
-        {
-            logger.LogInformation("Worker shutdown: no active processes to handle");
-            return;
-        }
-
-        logger.LogInformation("Worker shutdown: killing {Count} active process(es)",
-            activeSnapshot.Count);
-
-        foreach (var (commandId, process) in activeSnapshot)
-        {
-            if (process.HasExited)
-            {
-                continue;
-            }
-
-            logger.LogInformation("Active process on shutdown: commandId={Id}, pid={Pid}", commandId, process.Id);
-        }
+        var activeCount = processRunner.ActiveProcesses.Count(item => !item.Value.HasExited);
+        logger.LogInformation("Worker shutdown: activeProcesses={Count}", activeCount);
     }
 
     private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName, CancellationToken shutdownToken, int timeoutSeconds)
@@ -463,9 +438,8 @@ public sealed class CommandExecutionService(
                 }
 
                 logger.LogInformation(
-                    "Worker batch claimed: count={Count}, correlationIds={CorrelationIds}",
-                    claimed.Count,
-                    string.Join(", ", claimed.Select(c => c.CorrelationId).Distinct()));
+                    "Commands claimed: count={Count}",
+                    claimed.Count);
 
                 foreach (var cmd in claimed)
                 {

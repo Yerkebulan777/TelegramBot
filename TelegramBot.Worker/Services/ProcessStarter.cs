@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
@@ -15,10 +13,8 @@ namespace TelegramBot.Worker.Services;
 public sealed class ProcessStarter(
     CommandPreparer commandPreparer,
     CommandDataService commandDataService,
-    IOptions<WorkerOptions> workerOptions,
     ILogger<ProcessStarter> logger)
 {
-    private readonly WorkerOptions _workerOptions = workerOptions.Value;
     private readonly SemaphoreSlim _launchGate = new(1, 1);
 
     /// <summary>
@@ -26,7 +22,7 @@ public sealed class ProcessStarter(
     /// </summary>
     public async Task<Process> StartAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
-        var (resultFilePath, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        var (_, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
         if (!commandPreparer.CreateTaskFile(cmd))
         {
             throw new IOException(
@@ -36,9 +32,6 @@ public sealed class ProcessStarter(
 
         var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg);
 
-        logger.LogInformation("Command start: id={Id}, correlationId={CorrelationId}, command={Cmd}, attempt={Attempt}",
-            cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
-
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         await _launchGate.WaitAsync(ct);
         try
@@ -46,8 +39,8 @@ public sealed class ProcessStarter(
             _ = process.Start();
 
             logger.LogInformation(
-                "External process start: id={Id}, correlationId={CorrelationId}, exe={ExecutablePath}, args={Arguments}, workingDirectory={WorkingDirectory}, taskFile={TaskFilePath}, expectedResultFile={ResultFilePath}",
-                cmd.CommandId, cmd.CorrelationId, startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory, taskFilePath, resultFilePath);
+                "Process started: command={Cmd}, id={Id}, correlationId={CorrelationId}, pid={Pid}, attempt={Attempt}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, process.Id, cmd.RetryCount + 1);
 
             return process;
         }
@@ -59,20 +52,6 @@ public sealed class ProcessStarter(
         finally
         {
             _ = _launchGate.Release();
-        }
-    }
-
-    /// <summary>
-    /// Регистрирует процесс в activeProcesses и настраивает stagger-задержку.
-    /// </summary>
-    public void RegisterProcess(Process process, int commandId, ConcurrentDictionary<int, Process> activeProcesses)
-    {
-        activeProcesses[commandId] = process;
-
-        if (_workerOptions.LaunchStaggerSeconds > 0)
-        {
-            // Держим gate, пока CEF в новом Revit успеет забиндить devtools-порт.
-            _ = Task.Delay(TimeSpan.FromSeconds(_workerOptions.LaunchStaggerSeconds), CancellationToken.None);
         }
     }
 

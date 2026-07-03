@@ -1,224 +1,173 @@
-# Telegram Bot Server
+# TelegramBot
 
 [![CI](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/ci.yml/badge.svg)](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/ci.yml)
 [![Qodana](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/code_quality.yml/badge.svg)](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/code_quality.yml)
 
-Telegram-бот для навигации по файловой системе и управления сессиями экспорта/автоматизации. Задачи выполняются асинхронно через Worker-процесс с PostgreSQL-очередью (LISTEN/NOTIFY + fallback polling).
+Windows-сервис на .NET 10: Telegram-бот принимает задания, PostgreSQL хранит очередь, отдельный Worker запускает BIM/AI-исполнители.
 
 ## Документация
 
-| Документ | Описание |
-|----------|----------|
-| [AGENTS.md](AGENTS.md) | Архитектура, BimLib, DI, code style, константы |
-| [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Алгоритм выполнения команд, SQL-запросы, схема БД |
-| [RevitBIMFusion/Docs/BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Единственный эталонный контракт BIM-плагинов |
-| [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | 🔴 Расследование крашей Revit (`ACCESS_VIOLATION`) — симптомы, гипотезы, методы исправления |
+| Документ | Назначение |
+|---|---|
+| [AGENTS.md](AGENTS.md) | Архитектура, DI, правила разработки |
+| [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Очередь, статусы, retry, уведомления, схема БД |
+| [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | История расследования `ACCESS_VIOLATION` |
+| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Единственный эталонный контракт BIM-исполнителей |
 
-## Обзор
+## Возможности
 
-.NET 10 background service с long-polling, PostgreSQL-очередью и отдельным Worker для выполнения BIM/AI-задач. Доступные функции:
+- `/export`: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`.
+- `/automation`: `BIMDOC`, `CLASHREP`, `AUTORES`.
+- Навигация `RootPath → проект → 01_PROJECT → разделы → 01_RVT`.
+- Фильтры, пагинация и soft-delete через `/status`.
+- Регистрация пользователей и одобрение доступа администраторами.
+- Дедупликация RVT, дневной лимит файлов и защита от повторной постановки.
+- PostgreSQL `LISTEN/NOTIFY`, leases, partition scheduling и retry.
+- Durable completion notifications через `NotificationOutbox`.
+- Корреляция сессии и команд по `CorrelationId`.
 
-- Навигация по файловой системе через inline-клавиатуры (проекты → разделы → файлы)
-- **Экспорт** (`/export`): `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
-- **Автоматизация** (`/automation`): `BIMDOC` (BIM-документирование), `CLASHREP` (Clash Reports), `AUTORES` (AutoResolve)
-- Управление сессиями через `/status`: фильтры (Все / Активные / Завершённые / С ошибками), удаление сессий и отдельных команд
-- Уведомления о завершении сессий: Worker идемпотентно пишет событие в `NotificationOutbox`, `command_completed` будит Server, Server отправляет сводку и помечает событие отправленным
-- Индикатор «печатает…» во время сбора файлов
-- Дневной лимит файлов на пользователя (`RateLimit:MaxFilesPerUserPerDay`)
-- Дедупликация Revit-файлов по префиксу имени и числовым токенам
-- Запрос доступа с подтверждением администратором
-- Умный retry: классификация ошибок (`InvalidFileError` → сразу Failed, `ProcessCrashError` → retry с экспоненциальной задержкой)
-- Декомпозиция выполнения команд: `CommandExecutionService` (LISTEN/NOTIFY + лимит параллельности), `CommandPreparer` (валидация + BIM-резолвинг), `ProcessRunner` (запуск + timeout + retry + DB-проверка завершения сессии)
+## Проекты
 
-## Технологии
+```text
+TelegramBot.Core   ← TelegramBot.Data
+       ↑                    ↑
+       ├── TelegramBot.Server
+       └── TelegramBot.Worker
+                └── BimLib/
+```
 
-.NET 10, Telegram.Bot 22.x, **PostgreSQL 18** (Npgsql + Dapper), Serilog (Console + Seq + rolling file), OpenMcdf (OLE-потоки .rvt/.rfa).
+| Проект | Ответственность |
+|---|---|
+| `TelegramBot.Core` | модели, DTO, конфигурация, константы, общие helpers |
+| `TelegramBot.Data` | Dapper/Npgsql, SQL и инициализация схемы |
+| `TelegramBot.Server` | Telegram long-polling, команды, callbacks, уведомления |
+| `TelegramBot.Worker` | claim очереди, внешние процессы, ResultFile, retry, cleanup |
 
-⚠️ **Windows only** — использует Windows Registry и P/Invoke WinAPI.
+Все сервисы DI — singleton. Приложение и BimLib предназначены только для Windows.
 
-## Команды бота
+## Быстрый старт
 
-| Команда | Описание |
-|---------|----------|
-| `/start` | Регистрация, запрос доступа |
-| `/export` | Меню экспорта (`PDF`/`DWG`/`NWC`/`DATA`/`IFC`) |
-| `/automation` | Меню автоматизации (`BIMDOC`/`CLASHREP`/`AUTORES`) |
-| `/status` | Просмотр и управление сессиями с фильтрами |
-| `/help` | Справка |
+Требования: .NET 10 SDK, PostgreSQL 18, Windows; для BIM-команд — установленные Revit/Navisworks и плагины.
 
-Сценарий работы `/export` или `/automation`:
-1. Выбор команд из inline-клавиатуры
-2. Навигация по проектам (уровень `RootPath`)
-3. Подтверждение проекта → переход к `01_PROJECT/<project>/<01_PROJECT>/<раздел>/`
-4. Мульти-выбор разделов (папки, подходящие под `SectionFolderPattern`)
-5. Worker сканирует `01_RVT` внутри разделов, дедуплицирует, фильтрует по размеру (>50MB) и формату имени
-6. `Confirm` → вставка в `Commands` + `pg_notify('new_tasks', correlationId)` → Worker забирает пачку
+```powershell
+docker compose up -d
+dotnet build TelegramBot.slnx
+dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
+dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
+```
 
-## BIM-плагины
+Server и Worker — независимые процессы с общей БД.
 
-Worker запускает внешние исполнители и обменивается с ними через XML-файлы `TaskFile`/`ResultFile`.
-
-| Команды | Исполнитель | stdout/stderr | Важное |
-|---------|-------------|---------------|--------|
-| `PDF`, `DWG`, `NWC`, `DATA` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Worker передаёт TaskFile через `REVITBIMFUSION_TASK_FILE`; AddIn запускает экспорт один раз из `Idling`. `DATA` пишет SQLite в `06_DATA/<model>.db` |
-| `IFC`, `BIMDOC` | `Revit.exe` + установленный Revit AddIn | GUI, нет вывода | Зарезервированы, текущий AddIn возвращает `Unsupported command:` без retry |
-| `CLASHREP` | `FileConvert.exe` или `Roamer.exe`/`Navisworks.exe` | Обычно есть | Для полноценного результата нужна обёртка/плагин, который пишет `ResultFile`; иначе Worker использует exit code |
-| `AUTORES` | `python ai_agent.py` | Консольный скрипт | Скрипт должен читать `--task` и писать `ResultFile` |
-
-> ⚠️ **Единственный эталонный контракт** живёт в `C:\Users\y.zhumabayev\Repository\RevitBIMFusion\Docs\BimPluginContract.md` + XSD-схемы `TaskFile.schema.xsd` / `ResultFile.schema.xsd`.
->
-> Worker встраивает эталонную `TaskFile.schema.xsd` в DLL непосредственно при сборке. Локально репозитории должны лежать рядом; для другого расположения задайте `BIM_CONTRACT_DIRECTORY`.
-
-## Конфигурация
-
-### Обязательные параметры
-
-| Параметр | Описание |
-|----------|----------|
-| `TelegramBot:Token` | Токен бота (или env `TelegramBot__Token`) |
-| `TelegramBot:AdminUserIds` | Массив ID администраторов (long) |
-| `FileSystem:RootPath` | Корневая директория навигации (должна существовать) |
-| `ConnectionStrings:Postgres` | PostgreSQL connection string |
-
-### Server — `TelegramBot.Server/appsettings.json`
-
-| Секция | Поле | Описание |
-|--------|------|----------|
-| `Serilog` | — | Console + Seq (по умолчанию `http://localhost:5341`) |
-| `ConnectionStrings.Postgres` | — | DSN PostgreSQL |
-| `RateLimit` | `MaxRequests` / `WindowSeconds` | Скользящее окно rate-limiter (`30/60s` по умолчанию) |
-| `RateLimit` | `MaxFilesPerUserPerDay` | Лимит суммарных файлов в сессиях за 24ч (`1000` по умолчанию, `0` отключает) |
-| `FileSystem` | `RootPath` | Корневая директория (required, validated) |
-| `FileSystem` | `RvtDirectoryName` | Имя папки с RVT внутри раздела (default `01_RVT`) |
-| `FileSystem` | `ProjectDirectoryName` | Имя папки проекта (default `01_PROJECT`) |
-| `FileSystem` | `SectionFolderPattern` | Regex для папок-разделов (default `^(\d{2}|\d{3}\|I{1,3})_`) |
-| `FileSystem` | `RvtScanMaxDegreeOfParallelism` | Лимит параллельного сканирования `01_RVT` директорий (default `4`) |
-| `FileSystem` | `LogDirectory` | Опционально: путь к логам (default `%USERPROFILE%\Documents\TelegramBot\Logs`) |
-| `FileSystem` | `TaskDirectory` | Опционально: папка для task/result XML (default `%USERPROFILE%\Documents\TelegramBot\TaskDirectory`). **Только Worker** |
-
-### Worker — `TelegramBot.Worker/appsettings.json`
-
-| Секция | Поле | Описание |
-|--------|------|----------|
-| `Serilog` | — | Console + Seq + rolling file |
-| `DialogDismisser` | `Enabled` / `MaxDismissAttempts` / `KnownDialogPatterns` / `CloseButtonTexts` / `ExclusionDialogTitles` | Настройки авто-закрытия модальных окон Revit/Navisworks. ⚠️ `Enabled: false` — **временно отключён** для тестирования на реальных задачах (проверка гипотезы, не крашит ли он Revit через P/Invoke `EnumWindows`/`PostMessage`) |
-| `FileSystem` | `LogDirectory` | Опционально: путь к логам |
-| `BimIntegration` | `MinSupportedVersion` / `MaxSupportedVersion` | Допустимый диапазон версий при поиске Revit/Navisworks в реестре (default `2018`–`2026`) |
-| `ConnectionStrings.Postgres` | — | DSN PostgreSQL |
-| `Worker` | `ProcessTimeoutMinutes` | Общий таймаут команды (default `180` = 3ч; используется также для расчёта Lease `+5min`) |
-| `Worker` | `MaxRetries` | Кол-во retry перед `Failed` (default `5`) |
-| `Worker` | `RetryDelayBaseSeconds` | Базовая задержка retry × 2^(attempt-1) (default `60`) |
-| `Worker` | `PermanentFailureExitCodes` | HashSet exit-кодов, считающихся permanent (default пуст) |
-| `Worker` | `FallbackPollingIntervalSeconds` | Polling fallback при потере LISTEN/NOTIFY (default `300` = 5 мин) |
-| `Worker` | `CleanupIntervalSeconds` | Интервал фоновой очистки истёкших Lease (default `300`) |
-| `Worker` | `ProcessMonitorIntervalSeconds` | Интервал мониторинга активных внешних процессов и авто-закрытия диалогов (default `30`) |
-| `Worker` | `CompletedSessionRetentionDays` | Авто-cleanup сессий без active команд старше N дней (`0` отключает; default `30`) |
-| `Worker` | `LaunchStaggerSeconds` | Пауза между запусками внешних процессов (default `30`). Предотвращает коллизию devtools-порта CEF при параллельном старте Revit. `0` отключает |
-| `Worker` | `MaxConcurrentCommands` | Лимит параллельных команд (default `5`). Логические партиции файлов живут в БД (`Commands.Partition`). |
-| `Worker.Commands` | `PDF` / `DWG` / `NWC` / `DATA` / `IFC` / `BIMDOC` / `CLASHREP` / `AUTORES` | Маппинг `CommandText → {ExecutablePath, ArgumentsTemplate, AllowedExtensions, WorkingDirectory?}`; у Revit-команд `ArgumentsTemplate` пустой |
-
-#### Как работает `Worker:MaxConcurrentCommands`
-
-В [CommandExecutionService.cs](TelegramBot.Worker/Services/CommandExecutionService.cs)
-создаётся один `SemaphoreSlim` на это число слотов. Приоритет команды
-влияет только на порядок SQL claim'а: меньший `Priority` забирается раньше.
-
-Очередные partition назначает и обслуживает PostgreSQL. При вставке команды `Commands.Partition` строится
-по исходному файлу (`file:` + md5 от нормализованного `FilePath`). Claim-запрос не отдаёт следующую команду
-этой partition, пока предыдущая находится в `processing`, поэтому задачи одного файла идут последовательно,
-а разные файлы выполняются параллельно до общего лимита worker-а.
-
-### Пример `appsettings.Local.json` (gitignored)
+Секреты храните в gitignored `appsettings.Local.json`:
 
 ```json
 {
   "TelegramBot": {
-    "Token": "ВАШ_ТОКЕН",
-    "AdminUserIds": [ 123456789 ]
+    "Token": "BOT_TOKEN",
+    "AdminUserIds": [123456789]
   },
-  "FileSystem": { "RootPath": "B:\\" }
-}
-```
-
-### Логирование
-
-Логи пишутся в `%USERPROFILE%\Documents\TelegramBot\Logs\{Project}\log-{date}.txt`
-с ежедневной ротацией. Структура директорий:
-
-```
-%USERPROFILE%\Documents\TelegramBot\Logs\
-├── Server\log-20260612.txt              # Основной лог Server
-├── Worker\log-20260612.txt              # Основной лог Worker
-└── Worker\BimLib\log-20260612.txt       # BIM-специфичные события (Revit/Navisworks, SourceContext starts with "TelegramBot.Worker.BimLib")
-```
-
-**Путь можно изменить** через опциональный параметр `FileSystem:LogDirectory`:
-
-```json
-{
   "FileSystem": {
-    "RootPath": "B:\\",
-    "LogDirectory": "D:\\TelegramBot\\Logs"
+    "RootPath": "B:\\"
   }
 }
 ```
 
-Если `LogDirectory` не задан или `null` — используется дефолтный путь.
-Параметр применяется ко всем проектам (Server, Worker, BimLib).
+Переменные окружения используют стандартный синтаксис .NET, например `TelegramBot__Token`.
 
-### TaskDirectory — обмен с BIM-исполнителями
+## Конфигурация
 
-Worker обменивается XML (`task_*.xml` / `result_*.xml`) с CAD-плагинами через **выделенную папку**, а не через `Path.GetTempPath()` — иначе Windows/system-cleaner'ы могут удалить файлы во время длительной команды (Revit-экспорт до 3 часов). Папка намеренно находится **рядом с логами**, чтобы админ мог открыть её вручную и проверить активные попытки.
+### Server
 
-**Дефолтный путь:** `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\`
+| Параметр | По умолчанию / назначение |
+|---|---|
+| `TelegramBot:Token` | обязателен |
+| `TelegramBot:AdminUserIds` | ID администраторов |
+| `ConnectionStrings:Postgres` | DSN PostgreSQL |
+| `FileSystem:RootPath` | обязательный существующий каталог |
+| `FileSystem:RvtDirectoryName` | `01_RVT` |
+| `FileSystem:ProjectDirectoryName` | `01_PROJECT` |
+| `FileSystem:SectionFolderPattern` | regex для каталогов проектов |
+| `FileSystem:RvtScanMaxDegreeOfParallelism` | `4` |
+| `FileSystem:LogDirectory` | `%USERPROFILE%\Documents\TelegramBot\Logs` |
+| `RateLimit:MaxRequests` / `WindowSeconds` | `30` / `60` в committed config |
+| `RateLimit:MaxFilesPerUserPerDay` | `1000`; `0` отключает |
+
+### Worker
+
+| Параметр | По умолчанию / назначение |
+|---|---|
+| `ConnectionStrings:Postgres` | DSN PostgreSQL |
+| `FileSystem:TaskDirectory` | `%USERPROFILE%\Documents\TelegramBot\TaskDirectory` |
+| `FileSystem:LogDirectory` | `%USERPROFILE%\Documents\TelegramBot\Logs` |
+| `BimIntegration:MinSupportedVersion` / `MaxSupportedVersion` | `2018` / `2026` |
+| `DialogDismisser:Enabled` | `false` в committed config |
+| `Worker:ProcessTimeoutMinutes` | `180` |
+| `Worker:MaxRetries` | `5` |
+| `Worker:RetryDelayBaseSeconds` | `60` |
+| `Worker:PermanentFailureExitCodes` | пустой набор |
+| `Worker:FallbackPollingIntervalSeconds` | `300` |
+| `Worker:CleanupIntervalSeconds` | `300` |
+| `Worker:ProcessMonitorIntervalSeconds` | `30`; `0` отключает |
+| `Worker:CompletedSessionRetentionDays` | `30`; `0` отключает retention cleanup |
+| `Worker:MaxConcurrentCommands` | `5` |
+| `Worker:Commands` | обязательный mapping команд на executable/arguments/extensions |
+
+Полный пример находится в `TelegramBot.Server/appsettings.json` и `TelegramBot.Worker/appsettings.json`. Значения, отсутствующие в JSON, берутся из option-классов.
+
+## Поток задания
+
+1. Server последовательно обрабатывает обновления одного пользователя и параллельно — разных пользователей.
+2. Пользователь выбирает команды, проект и разделы.
+3. Server параллельно сканирует `01_RVT`, оставляет RVT больше 50 MiB с допустимым именем и дедуплицирует список.
+4. Одна транзакция создаёт `Sessions` и `Commands`, затем отправляет `pg_notify('new_tasks', correlationId)`.
+5. Worker атомарно claim-ит доступные partition-команды по priority и запускает не больше `MaxConcurrentCommands`.
+6. Исполнитель пишет `ResultFile`; Worker обновляет статус или планирует retry.
+7. Последняя команда сессии создаёт запись `NotificationOutbox`; Server отправляет итог и помечает запись `sent`.
+
+Подробности — в [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md).
+
+## BIM-контракт
+
+Worker создаёт `task_{project}_{commandId}.xml` и ожидает `result_{project}_{commandId}.xml` в `TaskDirectory`.
+
+- Revit запускается без контрактных CLI-аргументов.
+- TaskFile передаётся только через process-scoped `REVITBIMFUSION_TASK_FILE`.
+- `PDF`, `DWG`, `NWC`, `DATA`, `IFC`, `BIMDOC` считаются Revit-командами.
+- Для Revit ResultFile обязателен; exit code `0` без ResultFile не означает успех.
+- Exit-code fallback разрешён только console/wrapper-командам.
+- TaskFile атомарно записывается и валидируется встроенной canonical XSD.
+
+Текущая поддержка эталонного Revit AddIn:
+
+| Команда | Статус |
+|---|---|
+| `PDF`, `DWG`, `NWC`, `DATA` | поддерживается |
+| `IFC`, `BIMDOC` | planned; AddIn возвращает permanent `Unsupported command` |
+| `CLASHREP`, `AUTORES` | внешние wrapper/agent-команды |
+
+Canonical XSD берётся при сборке из соседнего `RevitBIMFusion/Docs`; другой путь задаётся через `BIM_CONTRACT_DIRECTORY`.
+
+## Логи
+
+Serilog пишет в Console, Seq (`http://localhost:5341`) и rolling files:
 
 ```text
-%USERPROFILE%\Documents\TelegramBot\
-├── Logs\
-│   ├── Server\
-│   └── Worker\
-│       ├── BimLib\
-│       └── (Serilog-логи Worker)
-└── TaskDirectory\           ← task_{projectName}_{commandId}.xml + result_{projectName}_{commandId}.xml
+%USERPROFILE%\Documents\TelegramBot\Logs\
+├── Server\log-YYYYMMDD.txt
+└── Worker\
+    ├── log-YYYYMMDD.txt
+    └── BimLib\log-YYYYMMDD.txt
 ```
 
-**Override** через опциональный параметр `FileSystem:TaskDirectory` (только Worker):
+Файлы ротируются ежедневно и по 50 MiB, хранится до 31 файла. `FileSystem:LogDirectory` меняет базовый каталог.
 
-```json
-{
-  "FileSystem": {
-    "TaskDirectory": "D:\\TelegramBot\\Worker\\TaskDirectory"
-  }
-}
-```
+Логи структурированные: в ключевых событиях сохраняются `CommandId`, `SessionId`, `CorrelationId`, `UserId`, `ProcessId`. Нормальные циклические события не пишутся на `Information`; подробная диагностика доступна на `Debug`.
 
-Если `TaskDirectory` не задан или `null` — используется дефолтный путь. Worker создаёт папку автоматически на старте; если создать не удалось — процесс падает с понятной ошибкой.
+## Проверка
 
-**Важно:** BIM-плагин (Revit AddIn, Navisworks wrapper, python agent) должен писать result-файл по пути из task-файла (`resultFilePath`), а не по своему `Path.GetTempPath()`. Для Revit отсутствие ResultFile всегда считается ошибкой; fallback по exit code остаётся только у console/wrapper-команд. Полный контракт — в [RevitBIMFusion/Docs/BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md#taskdirectory).
-
-Полный список параметров — `appsettings.json` в проектах Server и Worker.
-
-## Запуск
-
-```bash
-# PostgreSQL 18 через Docker
-docker compose up -d
-
-# Сборка
+```powershell
 dotnet build TelegramBot.slnx
-
-# Запуск Server (терминал 1)
-dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
-
-# Запуск Worker (терминал 2, отдельный сервис на той же БД)
-dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
+dotnet format TelegramBot.slnx
 ```
 
-Server и Worker используют одну и ту же **PostgreSQL 18** БД, но **независимые процессы** — могут запускаться на разных машинах.
-
-> ⚠️ **При первом запуске после обновления версии PostgreSQL** (например, с 17 на 18) Docker-образ не сможет прочитать данные из существующего volume `pgdata` из-за несовместимости major-версий. Если в volume уже есть данные, удалите его: `docker compose down -v` (потеря данных) или выполните миграцию через `pg_upgrade` отдельно. Для свежей установки этот шаг не нужен.
-
-## CI/CD
-
-GitHub Actions: `dotnet build` + `dotnet format --verify-no-changes` + Qodana на каждый push/PR.
-Деплой — через self-hosted runner на Windows Server.
+Тесты намеренно отключены: не добавляйте test projects и не запускайте `dotnet test`.

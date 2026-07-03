@@ -1,3 +1,4 @@
+using System.Text;
 using TelegramBot.Worker.BimLib.Native;
 
 namespace TelegramBot.Worker.BimLib.Monitor;
@@ -177,28 +178,41 @@ internal static class WindowUtil
     /// </summary>
     internal static void LogAllChildWindows(ILogger logger, IntPtr hwndDlg, string context)
     {
+        const int maxDetailsLength = 4096;
+
+        if (!logger.IsEnabled(LogLevel.Debug))
+        {
+            return;
+        }
+
         try
         {
             var allChildren = EnumerateChildWindows(hwndDlg);
             var buttons = EnumerateChildWindows(hwndDlg, "Button");
-
-            logger.LogDebug(
-                "[DlgDiag] {Context}: hwndDlg={Hwnd}, totalChildren={Total}, buttonClassChildren={BtnCount}",
-                context, hwndDlg, allChildren.Count, buttons.Count);
+            var details = new StringBuilder()
+                .Append("dialog=").Append(hwndDlg)
+                .Append(", children=").Append(allChildren.Count)
+                .Append(", buttons=").Append(buttons.Count);
 
             foreach (var child in allChildren)
             {
-                var childClass = GetWindowClassName(child);
-                var childText = GetWindowTitle(child);
-                var isEnabled = User32.IsWindowEnabledSafe(child);
-                var isVisible = User32.IsWindowVisibleSafe(child);
-                var ctrlId = User32.GetWindowLongSafe(child, Win32Consts.GWL_ID);
+                _ = details
+                    .AppendLine()
+                    .Append("child=").Append(child)
+                    .Append(", class=").Append(GetWindowClassName(child))
+                    .Append(", title=").Append(GetWindowTitle(child))
+                    .Append(", enabled=").Append(User32.IsWindowEnabledSafe(child))
+                    .Append(", visible=").Append(User32.IsWindowVisibleSafe(child))
+                    .Append(", controlId=").Append(User32.GetWindowLongSafe(child, Win32Consts.GWL_ID));
 
-                logger.LogDebug(
-                    "[DlgDiag]   Child: hwnd={Hwnd}, class='{Class}', title='{Title}', " +
-                    "enabled={Enabled}, visible={Visible}, ctrlId={CtrlId}",
-                    child, childClass, childText, isEnabled, isVisible, ctrlId);
+                if (details.Length >= maxDetailsLength)
+                {
+                    _ = details.AppendLine().Append("...");
+                    break;
+                }
             }
+
+            logger.LogDebug("Dialog diagnostics: context={Context}, details={Details}", context, details.ToString());
         }
         catch (Exception ex)
         {

@@ -40,8 +40,8 @@ public sealed class CommandSelectionHandler(
             return;
         }
 
-        Logger.LogDebug("User {Username} ({UserId}) applied command selection: [{Commands}]",
-            context.Username, context.UserId, string.Join(", ", session.PendingCommand));
+        Logger.LogDebug("Command selection applied: user={Username} ({UserId}), count={Count}",
+            context.Username, context.UserId, session.PendingCommand.Count);
 
         session.CurrentPath = _options.RootPath;
         session.IsFileSelectionActive = true;

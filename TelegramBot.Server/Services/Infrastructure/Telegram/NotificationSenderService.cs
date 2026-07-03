@@ -158,11 +158,19 @@ public sealed class NotificationSenderService(
         if (session.FailedFiles > 0 && session.FailedFilePaths.Count > 0)
         {
             _=summary.Append("\n\nОшибки:\n");
-            _=summary.AppendJoin('\n', session.FailedFilePaths.Select(f => $"- {Path.GetFileName(f)}"));
+            for (var i = 0; i < session.FailedFilePaths.Count; i++)
+            {
+                if (i > 0)
+                {
+                    _ = summary.AppendLine();
+                }
+
+                _ = summary.Append("- ").Append(Path.GetFileName(session.FailedFilePaths[i]));
+            }
         }
 
         _=await telegramOutput.SendMessageAsync(session.UserId, summary.ToString());
-        logger.LogInformation("Session completed: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+        logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
             session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
     }
 

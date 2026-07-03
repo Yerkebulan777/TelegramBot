@@ -409,9 +409,9 @@ public sealed class CommandPreparer(
 
             File.Move(tmpPath, taskFilePath, overwrite: true);
 
-            logger.LogInformation(
-                "Task file created: id={Id}, correlationId={CorrelationId}, command={Cmd}, taskFile={TaskFilePath}, resultFile={ResultFilePath}, sourceFile={SourceFile}",
-                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, taskFilePath, resultFilePath, cmd.FilePath);
+            logger.LogDebug(
+                "Task file created: commandId={CommandId}, taskFile={TaskFilePath}, resultFile={ResultFilePath}",
+                cmd.CommandId, taskFilePath, resultFilePath);
 
             return true;
         }
@@ -437,32 +437,22 @@ public sealed class CommandPreparer(
         try
         {
             var (resultFilePath, taskFilePath) = GetTaskFilePaths(commandId, filePath);
-            var deletedFiles = new List<string>(capacity: 2);
+            var deletedCount = 0;
 
             if (File.Exists(taskFilePath))
             {
                 File.Delete(taskFilePath);
-                deletedFiles.Add(taskFilePath);
+                deletedCount++;
             }
 
             if (File.Exists(resultFilePath))
             {
                 File.Delete(resultFilePath);
-                deletedFiles.Add(resultFilePath);
+                deletedCount++;
             }
 
-            if (deletedFiles.Count > 0)
-            {
-                logger.LogInformation(
-                    "Temp files cleaned: commandId={CommandId}, files={Files}",
-                    commandId, string.Join("; ", deletedFiles));
-            }
-            else
-            {
-                logger.LogDebug(
-                    "No temp files to clean: commandId={CommandId}, taskFile={TaskFilePath}, resultFile={ResultFilePath}",
-                    commandId, taskFilePath, resultFilePath);
-            }
+            logger.LogDebug("Temp file cleanup: commandId={CommandId}, deleted={DeletedCount}",
+                commandId, deletedCount);
         }
         catch (Exception ex)
         {

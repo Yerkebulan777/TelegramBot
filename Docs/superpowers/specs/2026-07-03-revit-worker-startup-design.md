@@ -1,5 +1,7 @@
 # Revit Worker Startup Design
 
+> **Статус:** реализовано. Актуальный handoff закреплён только в canonical `RevitBIMFusion/Docs/BimPluginContract.md`; incident history — в `Docs/RevitCrashes.md`.
+
 ## Goal
 
 Replace the unsupported `Revit.exe /command "WORKER" ...` launch with a supported
@@ -73,4 +75,3 @@ Repository policy forbids adding or running tests in TelegramBot. Verification i
 3. Inspect generated `ProcessStartInfo`: no `/command`, absolute environment path.
 4. Confirm both contract documents describe the same environment-variable flow.
 5. Confirm `DATA` exists across Telegram command catalog and Worker configuration.
-

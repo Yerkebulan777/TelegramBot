@@ -43,7 +43,6 @@ public static class Program
                         .Validate(options => options.RetryDelayBaseSeconds > 0, "Worker:RetryDelayBaseSeconds must be greater than 0")
                         .Validate(options => options.FallbackPollingIntervalSeconds > 0, "Worker:FallbackPollingIntervalSeconds must be greater than 0")
                         .Validate(options => options.ProcessMonitorIntervalSeconds >= 0, "Worker:ProcessMonitorIntervalSeconds must be greater than or equal to 0")
-                        .Validate(options => options.LaunchStaggerSeconds >= 0, "Worker:LaunchStaggerSeconds must be greater than or equal to 0")
                         .Validate(options => options.MaxConcurrentCommands > 0, "Worker:MaxConcurrentCommands must be greater than 0")
                         .Validate(options => options.Commands.Count > 0, "Worker:Commands must contain at least one command")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), "Worker:Commands executable paths are required")
