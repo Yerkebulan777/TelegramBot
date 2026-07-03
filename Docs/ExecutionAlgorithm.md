@@ -53,6 +53,10 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
    - **Duplicate guard** (`HasDuplicateCommandsAsync` — активные pending/processing с теми же
      `(CommandText, FilePath)`)
 2. `SessionDataService.CreateSessionWithCommandsAsync` (одна транзакция):
+   - `pg_advisory_xact_lock(1234570, hashtext(userId))` — сериализует check-then-insert одного
+     пользователя (закрывает TOCTOU-гонку с шагом 1 при двойном submit)
+   - Повторная проверка дубликатов под lock'ом — при совпадении `ROLLBACK` + возврат `null`
+     (`SlashCommandService` шлёт пользователю предупреждение вместо постановки в очередь)
    - INSERT `Sessions` с `CorrelationId` (GUID без дефисов)
    - INSERT `Commands` батчем (`unnest(@CommandTexts::text[])` × N)
    - `pg_notify('new_tasks', @CorrelationId)` — wake-up сигнал
@@ -68,7 +72,7 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
      - `CommandPreparer.PrepareAsync` — валидация FilePath (path traversal, reparse-point, extension, root
        containment) + BimLib резолвинг (`RevitVersionDetector` → `RevitPathResolver`,
        `NavisworksPathResolver`)
-     - `CreateTaskFile` — atomic write `task_{CommandId}_{attemptToken}.xml` (`.tmp` → `File.Move`); перед Move — runtime XSD-валидация через `TaskFileValidator` (embedded `Schemas/TaskFile.schema.xsd`); abort при drift модель↔XSD
+     - `CreateTaskFile` — atomic write `task_{projectName}_{commandId}.xml` (`.tmp` → `File.Move`); перед Move — runtime XSD-валидация через `TaskFileValidator` (embedded `Schemas/TaskFile.schema.xsd`); abort при drift модель↔XSD
      - `StartProcessAsync` — захват `_launchGate` (SemaphoreSlim 1/1) → `Process.Start` → регистрация в
        `_activeProcesses` (ДО stagger-задержки, чтобы health-check и shutdown видели процесс) →
        `Task.Delay(LaunchStaggerSeconds)` с `CancellationToken.None` (gate освобождается даже при shutdown)
@@ -86,7 +90,8 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
    - `ErrorClassifier.IsPermanentFailure(message, exitCode, PermanentFailureExitCodes, exception)`
      → `Failed` сразу для permanent-ошибки
    - Иначе если `RetryCount < MaxRetries` (default 5) → `ScheduleRetryAsync` с
-     `NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (default 60→120→240→480→960s)
+     `NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount + random(0, RetryDelayBaseSeconds)`
+     (base 60→120→240→480→960s, jitter против thundering herd при массовом сбое)
    - Иначе `Failed` после исчерпания
 6. `SessionCompletionTracker.OnCommandCompletedAsync`:
    - `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync`
@@ -213,6 +218,13 @@ Server → PostgreSQL (Sessions, Commands Status='pending')
 ### Вставка сессии с командами (одна транзакция)
 
 ```sql
+-- 0) advisory xact lock — сериализует check-then-insert одного пользователя (namespace 1234570),
+--    снимается автоматически на commit/rollback
+SELECT pg_advisory_xact_lock(1234570, hashtext(@UserId::text));
+
+-- 0.1) повторная проверка дубликатов под lock'ом (см. «Проверка дубликатов команд» ниже);
+--      при duplicateCount > 0 — ROLLBACK, метод возвращает null
+
 -- 1) INSERT Sessions
 INSERT INTO Sessions (UserId, Username, CorrelationId, ProjectName, FilesAmount)
 VALUES (@UserId, @Username, @CorrelationId, @ProjectName, @FilesAmount)
@@ -237,7 +249,8 @@ FROM unnest(
 SELECT pg_notify('new_tasks', @CorrelationId);
 ```
 
-Реализация: `SessionDataService.CreateSessionWithCommandsAsync` — единая `BeginTransactionAsync` + commit.
+Реализация: `SessionDataService.CreateSessionWithCommandsAsync` — единая `BeginTransactionAsync` + commit,
+возвращает `long?` (`null` при дубликате, пойманном под lock'ом).
 
 ### Захват команд (атомарный DB scheduler)
 
@@ -390,8 +403,9 @@ WHERE CommandId = @CommandId
 RETURNING RetryCount;
 ```
 
-`NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount` (экспоненциальная задержка). При следующем
-`ClaimAndReturn` команда будет пропущена, пока `NOW() < NextRetryAt`.
+`NextRetryAt = NOW() + RetryDelayBaseSeconds * 2^RetryCount + random(0, RetryDelayBaseSeconds)`
+(экспоненциальная задержка + jitter). При следующем `ClaimAndReturn` команда будет пропущена, пока
+`NOW() < NextRetryAt`.
 
 ### Отмена команды пользователем
 
@@ -421,8 +435,10 @@ WHERE EXISTS (
 );
 ```
 
-Используется в `HasDuplicateCommandsAsync` перед `CreateSessionWithCommandsAsync` (если есть дубликаты —
-сессия не создаётся).
+Используется дважды: `HasDuplicateCommandsAsync` — быстрый pre-check в `SlashCommandService` до
+транзакции; тот же запрос (`CountDuplicatePairs`) повторяется внутри `CreateSessionWithCommandsAsync`
+под advisory xact lock'ом (1234570) — закрывает TOCTOU-гонку между pre-check'ом и вставкой при двойном
+submit. Если дубликаты найдены на любом из шагов — сессия не создаётся.
 
 ### Получение сводки завершения
 
@@ -572,15 +588,17 @@ ORDER BY s.CreatedAt DESC;
 
 Для Revit/Navisworks/AI-команд Worker использует один механизм:
 
-1. `ProcessRunner.RunAsync()` генерирует `AttemptToken` (GUID без дефисов).
-2. `CommandPreparer.CreateTaskFile()` создаёт `task_{CommandId}_{AttemptToken}.xml` (atomic write `.tmp` →
+1. `CommandPreparer.GetTaskFilePaths()` выводит `projectName` из `cmd.FilePath` (имя файла без расширения,
+   невалидные символы → `_`).
+2. `CommandPreparer.CreateTaskFile()` создаёт `task_{projectName}_{commandId}.xml` (atomic write `.tmp` →
    `File.Move`; перед Move — runtime XSD-валидация через `TaskFileValidator` из embedded
    `Schemas/TaskFile.schema.xsd`).
 3. `CommandPreparer.CreateProcessStartInfo()` подставляет `{TaskFilePath}` и `{ResultFilePath}` в
    `ArgumentsTemplate`. Для Revit AddIn шаблон должен быть `/command "WORKER" "{TaskFilePath}"`; реальная
    команда остаётся в `TaskFile.commandText`.
 4. После выхода процесса `ProcessRunner.TryReadResultFile()` читает
-   `result_{CommandId}_{AttemptToken}.xml`.
+   `result_{projectName}_{commandId}.xml`. Имя без attempt-токена — retry перезаписывает файл предыдущей
+   попытки (1:1 с эталоном RevitBIMFusion).
 5. Если result-файл отсутствует, Worker использует fallback по exit code. Если result-файл существует, но не
    читается или содержит битый XML, попытка считается ошибочной и проходит через `ErrorClassifier`
    (permanent → `Failed`, transient → `ScheduleRetry`). `status` — обязательное enum-поле

@@ -193,7 +193,7 @@ services.AddSingleton<NavisworksPathResolver>();
 |-----------|------|
 | `CommandDataService` | `ClaimPendingCommandsAsync` (FOR UPDATE SKIP LOCKED + Lease), `UpdateCommandStatusAsync`, `MarkProcessStartedAndNotifyOnceAsync` (ProcessId + idempotent `session_started` pg_notify), `ScheduleRetryAsync` (NextRetryAt + RetryCount), `ReleaseExpiredLeasesAsync` (advisory lock), `HasDuplicateCommandsAsync`, `DeleteCommandAsync`, `DeleteCommandsByTypeAsync` |
 | `CommandPreparer` | `PrepareAsync`: 1) `Commands.TryGetValue` → Fail если unknown, 2) `ValidateFilePath` (path traversal, reparse-point, extension, root containment), 3) `ResolveExecutablePathAsync` (PDF/DWG/IFC/BIMDOC/NWC через Revit BimLib, CLASHREP через Navisworks BimLib, fallback на configured path). Создаёт **копию `CommandConfig`** перед `ExecutablePath` mutation. `CreateTaskFile` (atomic write `.tmp` → `Move`; **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd` перед Move — abort при drift модель↔XSD), `CreateProcessStartInfo` (substitutes `{CommandText}`/`{CommandId}`/`{TaskFilePath}`/`{ResultFilePath}`; Revit AddIn получает fixed dispatcher `WORKER` (`WorkerOptions.RevitDispatcherCommand`), **без `{FilePath}`** — путь к `.rvt` только в TaskFile), `CleanupTempFiles` |
-| `ProcessRunner` | `RunAsync(cmd, ct)`: генерирует `attemptToken` (GUID без дефисов) → `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, пишет ProcessId и идемпотентно шлёт `session_started` через `MarkProcessStartedAndNotifyOnceAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый XML) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
+| `ProcessRunner` | `RunAsync(cmd, ct)`: `PrepareAsync` → `StartProcessAsync` (создаёт task-файл, запускает процесс через **`_launchGate` SemaphoreSlim** с `LaunchStaggerSeconds` паузой для предотвращения коллизий CEF-порта Revit, регистрирует в `_activeProcesses` **до** stagger-задержки, пишет ProcessId и идемпотентно шлёт `session_started` через `MarkProcessStartedAndNotifyOnceAsync`) → `WaitAndHandleResultAsync` (OutputDataReceived + ErrorDataReceived с 64KB лимитом + `truncated` флаг) → `TryReadResultFile` (parse → delete на success; rename в `.bad` на битый XML) → `HandleTimeoutAsync` или `HandleFailureAsync`. `ActiveProcesses` — snapshot для health-мониторинга |
 | `SessionCompletionTracker` | `OnCommandCompletedAsync`: `CountPendingProcessingBySessionAsync` (DB confirm) → `NotifySessionCompletedOnceAsync` → `CompletionNotified=TRUE` + `NotificationOutbox` insert + `pg_notify('command_completed')` wake-up |
 | `SessionCleanupService` | `BackgroundService`: soft-delete сессий старше `CompletedSessionRetentionDays` без pending/processing. `0` отключает |
 
@@ -256,8 +256,8 @@ services.AddHostedService<SessionCleanupService>();
 
 | Файл | Кто создаёт | Кто читает | Назначение |
 |------|------------|------------|------------|
-| `task_{CommandId}_{AttemptToken}.xml` | Worker (`CommandPreparer.CreateTaskFile`, atomic write) | Плагин | Задание: что и с каким файлом делать |
-| `result_{CommandId}_{AttemptToken}.xml` | Плагин (atomic write) | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка/отмена + выходные файлы |
+| `task_{projectName}_{commandId}.xml` | Worker (`CommandPreparer.CreateTaskFile`, atomic write) | Плагин | Задание: что и с каким файлом делать |
+| `result_{projectName}_{commandId}.xml` | Плагин (atomic write) | Worker (`ProcessRunner.TryReadResultFile`) | Результат: успех/ошибка/отмена + выходные файлы |
 
 **TaskFile** (`TelegramBot.Core.Models.TaskFile`):
 ```xml
@@ -287,10 +287,10 @@ services.AddHostedService<SessionCleanupService>();
 - `outputFiles` — `string?` (путь к выходному файлу при `done`; несмотря на множественное число в имени — **одна строка**, не массив, соответствует канону в `…\RevitBIMFusion\Docs\ResultFile.schema.xsd`)
 
 **Алгоритм:**
-1. Worker генерирует `attemptToken` (GUID без дефисов) для каждой попытки
-2. `CommandPreparer.CreateTaskFile` пишет `task_{CommandId}_{attemptToken}.xml` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`; перед Move — **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
+1. `CommandPreparer.GetTaskFilePaths` выводит `projectName` из `cmd.FilePath` (имя файла без расширения, невалидные символы → `_`)
+2. `CommandPreparer.CreateTaskFile` пишет `task_{projectName}_{commandId}.xml` в **TaskDirectory** (atomic: `.tmp` → `File.Move(overwrite: true)`; перед Move — **runtime XSD-валидация** через `TaskFileValidator` из embedded `Schemas/TaskFile.schema.xsd`). По умолчанию `%USERPROFILE%\Documents\TelegramBot\TaskDirectory\` (рядом с `Logs\Worker\`), настраивается через `FileSystem:TaskDirectory`. Не используется `Path.GetTempPath()` — иначе Windows-cleaner'ы могут удалить файлы во время длительной команды.
 3. Worker запускает `Revit.exe`/`FileConvert.exe`/`python` с аргументами из `ArgumentsTemplate` (подстановка `{CommandText}`/`{TaskFilePath}`/`{ResultFilePath}`). Для Revit AddIn `args[2]` всегда `WORKER`, реальная команда берётся из `TaskFile.commandText`. **Без `{FilePath}`** — путь к `.rvt` передаётся только через TaskFile (см. эталон §CLI Arguments).
-4. Исполнитель читает task-файл, выполняет команду, пишет `result_{CommandId}_{attemptToken}.xml` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
+4. Исполнитель читает task-файл, выполняет команду, пишет `result_{projectName}_{commandId}.xml` в ту же TaskDirectory по пути из `resultFilePath` (атомарно: `.tmp` → `File.Move`)
 5. `ProcessRunner.WaitAndHandleResultAsync` собирает stdout/stderr через `OutputDataReceived` (лимит 64KB на каждый, флаг `truncated` в логах), затем:
    - `status="done"` → `Done`
    - `status="failed"` → `HandleFailureAsync` (retry/error classification); `errorMessage` в лог, `errorDetails` в Debug-лог
@@ -306,7 +306,7 @@ services.AddHostedService<SessionCleanupService>();
 Плагин получает аргументы командной строки (шаблон `ArgumentsTemplate` в `appsettings.json`):
 
 ```
-Revit.exe /command "WORKER" "C:\Temp\task_42_6f1c2b3a.xml"
+Revit.exe /command "WORKER" "C:\Temp\task_building_42.xml"
 ```
 
 Доступные плейсхолдеры:
@@ -315,12 +315,12 @@ Revit.exe /command "WORKER" "C:\Temp\task_42_6f1c2b3a.xml"
 | `{CommandText}` | Тип экспорта для console/wrapper-команд; для Revit AddIn не используется как dispatcher |
 | `{FilePath}` | Полный путь к исходному файлу |
 | `{CommandId}` | ID команды в БД |
-| `{TaskFilePath}` | Полный путь к `task_{CommandId}_{AttemptToken}.xml` |
-| `{ResultFilePath}` | Полный путь к `result_{CommandId}_{AttemptToken}.xml` |
+| `{TaskFilePath}` | Полный путь к `task_{projectName}_{commandId}.xml` |
+| `{ResultFilePath}` | Полный путь к `result_{projectName}_{commandId}.xml` |
 
 **Рекомендуемый подход:** плагин должен читать task-файл, а не полагаться только на аргументы командной строки — XML содержит полную структурированную информацию.
 
-> **Важно (v1.7):** Имена temp-файлов включают уникальный `AttemptToken` (GUID без дефисов) для каждой попытки выполнения. Это предотвращает: (1) подсовывание ложного result локальным процессом (predictable filenames), (2) чтение stale result от предыдущей retry-попытки, (3) конфликты между параллельными выполнениями одной команды.
+> Имя файла — `task_{projectName}_{commandId}.xml`, без attempt-токена (1:1 с эталоном RevitBIMFusion). Retry одной команды перезаписывает файл предыдущей попытки; принятый trade-off ради совпадения имени с эталоном (AddIn имя файла не парсит, путь читает из `args[3]`).
 
 #### Revit without AddIn (broken flow):
 
@@ -342,7 +342,7 @@ Worker → Revit.exe opens as GUI
 | CLASHREP | `FileConvert.exe`/Navisworks wrapper | **Usually yes** for CLI wrapper | TaskFile + ResultFile if wrapper/plugin supports it; otherwise fallback to exit code |
 | AUTORES | `python ai_agent.py` | **Yes** — console script | TaskFile + ResultFile via `--task`/`--result`, fallback to exit code |
 
-**Temp-file cleanup (v1.7):** Temp-файлы (`task_*.xml`, `result_*.xml`) очищаются per-attempt в `finally` блоке `ProcessRunner.RunAsync()`. Каждая попытка использует уникальный `attemptToken`, предотвращая stale-file конфликты между retry.
+**Temp-file cleanup:** Temp-файлы (`task_*.xml`, `result_*.xml`) очищаются в `finally` блоке `ProcessRunner.RunAsync()` через `CommandPreparer.CleanupTempFiles(commandId, filePath)`.
 
 ### Shared Static Helpers
 
@@ -391,7 +391,7 @@ SlashCommandService.ConfirmFileSelectionAsync()
     ├── RevitFileDeduplicator.Deduplicate()  // exact-name + 15-char prefix group + numeric-token overlap
     ├── RateLimiter (CheckDailyFileLimitAsync: CountQueuedFilesByUserSinceAsync)
     ├── CommandDataService.HasDuplicateCommandsAsync (active queue dedup)
-    ├── dataService.CreateSessionWithCommandsAsync() -- INSERT INTO Sessions + Commands + pg_notify('new_tasks', correlationId)
+    ├── dataService.CreateSessionWithCommandsAsync() -- advisory xact lock (dedup race guard) → INSERT INTO Sessions + Commands + pg_notify('new_tasks', correlationId); возвращает null при дубликате под lock'ом
     │
     ▼
 CommandNotificationService (Server) ── LISTEN session_started ──▶ Channel<NotificationItem> ──▶ NotificationSenderService ──▶ "⚙️ Задание запущено" пользователю
@@ -445,7 +445,7 @@ DI is wired in `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs`.
 | Тип | Поведение | Примеры |
 |-----|-----------|--------|
 | `InvalidFileError` (permanent) | Сразу `Failed`, без retry | Файл не найден, нет доступа, неверный формат, invalid path |
-| `ProcessCrashError` (transient) | retry с экспоненциальной задержкой (`RetryDelayBaseSeconds * 2^(attempt-1)`, default 60s → 120s → 240s → 480s → 960s) | Процесс упал с неспецифичным кодом ошибки |
+| `ProcessCrashError` (transient) | retry с экспоненциальной задержкой + jitter (`RetryDelayBaseSeconds * 2^(attempt-1) + random(0, RetryDelayBaseSeconds)`, base 60s → 120s → 240s → 480s → 960s) | Процесс упал с неспецифичным кодом ошибки |
 
 **Критерии permanent:**
 1. **По тексту ошибки** — паттерны (EN+RU): `"not found"`, `"no such file"`, `"cannot open file"`, `"access denied"`, `"access is denied"`, `"invalid file"`, `"permission denied"`, `"path not found"`, `"no such directory"`, `"cannot access"`, `"файл не найден"`, `"путь не найден"`, `"отказано в доступе"`, `"доступ запрещен"`, `"нет доступа"`, `"недопустимый файл"`, `"неверный формат файла"`, `"невозможно открыть файл"`
@@ -503,6 +503,8 @@ Tables: `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutb
 **`CountPendingProcessingBySessionAsync` (v1.7):** `SessionCompletionTracker` вызывает его после завершения каждой команды; поэтому сессии с числом команд больше `DefaultBatchSize` (5) и несколько воркеров обрабатываются корректно.
 
 **Advisory lock** для `ReleaseExpiredLeasesAsync`: `pg_try_advisory_lock(1234567)` — namespace `telegram_bot_lease_cleanup`. Предотвращает race между несколькими воркерами, освобождающими истёкшие Lease.
+
+**Advisory xact lock (1234570)** — `SessionDataService.CreateSessionWithCommandsAsync` вызывает `pg_advisory_xact_lock(1234570, hashtext(userId))` перед check-then-insert, чтобы закрыть TOCTOU-гонку между `HasDuplicateCommandsAsync` (pre-check в `SlashCommandService`) и вставкой при двойном submit. Снимается автоматически на commit/rollback транзакции. При обнаружении дубликата под lock'ом метод откатывает транзакцию и возвращает `null`; `SlashCommandService.ConfirmFileSelectionAsync` в этом случае шлёт пользователю предупреждение о дубликате вместо постановки в очередь.
 
 Database: **PostgreSQL 18** via Npgsql. Initialized at startup via `host.InitializeDatabaseAsync()` + `host.SeedAdminUsersAsync()` (Server only).
 All data access uses **Dapper** (in `TelegramBot.Data/` — `CommandDataService.cs`, `SessionDataService.cs`, `UserDataService.cs`, `MessageTrackingDataService.cs`, `NotificationOutboxDataService.cs`). Connection creation is unified via `CreateOpenConnectionAsync()` helper in `DataAccessBase`. SQL constants в `TelegramBot.Data/Sql/` (6 partial files: `Queries.Schema.cs`, `Queries.Users.cs`, `Queries.Sessions.cs`, `Queries.Commands.cs`, `Queries.TrackedMessages.cs`, `Queries.NotificationOutbox.cs`).
@@ -703,7 +705,7 @@ Previously, linked CTS вызывал немедленное прерывани�
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1277 symbols, 3294 relationships, 104 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1283 symbols, 3363 relationships, 104 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -712,8 +714,9 @@ This project is indexed by GitNexus as **TelegramBot** (1277 symbols, 3294 relat
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
 - **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "master"})`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 

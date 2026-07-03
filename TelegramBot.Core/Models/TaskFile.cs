@@ -3,9 +3,9 @@ using System.Xml.Serialization;
 namespace TelegramBot.Core.Models;
 
 /// <summary>
-/// Файл задания для BIM-плагина. Worker создаёт <c>task_{CommandId}_{AttemptToken}.xml</c> в TaskDirectory
+/// Файл задания для BIM-плагина. Worker создаёт <c>task_{projectName}_{commandId}.xml</c> в TaskDirectory
 /// перед запуском процесса. Плагин читает этот файл, получает все параметры команды и после
-/// выполнения пишет результат в <c>result_{CommandId}_{AttemptToken}.xml</c>.
+/// выполнения пишет результат в <c>result_{projectName}_{commandId}.xml</c>.
 /// </summary>
 /// <remarks>
 /// Формат полностью соответствует <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> и

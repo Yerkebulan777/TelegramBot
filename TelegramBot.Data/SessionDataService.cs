@@ -14,8 +14,11 @@ public sealed class SessionDataService(
     ILogger<SessionDataService> logger)
     : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
 {
-    /// <summary>Создаёт сессию с командами в одной транзакции.</summary>
-    public async Task<long> CreateSessionWithCommandsAsync(
+    /// <summary>
+    /// Создаёт сессию с командами в одной транзакции. Возвращает null, если под advisory lock'ом
+    /// обнаружились дубликаты (защита от TOCTOU-гонки при двойном submit — см. AcquireUserDedupeLock).
+    /// </summary>
+    public async Task<long?> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
         long userId,
@@ -35,6 +38,20 @@ public sealed class SessionDataService(
 
         await using var conn = await CreateOpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
+
+        // Сериализует check-then-insert одного пользователя; закрывается при commit/rollback.
+        _ = await conn.ExecuteAsync(SqlQueries.Commands.AcquireUserDedupeLock, new { UserId = userId }, tx);
+
+        var duplicateCount = await conn.QuerySingleAsync<int>(
+            SqlQueries.Commands.CountDuplicatePairs,
+            new { CommandTexts = commands, FilePaths = fileList },
+            tx);
+        if (duplicateCount > 0)
+        {
+            await tx.RollbackAsync();
+            Logger.LogWarning("Session rejected: duplicate commands detected under lock for user {UserId}", userId);
+            return null;
+        }
 
         correlationId ??= Guid.NewGuid().ToString("N");
         var sessionId = await conn.QuerySingleAsync<long>(

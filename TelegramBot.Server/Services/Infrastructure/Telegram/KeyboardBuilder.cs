@@ -191,10 +191,11 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         {
             var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
             var fileName = Path.GetFileName(sessionCommand.FileName);
+            var commandPrefix = isFiltered || uniqueCommands.Count == 1 ? "" : $"{sessionCommand.Command}: ";
 
             if (sessionCommand.Status == "pending")
             {
-                var label = $"{statusIcon} {sessionCommand.Command}: {fileName} ✖️";
+                var label = $"{statusIcon} {commandPrefix}{fileName} ✖️";
                 buttons.Add(
                 [
                     InlineKeyboardButton.WithCallbackData(
@@ -204,7 +205,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             }
             else
             {
-                var label = $"{statusIcon} {sessionCommand.Command}: {fileName}";
+                var label = $"{statusIcon} {commandPrefix}{fileName}";
                 buttons.Add(
                 [
                     InlineKeyboardButton.WithCallbackData(

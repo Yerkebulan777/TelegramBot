@@ -31,15 +31,35 @@ public sealed class CommandPreparer(
     private static readonly XmlSerializerNamespaces EmptyXmlNamespaces = new([XmlQualifiedName.Empty]);
 
     /// <summary>
-    /// Возвращает пути к task-файлу и result-файлу для указанной команды и попытки.
+    /// Возвращает пути к task-файлу и result-файлу для указанной команды.
     /// Используется как CommandPreparer'ом при записи task-файла и ProcessRunner'ом при чтении result-файла,
     /// чтобы оба компонента использовали одну и ту же директорию (настраиваемую через <c>FileSystem:TaskDirectory</c>).
+    /// Схема имени — <c>task_{projectName}_{commandId}.xml</c> — 1:1 с эталоном RevitBIMFusion
+    /// (см. BimPluginContract.md §TaskFile Location); AddIn имя файла не парсит, читает путь из CLI args,
+    /// так что схема — чисто диагностическая, retry одной команды перезаписывает файл предыдущей попытки.
     /// </summary>
-    public (string resultFilePath, string taskFilePath) GetTaskFilePaths(int commandId, string attemptToken)
+    public (string resultFilePath, string taskFilePath) GetTaskFilePaths(int commandId, string filePath)
     {
-        var resultFilePath = Path.Combine(_taskDirectory, $"result_{commandId}_{attemptToken}.xml");
-        var taskFilePath = Path.Combine(_taskDirectory, $"task_{commandId}_{attemptToken}.xml");
+        var projectName = GetProjectName(filePath);
+        var resultFilePath = Path.Combine(_taskDirectory, $"result_{projectName}_{commandId}.xml");
+        var taskFilePath = Path.Combine(_taskDirectory, $"task_{projectName}_{commandId}.xml");
         return (resultFilePath, taskFilePath);
+    }
+
+    private static string GetProjectName(string filePath)
+    {
+        var name = Path.GetFileNameWithoutExtension(filePath);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "unknown";
+        }
+
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(invalidChar, '_');
+        }
+
+        return name;
     }
 
     /// <summary>
@@ -261,9 +281,9 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>Создаёт ProcessStartInfo из конфигурации команды.</summary>
-    public ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, CommandConfig cfg, string attemptToken)
+    public ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, CommandConfig cfg)
     {
-        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, attemptToken);
+        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
 
         var args = cfg.ArgumentsTemplate
             .Replace("{CommandText}", cmd.CommandText)
@@ -296,7 +316,7 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>
-    /// Создаёт файл задания <c>task_{CommandId}_{attemptToken}.xml</c> для BIM-плагина (контракт
+    /// Создаёт файл задания <c>task_{projectName}_{commandId}.xml</c> для BIM-плагина (контракт
     /// <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> §TaskFile Location). Плагин читает этот файл,
     /// чтобы получить <c>commandText</c>, <c>filePath</c> и <c>resultFilePath</c>. В CLI для Revit AddIn
     /// передаётся fixed dispatcher <c>WORKER</c>, а <c>filePath</c> намеренно НЕ передаётся
@@ -308,9 +328,9 @@ public sealed class CommandPreparer(
     /// не создана, .tmp не записан, или rename не прошёл). В последнем случае вызывающая сторона
     /// может решить — стартовать процесс всё равно или прервать выполнение.
     /// </returns>
-    public bool CreateTaskFile(PendingCommand cmd, string attemptToken)
+    public bool CreateTaskFile(PendingCommand cmd)
     {
-        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, attemptToken);
+        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
 
         try
         {
@@ -396,13 +416,13 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>
-    /// Очищает временные файлы task и result для указанной попытки.
+    /// Очищает временные файлы task и result для указанной команды.
     /// </summary>
-    public void CleanupTempFiles(int commandId, string attemptToken)
+    public void CleanupTempFiles(int commandId, string filePath)
     {
         try
         {
-            var (resultFilePath, taskFilePath) = GetTaskFilePaths(commandId, attemptToken);
+            var (resultFilePath, taskFilePath) = GetTaskFilePaths(commandId, filePath);
             var deletedFiles = new List<string>(capacity: 2);
 
             if (File.Exists(taskFilePath))
@@ -420,21 +440,20 @@ public sealed class CommandPreparer(
             if (deletedFiles.Count > 0)
             {
                 logger.LogInformation(
-                    "Temp files cleaned: commandId={CommandId}, attemptToken={AttemptToken}, files={Files}",
-                    commandId, attemptToken, string.Join("; ", deletedFiles));
+                    "Temp files cleaned: commandId={CommandId}, files={Files}",
+                    commandId, string.Join("; ", deletedFiles));
             }
             else
             {
                 logger.LogDebug(
-                    "No temp files to clean: commandId={CommandId}, attemptToken={AttemptToken}, taskFile={TaskFilePath}, resultFile={ResultFilePath}",
-                    commandId, attemptToken, taskFilePath, resultFilePath);
+                    "No temp files to clean: commandId={CommandId}, taskFile={TaskFilePath}, resultFile={ResultFilePath}",
+                    commandId, taskFilePath, resultFilePath);
             }
         }
         catch (Exception ex)
         {
             // Best effort — не должны падать из-за ошибки очистки
-            logger.LogDebug(ex, "Failed to clean up temp files for command {CommandId} (attempt {Token})",
-                commandId, attemptToken);
+            logger.LogDebug(ex, "Failed to clean up temp files for command {CommandId}", commandId);
         }
     }
 }

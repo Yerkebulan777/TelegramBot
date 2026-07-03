@@ -432,11 +432,18 @@ public sealed partial class SlashCommandService(
             var correlationId = Guid.NewGuid().ToString("N");
             var sessionId = await dataServices.Sessions.CreateSessionWithCommandsAsync(
                 session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
+            if (sessionId is null)
+            {
+                // Гонка: дубликат проскочил быстрый pre-check выше, но пойман под advisory lock'ом при вставке
+                logger.LogWarning("Job blocked: user={Username} ({UserId}), reason=duplicate_commands_in_queue_race", username, userId);
+                await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
+                return;
+            }
             logger.LogInformation(
                 "Job queued: session={SessionId}, correlationId={CorrelationId}, user={Username} ({UserId}), commands={CommandCount}, files={FileCount}",
                 sessionId, correlationId, username, userId, session.PendingCommand.Count, filesToProcess.Count);
 
-            session.SessionId = checked((int)sessionId);
+            session.SessionId = checked((int)sessionId.Value);
             await outputService.ClearChatHistoryAsync(userId, session);
 
             session.ResetNavigation(_options.RootPath);

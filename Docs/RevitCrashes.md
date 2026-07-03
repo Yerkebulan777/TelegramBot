@@ -562,7 +562,7 @@ public override void OnStartup()
 | `TelegramBot.Worker/BimLib/Monitor/DialogDismisser.cs:36` | `DismissDialogsForProcess` — ранний `return` при `Enabled=false` |
 | `TelegramBot.Worker/BimLib/Config/DialogDismisserOptions.cs` | `Enabled` toggle (по умолчанию `true`, сейчас `false` для тестов) |
 | `TelegramBot.Core/Config/WorkerOptions.cs:67` | `LaunchStaggerSeconds` (default 30) |
-| `TelegramBot.Worker/Services/CommandPreparer.cs` | `CreateTaskFile` — atomic write `task_{CommandId}_{AttemptToken}.xml` |
+| `TelegramBot.Worker/Services/CommandPreparer.cs` | `CreateTaskFile` — atomic write `task_{projectName}_{commandId}.xml` |
 
 ### RevitBIMFusion AddIn (внешний репозиторий — где нужно исправление Метода H)
 

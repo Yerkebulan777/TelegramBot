@@ -202,5 +202,11 @@ internal static partial class SqlQueries
                   AND c.CommandText = input.cmd
                   AND c.FilePath = input.fpath
             )";
+
+        // Namespace 1234570 (xact-scoped) — сериализует check-then-insert одного пользователя,
+        // закрывает TOCTOU-гонку между HasDuplicateCommandsAsync и CreateSessionWithCommandsAsync
+        // при двойном submit (двойной тап). Освобождается автоматически на commit/rollback транзакции.
+        internal const string AcquireUserDedupeLock = @"
+            SELECT pg_advisory_xact_lock(1234570, hashtext(@UserId::text))";
     }
 }

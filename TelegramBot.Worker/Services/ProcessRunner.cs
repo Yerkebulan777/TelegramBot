@@ -50,10 +50,6 @@ public sealed class ProcessRunner(
         var sw = Stopwatch.StartNew();
         Process? process = null;
 
-        // Уникальный токен попытки: предотвращает конфликты между retry одной команды
-        // и атаки с предсказуемыми именами файлов.
-        var attemptToken = Guid.NewGuid().ToString("N");
-
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromMinutes(_workerOptions.ProcessTimeoutMinutes));
         var timeoutToken = timeoutCts.Token;
@@ -70,10 +66,10 @@ public sealed class ProcessRunner(
             }
 
             // Шаг 2: запуск процесса
-            process = await StartProcessAsync(cmd, commandCfg, attemptToken, timeoutToken);
+            process = await StartProcessAsync(cmd, commandCfg, timeoutToken);
 
             // Шаг 3: ожидание и обработка результата (exit code + stdout/stderr)
-            await WaitAndHandleResultAsync(cmd, process, sw, timeoutToken, attemptToken);
+            await WaitAndHandleResultAsync(cmd, process, sw, timeoutToken);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -94,7 +90,7 @@ public sealed class ProcessRunner(
         finally
         {
             // Очищаем temp-файлы этой попытки
-            commandPreparer.CleanupTempFiles(cmd.CommandId, attemptToken);
+            commandPreparer.CleanupTempFiles(cmd.CommandId, cmd.FilePath ?? string.Empty);
 
             // На shutdown не удаляем процесс из tracking'а — пусть LogActiveProcessesOnShutdownAsync его увидит.
             if (!ct.IsCancellationRequested)
@@ -107,7 +103,7 @@ public sealed class ProcessRunner(
     }
 
     /// <summary>Запускает процесс по конфигурации команды.</summary>
-    private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, string attemptToken, CancellationToken ct)
+    private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
         // Создаём task-файл для CAD-плагина перед запуском процесса.
         // Если запись не удалась — AddIn не получит filePath (контракт BimPluginContract §CLI Arguments
@@ -115,16 +111,16 @@ public sealed class ProcessRunner(
         // с IOException, чтобы ErrorClassifier пометил это как permanent failure без retry:
         // проблема инфраструктурная (TaskDirectory недоступен/переполнен/заблокирован антивирусом),
         // повторная попытка ничего не даст.
-        var (_, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken);
-        if (!commandPreparer.CreateTaskFile(cmd, attemptToken))
+        var (_, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        if (!commandPreparer.CreateTaskFile(cmd))
         {
             throw new IOException(
                 $"Failed to write task file in TaskDirectory '{taskFilePath}'. " +
                 $"AddIn cannot proceed without the task file. Check FileSystem:TaskDirectory permissions, disk space, and antivirus.");
         }
 
-        var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg, attemptToken);
-        var (resultFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken);
+        var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg);
+        var (resultFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
 
         logger.LogInformation("Command start: id={Id}, correlationId={CorrelationId}, command={Cmd}, attempt={Attempt}",
             cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
@@ -183,7 +179,7 @@ public sealed class ProcessRunner(
     /// После выхода процесса пробует прочитать result-файл от плагина.
     /// Если файл есть — статус берётся из него. Если нет — fallback на exit code.
     /// </summary>
-    private async Task WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct, string attemptToken)
+    private async Task WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
     {
         const int MaxOutputChars = 64 * 1024; // 64KB лимит на вывод
         var outputBuilder = new StringBuilder(capacity: 1024);
@@ -230,10 +226,10 @@ public sealed class ProcessRunner(
         sw.Stop();
 
         // Пробуем прочитать result-файл от плагина
-        var resultReadStatus = TryReadResultFile(cmd.CommandId, attemptToken, out var result, out var resultReadError);
+        var resultReadStatus = TryReadResultFile(cmd.CommandId, cmd.FilePath ?? string.Empty, out var result, out var resultReadError);
         if (resultReadStatus == ResultFileReadStatus.NotFound)
         {
-            var (expectedResultFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, attemptToken);
+            var (expectedResultFilePath, _) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
             logger.LogInformation(
                 "Result file not found: id={Id}, correlationId={CorrelationId}, command={Cmd}, expectedResultFile={ResultFilePath}. Falling back to process exit code.",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, expectedResultFilePath);
@@ -338,11 +334,11 @@ public sealed class ProcessRunner(
     /// </summary>
     private ResultFileReadStatus TryReadResultFile(
         int commandId,
-        string attemptToken,
+        string filePath,
         out ResultFile result,
         out string? errorMessage)
     {
-        var (path, _) = commandPreparer.GetTaskFilePaths(commandId, attemptToken);
+        var (path, _) = commandPreparer.GetTaskFilePaths(commandId, filePath);
 
         if (!File.Exists(path))
         {
@@ -442,9 +438,11 @@ public sealed class ProcessRunner(
         }
         else if (cmd.RetryCount < _workerOptions.MaxRetries)
         {
-            // ProcessCrashError → retry с экспоненциальной задержкой
-            var nextRetryAt = DateTime.UtcNow.AddSeconds(
-                _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount));
+            // ProcessCrashError → retry с экспоненциальной задержкой + jitter (против thundering herd
+            // при массовом сбое, напр. недоступна лицензия Revit)
+            var baseDelay = _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount);
+            var jitterSeconds = Random.Shared.Next(0, _workerOptions.RetryDelayBaseSeconds);
+            var nextRetryAt = DateTime.UtcNow.AddSeconds(baseDelay + jitterSeconds);
             var newRetryCount = await commandDataService.ScheduleRetryAsync(
                 cmd.CommandId, nextRetryAt, errorMessage);
             logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
