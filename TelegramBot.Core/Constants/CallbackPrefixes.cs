@@ -62,6 +62,9 @@ public static class CallbackPrefixes
     /// <summary>Выбрать все папки разделов.</summary>
     public const string SelectAllSectionFolders = "SELECTALLSECTIONS:";
 
+    /// <summary>Навигация внутрь раздела (список файлов) или назад, без сброса выбора.</summary>
+    public const string OpenFolder = "OPENFOLDER:";
+
     /// <summary>Подтверждение удаления сессии по типу.</summary>
     public const string ConfirmDeleteSessionByType = "CONFIRMDELETESESSIONBYTYPE:";
 

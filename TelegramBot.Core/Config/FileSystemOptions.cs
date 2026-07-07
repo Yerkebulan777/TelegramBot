@@ -21,11 +21,6 @@ public sealed class FileSystemOptions
     public string SectionFolderPattern { get; set; } = @"^(\d{2}|\d{3}|I{1,3})_";
 
     /// <summary>
-    /// Максимальная параллельность сканирования 01_RVT директорий при создании задания.
-    /// </summary>
-    public int RvtScanMaxDegreeOfParallelism { get; set; } = 4;
-
-    /// <summary>
     /// Путь к директории логов. Если не задан (null или пусто),
     /// используется дефолтный путь: %USERPROFILE%\Documents\TelegramBot\Logs.
     /// </summary>
@@ -60,11 +55,17 @@ public sealed class FileSystemOptions
         return Path.Combine(sectionPath, RvtDirectoryName);
     }
 
-    /// <summary>Проверяет, находится ли пользователь на уровне выбора проектов (а не разделов).</summary>
+    /// <summary>Проверяет, находится ли пользователь на уровне выбора проектов (а не разделов/файлов).</summary>
     public bool IsAtProjectLevel(string currentPath)
     {
-        return !string.Equals(Path.GetFileName(currentPath), ProjectDirectoryName,
-            StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            return string.Equals(NormalizePath(currentPath), NormalizePath(RootPath), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>Проверяет, что путь находится внутри корневой директории.</summary>
@@ -72,8 +73,8 @@ public sealed class FileSystemOptions
     {
         try
         {
-            var root = Path.GetFullPath(RootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var candidate = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var root = NormalizePath(RootPath);
+            var candidate = NormalizePath(path);
 
             return candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
                 || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
@@ -82,5 +83,10 @@ public sealed class FileSystemOptions
         {
             return false;
         }
+    }
+
+    private static string NormalizePath(string path)
+    {
+        return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 }

@@ -19,7 +19,8 @@ public sealed class FileSelectionHandler(
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
         CallbackPrefixes.File,
-        CallbackPrefixes.SelectAllSectionFolders
+        CallbackPrefixes.SelectAllSectionFolders,
+        CallbackPrefixes.OpenFolder
     ];
 
     public override Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -27,12 +28,38 @@ public sealed class FileSelectionHandler(
         return context.ParsedCallback.Prefix switch
         {
             CallbackPrefixes.File => HandleFileToggleAsync(context, cancellationToken),
-            CallbackPrefixes.SelectAllSectionFolders => HandleSelectAllSectionFoldersAsync(context, cancellationToken),
+            CallbackPrefixes.SelectAllSectionFolders => HandleSelectAllAsync(context, cancellationToken),
+            CallbackPrefixes.OpenFolder => HandleOpenFolderAsync(context, cancellationToken),
             _ => Task.CompletedTask
         };
     }
 
-    private async Task HandleSelectAllSectionFoldersAsync(CallbackContext context, CancellationToken cancellationToken)
+    private async Task HandleOpenFolderAsync(CallbackContext context, CancellationToken cancellationToken)
+    {
+        var session = context.Session;
+        session.FileSelectionMessageId = context.MessageId;
+
+        var newPath = string.IsNullOrEmpty(context.ParsedCallback.Argument)
+            ? Path.GetDirectoryName(session.CurrentPath)
+            : fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
+
+        if (string.IsNullOrEmpty(newPath) || !_options.IsPathWithinRoot(newPath))
+        {
+            Logger.LogWarning(
+                "Rejected folder navigation outside root. User={Username} ({UserId}), Path={Path}",
+                context.Username, context.UserId, newPath);
+            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
+            return;
+        }
+
+        session.CurrentPath = newPath;
+
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
+        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+    }
+
+    private async Task HandleSelectAllAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
@@ -43,8 +70,8 @@ public sealed class FileSelectionHandler(
 
         if (_options.IsPathWithinRoot(path))
         {
-            var folderPaths = fileBrowser.GetSectionFolderPaths(path);
-            session.AddSelectedFiles(folderPaths);
+            var filePaths = fileBrowser.GetSelectableFiles(path);
+            session.AddSelectedFiles(filePaths);
         }
         else
         {
@@ -57,7 +84,7 @@ public sealed class FileSelectionHandler(
 
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "Все папки выбраны");
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "Все файлы выбраны");
 
     }
 

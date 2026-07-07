@@ -87,7 +87,6 @@ Server и Worker — независимые процессы с общей БД.
 | `FileSystem:RvtDirectoryName` | `01_RVT` |
 | `FileSystem:ProjectDirectoryName` | `01_PROJECT` |
 | `FileSystem:SectionFolderPattern` | regex для каталогов проектов |
-| `FileSystem:RvtScanMaxDegreeOfParallelism` | `4` |
 | `FileSystem:LogDirectory` | `%USERPROFILE%\Documents\TelegramBot\Logs` |
 | `RateLimit:MaxRequests` / `WindowSeconds` | `30` / `60` в committed config |
 | `RateLimit:MaxFilesPerUserPerDay` | `1000`; `0` отключает |

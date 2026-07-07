@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Options;
 using System.Collections.Frozen;
 using System.Text;
-using System.Text.RegularExpressions;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
@@ -44,20 +43,6 @@ public sealed partial class SlashCommandService(
 
     private readonly FileSystemOptions _options = fileSystemOptions.Value;
     private readonly RateLimitOptions _rateLimitOptions = rateLimitOptions.Value;
-
-    [GeneratedRegex(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase)]
-    private static partial Regex RvtSectionPattern();
-
-    private const long _rvtMinFileSizeBytes = 50L * 1024 * 1024;
-
-    private static readonly EnumerationOptions _rvtEnumOptions = new()
-    {
-        RecurseSubdirectories = true,
-        MaxRecursionDepth = 3,
-        IgnoreInaccessible = true,
-        MatchCasing = MatchCasing.CaseInsensitive,
-        AttributesToSkip = FileAttributes.ReparsePoint,
-    };
 
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
@@ -278,22 +263,24 @@ public sealed partial class SlashCommandService(
         await RemoveReplyKeyboardAsync(userId, session, username);
         session.IsFileSelectionActive = false;
 
-        var selectedSections = session.GetSelectedFiles();
-        if (selectedSections.Count == 0)
+        var selectedFiles = session.GetSelectedFiles();
+        if (selectedFiles.Count == 0)
         {
-            logger.LogDebug("Job submit blocked: user={Username} ({UserId}), reason=no_sections_selected", username, userId);
-            await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один раздел.");
+            logger.LogDebug("Job submit blocked: user={Username} ({UserId}), reason=no_files_selected", username, userId);
+            await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один файл.");
             return;
         }
 
         logger.LogDebug(
-            "Job submit: user={Username} ({UserId}), commands={CommandCount}, sections={SectionCount}",
-            username, userId, session.PendingCommand.Count, selectedSections.Count);
+            "Job submit: user={Username} ({UserId}), commands={CommandCount}, files={FileCount}",
+            username, userId, session.PendingCommand.Count, selectedFiles.Count);
 
         var commandNames = session.PendingCommandName;
-        var projectName = GetCurrentProjectName(session);
-        var sectionNames = selectedSections
-            .Select(GetSafePathName)
+        var projectName = GetProjectName(selectedFiles.First());
+        var sectionNames = selectedFiles
+            .Select(GetSectionFolderName)
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         using var typingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -301,11 +288,11 @@ public sealed partial class SlashCommandService(
 
         try
         {
-            var filesToProcess = await CollectRvtFilesAsync(selectedSections, cancellationToken);
+            var filesToProcess = selectedFiles.Where(File.Exists).ToList();
             if (filesToProcess.Count == 0)
             {
                 logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=no_files_found", username, userId);
-                await RejectAndWarnAsync(userId, session, $"⚠️ В выбранных разделах проекта «{projectName}» не найдено файлов для обработки.");
+                await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» не найдены на диске.");
                 return;
             }
 
@@ -569,12 +556,22 @@ public sealed partial class SlashCommandService(
         return builder.ToString();
     }
 
-    private static string GetCurrentProjectName(UserSession session)
+    /// <summary>Имя папки проекта (родитель 01_PROJECT) для выбранного файла.</summary>
+    private string GetProjectName(string filePath)
     {
-        var projectDirectory = Directory.GetParent(session.CurrentPath);
-        return projectDirectory == null
-            ? GetSafePathName(session.CurrentPath)
-            : GetSafePathName(projectDirectory.FullName);
+        var dir = Path.GetDirectoryName(filePath);
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (string.Equals(Path.GetFileName(dir), _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                var parent = Path.GetDirectoryName(dir);
+                return parent != null ? GetSafePathName(parent) : GetSafePathName(dir);
+            }
+
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        return GetSafePathName(filePath);
     }
 
     private static string GetSafePathName(string path)
@@ -583,93 +580,22 @@ public sealed partial class SlashCommandService(
         return string.IsNullOrWhiteSpace(name) ? path : name;
     }
 
-    private async Task<List<string>> CollectRvtFilesAsync(IReadOnlySet<string> sectionPaths, CancellationToken cancellationToken)
+    /// <summary>Имя папки раздела (родитель которой — 01_PROJECT) для выбранного файла, либо null.</summary>
+    private string? GetSectionFolderName(string filePath)
     {
-        var rvtDirs = sectionPaths
-            .Select(_options.GetRvtPath)
-            .Where(Directory.Exists)
-            .ToArray();
-
-        if (rvtDirs.Length == 0)
+        var dir = Path.GetDirectoryName(filePath);
+        while (!string.IsNullOrEmpty(dir))
         {
-            return [];
+            var parent = Path.GetDirectoryName(dir);
+            if (parent != null && string.Equals(Path.GetFileName(parent), _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                return GetSafePathName(dir);
+            }
+
+            dir = parent;
         }
 
-        var scanResults = new (string Path, int Depth)[rvtDirs.Length][];
-        var parallelOptions = new ParallelOptions
-        {
-            CancellationToken = cancellationToken,
-            MaxDegreeOfParallelism = Math.Max(1, _options.RvtScanMaxDegreeOfParallelism),
-        };
-
-        await Parallel.ForAsync(0, rvtDirs.Length, parallelOptions, (index, ct) =>
-        {
-            ct.ThrowIfCancellationRequested();
-            scanResults[index] = EnumerateValidRvtFiles(rvtDirs[index]).ToArray();
-            return ValueTask.CompletedTask;
-        });
-
-        var allFiles = scanResults.SelectMany(files => files).ToList();
-        return RevitFileDeduplicator.Deduplicate(allFiles);
-    }
-
-    private static IEnumerable<(string Path, int Depth)> EnumerateValidRvtFiles(string rvtDir)
-    {
-        try
-        {
-            return new DirectoryInfo(rvtDir)
-                .EnumerateFiles("*.rvt", _rvtEnumOptions)
-                .Where(IsValidRevitFile)
-                .Select(fi => (fi.FullName, GetDepth(rvtDir, fi.DirectoryName!)))
-                .ToArray();
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-
-    private static int GetDepth(string rvtDir, string fileDir)
-    {
-        var relative = Path.GetRelativePath(rvtDir, fileDir);
-        return relative == "." ? 0 : relative.Count(c => c is '\\' or '/') + 1;
-    }
-
-    private static bool IsValidRevitFile(FileInfo fi)
-    {
-        var name = Path.GetFileNameWithoutExtension(fi.Name);
-
-        if (name.Length is <10 or >50)
-        {
-            return false;
-        }
-
-        if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!RvtSectionPattern().IsMatch(name))
-        {
-            return false;
-        }
-
-        try
-        {
-            return fi.Length > _rvtMinFileSizeBytes;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
+        return null;
     }
 }
 

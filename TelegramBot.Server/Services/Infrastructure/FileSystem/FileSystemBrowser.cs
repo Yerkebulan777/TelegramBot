@@ -11,10 +11,11 @@ using TelegramBot.Server.Services.Application;
 
 namespace TelegramBot.Server.Services.Infrastructure.FileSystem;
 
-public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptions> options)
+public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptions> options, ILogger<FileSystemBrowser> logger)
 {
     private static readonly TimeSpan DirectoryCacheTtl = TimeSpan.FromSeconds(5);
     private readonly ConcurrentDictionary<string, CachedDirectoryListing> _directoryCache = new();
+    private readonly ConcurrentDictionary<string, CachedFileListing> _fileCache = new();
 
     private readonly FileSystemOptions _options = options.Value;
     private readonly Regex _folderRegex = new(options.Value.SectionFolderPattern, RegexOptions.IgnoreCase);
@@ -26,7 +27,22 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
 
     private static readonly char[] _nameSeparators = ['_', '-', ' ', '.'];
 
+    private const long RvtMinFileSizeBytes = 50L * 1024 * 1024;
+
+    private static readonly Regex _rvtSectionPattern =
+        new(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase);
+
+    private static readonly EnumerationOptions _rvtEnumOptions = new()
+    {
+        RecurseSubdirectories = true,
+        MaxRecursionDepth = 3,
+        IgnoreInaccessible = true,
+        MatchCasing = MatchCasing.CaseInsensitive,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+    };
+
     private readonly record struct CachedDirectoryListing(string[] Paths, DateTime ExpiresAt);
+    private readonly record struct CachedFileListing(List<string> Paths, DateTime ExpiresAt);
 
     private string[] GetCachedDirectories(string path)
     {
@@ -42,24 +58,38 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         return paths;
     }
 
+    private List<string> GetCachedSectionFiles(string sectionPath)
+    {
+        var now = DateTime.UtcNow;
+
+        if (_fileCache.TryGetValue(sectionPath, out var cached) && cached.ExpiresAt > now)
+        {
+            return cached.Paths;
+        }
+
+        var files = ScanSectionFiles(sectionPath);
+        _fileCache[sectionPath] = new CachedFileListing(files, now.Add(DirectoryCacheTtl));
+        return files;
+    }
+
     public InlineKeyboardMarkup GetSectionsView(long userId, string path)
     {
         var session = sessions.GetOrCreateSession(userId);
 
-        var atSectionLevel = string.Equals(
-            Path.GetFileName(path), _options.ProjectDirectoryName,
-            StringComparison.OrdinalIgnoreCase);
+        if (IsSectionFileLevel(path))
+        {
+            return BuildFilesKeyboard(session, path);
+        }
 
-        var keyboard = atSectionLevel
+        return IsSectionLevel(path)
             ? BuildSectionKeyboard(session, path)
             : BuildProjectKeyboard(session, path);
-
-        return keyboard;
     }
 
-    public List<string> GetSectionFolderPaths(string path)
+    /// <summary>Файлы для кнопки "Выбрать все": доступна только на уровне файлов одного раздела.</summary>
+    public List<string> GetSelectableFiles(string path)
     {
-        return EnumerateSectionFolders(path).ToList();
+        return GetCachedSectionFiles(path);
     }
 
     public string? ResolveSelectionPath(string currentPath, string callbackArgument)
@@ -74,12 +104,14 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
             return callbackArgument;
         }
 
-        var folders = IsSectionLevel(currentPath)
-            ? EnumerateSectionFolders(currentPath)
-            : EnumerateProjectFolders(currentPath);
+        IEnumerable<string> candidates = IsSectionFileLevel(currentPath)
+            ? GetCachedSectionFiles(currentPath)
+            : IsSectionLevel(currentPath)
+                ? EnumerateSectionFolders(currentPath)
+                : EnumerateProjectFolders(currentPath);
 
-        return folders.FirstOrDefault(folder =>
-            string.Equals(CreateSelectionToken(folder), callbackArgument, StringComparison.OrdinalIgnoreCase));
+        return candidates.FirstOrDefault(candidate =>
+            string.Equals(CreateSelectionToken(candidate), callbackArgument, StringComparison.OrdinalIgnoreCase));
     }
 
     private InlineKeyboardMarkup BuildProjectKeyboard(UserSession session, string path)
@@ -103,8 +135,27 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
 
         foreach (var dir in EnumerateSectionFolders(path))
         {
-            var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(dir)}")]);
+            var hasSelection = selected.Any(file => IsWithinFolder(dir, file));
+            var label = $"{(hasSelection ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.OpenFolder}{CreateSelectionToken(dir)}")]);
+        }
+
+        return new InlineKeyboardMarkup(buttons);
+    }
+
+    /// <summary>Список файлов раздела: та же механика выбора (чекбоксы + "Выбрать все"), что и у списка разделов.</summary>
+    private InlineKeyboardMarkup BuildFilesKeyboard(UserSession session, string path)
+    {
+        var selected = session.GetSelectedFiles();
+        var buttons = new List<List<InlineKeyboardButton>>
+        {
+            new() { InlineKeyboardButton.WithCallbackData("⬅️ Назад", CallbackPrefixes.OpenFolder) }
+        };
+
+        foreach (var file in GetCachedSectionFiles(path))
+        {
+            var label = $"{(selected.Contains(file) ? "✅ " : "📄 ")}{Path.GetFileName(file)}";
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(file)}")]);
         }
 
         buttons.Add([InlineKeyboardButton.WithCallbackData("Выбрать все", CallbackPrefixes.SelectAllSectionFolders)]);
@@ -117,6 +168,20 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         return string.Equals(
             Path.GetFileName(path), _options.ProjectDirectoryName,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsSectionFileLevel(string path)
+    {
+        var parent = Path.GetDirectoryName(path);
+        return parent != null && string.Equals(
+            Path.GetFileName(parent), _options.ProjectDirectoryName,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWithinFolder(string dir, string filePath)
+    {
+        var prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return filePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string CreateSelectionToken(string path)
@@ -153,4 +218,74 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         return nameSegments.Any(_sectionAcronyms.Contains);
     }
 
+    private List<string> ScanSectionFiles(string sectionPath)
+    {
+        var rvtDir = _options.GetRvtPath(sectionPath);
+        if (!Directory.Exists(rvtDir))
+        {
+            return [];
+        }
+
+        try
+        {
+            var files = new DirectoryInfo(rvtDir)
+                .EnumerateFiles("*.rvt", _rvtEnumOptions)
+                .Where(IsValidRevitFile)
+                .Select(fi => (fi.FullName, Depth: GetDepth(rvtDir, fi.DirectoryName!)))
+                .ToList();
+
+            return RevitFileDeduplicator.Deduplicate(files);
+        }
+        catch (IOException ex)
+        {
+            logger.LogWarning(ex, "Failed to scan RVT directory {RvtDir}", rvtDir);
+            return [];
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogWarning(ex, "Access denied scanning RVT directory {RvtDir}", rvtDir);
+            return [];
+        }
+    }
+
+    private static int GetDepth(string rvtDir, string fileDir)
+    {
+        var relative = Path.GetRelativePath(rvtDir, fileDir);
+        return relative == "." ? 0 : relative.Count(c => c is '\\' or '/') + 1;
+    }
+
+    private bool IsValidRevitFile(FileInfo fi)
+    {
+        var name = Path.GetFileNameWithoutExtension(fi.Name);
+
+        if (name.Length is <10 or >50)
+        {
+            return false;
+        }
+
+        if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!_rvtSectionPattern.IsMatch(name))
+        {
+            return false;
+        }
+
+        try
+        {
+            return fi.Length > RvtMinFileSizeBytes;
+        }
+        catch (IOException ex)
+        {
+            logger.LogWarning(ex, "Failed to read file size for {FilePath}", fi.FullName);
+            return false;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogWarning(ex, "Access denied reading file size for {FilePath}", fi.FullName);
+            return false;
+        }
+    }
 }

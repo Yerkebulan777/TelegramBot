@@ -77,8 +77,8 @@ Handlers:
 | Handler | Prefixes |
 |---|---|
 | `AccessRequestHandler` | `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` |
-| `FileNavigationHandler` | `GOTOPARENT:` |
-| `FileSelectionHandler` | `FILE:`, `SELECTALLSECTIONS:` |
+| `FileNavigationHandler` | `GOTOPARENT:` (не используется, dead code) |
+| `FileSelectionHandler` | `FILE:`, `SELECTALLSECTIONS:`, `OPENFOLDER:` |
 | `CommandToggleHandler` | command prefixes из `CommandCatalog` |
 | `CommandSelectionHandler` | `APPLYCOMMANDS:`, `CANCELCOMMANDSSEL:` |
 | `SessionManagementHandler` | status/page/details/delete prefixes |
@@ -87,12 +87,13 @@ Handlers:
 
 ### File selection
 
-`FileSystemBrowser` показывает только каталоги, которые:
+`FileSystemBrowser` — три уровня навигации, определяются структурой `CurrentPath`:
 
-- на уровне `RootPath` совпадают с `SectionFolderPattern` и содержат `ProjectDirectoryName`;
-- на уровне проекта находятся внутри `01_PROJECT` и содержат известный section acronym.
+- `RootPath` — каталоги, совпадающие с `SectionFolderPattern` и содержащие `ProjectDirectoryName` (single-select, клик = выбор проекта);
+- `<project>/01_PROJECT` — каталоги разделов с известным section acronym (клик = `OPENFOLDER:` — переход к файлам раздела, выбор не сбрасывается);
+- `<project>/01_PROJECT/<section>` — список `.rvt`-файлов раздела (multi-select чекбоксами + кнопка "Выбрать все").
 
-`SlashCommandService` рекурсивно сканирует `01_RVT` с `RvtScanMaxDegreeOfParallelism`, оставляет `.rvt` больше 50 MiB с допустимым именем и передаёт список в `RevitFileDeduplicator`.
+Список файлов раздела строит `FileSystemBrowser` рекурсивным сканированием `01_RVT` (глубина 3), оставляет `.rvt` больше 50 MiB с допустимым именем и прогоняет через `RevitFileDeduplicator`. Кнопка "Выбрать все" (`SELECTALLSECTIONS:`) доступна только на уровне файлов одного раздела (`FileSystemBrowser.GetSelectableFiles` возвращает файлы только текущего раздела) — массовый скан всех разделов проекта разом намеренно убран как слишком накладный по I/O. `SlashCommandService.ConfirmFileSelectionAsync` на финальном шаге просто берёт `session.GetSelectedFiles()` — файлы уже отобраны и провалидированы на этапе навигации, повторное сканирование не требуется. Имя проекта для лога/уведомления берётся из пути первого выбранного файла (`GetProjectName`), а не из `session.CurrentPath` — CurrentPath после `OPENFOLDER:` указывает вглубь на раздел, а не на проект.
 
 ### Server DI
 
