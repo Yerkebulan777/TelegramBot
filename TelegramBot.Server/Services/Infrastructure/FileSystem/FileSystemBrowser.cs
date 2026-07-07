@@ -14,8 +14,8 @@ namespace TelegramBot.Server.Services.Infrastructure.FileSystem;
 public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptions> options, ILogger<FileSystemBrowser> logger)
 {
     private static readonly TimeSpan DirectoryCacheTtl = TimeSpan.FromSeconds(5);
-    private readonly ConcurrentDictionary<string, CachedDirectoryListing> _directoryCache = new();
-    private readonly ConcurrentDictionary<string, CachedFileListing> _fileCache = new();
+    private readonly ConcurrentDictionary<string, CacheEntry<string[]>> _directoryCache = new();
+    private readonly ConcurrentDictionary<string, CacheEntry<List<string>>> _fileCache = new();
 
     private readonly FileSystemOptions _options = options.Value;
     private readonly Regex _folderRegex = new(options.Value.SectionFolderPattern, RegexOptions.IgnoreCase);
@@ -30,7 +30,7 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
     private const long RvtMinFileSizeBytes = 50L * 1024 * 1024;
 
     private static readonly Regex _rvtSectionPattern =
-        new(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase);
+        new(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly EnumerationOptions _rvtEnumOptions = new()
     {
@@ -41,36 +41,27 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         AttributesToSkip = FileAttributes.ReparsePoint,
     };
 
-    private readonly record struct CachedDirectoryListing(string[] Paths, DateTime ExpiresAt);
-    private readonly record struct CachedFileListing(List<string> Paths, DateTime ExpiresAt);
+    private readonly record struct CacheEntry<T>(T Value, DateTime ExpiresAt);
 
-    private string[] GetCachedDirectories(string path)
+    private static T GetOrCache<T>(ConcurrentDictionary<string, CacheEntry<T>> cache, string key, Func<T> factory)
     {
         var now = DateTime.UtcNow;
 
-        if (_directoryCache.TryGetValue(path, out var cached) && cached.ExpiresAt > now)
+        if (cache.TryGetValue(key, out var cached) && cached.ExpiresAt > now)
         {
-            return cached.Paths;
+            return cached.Value;
         }
 
-        var paths = Directory.GetDirectories(path);
-        _directoryCache[path] = new CachedDirectoryListing(paths, now.Add(DirectoryCacheTtl));
-        return paths;
+        var value = factory();
+        cache[key] = new CacheEntry<T>(value, now.Add(DirectoryCacheTtl));
+        return value;
     }
 
-    private List<string> GetCachedSectionFiles(string sectionPath)
-    {
-        var now = DateTime.UtcNow;
+    private string[] GetCachedDirectories(string path) =>
+        GetOrCache(_directoryCache, path, () => Directory.GetDirectories(path));
 
-        if (_fileCache.TryGetValue(sectionPath, out var cached) && cached.ExpiresAt > now)
-        {
-            return cached.Paths;
-        }
-
-        var files = ScanSectionFiles(sectionPath);
-        _fileCache[sectionPath] = new CachedFileListing(files, now.Add(DirectoryCacheTtl));
-        return files;
-    }
+    private List<string> GetCachedSectionFiles(string sectionPath) =>
+        GetOrCache(_fileCache, sectionPath, () => ScanSectionFiles(sectionPath));
 
     public InlineKeyboardMarkup GetSectionsView(long userId, string path)
     {
@@ -135,7 +126,8 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
 
         foreach (var dir in EnumerateSectionFolders(path))
         {
-            var hasSelection = selected.Any(file => IsWithinFolder(dir, file));
+            var prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var hasSelection = selected.Any(file => file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
             var label = $"{(hasSelection ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.OpenFolder}{CreateSelectionToken(dir)}")]);
         }
@@ -173,15 +165,7 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
     private bool IsSectionFileLevel(string path)
     {
         var parent = Path.GetDirectoryName(path);
-        return parent != null && string.Equals(
-            Path.GetFileName(parent), _options.ProjectDirectoryName,
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsWithinFolder(string dir, string filePath)
-    {
-        var prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return filePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        return parent != null && IsSectionLevel(parent);
     }
 
     private static string CreateSelectionToken(string path)

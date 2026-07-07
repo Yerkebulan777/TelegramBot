@@ -54,10 +54,10 @@ public sealed class ExportFolderCleanupService(
 
         // 3. Запись маркера — сегодня чистили
         MarkCleanupDoneToday(baseExportDir);
-        logger.LogInformation("Export folder cleanup completed for {BaseDir}", SanitizeForLog(baseExportDir));
+        logger.LogInformation("Export folder cleanup completed for {BaseDir}", Path.GetFileName(baseExportDir));
     }
 
-    private static bool IsCleanupDoneToday(string baseExportDir)
+    private bool IsCleanupDoneToday(string baseExportDir)
     {
         string markerPath = Path.Combine(baseExportDir, MarkerFileName);
         if (!File.Exists(markerPath))
@@ -67,25 +67,26 @@ public sealed class ExportFolderCleanupService(
 
         try
         {
-            string? lastDate = File.ReadAllText(markerPath)?.Trim();
+            string lastDate = File.ReadAllText(markerPath).Trim();
             return string.Equals(lastDate, DateTime.UtcNow.ToString("yyyy-MM-dd"), StringComparison.Ordinal);
         }
-        catch
+        catch (IOException ex)
         {
+            logger.LogWarning(ex, "Failed to read cleanup marker: {Path}", markerPath);
             return false;
         }
     }
 
     private void MarkCleanupDoneToday(string baseExportDir)
     {
+        string markerPath = Path.Combine(baseExportDir, MarkerFileName);
         try
         {
-            string markerPath = Path.Combine(baseExportDir, MarkerFileName);
             File.WriteAllText(markerPath, DateTime.UtcNow.ToString("yyyy-MM-dd"));
         }
-        catch
+        catch (IOException ex)
         {
-            // Сбой записи не должен ломать экспорт — игнор.
+            logger.LogWarning(ex, "Failed to write cleanup marker: {Path}", markerPath);
         }
     }
 
@@ -156,8 +157,7 @@ public sealed class ExportFolderCleanupService(
             var oldFiles = sorted.Where(f => f.LastWriteTimeUtc < cutoffDate).ToList();
             if (oldFiles.Count >= 2)
             {
-                oldFiles = oldFiles.OrderByDescending(f => f.LastWriteTimeUtc).ToList();
-
+                // oldFiles уже отсортирован по убыванию — унаследовано от sorted.
                 // Keep last N — оставляем
                 var candidates = oldFiles.Skip(_options.KeepLastCount).ToList();
 
@@ -194,7 +194,7 @@ public sealed class ExportFolderCleanupService(
             }
             File.Move(file.FullName, destPath);
 
-            logger.LogInformation("Archived: {File} → {Dest}", file.Name, SanitizeForLog(destPath));
+            logger.LogInformation("Archived: {File} → {Dest}", file.Name, Path.GetFileName(destPath));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -214,19 +214,6 @@ public sealed class ExportFolderCleanupService(
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             logger.LogWarning(ex, "Failed to delete file: {Path}", file.FullName);
-        }
-    }
-
-    /// <summary>Санитизация пути для лога (убирает敏感ные части, если нужны).</summary>
-    private static string SanitizeForLog(string path)
-    {
-        try
-        {
-            return Path.GetFileName(path) ?? path;
-        }
-        catch
-        {
-            return path;
         }
     }
 }
