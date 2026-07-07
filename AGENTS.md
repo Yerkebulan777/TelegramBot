@@ -93,7 +93,7 @@ Handlers:
 - `<project>/01_PROJECT` — каталоги разделов с известным section acronym (клик = `OPENFOLDER:` — переход к файлам раздела, выбор не сбрасывается);
 - `<project>/01_PROJECT/<section>` — список `.rvt`-файлов раздела (multi-select чекбоксами + кнопка "Выбрать все").
 
-Список файлов раздела строит `FileSystemBrowser` рекурсивным сканированием `01_RVT` (глубина 3), оставляет `.rvt` больше 50 MiB с допустимым именем и прогоняет через `RevitFileDeduplicator`. Кнопка "Выбрать все" (`SELECTALLSECTIONS:`) доступна только на уровне файлов одного раздела (`FileSystemBrowser.GetSelectableFiles` возвращает файлы только текущего раздела) — массовый скан всех разделов проекта разом намеренно убран как слишком накладный по I/O. `SlashCommandService.ConfirmFileSelectionAsync` на финальном шаге просто берёт `session.GetSelectedFiles()` — файлы уже отобраны и провалидированы на этапе навигации, повторное сканирование не требуется. Имя проекта для лога/уведомления берётся из пути первого выбранного файла (`GetProjectName`), а не из `session.CurrentPath` — CurrentPath после `OPENFOLDER:` указывает вглубь на раздел, а не на проект.
+Список файлов раздела строит `FileSystemBrowser` синхронным сканированием `01_RVT`: сначала верхний уровень (depth 0), а если валидных файлов нет — прямые субпапки (depth 1); глубже не углубляется. Фильтрация и дедупликация те же: `.rvt` больше 50 MiB с допустимым именем через `RevitFileDeduplicator`. Кнопка "Выбрать все" (`SELECTALLSECTIONS:`) доступна только на уровне файлов одного раздела (`FileSystemBrowser.GetSelectableFiles` возвращает файлы только текущего раздела) — массовый скан всех разделов проекта разом намеренно убран как слишком накладный по I/O. `SlashCommandService.ConfirmFileSelectionAsync` на финальном шаге просто берёт `session.GetSelectedFiles()` — файлы уже отобраны и провалидированы на этапе навигации, повторное сканирование не требуется. Имя проекта для лога/уведомления берётся из пути первого выбранного файла (`GetProjectName`), а не из `session.CurrentPath` — CurrentPath после `OPENFOLDER:` указывает вглубь на раздел, а не на проект.
 
 ### Server DI
 
@@ -234,3 +234,48 @@ Worker поддерживает `.rvt`, `.rfa`, `.rte` для чтения `Basi
 5. проверить затронутые execution flows и затем собрать solution.
 
 Для архитектуры использовать `query` → `context`; для rename/refactor — соответствующий GitNexus skill. Не делать symbol rename простым find/replace.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **TelegramBot** (1245 symbols, 3287 relationships, 100 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "master"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/TelegramBot/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/TelegramBot/clusters` | All functional areas |
+| `gitnexus://repo/TelegramBot/processes` | All execution flows |
+| `gitnexus://repo/TelegramBot/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->

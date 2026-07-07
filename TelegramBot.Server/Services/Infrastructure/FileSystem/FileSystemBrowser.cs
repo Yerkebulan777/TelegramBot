@@ -32,10 +32,12 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
     private static readonly Regex _rvtSectionPattern =
         new(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private static readonly EnumerationOptions _rvtEnumOptions = new()
+    /// <summary>
+    /// Плоское перечисление без рекурсии: используется для синхронного быстрого поиска
+    /// .rvt-файлов сначала на верхнем уровне <c>01_RVT</c>, а при их отсутствии — в субпапках.
+    /// </summary>
+    private static readonly EnumerationOptions _flatEnumOptions = new()
     {
-        RecurseSubdirectories = true,
-        MaxRecursionDepth = 3,
         IgnoreInaccessible = true,
         MatchCasing = MatchCasing.CaseInsensitive,
         AttributesToSkip = FileAttributes.ReparsePoint,
@@ -202,6 +204,12 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         return nameSegments.Any(_sectionAcronyms.Contains);
     }
 
+    /// <summary>
+    /// Синхронный быстрый поиск RVT-файлов раздела.
+    /// Стратегия (максимальная производительность — без глубокого рекурсивного скана):
+    /// 1. Файлы верхнего уровня <c>01_RVT</c>. Если они есть — возвращаются только они.
+    /// 2. Иначе — файлы в прямых субпапках <c>01_RVT</c>. Дальше не углубляемся.
+    /// </summary>
     private List<string> ScanSectionFiles(string sectionPath)
     {
         var rvtDir = _options.GetRvtPath(sectionPath);
@@ -212,13 +220,21 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
 
         try
         {
-            var files = new DirectoryInfo(rvtDir)
-                .EnumerateFiles("*.rvt", _rvtEnumOptions)
-                .Where(IsValidRevitFile)
-                .Select(fi => (fi.FullName, Depth: GetDepth(rvtDir, fi.DirectoryName!)))
-                .ToList();
+            var root = new DirectoryInfo(rvtDir);
+            var topLevel = CollectRevitFiles(root);
+            if (topLevel.Count > 0)
+            {
+                return RevitFileDeduplicator.Deduplicate(topLevel);
+            }
 
-            return RevitFileDeduplicator.Deduplicate(files);
+            // Top-level пустой — сканируем прямые субпапки, без дальнейшей рекурсии.
+            var nested = new List<string>();
+            foreach (var sub in root.EnumerateDirectories("*", _flatEnumOptions))
+            {
+                nested.AddRange(CollectRevitFiles(sub));
+            }
+
+            return RevitFileDeduplicator.Deduplicate(nested);
         }
         catch (IOException ex)
         {
@@ -232,10 +248,18 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         }
     }
 
-    private static int GetDepth(string rvtDir, string fileDir)
+    private List<string> CollectRevitFiles(DirectoryInfo dir)
     {
-        var relative = Path.GetRelativePath(rvtDir, fileDir);
-        return relative == "." ? 0 : relative.Count(c => c is '\\' or '/') + 1;
+        var result = new List<string>();
+        foreach (var fi in dir.EnumerateFiles("*.rvt", _flatEnumOptions))
+        {
+            if (IsValidRevitFile(fi))
+            {
+                result.Add(fi.FullName);
+            }
+        }
+
+        return result;
     }
 
     private bool IsValidRevitFile(FileInfo fi)
