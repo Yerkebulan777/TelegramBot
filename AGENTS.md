@@ -13,6 +13,22 @@
 | `TelegramBot.Data/Sql/` | фактическая схема и SQL |
 | option-классы `Config/` | defaults конфигурации |
 
+## Ключевые файлы
+
+| Файл | Назначение |
+|---|---|
+| `TelegramBot.Core/Constants/` | `CommandCodes.cs`, `CallbackPrefixes.cs`, `Statuses.cs`, `CommandPriorities.cs` |
+| `TelegramBot.Core/Config/` | `BotOptions.cs`, `FileSystemOptions.cs`, `RateLimitOptions.cs`, `WorkerOptions.cs`, `CommandConfig.cs` |
+| `TelegramBot.Core/Models/` | `UserSession.cs`, `PendingCommand.cs`, `BotUser.cs`, `UserRole.cs` |
+| `TelegramBot.Data/Sql/Queries.*.cs` | SQL-запросы (Schema, Commands, Sessions, NotificationOutbox, TrackedMessages, Users) |
+| `TelegramBot.Server/Services/Application/Handlers/` | 6 `ICallbackHandler`: `AccessRequest`, `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement` |
+| `TelegramBot.Server/Services/Infrastructure/Telegram/` | `TelegramBotHostedService.cs`, `TelegramOutputService.cs`, `KeyboardBuilder.cs`, `CommandNotificationService.cs`, `NotificationSenderService.cs` |
+| `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
+| `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
+| `TelegramBot.Worker/Services/` | `CommandExecutionService.cs`, `CommandPreparer.cs`, `ProcessStarter.cs`, `ProcessRunner.cs`, `OutputCollector.cs`, `ResultAnalyzer.cs`, `ErrorClassifier.cs`, `SessionCleanupService.cs` |
+| `TelegramBot.Worker/BimLib/` | `RevitVersionDetector.cs`, `NavisworksPathResolver.cs`, `DialogDismisser.cs`, `ExportFolderCleanupService.cs` |
+| `TelegramBot.Worker/Program.cs` | Worker DI + startup |
+
 ## Build
 
 ```powershell
@@ -116,33 +132,44 @@ LISTEN new_tasks → DrainPendingCommands → ClaimPendingCommands → ProcessRu
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1243 symbols, 3277 relationships, 100 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1237 symbols, 3249 relationships, 99 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root.
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
 ## Always Do
 
-- **MUST run `impact` on any symbol before editing it** — report blast radius (callers, processes, risk level).
-- **MUST warn user** on HIGH/CRITICAL risk before editing.
-- **MUST run `detect_changes(scope: "all")` before committing.**
-- Use `query` → `context` for exploring; `rename` for refactoring.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "master"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit without `impact` first.
-- NEVER ignore HIGH/CRITICAL risk.
-- NEVER rename with find/replace.
-- NEVER commit without `detect_changes`.
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/TelegramBot/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/TelegramBot/clusters` | All functional areas |
+| `gitnexus://repo/TelegramBot/processes` | All execution flows |
+| `gitnexus://repo/TelegramBot/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
-| Task | Skill |
-|---|---|
-| Architecture / "How does X work?" | `gitnexus-exploring` |
-| Blast radius / "What breaks if I change X?" | `gitnexus-impact-analysis` |
-| Debug / "Why is X failing?" | `gitnexus-debugging` |
-| Rename/refactor | `gitnexus-refactoring` |
-| Tools reference | `gitnexus-guide` |
-| Index/status/clean | `gitnexus-cli` |
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
