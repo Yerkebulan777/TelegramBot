@@ -6,15 +6,13 @@ namespace TelegramBot.Server.Helpers;
 /// <summary>
 /// Helper methods for escaping text for Telegram's Markdown parse modes.
 /// </summary>
-public static class MarkdownHelper
+public static partial class MarkdownHelper
 {
-    // Compiled Regex for MarkdownV2: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
-    private static readonly Regex MarkdownV2Regex = new(
-        @"[\\_*\[\]()~`>#+\-=|{}.!]", RegexOptions.Compiled);
+    [GeneratedRegex(@"[\\_*\[\]()~`>#+\-=|{}.!]")]
+    private static partial Regex MarkdownV2Regex();
 
-    // Compiled Regex for regular Markdown: \ _ * [ ] ( ) `
-    private static readonly Regex MarkdownRegex = new(
-        @"[\\_*\[\]()`]", RegexOptions.Compiled);
+    [GeneratedRegex(@"[\\_*\[\]()`]")]
+    private static partial Regex MarkdownRegex();
 
     /// <summary>
     /// Escapes special characters for Telegram's Markdown parse modes.
@@ -30,7 +28,7 @@ public static class MarkdownHelper
             return string.Empty;
         }
 
-        var regex = mode == ParseMode.MarkdownV2 ? MarkdownV2Regex : MarkdownRegex;
+        var regex = mode == ParseMode.MarkdownV2 ? MarkdownV2Regex() : MarkdownRegex();
         return regex.Replace(text, "\\$&");
     }
 }

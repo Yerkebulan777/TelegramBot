@@ -39,7 +39,8 @@ public class TelegramOutputService(
         }
         catch (ApiRequestException ex)
         {
-            if (!ex.Message.Contains("message can't be deleted") && !ex.Message.Contains("message to delete not found"))
+            if (!ex.Message.Contains("message can't be deleted", StringComparison.OrdinalIgnoreCase)
+                && !ex.Message.Contains("message to delete not found", StringComparison.OrdinalIgnoreCase))
             {
                 throw;
             }
