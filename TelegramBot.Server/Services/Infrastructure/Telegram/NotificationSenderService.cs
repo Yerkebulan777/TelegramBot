@@ -98,8 +98,7 @@ public sealed class NotificationSenderService(
         // Single-writer mutual exclusion: только одна реплика Server одновременно drain'ит outbox.
         // Session-level advisory lock удерживается на весь drain-цикл; отпускается через await using.
         // При multi-instance вторая реплика получает null и пропускает цикл — её polling tick
-        // (30 сек) повторит попытку. Это устраняет гонку между репликами при перекрывающихся окнах
-        // LockedUntil (см. ранее CriticalReview п.2 — теперь исправлено).
+        // (30 сек) повторит попытку. Это устраняет гонку между репликами при перекрывающихся окнах LockedUntil.
         await using var lockHolder = await notificationOutboxDataService.TryAcquireSenderLockAsync();
         if (lockHolder == null)
         {
