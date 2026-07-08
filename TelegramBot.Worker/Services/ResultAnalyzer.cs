@@ -12,6 +12,8 @@ namespace TelegramBot.Worker.Services;
 public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<ResultAnalyzer> logger)
 {
     private static readonly XmlSerializer ResultFileSerializer = new(typeof(ResultFile));
+    private const int ResultFileReadRetryCount = 50;
+    private static readonly TimeSpan ResultFileReadRetryDelay = TimeSpan.FromMilliseconds(200);
 
     /// <summary>
     /// Пробует прочитать result-файл и возвращает статус.
@@ -27,36 +29,53 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             return ResultFileReadStatus.NotFound;
         }
 
-        try
+        for (var attempt = 0; attempt <= ResultFileReadRetryCount; attempt++)
         {
-            using var stream = File.OpenRead(path);
-            result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
-
-            if (result.Status is ResultStatus.Done or ResultStatus.Failed or ResultStatus.Cancelled)
+            try
             {
-                File.Delete(path);
-                errorMessage = null;
-                return ResultFileReadStatus.Valid;
-            }
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
 
-            RenameToBadFile(path);
-            result = null!;
-            errorMessage = $"Plugin result file has invalid status: {path}";
-            return ResultFileReadStatus.Invalid;
+                if (result.Status is ResultStatus.Done or ResultStatus.Failed or ResultStatus.Cancelled)
+                {
+                    DeleteResultFile(path);
+                    errorMessage = null;
+                    return ResultFileReadStatus.Valid;
+                }
+
+                RenameToBadFile(path);
+                result = null!;
+                errorMessage = $"Plugin result file has invalid status: {path}";
+                return ResultFileReadStatus.Invalid;
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (RetryRead(attempt))
+                {
+                    continue;
+                }
+
+                RenameToBadFile(path);
+                result = null!;
+                errorMessage = $"Plugin result file contains invalid XML: {path}. {ex.Message}";
+                return ResultFileReadStatus.Invalid;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (RetryRead(attempt))
+                {
+                    continue;
+                }
+
+                result = null!;
+                errorMessage = $"Plugin result file cannot be read: {path}. {ex.Message}";
+                return ResultFileReadStatus.Invalid;
+            }
         }
-        catch (InvalidOperationException ex)
-        {
-            RenameToBadFile(path);
-            result = null!;
-            errorMessage = $"Plugin result file contains invalid XML: {path}. {ex.Message}";
-            return ResultFileReadStatus.Invalid;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            result = null!;
-            errorMessage = $"Plugin result file cannot be read: {path}. {ex.Message}";
-            return ResultFileReadStatus.Invalid;
-        }
+
+        result = null!;
+        errorMessage = $"Plugin result file cannot be read: {path}";
+        return ResultFileReadStatus.Invalid;
     }
 
     /// <summary>
@@ -152,6 +171,29 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         {
             logger.LogWarning(ex, "Rename to .bad fail: {Path}", path);
         }
+    }
+
+    private void DeleteResultFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Delete result file fail: {Path}", path);
+        }
+    }
+
+    private static bool RetryRead(int attempt)
+    {
+        if (attempt >= ResultFileReadRetryCount)
+        {
+            return false;
+        }
+
+        Thread.Sleep(ResultFileReadRetryDelay);
+        return true;
     }
 
     public enum ResultFileReadStatus
