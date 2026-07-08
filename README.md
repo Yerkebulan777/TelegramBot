@@ -72,7 +72,8 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 | `Worker:MaxRetries` | `5` |
 | `Worker:RetryDelayBaseSeconds` | `60` |
 | `Worker:FallbackPolling/CleanupIntervalSeconds` | `300` |
-| `Worker:ProcessMonitorIntervalSeconds` | `30`; `0` отключает |
+| `Worker:ProcessMonitorIntervalSeconds` | `30`; минимум/шаг 30 с |
+| `Worker:UnresponsiveThresholdSeconds` | `60`; минимум/шаг 30 с |
 | `Worker:CompletedSessionRetentionDays` | `30`; `0` отключает |
 | `Worker:MaxConcurrentCommands` | `5` |
 | `Worker:Commands` | маппинг команд |

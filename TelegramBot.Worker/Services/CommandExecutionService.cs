@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Npgsql;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
@@ -28,6 +29,7 @@ public sealed class CommandExecutionService(
 
     // Трекинг выполняемых задач для корректного ожидания при shutdown
     private readonly HashSet<Task> _runningTasks = [];
+    private readonly ConcurrentDictionary<int, DateTime> _unresponsiveSince = new();
     private readonly object _runningTasksLock = new();
     private readonly SemaphoreSlim _drainGate = new(1, 1);
     private readonly int _maxConcurrentCommands = Math.Max(1, workerOptions.Value.MaxConcurrentCommands);
@@ -165,8 +167,9 @@ public sealed class CommandExecutionService(
 
     private Task StartProcessMonitoringTaskAsync()
     {
+        var intervalSeconds = RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds);
         return StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: _workerOptions.ProcessMonitorIntervalSeconds,
+            intervalSeconds: intervalSeconds,
             disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
             cycleName: "process monitor",
             cycle: () =>
@@ -220,10 +223,15 @@ public sealed class CommandExecutionService(
 
     private void CheckProcessesHealth()
     {
+        var thresholdSeconds = Math.Max(
+            RoundUpTo30Seconds(_workerOptions.UnresponsiveThresholdSeconds),
+            RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds));
+
         foreach (var (commandId, process) in processRunner.ActiveProcesses)
         {
             if (process.HasExited)
             {
+                _ = _unresponsiveSince.TryRemove(commandId, out _);
                 continue;
             }
 
@@ -233,9 +241,20 @@ public sealed class CommandExecutionService(
 
                 if (health.Status == BimLib.Models.RevitProcessStatus.NotResponding)
                 {
-                    logger.LogWarning(
-                        "Not responding: id={Id}, pid={Pid}, mem={MemoryMb}MB, dur={Duration}",
-                        commandId, process.Id, health.MemoryMb, health.Duration);
+                    var since = _unresponsiveSince.GetOrAdd(commandId, _ => DateTime.UtcNow);
+                    var stuckFor = DateTime.UtcNow - since;
+                    if (stuckFor.TotalSeconds >= thresholdSeconds)
+                    {
+                        logger.LogWarning(
+                            "Not responding: id={Id}, pid={Pid}, stuck={StuckFor}, mem={MemoryMb}MB, dur={Duration}",
+                            commandId, process.Id, stuckFor, health.MemoryMb, health.Duration);
+                    }
+                }
+                else if (_unresponsiveSince.TryRemove(commandId, out var since))
+                {
+                    logger.LogInformation(
+                        "Responding again: id={Id}, pid={Pid}, stuck={StuckFor}",
+                        commandId, process.Id, DateTime.UtcNow - since);
                 }
                 try
                 {
@@ -252,6 +271,8 @@ public sealed class CommandExecutionService(
             }
         }
     }
+
+    private static int RoundUpTo30Seconds(int seconds) => Math.Max(30, ((seconds + 29) / 30) * 30);
 
     private async Task PerformGracefulShutdownAsync()
     {
@@ -341,7 +362,7 @@ public sealed class CommandExecutionService(
 
         if (shutdownToken.IsCancellationRequested)
         {
-                logger.LogWarning("{TaskName} skip: budget exhausted", taskName);
+            logger.LogWarning("{TaskName} skip: budget exhausted", taskName);
             return;
         }
 

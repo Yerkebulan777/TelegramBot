@@ -26,8 +26,7 @@ public sealed class DialogDismisserOptions
         "Relinquish all elements and worksets", "Relinquish elements and worksets",
         "Освободить все элементы и рабочие наборы", "Освободить элементы и рабочие наборы",
         "Accept", "Принять",
-        "Continue", "Продолжить",
-        "Cancel", "Отмена"
+        "Continue", "Продолжить"
     ];
 
     /// <summary>

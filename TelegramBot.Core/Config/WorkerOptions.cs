@@ -54,6 +54,11 @@ public sealed class WorkerOptions
     public int ProcessMonitorIntervalSeconds { get; set; } = 30;
 
     /// <summary>
+    /// Через сколько секунд NotResponding считать длительным зависанием. Минимум/шаг — 30 секунд.
+    /// </summary>
+    public int UnresponsiveThresholdSeconds { get; set; } = 60;
+
+    /// <summary>
     /// Через сколько дней автоматически скрывать сессии без pending/processing команд.
     /// Значение 0 или меньше отключает автоочистку.
     /// </summary>

@@ -63,6 +63,14 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             // (у многих диалогов пустой заголовок, а Debug-уровень обычно выключен).
             var content = DescribeDialogContent(hwndDlg);
 
+            if (TryClickKnownDialogButton(hwndDlg, info.WindowTitle, out var dialogButton))
+            {
+                _logger.LogInformation("Dialog dismissed: title='{Title}', btn='{Button}', pid={Pid}, strategy=title",
+                    info.WindowTitle, dialogButton, processId);
+                dismissed = true;
+                continue;
+            }
+
             // Стратегия 1: поиск и клик по известному тексту кнопки
             if (TryClickKnownButton(hwndDlg, out var knownButton))
             {
@@ -79,7 +87,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             }
             else
             {
-                _logger.LogWarning("Cannot dismiss dialog: {Info}", info);
+                _logger.LogWarning("Cannot dismiss dialog: {Info}, content={Content}", info, content);
             }
         }
 
@@ -151,6 +159,38 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
     /// </summary>
     private bool TryClickKnownButton(IntPtr hwndDlg, out string? clickedButtonText)
     {
+        return TryClickButton(hwndDlg, _options.CloseButtonTexts, out clickedButtonText);
+    }
+
+    private bool TryClickKnownDialogButton(IntPtr hwndDlg, string title, out string? clickedButtonText)
+    {
+        clickedButtonText = null;
+
+        string[]? buttons = title switch
+        {
+            var t when ContainsAny(t, "Changes Not Saved", "Cambios no guardados")
+                => ["Do not save the project", "Don't Save", "No guardar el proyecto", "Не сохранять проект", "Не сохранять"],
+            var t when ContainsAny(t, "Save File")
+                => ["No", "Нет"],
+            var t when ContainsAny(t, "Close Project Without Saving", "Editable Elements")
+                => ["Relinquish all elements and worksets", "Relinquish elements and worksets", "Освободить все элементы и рабочие наборы"],
+            var t when ContainsAny(t, "Local Changes Not Synchronized with Central")
+                => ["Close the local file", "Закрыть локальный файл"],
+            var t when ContainsAny(t, "Elements Lost on Import", "Navisworks NWC Exporter", "Revit")
+                => ["Close", "OK", "Закрыть", "ОК"],
+            _ => null
+        };
+
+        return buttons != null && TryClickButton(hwndDlg, buttons, out clickedButtonText);
+    }
+
+    private static bool ContainsAny(string value, params string[] needles)
+    {
+        return needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool TryClickButton(IntPtr hwndDlg, IEnumerable<string> buttonTexts, out string? clickedButtonText)
+    {
         clickedButtonText = null;
 
         var buttons = WindowUtil.EnumerateChildWindows(hwndDlg, "Button");
@@ -159,7 +199,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             return false;
         }
 
-        foreach (var name in _options.CloseButtonTexts)
+        foreach (var name in buttonTexts)
         {
             foreach (var button in buttons)
             {

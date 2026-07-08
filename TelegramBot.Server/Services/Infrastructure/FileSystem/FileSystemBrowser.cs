@@ -22,6 +22,9 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     [GeneratedRegex(@"(?:^|[_ -])[BSCPKITGM]+\d*[_ -][ASRPGJOVIK]+\d*", RegexOptions.IgnoreCase | RegexOptions.Compiled, "ru-RU")]
     private static partial Regex ValidRvtFilePattern();
 
+    [GeneratedRegex(@"\.\d{3,5}$", RegexOptions.Compiled)]
+    private static partial Regex RevitBackupFilePattern();
+
     // Кэши хранят уже отфильтрованные результаты: I/O-проверки выполняются один раз за TTL,
     // а не на каждом рендере клавиатуры.
     private readonly ConcurrentDictionary<string, CacheEntry<List<string>>> _projectFolderCache = new();
@@ -40,6 +43,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     private const long _rvtMinFileSizeBytes = 50L * 1024 * 1024;
 
     private static readonly Regex _rvtSectionPattern = ValidRvtFilePattern();
+    private static readonly Regex _rvtBackupFilePattern = RevitBackupFilePattern();
 
     private static readonly EnumerationOptions _enumOptions = new()
     {
@@ -266,7 +270,8 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         return name.Length is >= 10 and <= 50
             && !name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase)
             && _rvtSectionPattern.IsMatch(name)
-            && fi.Length > _rvtMinFileSizeBytes;
+            && fi.Length > _rvtMinFileSizeBytes
+            && !_rvtBackupFilePattern.IsMatch(name);
     }
 
 
