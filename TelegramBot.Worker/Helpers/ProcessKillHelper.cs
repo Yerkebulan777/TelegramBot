@@ -29,7 +29,7 @@ internal static class ProcessKillHelper
         catch (Exception ex)
         {
             // Процесс мог выйти между HasExited и Kill — это не ошибка
-            logger.LogDebug(ex, "Kill failed (likely already exited): commandId={Id}, pid={Pid}", commandId, SafeGetPid(process));
+            logger.LogDebug(ex, "Kill fail (already exited): id={Id}, pid={Pid}", commandId, SafeGetPid(process));
             return true;
         }
 
@@ -44,12 +44,12 @@ internal static class ProcessKillHelper
         }
         catch (OperationCanceledException)
         {
-            logger.LogWarning("Process did not exit within {Timeout} after Kill: commandId={Id}, pid={Pid}", timeout, commandId, SafeGetPid(process));
+            logger.LogWarning("Process not exit within {Timeout}: id={Id}, pid={Pid}", timeout, commandId, SafeGetPid(process));
             return false;
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "WaitForExitAsync after Kill failed: commandId={Id}, pid={Pid}", commandId, SafeGetPid(process));
+            logger.LogDebug(ex, "WaitForExit after kill fail: id={Id}, pid={Pid}", commandId, SafeGetPid(process));
             return false;
         }
     }

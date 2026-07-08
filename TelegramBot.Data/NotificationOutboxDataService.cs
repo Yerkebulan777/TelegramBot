@@ -139,7 +139,7 @@ public sealed class SenderLockHolder : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to release sender advisory lock");
+            _logger.LogWarning(ex, "Release sender lock fail");
         }
         finally
         {

@@ -26,7 +26,7 @@ public class TelegramOutputService(
                 chatId: new ChatId(userId),
                 text: MarkdownHelper.Escape(message, ParseMode.MarkdownV2),
                 parseMode: ParseMode.MarkdownV2);
-            logger.LogDebug("Sent to {UserId}: {Message}", userId, message);
+            logger.LogDebug("Sent: {UserId}: {Message}", userId, message);
             return t;
         }, userId);
     }
@@ -64,7 +64,7 @@ public class TelegramOutputService(
             {
                 logger.LogWarning(
                     ex,
-                    "Batch delete failed for {ChatId}; falling back to single deletes for {Count} messages",
+                    "Batch delete fail: {ChatId}, fallback single for {Count}",
                     chatId,
                     chunk.Length);
 
@@ -140,7 +140,7 @@ public class TelegramOutputService(
         catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
             logger.LogWarning(
-                "SendMessageWithKeyboardAsync: reply markup too long for {UserId}; falling back to text-only send",
+                "Reply markup too long: {UserId}, fallback text-only",
                 userId);
             return await ExecuteWithRetryAsync(() => botClient.SendMessage(
                 chatId: userId, text: message, parseMode: ParseMode.Markdown), userId);
@@ -165,7 +165,7 @@ public class TelegramOutputService(
         }
         catch (ApiRequestException ex)
         {
-            logger.LogWarning(ex, "Failed to answer callback {CallbackId}", callbackId);
+            logger.LogWarning(ex, "Answer callback fail: {CallbackId}", callbackId);
         }
     }
 
@@ -177,11 +177,11 @@ public class TelegramOutputService(
         }
         catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
-            logger.LogDebug("Skipped unchanged message reply text edit for {UserId} messageId={MessageId}", userId, messageId);
+            logger.LogDebug("Reply text unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
         catch (ApiRequestException ex)
         {
-            logger.LogWarning(ex, "Failed to edit message reply text for {UserId} messageId={MessageId}", userId, messageId);
+            logger.LogWarning(ex, "Edit reply text fail: {UserId} msg={MessageId}", userId, messageId);
         }
     }
 
@@ -193,18 +193,18 @@ public class TelegramOutputService(
         }
         catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
-            logger.LogDebug("Skipped unchanged message reply markup edit for {UserId} messageId={MessageId}", userId, messageId);
+            logger.LogDebug("Reply markup unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
         catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
             // Существующая клавиатура остаётся — фронт не ломаем, только логируем.
-            logger.LogWarning(
-                "EditMessageReplyMarkupAsync: reply markup too long for {UserId} messageId={MessageId}; existing keyboard kept",
-                userId, messageId);
+                logger.LogWarning(
+                    "Reply markup too long: {UserId} msg={MessageId}; keyboard kept",
+                    userId, messageId);
         }
         catch (ApiRequestException ex)
         {
-            logger.LogWarning(ex, "Failed to edit message reply markup for {UserId} messageId={MessageId}", userId, messageId);
+            logger.LogWarning(ex, "Edit reply markup fail: {UserId} msg={MessageId}", userId, messageId);
         }
     }
 
@@ -216,14 +216,13 @@ public class TelegramOutputService(
         }
         catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
-            logger.LogDebug("Skipped unchanged message text with keyboard edit for {UserId} messageId={MessageId}", userId, messageId);
+            logger.LogDebug("Text+keyboard unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
         catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
-            logger.LogWarning(
-                "EditMessageTextWithKeyboardAsync: reply markup too long for {UserId} messageId={MessageId}; " +
-                "falling back to text-only edit",
-                userId, messageId);
+                logger.LogWarning(
+                    "Reply markup too long: {UserId} msg={MessageId}; fallback text-only",
+                    userId, messageId);
             try
             {
                 _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
@@ -231,18 +230,18 @@ public class TelegramOutputService(
             catch (ApiRequestException fbEx) when (IsMessageNotModified(fbEx))
             {
                 logger.LogDebug(
-                    "Skipped unchanged text-only fallback for {UserId} messageId={MessageId}", userId, messageId);
+                    "Text fallback unchanged: {UserId} msg={MessageId}", userId, messageId);
             }
             catch (ApiRequestException fbEx)
             {
                 logger.LogWarning(
                     fbEx,
-                    "Text-only fallback edit failed for {UserId} messageId={MessageId}", userId, messageId);
+                    "Text fallback edit fail: {UserId} msg={MessageId}", userId, messageId);
             }
         }
         catch (ApiRequestException ex)
         {
-            logger.LogWarning(ex, "Failed to edit message text with keyboard for {UserId} messageId={MessageId}", userId, messageId);
+            logger.LogWarning(ex, "Edit text+keyboard fail: {UserId} msg={MessageId}", userId, messageId);
         }
     }
 
@@ -258,7 +257,7 @@ public class TelegramOutputService(
         }
         catch (ApiRequestException ex)
         {
-            logger.LogDebug(ex, "Failed to send chat action to {UserId}", userId);
+            logger.LogDebug(ex, "Send chat action fail: {UserId}", userId);
         }
     }
 
@@ -297,7 +296,7 @@ public class TelegramOutputService(
             {
                 var retryAfter = ex.Parameters?.RetryAfter ?? 5;
                 logger.LogWarning(
-                    "Rate limited for {UserId}. Retrying after {RetryAfterSeconds}s (attempt {Attempt}/{MaxRetries})",
+                    "Rate limit: {UserId}, retry {RetryAfterSeconds}s (attempt {Attempt}/{MaxRetries})",
                     userId, retryAfter, attempt + 1, MaxRetries);
 
                 if (attempt < MaxRetries)
@@ -306,13 +305,13 @@ public class TelegramOutputService(
                 }
                 else
                 {
-                    logger.LogError(ex, "Rate limit retries exhausted for {UserId}", userId);
+                    logger.LogError(ex, "Rate limit retries exhausted: {UserId}", userId);
                     return null;
                 }
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Failed to send message to {UserId} (attempt {Attempt}/{MaxRetries})",
+                logger.LogWarning(ex, "Send fail: {UserId} (attempt {Attempt}/{MaxRetries})",
                     userId, attempt + 1, MaxRetries);
 
                 if (attempt < MaxRetries)
@@ -322,7 +321,7 @@ public class TelegramOutputService(
                 }
                 else
                 {
-                    logger.LogError(ex, "Message send retries exhausted for {UserId}", userId);
+                    logger.LogError(ex, "Send retries exhausted: {UserId}", userId);
                     return null;
                 }
             }

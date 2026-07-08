@@ -39,7 +39,7 @@ public sealed class ProcessStarter(
             _ = process.Start();
 
             logger.LogInformation(
-                "Process started: command={Cmd}, id={Id}, correlationId={CorrelationId}, pid={Pid}, attempt={Attempt}",
+                "Process started: cmd={Cmd}, id={Id}, corr={CorrelationId}, pid={Pid}, attempt={Attempt}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, process.Id, cmd.RetryCount + 1);
 
             return process;

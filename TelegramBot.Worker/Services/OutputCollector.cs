@@ -31,7 +31,7 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
                 ? $"{TruncateOutput(outputBuilder)} [TRUNCATED: 64KB limit reached]"
                 : TruncateOutput(outputBuilder);
 
-            logger.LogDebug("Process stdout: command={Cmd}, id={Id}, correlationId={CorrelationId}, truncated={Truncated}, output={Output}",
+            logger.LogDebug("stdout: cmd={Cmd}, id={Id}, corr={CorrelationId}, trunc={Truncated}, out={Output}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, outputTruncated, outputInfo);
         }
 
@@ -41,7 +41,7 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
                 ? $"{TruncateOutput(errorBuilder)} [TRUNCATED: 64KB limit reached]"
                 : TruncateOutput(errorBuilder);
 
-            logger.LogWarning("Process stderr: command={Cmd}, id={Id}, correlationId={CorrelationId}, truncated={Truncated}, error={Error}",
+            logger.LogWarning("stderr: cmd={Cmd}, id={Id}, corr={CorrelationId}, trunc={Truncated}, err={Error}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, errorTruncated, errorInfo);
         }
     }

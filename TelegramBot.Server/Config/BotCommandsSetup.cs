@@ -15,16 +15,16 @@ public static class BotCommandsSetup
             new BotCommand { Command = "help", Description = "Show help menu" }
         ];
 
-        logger.LogInformation("Configuring Telegram bot commands. Count: {Count}", commands.Length);
+        logger.LogInformation("Configuring bot commands: count={Count}", commands.Length);
 
         try
         {
             await bot.SetMyCommands(commands);
-            logger.LogInformation("Telegram bot commands configured successfully.");
+            logger.LogInformation("Bot commands configured");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to configure Telegram bot commands.");
+            logger.LogError(ex, "Configure bot commands fail");
             throw;
         }
     }

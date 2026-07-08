@@ -51,7 +51,7 @@ public sealed partial class SlashCommandService(
         var command = NormalizeCommandText(rawText);
 
         ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
-        logger.LogDebug("Command received: command={Command}, user={Username} ({UserId})", command, username, userId);
+        logger.LogDebug("Cmd: cmd={Command}, user={Username} ({UserId})", command, username, userId);
 
         var access = await accessValidator.ValidateAsync(userId);
         if (command == "/start" && !access.IsActive)
@@ -62,7 +62,7 @@ public sealed partial class SlashCommandService(
 
         if (command != "/start" && !access.IsActive)
         {
-            logger.LogWarning("Command rejected: command={Command}, user={Username} ({UserId}), reason=access_denied",
+            logger.LogWarning("Cmd rejected: cmd={Command}, user={Username} ({UserId}), reason=access",
                 command, username, userId);
             var chatId = message.ChatId == 0 ? userId : message.ChatId;
             await SendSafeResponseAsync(chatId, "У вас нет доступа. Введите /start для запроса доступа.", session);
@@ -105,12 +105,12 @@ public sealed partial class SlashCommandService(
         switch (command)
         {
             case "/export":
-                logger.LogDebug("Executing /export for {Username} ({UserId})", username, userId);
+                logger.LogDebug("/export: user={Username} ({UserId})", username, userId);
                 await StartCommandSelectionAsync(userId, session, CommandGroup.Export);
                 break;
 
             case "/status":
-                logger.LogDebug("Executing /status for {Username} ({UserId})", username, userId);
+                logger.LogDebug("/status: user={Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 session.StatusFilter = StatusFilters.All;
 
@@ -120,12 +120,12 @@ public sealed partial class SlashCommandService(
                 break;
 
             case "/automation":
-                logger.LogDebug("Executing /automation for {Username} ({UserId})", username, userId);
+                logger.LogDebug("/automation: user={Username} ({UserId})", username, userId);
                 await StartCommandSelectionAsync(userId, session, CommandGroup.Automation);
                 break;
 
             case "/help":
-                logger.LogDebug("Executing /help for {Username} ({UserId})", username, userId);
+                logger.LogDebug("/help: user={Username} ({UserId})", username, userId);
                 session.Reset(_options.RootPath);
                 await SendHelpMessageAsync(userId, session);
                 break;
@@ -133,11 +133,11 @@ public sealed partial class SlashCommandService(
             default:
                 if (isSlashCommand)
                 {
-                    logger.LogWarning("Unknown slash command '{Command}' from {Username} ({UserId})", command, username, userId);
+                    logger.LogWarning("Unknown cmd '{Command}' from {Username} ({UserId})", command, username, userId);
                 }
                 else
                 {
-                    logger.LogDebug("Ignoring non-command text from {Username} ({UserId})", username, userId);
+                    logger.LogDebug("Ignoring non-cmd text from {Username} ({UserId})", username, userId);
                 }
 
                 break;
@@ -170,7 +170,7 @@ public sealed partial class SlashCommandService(
             // does not leak in the UI, instead of falling through to default (returns false,
             // no cleanup).
             case ButtonTexts.Confirm:
-                logger.LogDebug("Stale Confirm press from {Username} ({UserId}); cleaning orphaned message", username, userId);
+                logger.LogDebug("Stale Confirm from {Username} ({UserId}), cleaning", username, userId);
                 if (session.LastUserMessageId.HasValue)
                 {
                     try
@@ -179,14 +179,14 @@ public sealed partial class SlashCommandService(
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "Failed to delete stale Confirm message for user {UserId}", userId);
+                        logger.LogWarning(ex, "Delete stale Confirm fail: user={UserId}", userId);
                     }
                     session.LastUserMessageId = null;
                 }
                 return true;
 
             case ButtonTexts.Cancel:
-                logger.LogDebug("User {Username} ({UserId}) cancelled active selection", username, userId);
+                logger.LogDebug("{Username} ({UserId}) cancelled selection", username, userId);
 
                 await outputService.ClearChatHistoryAsync(userId, session);
                 session.Reset(_options.RootPath);
@@ -204,12 +204,12 @@ public sealed partial class SlashCommandService(
     {
         if (session.PendingCommand.Count == 0)
         {
-            logger.LogDebug("User {Username} ({UserId}) tried to apply with no commands selected", username, userId);
+            logger.LogDebug("{Username} ({UserId}) apply with no cmds", username, userId);
             await SendWarningAndCleanupAsync(userId, session, "Сначала выберите хотя бы одну команду.");
             return;
         }
 
-        logger.LogDebug("Command selection confirmed: user={Username} ({UserId}), count={Count}",
+        logger.LogDebug("Selection confirmed: user={Username} ({UserId}), count={Count}",
             username, userId, session.PendingCommand.Count);
 
         await outputService.ClearChatHistoryAsync(userId, session);
@@ -228,7 +228,7 @@ public sealed partial class SlashCommandService(
     {
         if (!session.FileSelectionMessageId.HasValue)
         {
-            logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=missing_file_selection_message", username, userId);
+            logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_file_selection_msg", username, userId);
             await RemoveReplyKeyboardAsync(userId, session, username);
             session.IsFileSelectionActive = false;
             await RejectAndWarnAsync(userId, session, "Сообщение выбора файлов не найдено.");
@@ -240,7 +240,7 @@ public sealed partial class SlashCommandService(
             var selectedProject = session.GetSelectedFiles().FirstOrDefault();
             if (selectedProject == null)
             {
-                logger.LogDebug("Project confirm blocked: user={Username} ({UserId}), reason=no_project_selected", username, userId);
+                logger.LogDebug("Project confirm blocked: {Username} ({UserId}), reason=no_project", username, userId);
                 await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите проект.");
                 return;
             }
@@ -249,7 +249,7 @@ public sealed partial class SlashCommandService(
 
             session.ClearSelectedFiles();
 
-            logger.LogDebug("User {Username} ({UserId}) confirmed project '{Project}', navigated to 01_PROJECT", username, userId, Path.GetFileName(selectedProject));
+            logger.LogDebug("{Username} ({UserId}) confirmed project '{Project}', nav to 01_PROJECT", username, userId, Path.GetFileName(selectedProject));
 
             var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
             await outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
@@ -265,13 +265,13 @@ public sealed partial class SlashCommandService(
         var selectedFiles = session.GetSelectedFiles();
         if (selectedFiles.Count == 0)
         {
-            logger.LogDebug("Job submit blocked: user={Username} ({UserId}), reason=no_files_selected", username, userId);
+            logger.LogDebug("Job blocked: {Username} ({UserId}), reason=no_files", username, userId);
             await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один файл.");
             return;
         }
 
         logger.LogDebug(
-            "Job submit: user={Username} ({UserId}), commands={CommandCount}, files={FileCount}",
+            "Job submit: user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}",
             username, userId, session.PendingCommand.Count, selectedFiles.Count);
 
         var commandNames = session.PendingCommandName;
@@ -290,7 +290,7 @@ public sealed partial class SlashCommandService(
             var filesToProcess = selectedFiles.Where(File.Exists).ToList();
             if (filesToProcess.Count == 0)
             {
-                logger.LogWarning("Job submit blocked: user={Username} ({UserId}), reason=no_files_found", username, userId);
+                logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_files_found", username, userId);
                 await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» не найдены на диске.");
                 return;
             }
@@ -303,7 +303,7 @@ public sealed partial class SlashCommandService(
             // Проверяем, нет ли уже таких же (команда + файл) в очереди
             if (await commandDataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
             {
-                logger.LogWarning("Job blocked: user={Username} ({UserId}), reason=duplicate_commands_in_queue", username, userId);
+                logger.LogWarning("Job blocked: {Username} ({UserId}), reason=dup_cmds", username, userId);
                 await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
                 return;
             }
@@ -319,12 +319,12 @@ public sealed partial class SlashCommandService(
             if (sessionId is null)
             {
                 // Гонка: дубликат проскочил быстрый pre-check выше, но пойман под advisory lock'ом при вставке
-                logger.LogWarning("Job blocked: user={Username} ({UserId}), reason=duplicate_commands_in_queue_race", username, userId);
+                logger.LogWarning("Job blocked: {Username} ({UserId}), reason=dup_cmds_race", username, userId);
                 await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
                 return;
             }
             logger.LogInformation(
-                "Job queued: session={SessionId}, correlationId={CorrelationId}, user={Username} ({UserId}), commands={CommandCount}, files={FileCount}",
+                "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}",
                 sessionId, correlationId, username, userId, session.PendingCommand.Count, filesToProcess.Count);
 
             session.SessionId = checked((int)sessionId.Value);
@@ -358,7 +358,7 @@ public sealed partial class SlashCommandService(
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Typing indicator failed for user {UserId}", userId);
+                logger.LogDebug(ex, "Typing indicator fail: user={UserId}", userId);
                 return;
             }
         }
@@ -381,7 +381,7 @@ public sealed partial class SlashCommandService(
         }
 
         logger.LogWarning(
-            "Job submit blocked: user={Username} ({UserId}), reason=daily_file_limit, queued={Queued}, requested={Requested}, limit={Limit}",
+            "Job blocked: {Username} ({UserId}), reason=daily_limit, queued={Queued}, requested={Requested}, limit={Limit}",
             username, userId, queuedToday, newFileCount, _rateLimitOptions.MaxFilesPerUserPerDay);
 
         var message = remaining > 0
@@ -434,7 +434,7 @@ public sealed partial class SlashCommandService(
         }
         catch (ApiRequestException ex)
         {
-            logger.LogWarning(ex, "Failed to send command response to {ChatId}", chatId);
+            logger.LogWarning(ex, "Send cmd response fail: chat={ChatId}", chatId);
         }
     }
 
@@ -500,7 +500,7 @@ public sealed partial class SlashCommandService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to remove reply keyboard: user={Username} ({UserId})", username, userId);
+            logger.LogWarning(ex, "Remove reply keyboard fail: user={Username} ({UserId})", username, userId);
         }
     }
 

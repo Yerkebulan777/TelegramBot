@@ -22,13 +22,13 @@ public sealed class SessionCleanupService(
         var intervalSeconds = _options.CleanupIntervalSeconds;
         if (intervalSeconds <= 0)
         {
-            logger.LogWarning("CleanupIntervalSeconds = {Interval}, auto-cleanup disabled", intervalSeconds);
+            logger.LogWarning("Cleanup disabled: interval={Interval}s", intervalSeconds);
             return;
         }
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(intervalSeconds));
         logger.LogInformation(
-            "Session cleanup started: retentionDays={RetentionDays}, interval={Interval}s",
+            "Session cleanup: retention={RetentionDays}d, interval={Interval}s",
             _options.CompletedSessionRetentionDays, intervalSeconds);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -62,7 +62,7 @@ public sealed class SessionCleanupService(
             if (deleted > 0)
             {
                 logger.LogInformation(
-                    "Auto-cleaned {Count} inactive session(s) older than {Cutoff:yyyy-MM-dd} ({RetentionDays}d retention)",
+                    "Cleaned {Count} inactive sessions <{Cutoff:yyyy-MM-dd} ({RetentionDays}d)",
                     deleted, cutoff, retentionDays);
             }
         }

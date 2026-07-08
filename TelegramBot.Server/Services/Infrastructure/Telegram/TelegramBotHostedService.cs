@@ -59,7 +59,7 @@ public class TelegramBotHostedService(
 
         var processingTask = ProcessUpdatesAsync(processingToken);
 
-        logger.LogInformation("Telegram polling starting with parallel processing (maxConcurrency={MaxConcurrency}, channelCapacity={Capacity})",
+        logger.LogInformation("Polling start: concurrency={MaxConcurrency}, capacity={Capacity}",
             MaxConcurrentUpdates, ChannelCapacity);
 
         await BotCommandsSetup.ConfigureAsync(botClient, logger);
@@ -105,7 +105,7 @@ public class TelegramBotHostedService(
         await _processingCts.CancelAsync();
         _processingCts.Dispose();
 
-        logger.LogInformation("Telegram polling stopped");
+        logger.LogInformation("Polling stopped");
     }
 
     /// <summary>
@@ -132,18 +132,18 @@ public class TelegramBotHostedService(
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
                         // Отдельное обновление было отменено (например, таймаут) — логируем и продолжаем
-                        logger.LogWarning("Update {UpdateId} processing was cancelled", update.Id);
+                        logger.LogWarning("Update {UpdateId} cancelled", update.Id);
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Unhandled exception processing update {UpdateId}", update.Id);
+                        logger.LogError(ex, "Update {UpdateId} error", update.Id);
                     }
                 });
         }
         catch (OperationCanceledException)
         {
             // Shutdown — нормальное завершение
-            logger.LogDebug("Parallel update processing stopped (shutdown)");
+            logger.LogDebug("Parallel processing stopped (shutdown)");
         }
     }
 
@@ -156,7 +156,7 @@ public class TelegramBotHostedService(
     private async Task ProcessUpdateAsync(Update update, CancellationToken ct)
     {
         var dto = inputService.Map(update);
-        logger.LogDebug("Update processing: id={UpdateId}, type={UpdateType}, dto={DtoType}",
+        logger.LogDebug("Update: id={UpdateId}, type={UpdateType}, dto={DtoType}",
             update.Id, update.Type, dto?.GetType().Name ?? "null");
 
         switch (dto)
@@ -168,7 +168,7 @@ public class TelegramBotHostedService(
 
                     if (message.Text == null)
                     {
-                        logger.LogWarning("Received message with null Text from {Username} ({UserId})", message.Username, message.UserId);
+                        logger.LogWarning("Null message text from {Username} ({UserId})", message.Username, message.UserId);
                         return;
                     }
 
@@ -178,7 +178,7 @@ public class TelegramBotHostedService(
             case CallbackQueryDto callback:
                 if (callback.CallbackQueryId == null)
                 {
-                    logger.LogWarning("Received callback with null CallbackQueryId from {Username} ({UserId})", callback.Username, callback.UserId);
+                    logger.LogWarning("Null callback id from {Username} ({UserId})", callback.Username, callback.UserId);
                     return;
                 }
                 using (await sessionManager.AcquireUserLockAsync(callback.UserId))
@@ -205,16 +205,16 @@ public class TelegramBotHostedService(
         }
         catch (ChannelClosedException ex)
         {
-            logger.LogDebug(ex, "Channel writer rejected update {UpdateId}: channel closed", update.Id);
+            logger.LogDebug(ex, "Channel writer reject {UpdateId}: closed", update.Id);
         }
         catch (OperationCanceledException)
         {
             // Отмена токена (shutdown) — ожидаемо, обновление уйдёт в следующий polling-цикл
-            logger.LogDebug("Channel writer rejected update {UpdateId}: operation cancelled", update.Id);
+            logger.LogDebug("Channel writer reject {UpdateId}: cancelled", update.Id);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to enqueue update {UpdateId}", update.Id);
+            logger.LogWarning(ex, "Enqueue update {UpdateId} fail", update.Id);
         }
     }
 

@@ -43,7 +43,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
         foreach (var hwndDlg in dialogs)
         {
             var info = WindowInfo.FromHandle(hwndDlg);
-            _logger.LogDebug("Dialog detected: {Info}", info);
+            _logger.LogDebug("Dialog: {Info}", info);
             WindowUtil.LogAllChildWindows(_logger, hwndDlg, $"DialogDismisser PID={processId}");
         }
 
@@ -55,7 +55,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
 
             if (IsExcluded(info.WindowTitle))
             {
-                _logger.LogDebug("Dialog excluded: {Title}", info.WindowTitle);
+                _logger.LogDebug("Dialog excluded: '{Title}'", info.WindowTitle);
                 continue;
             }
 
@@ -66,7 +66,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             // Стратегия 1: поиск и клик по известному тексту кнопки
             if (TryClickKnownButton(hwndDlg, out var knownButton))
             {
-                _logger.LogInformation("Dialog dismissed: title='{Title}', button='{Button}', strategy=known, pid={Pid}, content=[{Content}]", info.WindowTitle, knownButton, processId, content);
+                _logger.LogInformation("Dialog dismissed: title='{Title}', btn='{Button}', pid={Pid}", info.WindowTitle, knownButton, processId);
                 dismissed = true;
                 continue;
             }
@@ -74,12 +74,12 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             // Стратегия 2: WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE
             if (TryCloseDialogViaWindowMessage(hwndDlg))
             {
-                _logger.LogInformation("Dialog dismissed: title='{Title}', button='<system close>', strategy=WM_CLOSE, pid={Pid}, content=[{Content}]", info.WindowTitle, processId, content);
+                _logger.LogInformation("Dialog dismissed: title='{Title}', pid={Pid}, strategy=WM_CLOSE", info.WindowTitle, processId);
                 dismissed = true;
             }
             else
             {
-                _logger.LogWarning("Cannot dismiss dialog: {Info} — all strategies failed", info);
+                _logger.LogWarning("Cannot dismiss dialog: {Info}", info);
             }
         }
 
@@ -92,7 +92,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
         {
             // Диалоги есть, но закрыть не удалось — учитываем попытку
             var attempts = _dismissAttempts.AddOrUpdate(processId, 1, (_, count) => count + 1);
-            _logger.LogWarning("Failed to dismiss dialogs for process {ProcessId} (attempt {Attempts}/{Max})",
+            _logger.LogWarning("Dismiss fail: pid={ProcessId} (attempt {Attempts}/{Max})",
                 processId, attempts, _options.MaxDismissAttempts);
 
             if (attempts >= _options.MaxDismissAttempts)
@@ -103,8 +103,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
         else
         {
             // MaxDismissAttempts == 0 — авто-kill отключён, логируем без счётчика
-            _logger.LogWarning("Cannot dismiss dialogs for process {ProcessId} (auto-kill disabled)",
-                processId);
+            _logger.LogWarning("Dismiss fail: pid={ProcessId} (auto-kill off)", processId);
         }
 
         return dismissed;
@@ -177,7 +176,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
                 }
 
                 _logger.LogDebug(
-                    "Known button found: text='{Text}', hwnd={Hwnd}, class='{Class}'",
+                    "Known button: text='{Text}', hwnd={Hwnd}, class='{Class}'",
                     cleanText, button, WindowUtil.GetWindowClassName(button));
 
                 WindowUtil.SendButtonClick(button);
@@ -257,13 +256,13 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
         try
         {
             using var process = Process.GetProcessById((int)processId);
-            _logger.LogWarning("Killing process {ProcessId} ({ProcessName}) after {Max} failed dismiss attempts",
+            _logger.LogWarning("Kill process: pid={ProcessId} ({ProcessName}) after {Max} dismiss fails",
                 processId, process.ProcessName, _options.MaxDismissAttempts);
             process.Kill(entireProcessTree: true);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to kill process {ProcessId}", processId);
+            _logger.LogError(ex, "Kill fail: pid={ProcessId}", processId);
         }
         finally
         {

@@ -151,12 +151,12 @@ public sealed class ProcessRunner(
 
         if (process != null && !process.HasExited)
         {
-            logger.LogWarning("Killing timed-out process: commandId={Id}, correlationId={CorrelationId}, pid={Pid}, elapsed={Elapsed:F1}s",
+            logger.LogWarning("Kill timeout: id={Id}, corr={CorrelationId}, pid={Pid}, elapsed={Elapsed:F1}s",
                 cmd.CommandId, cmd.CorrelationId, process.Id, sw.Elapsed.TotalSeconds);
             _ = await ProcessKillHelper.KillAsync(process, TimeSpan.FromSeconds(PerProcessKillTimeoutSeconds), logger, cmd.CommandId);
         }
 
-        logger.LogError("Command {CommandId} ({Cmd}) timed out: correlationId={CorrelationId}, timeout={Timeout} min, elapsed={Elapsed:F1}s",
+        logger.LogError("Timeout: id={CommandId}, cmd={Cmd}, corr={CorrelationId}, to={Timeout}m, elapsed={Elapsed:F1}s",
             cmd.CommandId, cmd.CommandText, cmd.CorrelationId, _workerOptions.ProcessTimeoutMinutes, sw.Elapsed.TotalSeconds);
 
         _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
@@ -176,7 +176,7 @@ public sealed class ProcessRunner(
         if (isPermanent)
         {
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
-            logger.LogError(ex, "Command {Cmd} ({Id}) failed with permanent error (no retry): correlationId={CorrelationId}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
+            logger.LogError(ex, "Permanent fail: cmd={Cmd}, id={Id}, corr={CorrelationId}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await NotifySessionCompletionAsync(cmd);
         }
@@ -186,7 +186,7 @@ public sealed class ProcessRunner(
             var jitterSeconds = Random.Shared.Next(0, _workerOptions.RetryDelayBaseSeconds);
             var nextRetryAt = DateTime.UtcNow.AddSeconds(baseDelay + jitterSeconds);
             var newRetryCount = await commandDataService.ScheduleRetryAsync(cmd.CommandId, nextRetryAt, errorMessage);
-            logger.LogWarning(ex, "Command {Cmd} ({Id}) failed: correlationId={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
+            logger.LogWarning(ex, "Retry: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await NotifySessionCompletionAsync(cmd);
@@ -194,7 +194,7 @@ public sealed class ProcessRunner(
         else
         {
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
-            logger.LogError(ex, "Command {Cmd} ({Id}) failed after attempts: correlationId={CorrelationId}, attempt={Attempt}, exitCode={ExitCode}, elapsedMs={ElapsedMs}, error={Msg}",
+            logger.LogError(ex, "Fail after retries: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await NotifySessionCompletionAsync(cmd);
         }
@@ -208,7 +208,7 @@ public sealed class ProcessRunner(
             if (remainingInDb > 0)
             {
                 logger.LogDebug(
-                    "Session {SessionId}: {Remaining} commands still pending/processing, skipping notification, correlationId={CorrelationId}",
+                    "Session {SessionId}: {Remaining} pending, skip notify, corr={CorrelationId}",
                     cmd.SessionId, remainingInDb, cmd.CorrelationId);
                 return;
             }
@@ -217,13 +217,13 @@ public sealed class ProcessRunner(
             if (!notified)
             {
                 logger.LogDebug(
-                    "Session {SessionId}: completion notification already sent or session deleted, correlationId={CorrelationId}",
+                    "Session {SessionId}: notify already sent, corr={CorrelationId}",
                     cmd.SessionId, cmd.CorrelationId);
             }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to notify session completion: session={SessionId}, correlationId={CorrelationId}",
+            logger.LogWarning(ex, "Notify session fail: session={SessionId}, corr={CorrelationId}",
                 cmd.SessionId, cmd.CorrelationId);
         }
     }

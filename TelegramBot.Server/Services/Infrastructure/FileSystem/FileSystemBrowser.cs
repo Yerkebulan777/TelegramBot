@@ -241,12 +241,12 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             }
             catch (IOException ex)
             {
-                logger.LogWarning(ex, "Failed to scan RVT directory {RvtDir}", rvtDir);
+                logger.LogWarning(ex, "Scan RVT dir fail: {RvtDir}", rvtDir);
                 return [];
             }
             catch (UnauthorizedAccessException ex)
             {
-                logger.LogWarning(ex, "Access denied scanning RVT directory {RvtDir}", rvtDir);
+                logger.LogWarning(ex, "Access denied: {RvtDir}", rvtDir);
                 return [];
             }
         }

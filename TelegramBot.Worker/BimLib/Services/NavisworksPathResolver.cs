@@ -29,12 +29,12 @@ public sealed class NavisworksPathResolver(
                 var path = Path.Combine(installDir, relativePath);
                 if (File.Exists(path))
                 {
-                    logger.LogDebug("Navisworks {Year} executable found at '{Path}'", year, path);
+                    logger.LogDebug("Navisworks {Year} found: '{Path}'", year, path);
                     return path;
                 }
             }
 
-            logger.LogWarning("Navisworks {Year} installed but no executable found in '{Dir}'", year, installDir);
+            logger.LogWarning("Navisworks {Year} installed, no exe in '{Dir}'", year, installDir);
         }
 
         return null;

@@ -20,7 +20,7 @@ public sealed class RevitPathResolver(
     {
         if (versionYear < _options.MinSupportedVersion || versionYear > _options.MaxSupportedVersion)
         {
-            logger.LogWarning("Unsupported Revit version: {Year} (supported: {Min}-{Max})",
+            logger.LogWarning("Unsupported Revit: {Year} (supported: {Min}-{Max})",
                 versionYear, _options.MinSupportedVersion, _options.MaxSupportedVersion);
             return null;
         }
@@ -29,7 +29,7 @@ public sealed class RevitPathResolver(
 
         if (installDir == null)
         {
-            logger.LogDebug("Revit {Year} not installed (registry lookup)", versionYear);
+            logger.LogDebug("Revit {Year} not installed (reg)", versionYear);
             return null;
         }
 
@@ -37,12 +37,12 @@ public sealed class RevitPathResolver(
 
         if (!File.Exists(revitPath))
         {
-            logger.LogWarning("Revit {Year} registry path '{Path}' exists but Revit.exe not found",
+            logger.LogWarning("Revit {Year} reg path '{Path}' - Revit.exe missing",
                 versionYear, revitPath);
             return null;
         }
 
-        logger.LogDebug("Revit {Year} found at '{Path}'", versionYear, revitPath);
+        logger.LogDebug("Revit {Year} found: '{Path}'", versionYear, revitPath);
         return revitPath;
     }
 

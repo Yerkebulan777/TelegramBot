@@ -28,7 +28,7 @@ public sealed class RevitVersionDetector(
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
-            logger.LogWarning("DetectVersion failed: empty path");
+            logger.LogWarning("DetectVersion: empty path");
             return null;
         }
 
@@ -39,20 +39,20 @@ public sealed class RevitVersionDetector(
         }
         catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
         {
-            logger.LogWarning(ex, "DetectVersion failed: invalid path '{Path}'", filePath);
+            logger.LogWarning(ex, "DetectVersion: invalid path '{Path}'", filePath);
             return null;
         }
 
         if (!fileInfo.Exists)
         {
-            logger.LogWarning("DetectVersion failed: file not found '{Path}'", filePath);
+            logger.LogWarning("DetectVersion: file not found '{Path}'", filePath);
             return null;
         }
 
         var ext = fileInfo.Extension.ToLowerInvariant();
         if (ext is not (".rvt" or ".rfa" or ".rte"))
         {
-            logger.LogDebug("DetectVersion skipped: unsupported extension '{Ext}' for '{Path}'", ext, filePath);
+            logger.LogDebug("DetectVersion skip: unsupported ext '{Ext}' ('{Path}')", ext, filePath);
             return null;
         }
 
@@ -63,13 +63,13 @@ public sealed class RevitVersionDetector(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "DetectVersion failed: cannot read file metadata '{Path}'", filePath);
+            logger.LogWarning(ex, "DetectVersion: cant read metadata '{Path}'", filePath);
             return null;
         }
 
         if (_cache.TryGetValue(cacheKey, out var cached))
         {
-            logger.LogDebug("Detected Revit {Year} from cache for '{Path}'", cached.Year, filePath);
+            logger.LogDebug("Revit {Year} from cache ('{Path}')", cached.Year, filePath);
             return cached;
         }
 
@@ -81,17 +81,17 @@ public sealed class RevitVersionDetector(
 
             if (versionText == null)
             {
-                logger.LogDebug("DetectVersion failed: no Format: line found in '{Path}'", filePath);
+                logger.LogDebug("DetectVersion: no Format line in '{Path}'", filePath);
                 return null;
             }
 
             if (!int.TryParse(versionText, out var year))
             {
-                logger.LogWarning("DetectVersion failed: could not parse year '{Version}' from '{Path}'", versionText, filePath);
+                logger.LogWarning("DetectVersion: cant parse year '{Version}' from '{Path}'", versionText, filePath);
                 return null;
             }
 
-            logger.LogDebug("Detected Revit {Year} from '{Path}'", year, filePath);
+            logger.LogDebug("Revit {Year} from '{Path}'", year, filePath);
 
             var detected = new RevitDetectedVersion
             {
@@ -108,7 +108,7 @@ public sealed class RevitVersionDetector(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "DetectVersion failed for '{Path}'", filePath);
+            logger.LogWarning(ex, "DetectVersion fail: '{Path}'", filePath);
             return null;
         }
     }

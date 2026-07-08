@@ -61,7 +61,7 @@ public sealed class AuthorizationMiddleware(
         // Проверка на race condition: если пользователь был изменен между чтением и записью
         if (user != null && adminUser.UpdatedAt > user.UpdatedAt)
         {
-            logger.LogDebug("Skipping update for admin {UserId}: concurrent modification detected", userId);
+            logger.LogDebug("Skip update admin {UserId}: concurrent modification", userId);
             return adminUser;
         }
 

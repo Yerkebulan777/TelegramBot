@@ -22,7 +22,7 @@ public sealed class NotificationSenderService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Notification sender starting");
+        logger.LogInformation("Notification sender start");
 
         try
         {
@@ -43,7 +43,7 @@ public sealed class NotificationSenderService(
             _=notificationChannel.Writer.TryComplete();
         }
 
-        logger.LogInformation("Notification sender stopped");
+        logger.LogInformation("Notification sender stop");
     }
 
     private async Task RunOutboxPollingAsync(CancellationToken stoppingToken)
@@ -62,7 +62,7 @@ public sealed class NotificationSenderService(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Outbox polling stopped unexpectedly");
+            logger.LogError(ex, "Outbox polling stopped");
         }
     }
 
@@ -80,16 +80,16 @@ public sealed class NotificationSenderService(
             {
                 _=await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
                 var startedUsername = await sessionDataService.GetSessionUsernameAsync(item.SessionId!.Value) ?? "(unnamed)";
-                logger.LogInformation("Session started notify sent: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}",
+                logger.LogInformation("Session started notify: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}",
                     startedUsername, item.UserId.Value, item.SessionId, item.CorrelationId);
                 return;
             }
 
-            logger.LogWarning("Notification item ignored: reason=unknown_shape");
+            logger.LogWarning("Notification ignored: unknown_shape");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to send queued notification for session {SessionId}, correlationId={CorrelationId}",
+            logger.LogError(ex, "Send queued notify fail: session={SessionId}, corr={CorrelationId}",
             item.SessionId, item.CorrelationId);
         }
     }
@@ -103,7 +103,7 @@ public sealed class NotificationSenderService(
         await using var lockHolder = await notificationOutboxDataService.TryAcquireSenderLockAsync();
         if (lockHolder == null)
         {
-            logger.LogDebug("Outbox drain skipped: another server replica holds sender lock");
+            logger.LogDebug("Outbox drain skipped: lock held by another replica");
             return;
         }
 
@@ -136,7 +136,7 @@ public sealed class NotificationSenderService(
         catch (Exception ex)
         {
             await notificationOutboxDataService.MarkFailedAsync(item.OutboxId, item.Attempts, ex);
-            logger.LogError(ex, "Failed to send outbox notification: outboxId={OutboxId}, session={SessionId}, correlationId={CorrelationId}, attempts={Attempts}",
+            logger.LogError(ex, "Outbox send fail: outboxId={OutboxId}, session={SessionId}, corr={CorrelationId}, attempts={Attempts}",
                 item.OutboxId, item.SessionId, item.CorrelationId, item.Attempts);
         }
     }
@@ -170,7 +170,7 @@ public sealed class NotificationSenderService(
         }
 
         _=await telegramOutput.SendMessageAsync(session.UserId, summary.ToString());
-        logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, correlationId={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+        logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
             session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
     }
 

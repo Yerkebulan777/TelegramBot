@@ -32,7 +32,7 @@ public sealed class ExportFolderCleanupService(
         // 1. Защита от нагрузки: маркерный файл — один cleanup в день
         if (IsCleanupDoneToday(baseExportDir))
         {
-            logger.LogDebug("Export folder cleanup already done today, skipping");
+            logger.LogDebug("Export cleanup already done today");
             return;
         }
 
@@ -54,7 +54,7 @@ public sealed class ExportFolderCleanupService(
 
         // 3. Запись маркера — сегодня чистили
         MarkCleanupDoneToday(baseExportDir);
-        logger.LogInformation("Export folder cleanup completed for {BaseDir}", Path.GetFileName(baseExportDir));
+        logger.LogInformation("Export cleanup done: {BaseDir}", Path.GetFileName(baseExportDir));
     }
 
     private bool IsCleanupDoneToday(string baseExportDir)
@@ -72,7 +72,7 @@ public sealed class ExportFolderCleanupService(
         }
         catch (IOException ex)
         {
-            logger.LogWarning(ex, "Failed to read cleanup marker: {Path}", markerPath);
+            logger.LogWarning(ex, "Read cleanup marker fail: {Path}", markerPath);
             return false;
         }
     }
@@ -86,7 +86,7 @@ public sealed class ExportFolderCleanupService(
         }
         catch (IOException ex)
         {
-            logger.LogWarning(ex, "Failed to write cleanup marker: {Path}", markerPath);
+            logger.LogWarning(ex, "Write cleanup marker fail: {Path}", markerPath);
         }
     }
 
@@ -99,7 +99,7 @@ public sealed class ExportFolderCleanupService(
         }
         catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Cannot access export subfolder: {Path}", folderPath);
+            logger.LogWarning(ex, "Cannot access export subfolder '{Path}'", folderPath);
             return;
         }
 
@@ -194,11 +194,11 @@ public sealed class ExportFolderCleanupService(
             }
             File.Move(file.FullName, destPath);
 
-            logger.LogInformation("Archived: {File} → {Dest}", file.Name, Path.GetFileName(destPath));
+            logger.LogInformation("Archived: {File} -> {Dest}", file.Name, Path.GetFileName(destPath));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Failed to archive file: {Path}", file.FullName);
+            logger.LogWarning(ex, "Archive fail: {Path}", file.FullName);
         }
     }
 
@@ -208,12 +208,12 @@ public sealed class ExportFolderCleanupService(
         try
         {
             file.Delete();
-            logger.LogInformation("Deleted duplicate: {File} ({Size} bytes, modified {Modified})",
+            logger.LogInformation("Deleted duplicate: {File} ({Size}B, {Modified})",
                 file.Name, file.Length, file.LastWriteTimeUtc.ToString("yyyy-MM-dd"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Failed to delete file: {Path}", file.FullName);
+            logger.LogWarning(ex, "Delete fail: {Path}", file.FullName);
         }
     }
 }

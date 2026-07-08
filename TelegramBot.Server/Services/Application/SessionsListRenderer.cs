@@ -48,7 +48,7 @@ public sealed class SessionsListRenderer(
         long chatId, int targetMessageId, string filter, int page, string username, CancellationToken cancellationToken = default)
     {
         var (text, keyboard) = await BuildAsync(filter, page, cancellationToken);
-        logger.LogInformation("{Username} view sessions — filter={Filter}, page={Page}", username, filter, page);
+        logger.LogInformation("{Username} view sessions: filter={Filter}, page={Page}", username, filter, page);
         await outputService.EditMessageTextWithKeyboardAsync(chatId, targetMessageId, text, keyboard);
     }
 }

@@ -84,8 +84,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         if (process.ExitCode == 0 && !CommandPreparer.IsRevitCommand(cmd.CommandText))
         {
             logger.LogWarning(
-                "Process exited cleanly (exitCode=0) but no result file was written for command {Id} (correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}). " +
-                "The command does not require the Revit ResultFile contract, falling back to exit code.",
+                "Exit=0 no result file: id={Id}, corr={CorrelationId}, cmd={Cmd}, ms={ElapsedMs}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);
 
             return CommandResult.Success(sw.ElapsedMilliseconds);
@@ -101,7 +100,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             var journalEvidence = RevitJournalHelper.TryGetCrashEvidence(process.StartInfo.FileName, processStartUtc);
             if (journalEvidence != null)
             {
-                logger.LogWarning("Revit journal evidence for crashed command {Id} (correlationId={CorrelationId}):\n{Evidence}",
+                logger.LogWarning("Journal evidence: id={Id}, corr={CorrelationId}\n{Evidence}",
                     cmd.CommandId, cmd.CorrelationId, journalEvidence);
             }
         }
@@ -114,7 +113,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         if (result.Status == ResultStatus.Done)
         {
             logger.LogInformation(
-                "Command done (plugin): id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, outputPath={OutputPath}, elapsedMs={ElapsedMs}",
+                "Plugin done: id={Id}, corr={CorrelationId}, cmd={Cmd}, status={Status}, out={OutputPath}, ms={ElapsedMs}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles ?? "<none>", sw.ElapsedMilliseconds);
 
             return CommandResult.Success(sw.ElapsedMilliseconds);
@@ -124,7 +123,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         {
             var cancellationMessage = result.ErrorMessage ?? "Plugin reported cancellation";
             logger.LogInformation(
-                "Command cancelled by plugin: id={Id}, correlationId={CorrelationId}, command={Cmd}, elapsedMs={ElapsedMs}, error={Error}",
+                "Plugin cancelled: id={Id}, corr={CorrelationId}, cmd={Cmd}, ms={ElapsedMs}, err={Error}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds, cancellationMessage);
 
             return CommandResult.Cancelled(cancellationMessage, sw.ElapsedMilliseconds);
@@ -132,12 +131,12 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
 
         // Failed
         logger.LogWarning(
-            "Command plugin failure: id={Id}, correlationId={CorrelationId}, command={Cmd}, status={Status}, elapsedMs={ElapsedMs}, error={Error}",
+            "Plugin fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, status={Status}, ms={ElapsedMs}, err={Error}",
             cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported failure");
 
         if (!string.IsNullOrWhiteSpace(result.ErrorDetails))
         {
-            logger.LogDebug("Plugin errorDetails for id={Id}: {Details}", cmd.CommandId, result.ErrorDetails);
+            logger.LogDebug("Plugin errDetails: id={Id}: {Details}", cmd.CommandId, result.ErrorDetails);
         }
 
         return CommandResult.Failure(result.ErrorMessage ?? "Plugin reported failure", null, sw.ElapsedMilliseconds);
@@ -151,7 +150,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Failed to rename invalid result file to .bad: {Path}", path);
+            logger.LogWarning(ex, "Rename to .bad fail: {Path}", path);
         }
     }
 

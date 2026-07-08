@@ -212,7 +212,7 @@ internal static class WindowUtil
                 }
             }
 
-            logger.LogDebug("Dialog diagnostics: context={Context}, details={Details}", context, details.ToString());
+            logger.LogDebug("Dialog diag: ctx={Context}, details={Details}", context, details.ToString());
         }
         catch (Exception ex)
         {

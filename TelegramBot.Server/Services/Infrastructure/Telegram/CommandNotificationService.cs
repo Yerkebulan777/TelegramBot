@@ -25,7 +25,7 @@ public sealed class CommandNotificationService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Command notifications starting");
+        logger.LogInformation("Cmd notifications start");
 
         var reconnectDelayMs = 5_000;
         while (!stoppingToken.IsCancellationRequested)
@@ -41,14 +41,14 @@ public sealed class CommandNotificationService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Command notifications listener lost: retryMs={Delay}", reconnectDelayMs);
+                logger.LogError(ex, "Cmd notify listener lost: retry={Delay}ms", reconnectDelayMs);
                 try { await Task.Delay(reconnectDelayMs, stoppingToken); }
                 catch (OperationCanceledException) { break; }
                 reconnectDelayMs = Math.Min((int)(reconnectDelayMs * 1.5), 60_000);
             }
         }
 
-        logger.LogInformation("Command notifications stopped");
+        logger.LogInformation("Cmd notifications stop");
     }
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
@@ -58,7 +58,7 @@ public sealed class CommandNotificationService(
         _=await conn.ExecuteAsync("LISTEN command_completed; LISTEN session_started;");
         conn.Notification += OnNotificationReceived;
 
-        logger.LogInformation("Command notifications listening: channels=command_completed,session_started");
+        logger.LogInformation("Cmd notify listen: channels=command_completed,session_started");
 
         try
         {
@@ -70,7 +70,7 @@ public sealed class CommandNotificationService(
                 }
                 catch (NpgsqlException ex) when (!stoppingToken.IsCancellationRequested)
                 {
-                    logger.LogError(ex, "Command notifications error: source=postgres");
+                    logger.LogError(ex, "Cmd notify error: source=postgres");
                     break;
                 }
             }
@@ -100,7 +100,7 @@ public sealed class CommandNotificationService(
             var parts = e.Payload.Split('|', 2);
             if (parts.Length != 2 || !int.TryParse(parts[0], out var sessionId) || string.IsNullOrWhiteSpace(parts[1]))
             {
-                logger.LogWarning("Completion notify ignored: reason=invalid_payload");
+                logger.LogWarning("Completion notify ignored: invalid_payload");
                 return;
             }
 
@@ -108,15 +108,15 @@ public sealed class CommandNotificationService(
 
             if (!notificationChannel.Writer.TryWrite(NotificationItem.CompletionWakeUp))
             {
-                logger.LogWarning("Completion wake-up dropped: reason=channel_full, session={SessionId}", sessionId);
+                logger.LogWarning("Completion wake-up dropped: channel full, session={SessionId}", sessionId);
                 return;
             }
 
-            logger.LogDebug("Completion wake-up queued: session={SessionId}, correlationId={CorrelationId}", sessionId, parts[1]);
+            logger.LogDebug("Completion wake-up queued: session={SessionId}, corr={CorrelationId}", sessionId, parts[1]);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to enqueue notification");
+            logger.LogError(ex, "Enqueue notify fail");
         }
     }
 
@@ -126,7 +126,7 @@ public sealed class CommandNotificationService(
         var parts = payload.Split('|', 3);
         if (parts.Length != 3 || !int.TryParse(parts[0], out var sessionId) || !long.TryParse(parts[2], out var userId))
         {
-            logger.LogWarning("Session started notify ignored: reason=invalid_payload");
+            logger.LogWarning("Started notify ignored: invalid_payload");
             return;
         }
 
@@ -139,10 +139,10 @@ public sealed class CommandNotificationService(
         if (!notificationChannel.Writer.TryWrite(item))
         {
             _=_startedSessions.TryRemove(sessionId, out _);
-            logger.LogWarning("Started notify dropped: reason=channel_full, session={SessionId}", sessionId);
+            logger.LogWarning("Started notify dropped: channel full, session={SessionId}", sessionId);
             return;
         }
 
-        logger.LogDebug("Started notify queued: session={SessionId}, correlationId={CorrelationId}", sessionId, parts[1]);
+        logger.LogDebug("Started notify queued: session={SessionId}, corr={CorrelationId}", sessionId, parts[1]);
     }
 }

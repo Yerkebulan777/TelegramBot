@@ -27,7 +27,7 @@ internal static class ProcessHealthHelper
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to check health for {ProcessName} process {ProcessId}",
+            logger.LogWarning(ex, "Health check fail: {ProcessName} pid={ProcessId}",
                 processDisplayName, process.Id);
             return new RevitProcessHealth(RevitProcessStatus.Error, 0, TimeSpan.Zero);
         }

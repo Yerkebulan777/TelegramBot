@@ -35,7 +35,7 @@ public sealed class CallbackDispatcher(IEnumerable<ICallbackHandler> handlers, I
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error in handler {HandlerName}", handler.GetType().Name);
+            logger.LogError(ex, "Handler error: {HandlerName}", handler.GetType().Name);
         }
     }
 }

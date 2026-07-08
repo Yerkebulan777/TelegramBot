@@ -71,7 +71,7 @@ public sealed class CommandPreparer(
     {
         if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
         {
-            logger.LogWarning("Command failed: id={Id}, correlationId={CorrelationId}, command={Cmd}, reason=unknown_command",
+            logger.LogWarning("Cmd fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, reason=unknown",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: $"Unknown command type: {cmd.CommandText}");
@@ -80,7 +80,7 @@ public sealed class CommandPreparer(
 
         if (!ValidateFilePath(cmd, commandCfg))
         {
-            logger.LogWarning("Command failed: id={Id}, correlationId={CorrelationId}, command={Cmd}, reason=invalid_file",
+            logger.LogWarning("Cmd fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, reason=invalid_file",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: $"File validation failed for path: {cmd.FilePath}");
@@ -90,7 +90,7 @@ public sealed class CommandPreparer(
         var (resolvedPath, resolutionError) = ResolveExecutablePath(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
         if (resolvedPath == null)
         {
-            logger.LogWarning("Command failed: id={Id}, correlationId={CorrelationId}, command={Cmd}, reason=executable_not_found, error={Error}",
+            logger.LogWarning("Cmd fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, reason=exe_not_found, err={Error}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, resolutionError);
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
                 errorMessage: resolutionError);
@@ -117,7 +117,7 @@ public sealed class CommandPreparer(
     {
         if (string.IsNullOrWhiteSpace(cmd.FilePath))
         {
-            logger.LogWarning("Validation failed: empty file path for command {Cmd} ({Id})",
+            logger.LogWarning("Validation: empty path for cmd {Cmd} ({Id})",
                 cmd.CommandText, cmd.CommandId);
             return false;
         }
@@ -127,28 +127,28 @@ public sealed class CommandPreparer(
             var fullPath = Path.GetFullPath(cmd.FilePath);
             if (fullPath != cmd.FilePath && !fullPath.Equals(cmd.FilePath, StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogWarning("Validation failed: path traversal detected for '{File}' ({Id})",
+                logger.LogWarning("Validation: path traversal '{File}' ({Id})",
                     cmd.FilePath, cmd.CommandId);
                 return false;
             }
 
             if (!string.IsNullOrWhiteSpace(_fileSystemRoot) && !IsPathWithinRoot(fullPath, _fileSystemRoot))
             {
-                logger.LogWarning("Validation failed: path outside configured root '{File}' ({Id}), root='{Root}'",
+                logger.LogWarning("Validation: path outside root '{File}' ({Id}), root='{Root}'",
                     cmd.FilePath, cmd.CommandId, _fileSystemRoot);
                 return false;
             }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Validation failed: invalid path '{File}' ({Id})",
+            logger.LogWarning(ex, "Validation: invalid path '{File}' ({Id})",
                 cmd.FilePath, cmd.CommandId);
             return false;
         }
 
         if (!File.Exists(cmd.FilePath))
         {
-            logger.LogWarning("Validation failed: file not found '{File}' for {Cmd} ({Id})",
+            logger.LogWarning("Validation: file not found '{File}' ({Cmd}, {Id})",
                 cmd.FilePath, cmd.CommandText, cmd.CommandId);
             return false;
         }
@@ -157,14 +157,14 @@ public sealed class CommandPreparer(
         {
             if (File.GetAttributes(cmd.FilePath).HasFlag(FileAttributes.ReparsePoint))
             {
-                logger.LogWarning("Validation failed: reparse point file is not allowed '{File}' ({Id})",
+                logger.LogWarning("Validation: reparse point '{File}' ({Id})",
                     cmd.FilePath, cmd.CommandId);
                 return false;
             }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Validation failed: cannot read file attributes '{File}' ({Id})",
+            logger.LogWarning(ex, "Validation: cant read attributes '{File}' ({Id})",
                 cmd.FilePath, cmd.CommandId);
             return false;
         }
@@ -177,7 +177,7 @@ public sealed class CommandPreparer(
         var ext = Path.GetExtension(cmd.FilePath)?.ToLowerInvariant();
         if (!cfg.AllowedExtensions.Contains(ext ?? ""))
         {
-            logger.LogWarning("Validation failed: extension '{Ext}' not allowed for {Cmd} ({Id}). Allowed: {Allowed}",
+            logger.LogWarning("Validation: ext '{Ext}' not allowed ({Cmd}, {Id}). Allowed: {Allowed}",
                 ext, cmd.CommandText, cmd.CommandId, string.Join(", ", cfg.AllowedExtensions));
             return false;
         }
@@ -230,7 +230,7 @@ public sealed class CommandPreparer(
             var version = versionDetector.DetectVersion(cmd.FilePath!, ct);
             if (version?.ExecutablePath != null)
             {
-                logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path} (Revit {Year})",
+                logger.LogDebug("{Cmd} via BimLib: {Path} (Revit {Year})",
                     commandText, version.ExecutablePath, version.Year);
                 return (version.ExecutablePath, null);
             }
@@ -238,13 +238,13 @@ public sealed class CommandPreparer(
             if (version != null && version.ExecutablePath == null)
             {
                 var msg = $"Revit {version.Year} не установлен на сервере. Пожалуйста, установите Revit {version.Year} или обратитесь к администратору.";
-                logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
+                logger.LogWarning("Resolve fail: {Cmd}: {Msg}", commandText, msg);
                 return (null, msg);
             }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "BimLib version detection failed for {Cmd}, falling back to configured path", commandText);
+            logger.LogWarning(ex, "BimLib detect fail for {Cmd}, fallback", commandText);
         }
 
         return null;
@@ -259,17 +259,16 @@ public sealed class CommandPreparer(
             if (path == null)
             {
                 var msg = "Navisworks не установлен на сервере. Пожалуйста, установите Navisworks или обратитесь к администратору.";
-                logger.LogWarning("Could not resolve {Cmd}: {Msg}", commandText, msg);
-                return (null, msg);
-            }
+            logger.LogWarning("Resolve fail: {Cmd}: {Msg}", commandText, msg);
+            return (null, msg);
+        }
 
-            logger.LogDebug("Resolved {Cmd} executable via BimLib: {Path}", commandText, path);
+            logger.LogDebug("{Cmd} via BimLib: {Path}", commandText, path);
             return (path, null);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "BimLib Navisworks resolution failed for {Cmd}, falling back to configured path",
-                commandText);
+            logger.LogWarning(ex, "Navisworks resolve fail for {Cmd}, fallback", commandText);
         }
 
         return null;
@@ -355,8 +354,7 @@ public sealed class CommandPreparer(
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
             logger.LogError(ex,
-                "Failed to create task directory '{Dir}' for command {Id} (correlationId={CorrelationId}, command={Cmd}). " +
-                "AddIn will not be able to read the task file. Process start will likely fail or produce wrong results.",
+                "Create task dir fail: dir='{Dir}', id={Id}, corr={CorrelationId}, cmd={Cmd}",
                 _taskDirectory, cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
             return false;
         }
@@ -398,12 +396,11 @@ public sealed class CommandPreparer(
                 try { File.Delete(tmpPath); }
                 catch (Exception delEx) when (delEx is IOException or UnauthorizedAccessException)
                 {
-                    logger.LogWarning(delEx, "Failed to delete invalid tmp task file '{TmpPath}'", tmpPath);
+                    logger.LogWarning(delEx, "Delete invalid tmp fail: '{TmpPath}'", tmpPath);
                 }
 
                 logger.LogError(
-                    "Task file XSD validation failed for command {Id} (correlationId={CorrelationId}, command={Cmd}). " +
-                    "Drift between C# model and XSD contract. Errors: {Errors}",
+                    "Task XSD validation fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, err={Errors}",
                     cmd.CommandId, cmd.CorrelationId, cmd.CommandText, string.Join("; ", validationErrors));
                 return false;
             }
@@ -411,7 +408,7 @@ public sealed class CommandPreparer(
             File.Move(tmpPath, taskFilePath, overwrite: true);
 
             logger.LogDebug(
-                "Task file created: commandId={CommandId}, taskFile={TaskFilePath}, resultFile={ResultFilePath}",
+                "Task file: cmdId={CommandId}, task={TaskFilePath}, result={ResultFilePath}",
                 cmd.CommandId, taskFilePath, resultFilePath);
 
             return true;
@@ -422,9 +419,7 @@ public sealed class CommandPreparer(
             // передачу .rvt-пути в CLI args), поэтому команда почти наверняка упадёт. Логируем громко
             // с correlationId, чтобы в случае end-to-end проблем можно было быстро найти эту запись.
             logger.LogError(ex,
-                "Failed to create task file '{TaskFilePath}' for command {Id} (correlationId={CorrelationId}, command={Cmd}). " +
-                "AddIn will not receive filePath; result file will likely not be written. " +
-                "Check FileSystem:TaskDirectory permissions, disk space, and antivirus interference.",
+                "Create task file fail: '{TaskFilePath}', id={Id}, corr={CorrelationId}, cmd={Cmd}",
                 taskFilePath, cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
             return false;
         }
@@ -452,13 +447,13 @@ public sealed class CommandPreparer(
                 deletedCount++;
             }
 
-            logger.LogDebug("Temp file cleanup: commandId={CommandId}, deleted={DeletedCount}",
+            logger.LogDebug("Temp cleanup: cmdId={CommandId}, deleted={DeletedCount}",
                 commandId, deletedCount);
         }
         catch (Exception ex)
         {
             // Best effort — не должны падать из-за ошибки очистки
-            logger.LogDebug(ex, "Failed to clean up temp files for command {CommandId}", commandId);
+            logger.LogDebug(ex, "Temp cleanup fail: cmdId={CommandId}", commandId);
         }
     }
 }

@@ -32,9 +32,9 @@ internal static class WinApiHelper
 
         if (errorCode != 0)
         {
-            _logger.LogWarning(
-                "WinAPI {Method} failed [error={Error}]: {Details}",
-                method, errorCode, details);
+                _logger.LogWarning(
+                    "WinAPI {Method} err={Error}: {Details}",
+                    method, errorCode, details);
         }
         else
         {
@@ -46,7 +46,7 @@ internal static class WinApiHelper
     internal static void LogError(string method, Exception ex, string details)
     {
         _logger?.LogError(
-            ex, "WinAPI {Method} threw an exception: {Details}",
+            ex, "WinAPI {Method} exception: {Details}",
             method, details);
     }
 

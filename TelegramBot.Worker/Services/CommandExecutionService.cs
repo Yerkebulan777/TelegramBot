@@ -42,7 +42,7 @@ public sealed class CommandExecutionService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Worker starting: maxConcurrentCommands={MaxConcurrentCommands}", _maxConcurrentCommands);
+        logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}", _maxConcurrentCommands);
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -65,7 +65,7 @@ public sealed class CommandExecutionService(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Worker listener lost: retryMs={Delay}", reconnectDelayMs);
+                    logger.LogError(ex, "Listener lost: retry={Delay}ms", reconnectDelayMs);
                     try { await Task.Delay(reconnectDelayMs, stoppingToken); }
                     catch (OperationCanceledException) { break; }
                     reconnectDelayMs = Math.Min((int)(reconnectDelayMs * 1.5), 60_000);
@@ -77,7 +77,7 @@ public sealed class CommandExecutionService(
             await PerformGracefulShutdownAsync();
         }
 
-        logger.LogInformation("Worker stopped");
+        logger.LogInformation("Worker stop");
     }
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
@@ -88,7 +88,7 @@ public sealed class CommandExecutionService(
         await using var cmd = new NpgsqlCommand($"LISTEN {ListenChannel};", conn);
         _ = await cmd.ExecuteNonQueryAsync(stoppingToken);
 
-        logger.LogInformation("Listening for notifications on channel '{Channel}'", ListenChannel);
+        logger.LogInformation("Listen {Channel}", ListenChannel);
 
         await commandDataService.ReleaseExpiredLeasesAsync();
         await DrainPendingCommandsAsync(stoppingToken);
@@ -100,11 +100,11 @@ public sealed class CommandExecutionService(
 
             if (notificationReceived)
             {
-                logger.LogDebug("Notification received on channel '{Channel}'", ListenChannel);
+                logger.LogDebug("NOTIFY {Channel}", ListenChannel);
             }
             else
             {
-                logger.LogInformation("Worker heartbeat: checking pending commands after {TimeoutSec}s without PostgreSQL notification", fallbackTimeoutSec);
+                logger.LogInformation("Heartbeat: poll pending ({TimeoutSec}s)", fallbackTimeoutSec);
             }
 
             await DrainPendingCommandsAsync(stoppingToken);
@@ -158,8 +158,8 @@ public sealed class CommandExecutionService(
     {
         return StartPeriodicBackgroundTaskAsync(
             intervalSeconds: _workerOptions.CleanupIntervalSeconds,
-            disabledMessage: interval => $"CleanupIntervalSeconds = {interval}, lease cleanup disabled",
-            cycleName: "lease cleanup cycle",
+            disabledMessage: interval => $"Cleanup disabled: interval={interval}s",
+            cycleName: "lease cleanup",
             cycle: commandDataService.ReleaseExpiredLeasesAsync);
     }
 
@@ -167,8 +167,8 @@ public sealed class CommandExecutionService(
     {
         return StartPeriodicBackgroundTaskAsync(
             intervalSeconds: _workerOptions.ProcessMonitorIntervalSeconds,
-            disabledMessage: interval => $"ProcessMonitorIntervalSeconds = {interval}, process monitoring disabled",
-            cycleName: "process monitor cycle",
+            disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
+            cycleName: "process monitor",
             cycle: () =>
             {
                 CheckProcessesHealth();
@@ -234,7 +234,7 @@ public sealed class CommandExecutionService(
                 if (health.Status == BimLib.Models.RevitProcessStatus.NotResponding)
                 {
                     logger.LogWarning(
-                        "Process not responding: commandId={Id}, pid={Pid}, memoryMb={MemoryMb}, duration={Duration}",
+                        "Not responding: id={Id}, pid={Pid}, mem={MemoryMb}MB, dur={Duration}",
                         commandId, process.Id, health.MemoryMb, health.Duration);
                 }
                 try
@@ -243,19 +243,19 @@ public sealed class CommandExecutionService(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Failed to dismiss dialogs for command {CommandId}", commandId);
+                    logger.LogWarning(ex, "Dismiss dialogs fail: id={CommandId}", commandId);
                 }
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Health check failed for command {CommandId}", commandId);
+                logger.LogWarning(ex, "Health fail: id={CommandId}", commandId);
             }
         }
     }
 
     private async Task PerformGracefulShutdownAsync()
     {
-        logger.LogInformation("Worker stopping: initiating graceful shutdown...");
+        logger.LogInformation("Shutdown...");
 
         using var shutdownBudgetCts = new CancellationTokenSource(TimeSpan.FromSeconds(ShutdownBudgetSeconds));
         var shutdownStartedAt = DateTime.UtcNow;
@@ -279,7 +279,7 @@ public sealed class CommandExecutionService(
             }
             catch (OperationCanceledException) when (shutdownBudgetCts.IsCancellationRequested)
             {
-                logger.LogWarning("Worker shutdown kill phase exceeded {BudgetSeconds}s budget", ShutdownBudgetSeconds);
+                logger.LogWarning("Shutdown kill >{BudgetSeconds}s", ShutdownBudgetSeconds);
             }
         }
 
@@ -293,7 +293,7 @@ public sealed class CommandExecutionService(
         _shutdownCts?.Dispose();
         _drainGate.Dispose();
 
-        logger.LogInformation("Worker shutdown completed");
+        logger.LogInformation("Shutdown done");
     }
 
     private async Task KillProcessAsync(int commandId, Process process, CancellationToken shutdownToken)
@@ -302,7 +302,7 @@ public sealed class CommandExecutionService(
         {
             if (!process.HasExited)
             {
-                logger.LogInformation("Killing process on shutdown: commandId={Id}, pid={Pid}",
+                logger.LogInformation("Kill process: id={Id}, pid={Pid}",
                     commandId, process.Id);
 
                 var exited = await ProcessKillHelper.KillAsync(
@@ -310,14 +310,14 @@ public sealed class CommandExecutionService(
 
                 if (exited)
                 {
-                    logger.LogInformation("Process killed successfully: commandId={Id}, pid={Pid}",
+                    logger.LogInformation("Process killed: id={Id}, pid={Pid}",
                         commandId, process.Id);
                 }
             }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Error killing process on shutdown: commandId={Id}, pid={Pid}",
+            logger.LogWarning(ex, "Kill error: id={Id}, pid={Pid}",
                 commandId, process.Id);
         }
         finally
@@ -329,7 +329,7 @@ public sealed class CommandExecutionService(
     private void LogActiveProcessesOnShutdown()
     {
         var activeCount = processRunner.ActiveProcesses.Count(item => !item.Value.HasExited);
-        logger.LogInformation("Worker shutdown: activeProcesses={Count}", activeCount);
+        logger.LogInformation("Shutdown: active={Count}", activeCount);
     }
 
     private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName, CancellationToken shutdownToken, int timeoutSeconds)
@@ -341,7 +341,7 @@ public sealed class CommandExecutionService(
 
         if (shutdownToken.IsCancellationRequested)
         {
-            logger.LogWarning("{TaskName} skipped: shutdown budget exhausted", taskName);
+                logger.LogWarning("{TaskName} skip: budget exhausted", taskName);
             return;
         }
 
@@ -351,7 +351,7 @@ public sealed class CommandExecutionService(
         }
         catch (TimeoutException)
         {
-            logger.LogWarning("{TaskName} did not complete within {Timeout}s timeout", taskName, timeoutSeconds);
+            logger.LogWarning("{TaskName} timeout ({Timeout}s)", taskName, timeoutSeconds);
         }
         catch (OperationCanceledException)
         {
@@ -359,7 +359,7 @@ public sealed class CommandExecutionService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "{TaskName} failed during shutdown", taskName);
+            logger.LogWarning(ex, "{TaskName} shutdown fail", taskName);
         }
     }
 
@@ -378,11 +378,11 @@ public sealed class CommandExecutionService(
 
         if (shutdownToken.IsCancellationRequested)
         {
-            logger.LogWarning("Command task wait skipped: shutdown budget exhausted");
+            logger.LogWarning("Task wait skip: budget exhausted");
             return;
         }
 
-        logger.LogInformation("Waiting up to {Timeout}s for {Count} command task(s) to stop", timeoutSeconds, runningTasks.Length);
+        logger.LogInformation("Wait {Timeout}s for {Count} task(s)", timeoutSeconds, runningTasks.Length);
 
         try
         {
@@ -390,7 +390,7 @@ public sealed class CommandExecutionService(
         }
         catch (TimeoutException)
         {
-            logger.LogWarning("{Count} command task(s) did not complete within {Timeout}s timeout",
+            logger.LogWarning("{Count} task(s) timeout ({Timeout}s)",
                 runningTasks.Count(task => !task.IsCompleted), timeoutSeconds);
         }
         catch (OperationCanceledException)
@@ -399,7 +399,7 @@ public sealed class CommandExecutionService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "One or more command tasks failed during shutdown");
+            logger.LogWarning(ex, "Task shutdown fail");
         }
     }
 
@@ -437,9 +437,7 @@ public sealed class CommandExecutionService(
                     break;
                 }
 
-                logger.LogInformation(
-                    "Commands claimed: count={Count}",
-                    claimed.Count);
+                logger.LogInformation("Claimed: {Count}", claimed.Count);
 
                 foreach (var cmd in claimed)
                 {
@@ -470,7 +468,7 @@ public sealed class CommandExecutionService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Error draining pending commands");
+            logger.LogError(ex, "Drain error");
         }
         finally
         {
@@ -486,7 +484,7 @@ public sealed class CommandExecutionService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Error executing command {CommandId}, correlationId={CorrelationId}",
+            logger.LogError(ex, "Exec error: id={CommandId}, corr={CorrelationId}",
                 cmd.CommandId, cmd.CorrelationId);
         }
     }
