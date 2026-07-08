@@ -1,61 +1,72 @@
-```
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.out
+
 # Dependencies
 node_modules/
-packages/
-
-# Build artifacts
-bin/
-obj/
-out/
-dist/
-build/
-target/
-
-# Logs
-*.log
-logs/
-
-# Environment
+venv/
+.venv/
 .env
 .env.local
 .env.*
 
-# IDE
-.vscode/
-.idea/
+# Logs and temp files
+*.log
+*.tmp
 *.swp
 *.swo
 
-# OS
+# Editors
+.vscode/
+.idea/
+
+# System files
 .DS_Store
 Thumbs.db
 
-# Testing
+# Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.pytest_cache/
-.mypy_cache/
+# Build directories
+dist/
+build/
+target/
+.gradle/
 
-# Dotnet specific
-**/bin/
-**/obj/
-**/out/
-*.userprefs
-*.pidb
-*.sln.cache
-*.userosscache
-.vs/
-appsettings.Local.json
-*.suo
-*.user
-```
-*.dll
+# Python specific
+.mypy_cache/
+.pytest_cache/
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
