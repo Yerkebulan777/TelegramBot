@@ -1,6 +1,6 @@
 # Worker Simplification Design
 
-> **Статус:** исторический proposal. Частично superseded реализацией от 2026-07-03. Текущие компоненты и DI описаны в `AGENTS.md`; этот файл не является operational source of truth.
+> **Статус:** исторический proposal (2026-07-02). Реализован. Текущая архитектура: [AGENTS.md](../../AGENTS.md) (упрощён), pipeline: [Docs/ExecutionAlgorithm.md](../../Docs/ExecutionAlgorithm.md) (упрощён).
 
 ## Goal
 

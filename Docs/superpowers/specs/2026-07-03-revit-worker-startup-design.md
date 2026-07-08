@@ -1,6 +1,6 @@
 # Revit Worker Startup Design
 
-> **Статус:** реализовано. Актуальный handoff закреплён только в canonical `RevitBIMFusion/Docs/BimPluginContract.md`; incident history — в `Docs/RevitCrashes.md`.
+> **Статус:** реализовано (2026-07-03). Handoff: [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md). Incident history: [Docs/RevitCrashes.md](../../Docs/RevitCrashes.md) (упрощён).
 
 ## Goal
 

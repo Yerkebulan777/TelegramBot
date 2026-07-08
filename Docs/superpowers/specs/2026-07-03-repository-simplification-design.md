@@ -1,6 +1,6 @@
 # Repository Simplification Design
 
-> **Статус:** реализованный design snapshot. Текущая архитектура и оставшиеся компоненты описаны в `AGENTS.md`.
+> **Статус:** реализованный design snapshot (2026-07-03). Текущая архитектура: [AGENTS.md](../../AGENTS.md) (упрощён), pipeline: [Docs/ExecutionAlgorithm.md](../../Docs/ExecutionAlgorithm.md) (упрощён).
 
 ## Goal
 
