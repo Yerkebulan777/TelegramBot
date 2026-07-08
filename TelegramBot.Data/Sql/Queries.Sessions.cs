@@ -9,6 +9,9 @@ internal static partial class SqlQueries
             VALUES (@UserId, @Username, @CorrelationId, @ProjectName, @FilesAmount)
             RETURNING SessionId;";
 
+        internal const string UpdateFilesAmount = @"
+            UPDATE Sessions SET FilesAmount = @FilesAmount WHERE SessionId = @SessionId;";
+
         internal const string GetListFiltered = @"
             WITH session_stats AS (
                 SELECT

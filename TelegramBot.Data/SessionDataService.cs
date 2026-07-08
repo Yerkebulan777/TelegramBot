@@ -1,7 +1,6 @@
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 
@@ -15,13 +14,16 @@ public sealed class SessionDataService(
     ILogger<SessionDataService> logger)
     : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
 {
+    private sealed record InsertedRow(string CommandText, string FilePath);
+
     /// <summary>
-    /// Создаёт сессию с командами в одной транзакции. Возвращает null, если под advisory lock'ом
-    /// обнаружились дубликаты (защита от TOCTOU-гонки при двойном submit — см. AcquireUserDedupeLock)
-    /// либо дубликат (команда, файл) пойман уникальным индексом idx_commands_active_unique
-    /// (защита от гонки между разными пользователями, которую advisory lock не покрывает).
+    /// Создаёт сессию с командами в одной транзакции. Дубликат определяется парой
+    /// (команда, файл) и отсекается точечно уникальным индексом idx_commands_active_unique
+    /// через ON CONFLICT DO NOTHING — остальные пары из того же запроса всё равно встают в очередь
+    /// (напр. если DWG для файла уже в очереди, а PDF для того же файла — нет, PDF всё равно queued).
+    /// SessionId = null, если дубликатами оказались все пары (очередь пополнить нечем).
     /// </summary>
-    public async Task<long?> CreateSessionWithCommandsAsync(
+    public async Task<(long? SessionId, int QueuedFileCount, IReadOnlyList<(string Command, string FilePath)> SkippedPairs)> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
         long userId,
@@ -41,20 +43,6 @@ public sealed class SessionDataService(
 
         await using var conn = await CreateOpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
-
-        // Сериализует check-then-insert одного пользователя; закрывается при commit/rollback.
-        _ = await conn.ExecuteAsync(SqlQueries.Commands.AcquireUserDedupeLock, new { UserId = userId }, tx);
-
-        var duplicateCount = await conn.QuerySingleAsync<int>(
-            SqlQueries.Commands.CountDuplicatePairs,
-            new { CommandTexts = commands, FilePaths = fileList },
-            tx);
-        if (duplicateCount > 0)
-        {
-            await tx.RollbackAsync();
-            Logger.LogWarning("Session rejected: duplicate commands detected under lock for user {UserId}", userId);
-            return null;
-        }
 
         correlationId ??= Guid.NewGuid().ToString("N");
         var sessionId = await conn.QuerySingleAsync<long>(
@@ -89,28 +77,38 @@ public sealed class SessionDataService(
             cmdIdx++;
         }
 
-        try
+        var allPairs = commandTexts.Zip(filePaths, (c, f) => (Command: c, FilePath: f)).ToArray();
+
+        // ON CONFLICT DO NOTHING отсекает только конфликтующие (команда, файл)-пары —
+        // остальные пары из этого же запроса вставляются штатно.
+        var insertedRows = (await conn.QueryAsync<InsertedRow>(SqlQueries.Commands.InsertBatch,
+            new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
+            tx)).ToList();
+
+        if (insertedRows.Count == 0)
         {
-            _ = await conn.ExecuteAsync(SqlQueries.Commands.InsertBatch,
-                new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
-                tx);
-        }
-        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
-        {
-            // Идентичный (команда, файл) уже активен в другой сессии — гонка между разными
-            // пользователями, которую advisory lock (сериализует только одного юзера) не ловит.
-            // Ловит idx_commands_active_unique.
             await tx.RollbackAsync();
-            Logger.LogWarning("Session rejected: duplicate active command caught by unique index for user {UserId}", userId);
-            return null;
+            Logger.LogWarning("Session rejected: all (command, file) pairs already active for user {UserId}", userId);
+            return (null, 0, allPairs);
+        }
+
+        var insertedPairs = insertedRows.Select(r => (r.CommandText, r.FilePath)).ToHashSet();
+        var skippedPairs = allPairs.Where(p => !insertedPairs.Contains(p)).ToArray();
+
+        var queuedFileCount = insertedRows.Select(r => r.FilePath).Distinct().Count();
+        if (skippedPairs.Length > 0)
+        {
+            _ = await conn.ExecuteAsync(SqlQueries.Sessions.UpdateFilesAmount,
+                new { SessionId = sessionId, FilesAmount = queuedFileCount },
+                tx);
         }
 
         // Отправляем уведомление Worker о новых задачах
         _ = await conn.ExecuteAsync("SELECT pg_notify('new_tasks', @Payload)", new { Payload = correlationId }, tx);
 
         await tx.CommitAsync();
-        Logger.LogInformation("Session created: session={SessionId}, correlationId={CorrelationId}", sessionId, correlationId);
-        return sessionId;
+        Logger.LogInformation("Session created: session={SessionId}, correlationId={CorrelationId}, skipped={SkippedCount}", sessionId, correlationId, skippedPairs.Length);
+        return (sessionId, queuedFileCount, skippedPairs);
     }
 
     /// <summary>Возвращает отфильтрованный список сессий.</summary>

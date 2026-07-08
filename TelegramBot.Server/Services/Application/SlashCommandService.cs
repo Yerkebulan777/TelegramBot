@@ -18,7 +18,6 @@ namespace TelegramBot.Server.Services.Application;
 
 public sealed partial class SlashCommandService(
     SessionDataService sessionDataService,
-    CommandDataService commandDataService,
     MessageTrackingService messageTrackingService,
     TelegramOutputService outputService,
     KeyboardBuilder keyboardBuilder,
@@ -298,32 +297,25 @@ public sealed partial class SlashCommandService(
                 return;
             }
 
-            // Проверяем, нет ли уже таких же (команда + файл) в очереди
-            if (await commandDataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
-            {
-                logger.LogWarning("Job blocked: {Username} ({UserId}), reason=dup_cmds", username, userId);
-                await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
-                return;
-            }
-
-            var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
-
             var priorities = session.PendingCommand
                 .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
 
             var correlationId = Guid.NewGuid().ToString("N");
-            var sessionId = await sessionDataService.CreateSessionWithCommandsAsync(
+            var (sessionId, queuedFileCount, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
                 session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
             if (sessionId is null)
             {
-                // Гонка: дубликат проскочил быстрый pre-check выше, но пойман под advisory lock'ом при вставке
-                logger.LogWarning("Job blocked: {Username} ({UserId}), reason=dup_cmds_race", username, userId);
+                // Каждая пара (команда, файл) пойман уникальным индексом idx_commands_active_unique — все пары дубли
+                logger.LogWarning("Job blocked: {Username} ({UserId}), reason=all_dup_cmds", username, userId);
                 await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
                 return;
             }
+
+            var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, queuedFileCount, skippedPairs);
+
             logger.LogInformation(
-                "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}",
-                sessionId, correlationId, username, userId, session.PendingCommand.Count, filesToProcess.Count);
+                "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}, skipped={SkippedCount}",
+                sessionId, correlationId, username, userId, session.PendingCommand.Count, queuedFileCount, skippedPairs.Count);
 
             session.SessionId = checked((int)sessionId.Value);
             await outputService.ClearChatHistoryAsync(userId, session);
@@ -536,7 +528,8 @@ public sealed partial class SlashCommandService(
         IReadOnlyList<string> commandNames,
         string projectName,
         IEnumerable<string> sectionNames,
-        int fileCount)
+        int fileCount,
+        IReadOnlyList<(string Command, string FilePath)>? skippedPairs = null)
     {
         var builder = new StringBuilder()
             .AppendLine("✅ *Задание успешно добавлено в очередь*")
@@ -563,6 +556,18 @@ public sealed partial class SlashCommandService(
         _=builder
             .AppendLine()
             .AppendLine($"📄 *Количество файлов:* `{fileCount}`");
+
+        if (skippedPairs is { Count: > 0 })
+        {
+            _=builder
+                .AppendLine()
+                .AppendLine($"⚠️ *Уже в очереди, пропущено:* `{skippedPairs.Count}`");
+
+            foreach (var (command, filePath) in skippedPairs)
+            {
+                _=builder.AppendLine($"• {MarkdownHelper.Escape(Path.GetFileName(filePath))} — {MarkdownHelper.Escape(command)}");
+            }
+        }
 
         return builder.ToString();
     }

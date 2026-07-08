@@ -17,7 +17,9 @@ internal static partial class SqlQueries
                 @FilePaths::text[],
                 @Orders::int[],
                 @Priorities::int[]
-            ) AS data(CommandText, FilePath, ExecutionOrder, Priority)";
+            ) AS data(CommandText, FilePath, ExecutionOrder, Priority)
+            ON CONFLICT (CommandText, FilePath) WHERE Status IN ('pending', 'processing') DO NOTHING
+            RETURNING CommandText, FilePath";
 
         internal const string GetBySession = @"
             SELECT c.ExecutionOrder AS ExecOrder, c.CommandText AS Command,
@@ -222,25 +224,5 @@ internal static partial class SqlQueries
               AND Status = 'Failed'
             ORDER BY ExecutionOrder, CommandId";
 
-        internal const string CountDuplicatePairs = @"
-            SELECT COUNT(*) FROM (
-                SELECT commands.CommandText AS cmd, files.FilePath AS fpath
-                FROM unnest(@CommandTexts::text[]) AS commands(CommandText)
-                CROSS JOIN unnest(@FilePaths::text[]) AS files(FilePath)
-            ) input
-            WHERE EXISTS (
-                SELECT 1 FROM Commands c
-                JOIN Sessions s ON s.SessionId = c.SessionId
-                WHERE c.Status IN ('pending', 'processing')
-                  AND s.Status != 'Deleted'
-                  AND c.CommandText = input.cmd
-                  AND c.FilePath = input.fpath
-            )";
-
-        // Namespace 1234570 (xact-scoped) — сериализует check-then-insert одного пользователя,
-        // закрывает TOCTOU-гонку между HasDuplicateCommandsAsync и CreateSessionWithCommandsAsync
-        // при двойном submit (двойной тап). Освобождается автоматически на commit/rollback транзакции.
-        internal const string AcquireUserDedupeLock = @"
-            SELECT pg_advisory_xact_lock(1234570, hashtext(@UserId::text))";
     }
 }

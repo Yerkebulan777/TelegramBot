@@ -152,18 +152,6 @@ public sealed class CommandDataService(
         }
     }
 
-    /// <summary>Проверяет наличие дубликатов команд.</summary>
-    public async Task<bool> HasDuplicateCommandsAsync(
-        IEnumerable<string> commandTexts,
-        IEnumerable<string> filePaths)
-    {
-        await using var conn = await CreateOpenConnectionAsync();
-        var count = await conn.QuerySingleAsync<int>(
-            SqlQueries.Commands.CountDuplicatePairs,
-            new { CommandTexts = commandTexts.ToArray(), FilePaths = filePaths.ToArray() });
-        return count > 0;
-    }
-
     /// <summary>Выполняет SQL-команду с обработкой ошибок и возвратом признака успеха.</summary>
     private async Task<bool> TryExecuteAsync(int commandId, string sql, object parameters, string operation)
     {
