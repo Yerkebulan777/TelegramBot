@@ -2,6 +2,8 @@ using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using TelegramBot.Worker.BimLib.Config;
+using TelegramBot.Worker.BimLib.Helpers;
+using TelegramBot.Worker.BimLib.Models;
 using TelegramBot.Worker.BimLib.Native;
 
 namespace TelegramBot.Worker.BimLib.Monitor;

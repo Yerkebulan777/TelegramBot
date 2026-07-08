@@ -11,7 +11,6 @@ using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Models;
-using TelegramBot.Server.Services.Application.Handlers;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application;

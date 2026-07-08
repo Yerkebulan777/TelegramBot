@@ -6,8 +6,8 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Data;
 using TelegramBot.Worker.BimLib.Config;
+using TelegramBot.Worker.BimLib.Helpers;
 using TelegramBot.Worker.BimLib.Monitor;
-using TelegramBot.Worker.BimLib.Native;
 using TelegramBot.Worker.BimLib.Services;
 using TelegramBot.Worker.Services;
 

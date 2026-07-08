@@ -2,6 +2,7 @@ using System.Text;
 using System.Threading.Channels;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
+using TelegramBot.Server.Models;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 

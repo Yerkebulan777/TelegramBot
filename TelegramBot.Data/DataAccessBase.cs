@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using TelegramBot.Data.Helpers;
 
 namespace TelegramBot.Data;
 

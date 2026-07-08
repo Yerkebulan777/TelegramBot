@@ -3,6 +3,8 @@ using Npgsql;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using TelegramBot.Data;
+using TelegramBot.Data.Helpers;
+using TelegramBot.Server.Models;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 

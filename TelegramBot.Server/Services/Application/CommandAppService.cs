@@ -1,6 +1,6 @@
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;
-using TelegramBot.Core.Services;
+using TelegramBot.Core.Helpers;
 using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
