@@ -71,7 +71,7 @@ public sealed class WorkerOptions
 
     /// <summary>
     /// Маппинг кодов команд (CommandText) на конфигурацию исполняемого файла.
-    /// По умолчанию: PDF/DWG/NWC/DATA/IFC/BIMDOC → Revit.exe, CLASHREP → FileConvert.exe, AUTORES → python ai_agent.py
+    /// По умолчанию: PDF/DWG/NWC/DATA/IFC → Revit.exe, CLASHREP → FileConvert.exe, AUTORES → python ai_agent.py
     /// </summary>
     public Dictionary<string, CommandConfig> Commands { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);

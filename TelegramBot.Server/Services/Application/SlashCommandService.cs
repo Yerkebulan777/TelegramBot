@@ -32,13 +32,10 @@ public sealed partial class SlashCommandService(
         new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
             ["PDF"] = CommandPriorities.Critical,
-            ["DWG"] = CommandPriorities.High,
-            ["NWC"] = CommandPriorities.Medium,
-            ["DATA"] = CommandPriorities.Medium,
+            ["DWG"] = CommandPriorities.Critical,
+            ["NWC"] = CommandPriorities.High,
             ["IFC"] = CommandPriorities.Medium,
-            ["BIMDOC"] = CommandPriorities.Medium,
-            ["CLASHREP"] = CommandPriorities.Medium,
-            ["AUTORES"] = CommandPriorities.Low,
+            ["DATA"] = CommandPriorities.Low,
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private readonly FileSystemOptions _options = fileSystemOptions.Value;

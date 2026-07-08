@@ -22,7 +22,7 @@ public sealed class TaskFile
 
     /// <summary>
     /// Тип команды (код экспорта): <c>"PDF"</c>, <c>"DWG"</c>, <c>"NWC"</c>, <c>"DATA"</c>,
-    /// <c>"IFC"</c>, <c>"BIMDOC"</c>, <c>"CLASHREP"</c>, <c>"AUTORES"</c>.
+    /// <c>"IFC"</c>, <c>"CLASHREP"</c>, <c>"AUTORES"</c>.
     /// Соответствует <see cref="Constants.CommandCodes"/>.
     /// </summary>
     [XmlElement("commandText")]

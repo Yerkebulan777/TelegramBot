@@ -19,7 +19,7 @@ dotnet build TelegramBot.slnx
 - `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
 - Worker: tracked tasks + SQL partition scheduling
 - Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, CLI args пусты
-- `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC, BIMDOC
+- `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC
 - Canonical BIM: `RevitBIMFusion/Docs`
 
 ## GitNexus

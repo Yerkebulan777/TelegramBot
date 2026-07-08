@@ -22,7 +22,7 @@ Telegram update → Server → Sessions + Commands (1 транзакция) → 
 
 ### Priority
 
-Меньшее число — раньше: `PDF` (1) → `DWG` (2) → `NWC/DATA/IFC/BIMDOC/CLASHREP` (3) → `AUTORES` (4) → default (5).
+Меньшее число — раньше: `PDF/DWG` (1) → `NWC` (2) → `IFC` (3) → `DATA` (4) → default/остальные команды (5).
 
 ### Partition
 

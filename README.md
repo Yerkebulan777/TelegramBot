@@ -18,7 +18,7 @@ Windows-сервис на .NET 10: Telegram-бот принимает задан
 ## Возможности
 
 - `/export`: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
-- `/automation`: `BIMDOC`, `CLASHREP`, `AUTORES`
+- `/automation`: `CLASHREP`, `AUTORES`
 - Навигация `RootPath → проект → разделы → 01_RVT`, фильтры `/status`, soft-delete
 - Дедупликация RVT, дневной лимит, защита от дублей
 - PostgreSQL `LISTEN/NOTIFY`, partition scheduling, retry, durable notifications
@@ -85,7 +85,7 @@ Defaults — из option-классов. Полный пример — `appsetti
 Worker создаёт `task_{project}_{commandId}.xml` и ждёт `result_{project}_{commandId}.xml` в `TaskDirectory`.
 - Revit: без command/file CLI-аргументов, TaskFile через `REVITBIMFUSION_TASK_FILE`
 - Revit запускается с `/language RUS`
-- Revit-команды: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`, `BIMDOC`
+- Revit-команды: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
 - ResultFile обязателен для Revit; exit-code fallback — только wrapper-командам
 
 Canonical XSD — `RevitBIMFusion/Docs`. Детали — [AGENTS.md](AGENTS.md).

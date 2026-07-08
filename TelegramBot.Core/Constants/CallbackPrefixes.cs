@@ -26,9 +26,6 @@ public static class CallbackPrefixes
     /// <summary>Выбор файла IFC.</summary>
     public const string Ifc = "IFC:";
 
-    /// <summary>Выбор файла BIMDOC.</summary>
-    public const string BimDoc = "BIMDOC:";
-
     /// <summary>Выбор файла CLASHREP.</summary>
     public const string ClashRep = "CLASHREP:";
 
