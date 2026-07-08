@@ -17,10 +17,15 @@ public sealed class MessageTrackingService(MessageTrackingDataService messageTra
     {
         if (message != null)
         {
-            var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-            await messageTrackingDataService.TrackMessageAsync(message.Chat.Id, message.MessageId, sessionId);
+            await TrackAsync(message.Chat.Id, message.MessageId, session);
         }
 
         return message;
+    }
+
+    public async Task TrackAsync(long chatId, int messageId, UserSession session)
+    {
+        var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
+        await messageTrackingDataService.TrackMessageAsync(chatId, messageId, sessionId);
     }
 }

@@ -29,6 +29,10 @@ public sealed class CommandAppService(
 
         // Track the user's own message so it can be deleted on the next slash command
         session.LastUserMessageId = message.MessageId;
+        await messageTrackingService.TrackAsync(
+            message.ChatId == 0 ? message.UserId : message.ChatId,
+            message.MessageId,
+            session);
 
         // Server restart detection: session is fresh after restart (not yet initialized)
         // and user sends a non-slash text — redirect to /start for a clean slate
@@ -52,6 +56,13 @@ public sealed class CommandAppService(
 
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
     {
+        if (!rateLimiter.IsAllowed(callback.UserId))
+        {
+            _ = await outputService.SendMessageAsync(callback.UserId,
+                "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
+            return;
+        }
+
         if (callback.Username == null || callback.MessageText == null || callback.CallbackData == null || callback.CallbackQueryId == null)
         {
             logger.LogWarning("Incomplete callback: user={UserId}", callback.UserId);

@@ -1,18 +1,22 @@
 using Microsoft.Extensions.Options;
-using System.Collections.Concurrent;
 using TelegramBot.Core.Config;
 
 namespace TelegramBot.Core.Helpers;
 
 /// <summary>
 /// Rate limiter с sliding window для ограничения количества запросов от пользователя.
-/// Исправлены race conditions: очистка и проверка выполняются в единой критической секции.
+/// Очистка, проверка и добавление выполняются в единой критической секции.
 /// </summary>
 public sealed class RateLimiter
 {
-    private readonly ConcurrentDictionary<long, RequestWindow> _requests = new();
+    private const int CleanupEveryRequests = 1024;
+
+    // ponytail: global lock is enough for 10 parallel updates; shard by user if this becomes hot.
+    private readonly object _syncRoot = new();
+    private readonly Dictionary<long, Queue<DateTime>> _requests = new();
     private readonly int _maxRequests;
     private readonly TimeSpan _window;
+    private long _requestsSinceCleanup;
 
     public RateLimiter(IOptions<RateLimitOptions> options)
     {
@@ -27,30 +31,52 @@ public sealed class RateLimiter
     public bool IsAllowed(long userId)
     {
         var now = DateTime.UtcNow;
-        var requestWindow = _requests.GetOrAdd(userId, static _ => new RequestWindow());
 
-        lock (requestWindow)
+        lock (_syncRoot)
         {
-            // Очистка expired записей в той же критической секции
-            while (requestWindow.Timestamps.Count > 0 && now - requestWindow.Timestamps.Peek() > _window)
+            _requestsSinceCleanup++;
+            if (_requestsSinceCleanup >= CleanupEveryRequests)
             {
-                _ = requestWindow.Timestamps.Dequeue();
+                CleanupExpiredWindows(now);
+                _requestsSinceCleanup = 0;
             }
 
-            // Проверка лимита и добавление нового timestamp
-            if (requestWindow.Timestamps.Count >= _maxRequests)
+            if (!_requests.TryGetValue(userId, out var timestamps))
+            {
+                timestamps = new Queue<DateTime>();
+                _requests[userId] = timestamps;
+            }
+
+            RemoveExpired(timestamps, now);
+
+            if (timestamps.Count >= _maxRequests)
             {
                 return false;
             }
 
-            requestWindow.Timestamps.Enqueue(now);
+            timestamps.Enqueue(now);
 
             return true;
         }
     }
 
-    private sealed class RequestWindow
+    private void CleanupExpiredWindows(DateTime now)
     {
-        public Queue<DateTime> Timestamps { get; } = new();
+        foreach (var (userId, timestamps) in _requests.ToArray())
+        {
+            RemoveExpired(timestamps, now);
+            if (timestamps.Count == 0)
+            {
+                _ = _requests.Remove(userId);
+            }
+        }
+    }
+
+    private void RemoveExpired(Queue<DateTime> timestamps, DateTime now)
+    {
+        while (timestamps.Count > 0 && now - timestamps.Peek() > _window)
+        {
+            _ = timestamps.Dequeue();
+        }
     }
 }

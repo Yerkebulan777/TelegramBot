@@ -39,7 +39,11 @@ public static class DependencyInjectionExtensions
             .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required");
 
         _=services.AddOptions<RateLimitOptions>()
-            .Bind(configuration.GetSection(RateLimitOptions.SectionName));
+            .Bind(configuration.GetSection(RateLimitOptions.SectionName))
+            .Validate(options => options.MaxRequests > 0, "RateLimit:MaxRequests must be greater than 0")
+            .Validate(options => options.WindowSeconds > 0, "RateLimit:WindowSeconds must be greater than 0")
+            .Validate(options => options.MaxFilesPerUserPerDay >= 0, "RateLimit:MaxFilesPerUserPerDay must be greater than or equal to 0")
+            .ValidateOnStart();
 
         return services;
     }
