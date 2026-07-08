@@ -14,11 +14,6 @@ public static partial class RevitFileDeduplicator
 
     public static List<string> Deduplicate(IReadOnlyCollection<string> files)
     {
-        if (files.Count == 0)
-        {
-            return [];
-        }
-
         var groups = new Dictionary<string, List<(string Path, string Name)>>(files.Count, StringComparer.OrdinalIgnoreCase);
 
         foreach (var path in files)
