@@ -32,9 +32,9 @@ internal static class WinApiHelper
 
         if (errorCode != 0)
         {
-                _logger.LogWarning(
-                    "WinAPI {Method} err={Error}: {Details}",
-                    method, errorCode, details);
+            _logger.LogWarning(
+                "WinAPI {Method} err={Error}: {Details}",
+                method, errorCode, details);
         }
         else
         {

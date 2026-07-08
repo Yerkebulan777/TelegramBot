@@ -1,15 +1,11 @@
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Server.Services.Application;
-using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Middleware;
 
 public sealed class AuthorizationMiddleware(
     UserDataService userDataService,
-    MessageTrackingService messageTrackingService,
-    TelegramOutputService outputService,
     ILogger<AuthorizationMiddleware> logger)
 {
     public async Task<AccessValidationResult> ValidateAsync(long userId)
@@ -27,21 +23,6 @@ public sealed class AuthorizationMiddleware(
             CallbackPrefixes.RequestAccess or
             CallbackPrefixes.ApproveUser or
             CallbackPrefixes.RejectUser;
-    }
-
-    public async Task<bool> EnsureActiveOrNotifyAsync(long userId, UserSession session)
-    {
-        var access = await ValidateAsync(userId);
-        if (access.IsActive)
-        {
-            return true;
-        }
-
-        _ = await messageTrackingService.TrackAsync(
-            outputService.SendMessageAsync(userId, "У вас нет доступа. Введите /start для запроса доступа."),
-            session);
-
-        return false;
     }
 
     /// <summary>

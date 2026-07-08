@@ -192,7 +192,9 @@ internal static partial class SqlQueries
 
         internal const string CountDuplicatePairs = @"
             SELECT COUNT(*) FROM (
-                SELECT unnest(@CommandTexts::text[]) AS cmd, unnest(@FilePaths::text[]) AS fpath
+                SELECT commands.CommandText AS cmd, files.FilePath AS fpath
+                FROM unnest(@CommandTexts::text[]) AS commands(CommandText)
+                CROSS JOIN unnest(@FilePaths::text[]) AS files(FilePath)
             ) input
             WHERE EXISTS (
                 SELECT 1 FROM Commands c

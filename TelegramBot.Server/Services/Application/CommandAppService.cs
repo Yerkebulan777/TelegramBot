@@ -12,6 +12,7 @@ public sealed class CommandAppService(
     CallbackDispatcher callbackDispatcher,
     SlashCommandService slashCommandService,
     SessionManager sessionManager,
+    MessageTrackingService messageTrackingService,
     RateLimiter rateLimiter,
     ILogger<CommandAppService> logger)
 {
@@ -60,11 +61,18 @@ public sealed class CommandAppService(
         var session = sessionManager.GetOrCreateSession(callback.UserId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
 
-        if (!accessValidator.BypassesAccessCheck(parsed.Prefix) &&
-            !await accessValidator.EnsureActiveOrNotifyAsync(callback.UserId, session))
+        if (!accessValidator.BypassesAccessCheck(parsed.Prefix))
         {
-            logger.LogWarning("Callback rejected: prefix={Prefix}, user={Username} ({UserId}), reason=access", parsed.Prefix, callback.Username, callback.UserId);
-            return;
+            var access = await accessValidator.ValidateAsync(callback.UserId);
+            if (!access.IsActive)
+            {
+                _ = await messageTrackingService.TrackAsync(
+                    outputService.SendMessageAsync(callback.UserId, "У вас нет доступа. Введите /start для запроса доступа."),
+                    session);
+
+                logger.LogWarning("Callback rejected: prefix={Prefix}, user={Username} ({UserId}), reason=access", parsed.Prefix, callback.Username, callback.UserId);
+                return;
+            }
         }
 
         var context = new CallbackContext

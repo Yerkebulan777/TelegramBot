@@ -259,9 +259,9 @@ public sealed class CommandPreparer(
             if (path == null)
             {
                 var msg = "Navisworks не установлен на сервере. Пожалуйста, установите Navisworks или обратитесь к администратору.";
-            logger.LogWarning("Resolve fail: {Cmd}: {Msg}", commandText, msg);
-            return (null, msg);
-        }
+                logger.LogWarning("Resolve fail: {Cmd}: {Msg}", commandText, msg);
+                return (null, msg);
+            }
 
             logger.LogDebug("{Cmd} via BimLib: {Path}", commandText, path);
             return (path, null);

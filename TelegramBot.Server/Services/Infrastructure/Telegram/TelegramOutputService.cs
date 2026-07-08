@@ -199,9 +199,9 @@ public class TelegramOutputService(
         catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
             // Существующая клавиатура остаётся — фронт не ломаем, только логируем.
-                logger.LogWarning(
-                    "Reply markup too long: {UserId} msg={MessageId}; keyboard kept",
-                    userId, messageId);
+            logger.LogWarning(
+                "Reply markup too long: {UserId} msg={MessageId}; keyboard kept",
+                userId, messageId);
         }
         catch (ApiRequestException ex)
         {
@@ -221,9 +221,9 @@ public class TelegramOutputService(
         }
         catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
-                logger.LogWarning(
-                    "Reply markup too long: {UserId} msg={MessageId}; fallback text-only",
-                    userId, messageId);
+            logger.LogWarning(
+                "Reply markup too long: {UserId} msg={MessageId}; fallback text-only",
+                userId, messageId);
             try
             {
                 _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
