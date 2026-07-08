@@ -68,12 +68,9 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     {
         var session = sessions.GetOrCreateSession(userId);
 
-        if (IsSectionFileLevel(path))
-        {
-            return BuildFilesKeyboard(session, path);
-        }
-
-        return IsSectionLevel(path) ? BuildSectionKeyboard(session, path) : BuildProjectKeyboard(session, path);
+        return IsSectionFileLevel(path)
+            ? BuildFilesKeyboard(session, path)
+            : IsSectionLevel(path) ? BuildSectionKeyboard(session, path) : BuildProjectKeyboard(session, path);
     }
 
     /// <summary>
@@ -96,16 +93,9 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             return callbackArgument;
         }
 
-        List<string> candidates;
-        if (IsSectionFileLevel(currentPath))
-        {
-            candidates = GetSectionFiles(currentPath);
-        }
-        else
-        {
-            candidates =IsSectionLevel(currentPath) ? GetSectionFolders(currentPath) : GetProjectFolders(currentPath);
-        }
-
+        var candidates = IsSectionFileLevel(currentPath)
+            ? GetSectionFiles(currentPath)
+            : IsSectionLevel(currentPath) ? GetSectionFolders(currentPath) : GetProjectFolders(currentPath);
         return candidates.FirstOrDefault(c => string.Equals(CreateSelectionToken(c), callbackArgument, StringComparison.OrdinalIgnoreCase));
     }
 
