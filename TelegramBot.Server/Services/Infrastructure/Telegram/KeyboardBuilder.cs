@@ -205,12 +205,12 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             }
             else
             {
-                var label = $"{statusIcon} {commandPrefix}{fileName}";
+                var label = $"{statusIcon} {commandPrefix}{fileName} 🔁";
                 buttons.Add(
                 [
                     InlineKeyboardButton.WithCallbackData(
                         TruncateListButtonText(label),
-                        $"{CallbackPrefixes.SessionDetails}{sessionId}:{selectedFilter}")
+                        $"{CallbackPrefixes.RerunCommand}{sessionCommand.CommandId}:{selectedFilter}")
                 ]);
             }
         }

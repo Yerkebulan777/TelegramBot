@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 
@@ -16,7 +17,9 @@ public sealed class SessionDataService(
 {
     /// <summary>
     /// Создаёт сессию с командами в одной транзакции. Возвращает null, если под advisory lock'ом
-    /// обнаружились дубликаты (защита от TOCTOU-гонки при двойном submit — см. AcquireUserDedupeLock).
+    /// обнаружились дубликаты (защита от TOCTOU-гонки при двойном submit — см. AcquireUserDedupeLock)
+    /// либо дубликат (команда, файл) пойман уникальным индексом idx_commands_active_unique
+    /// (защита от гонки между разными пользователями, которую advisory lock не покрывает).
     /// </summary>
     public async Task<long?> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
@@ -86,9 +89,21 @@ public sealed class SessionDataService(
             cmdIdx++;
         }
 
-        _ = await conn.ExecuteAsync(SqlQueries.Commands.InsertBatch,
-            new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
-            tx);
+        try
+        {
+            _ = await conn.ExecuteAsync(SqlQueries.Commands.InsertBatch,
+                new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
+                tx);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            // Идентичный (команда, файл) уже активен в другой сессии — гонка между разными
+            // пользователями, которую advisory lock (сериализует только одного юзера) не ловит.
+            // Ловит idx_commands_active_unique.
+            await tx.RollbackAsync();
+            Logger.LogWarning("Session rejected: duplicate active command caught by unique index for user {UserId}", userId);
+            return null;
+        }
 
         // Отправляем уведомление Worker о новых задачах
         _ = await conn.ExecuteAsync("SELECT pg_notify('new_tasks', @Payload)", new { Payload = correlationId }, tx);

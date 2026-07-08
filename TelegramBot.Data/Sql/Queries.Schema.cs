@@ -152,6 +152,8 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_commands_claim_partition ON Commands(Status, Partition, Priority ASC, CreatedAt ASC, CommandId ASC)
                 WHERE Status = 'pending';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_unique ON Commands(SessionId, CommandText, FilePath);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_active_unique ON Commands(CommandText, FilePath)
+                WHERE Status IN ('pending', 'processing');
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_session ON TrackedMessages(SessionId);
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_chat ON TrackedMessages(ChatId);
             CREATE INDEX IF NOT EXISTS idx_commands_updated_at ON Commands(UpdatedAt DESC);

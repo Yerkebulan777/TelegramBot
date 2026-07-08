@@ -20,6 +20,8 @@ Telegram update → Server → Sessions + Commands (1 транзакция) → 
 
 При дубликатах под lock — откат.
 
+DB-level backstop: `idx_commands_active_unique` — уникальный partial-индекс на `(CommandText, FilePath) WHERE Status IN ('pending', 'processing')`, глобально по всем сессиям/юзерам. Advisory lock сериализует только одного юзера — гонку между **разными** юзерами на идентичный (команда, файл) ловит только этот индекс. При его срабатывании `INSERT` кидает `PostgresException` (`23505`), `SessionDataService` ловит, откатывает транзакцию, возвращает `null` — тот же путь, что и dup-под-lock.
+
 ### Priority
 
 Меньшее число — раньше: `PDF/DWG` (1) → `NWC` (2) → `IFC` (3) → `DATA` (4) → default/остальные команды (5).
@@ -87,6 +89,17 @@ Server:
 - **Process health monitoring**: каждые `ProcessMonitorIntervalSeconds` — `ProcessHealthHelper` + `DialogDismisser`
 - **Session retention**: `SessionCleanupService` — soft-delete сессий старше `CompletedSessionRetentionDays`
 - **Worker shutdown**: остановка циклов → process-tree kill (30s budget) → освобождение ресурсов
+
+## 8. Повторный запуск из /status
+
+Кнопка с именем файла в `/status` (для `processing`/`Done`/`Failed`, не `pending`) шлёт `RERUNCMD:{commandId}:{filter}` → `SessionManagementHandler.HandleRerunCommandAsync`.
+
+`CommandDataService.RequeueCommandAsync` (SQL `Requeue`, `Queries.Commands.cs`):
+- если `Status == 'processing'` — no-op, возвращает `RequeueOutcome.Processing`, юзер видит toast «⏳ Уже выполняется» (блок дубликата выполнения того же CommandId)
+- иначе — сброс той же строки в `pending` (`Lease`/`ProcessId`/`ErrorMessage`/`NextRetryAt`/`CompletedAt` в NULL, `RetryCount` не трогается — это ручной rerun, не авто-retry), `pg_notify('new_tasks', commandId)` для мгновенного подхвата, `RequeueOutcome.Requeued`, toast «🔁 Перезапущено»
+- если строка не найдена/чужая/удалена — `RequeueOutcome.NotFound`, тихо игнорируется
+
+Если файл физически ещё выполняется старым процессом в момент rerun — этот процесс осиротевает; его финальный `UpdateStatus` может перезаписать заново queued/processing строку тем же `CommandId`. Разруливается на уровне БД по `CommandId`, отдельный kill старого процесса не делается.
 
 ## Статусы
 

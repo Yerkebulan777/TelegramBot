@@ -27,7 +27,8 @@ public sealed class SessionManagementHandler(
         CallbackPrefixes.ConfirmDeleteSessionByType,
         CallbackPrefixes.StatusFilter,
         CallbackPrefixes.StatusPage,
-        CallbackPrefixes.CommandsPage
+        CallbackPrefixes.CommandsPage,
+        CallbackPrefixes.RerunCommand
     ];
 
     public override Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -44,6 +45,7 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.StatusFilter => HandleStatusFilterAsync(context),
             CallbackPrefixes.StatusPage => HandleStatusPageAsync(context),
             CallbackPrefixes.CommandsPage => HandleCommandsPageAsync(context),
+            CallbackPrefixes.RerunCommand => HandleRerunCommandAsync(context),
             _ => Task.CompletedTask
         };
     }
@@ -270,6 +272,37 @@ public sealed class SessionManagementHandler(
         context.Session.SessionId = sessionId;
         await HandlePostDeletionAsync(context, sessionId, "ALL");
 
+    }
+
+    // ────────────────────── Rerun ──────────────────────
+
+    /// <summary>Повторный запуск файла; блокируется, если файл сейчас 'processing'.</summary>
+    private async Task HandleRerunCommandAsync(CallbackContext context)
+    {
+        if (!TryParseCompoundId(context, out var commandId, out var filter))
+        {
+            return;
+        }
+
+        filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
+        Logger.LogInformation("{Username} rerun cmd {CommandId}", context.Username, commandId);
+
+        var sessionId = await ResolveSessionByCommandAsync(context, commandId);
+        if (!sessionId.HasValue)
+        {
+            return;
+        }
+
+        var outcome = await commandDataService.RequeueCommandAsync(commandId, context.UserId, IsAdmin);
+        if (outcome == RequeueOutcome.NotFound)
+        {
+            return;
+        }
+
+        var toast = outcome == RequeueOutcome.Processing ? "⏳ Уже выполняется" : "🔁 Перезапущено";
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, toast);
+        context.Session.SessionId = sessionId.Value;
+        await RenderCommandsViewAsync(context, sessionId.Value, filter);
     }
 
     // ────────────────────── Shared Helpers ──────────────────────

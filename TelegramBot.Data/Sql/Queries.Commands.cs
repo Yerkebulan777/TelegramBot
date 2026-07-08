@@ -152,6 +152,38 @@ internal static partial class SqlQueries
                       selected.Partition,
                       selected.Priority, selected.RetryCount;";
 
+        internal const string Requeue = @"
+            WITH target AS (
+                SELECT c.CommandId, c.Status
+                FROM Commands c
+                JOIN Sessions s ON s.SessionId = c.SessionId
+                WHERE c.CommandId = @CommandId
+                  AND c.Status != 'Deleted'
+                  AND (s.UserId = @UserId OR @IsAdmin = true)
+            ),
+            requeued AS (
+                UPDATE Commands c
+                SET Status = 'pending',
+                    Lease = NULL,
+                    StartedAt = NULL,
+                    CompletedAt = NULL,
+                    ProcessId = NULL,
+                    ErrorMessage = NULL,
+                    NextRetryAt = NULL
+                FROM target t
+                WHERE c.CommandId = t.CommandId
+                  AND t.Status != 'processing'
+                RETURNING c.CommandId
+            ),
+            notified AS (
+                SELECT pg_notify('new_tasks', @CommandId::text) FROM requeued
+            )
+            SELECT CASE
+                WHEN EXISTS (SELECT 1 FROM requeued) THEN 'Requeued'
+                WHEN EXISTS (SELECT 1 FROM target) THEN 'Processing'
+                ELSE 'NotFound'
+            END;";
+
         internal const string ScheduleRetry = @"
             UPDATE Commands
             SET Status = 'pending',

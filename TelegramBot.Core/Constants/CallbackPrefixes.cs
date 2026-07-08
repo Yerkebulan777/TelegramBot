@@ -82,4 +82,7 @@ public static class CallbackPrefixes
 
     /// <summary>Постраничная навигация по командам сессии. Аргумент: "sessionId:filter:page".</summary>
     public const string CommandsPage = "CMDPAGE:";
+
+    /// <summary>Повторный запуск команды. Аргумент: "commandId:filter".</summary>
+    public const string RerunCommand = "RERUNCMD:";
 }

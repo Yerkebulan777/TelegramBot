@@ -85,6 +85,33 @@ public sealed class CommandDataService(
         return retryCount;
     }
 
+    /// <summary>
+    /// Повторный запуск команды. Блокирует requeue, если файл уже 'processing'
+    /// (не плодит дубликат выполнения того же файла).
+    /// </summary>
+    public async Task<RequeueOutcome> RequeueCommandAsync(int commandId, long userId, bool isAdmin = false)
+    {
+        try
+        {
+            await using var conn = await CreateOpenConnectionAsync();
+            var result = await conn.ExecuteScalarAsync<string>(
+                SqlQueries.Commands.Requeue,
+                new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
+
+            if (result != "Requeued")
+            {
+                Logger.LogWarning("Requeue skipped for command {CommandId} by user {UserId}: {Result}", commandId, userId, result);
+            }
+
+            return Enum.Parse<RequeueOutcome>(result ?? "NotFound");
+        }
+        catch (Exception e)
+        {
+            Logger.LogError(e, "Failed to requeue command {CommandId}", commandId);
+            return RequeueOutcome.NotFound;
+        }
+    }
+
     /// <summary>Мягкое удаление команды.</summary>
     public async Task<bool> DeleteCommandAsync(int commandId, long userId, bool isAdmin = false)
     {
