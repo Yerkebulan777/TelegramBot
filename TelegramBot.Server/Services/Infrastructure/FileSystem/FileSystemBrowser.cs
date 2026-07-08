@@ -139,7 +139,9 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         return new InlineKeyboardMarkup(buttons);
     }
 
-    /// <summary>Список файлов раздела: та же механика выбора (чекбоксы + "Выбрать все"), что и у списка разделов.</summary>
+    /// <summary>
+    /// Список файлов раздела: та же механика выбора (чекбоксы + "Выбрать все"), что и у списка разделов.
+    /// </summary>
     private InlineKeyboardMarkup BuildFilesKeyboard(UserSession session, string path)
     {
         var selected = session.GetSelectedFiles();

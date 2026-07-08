@@ -70,3 +70,14 @@ target/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+
+# .NET / Visual Studio
+.vs/
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.slnLaunch.user
+appsettings.Local.json
