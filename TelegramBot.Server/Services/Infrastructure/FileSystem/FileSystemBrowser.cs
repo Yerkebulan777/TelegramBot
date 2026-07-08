@@ -59,22 +59,23 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         return value;
     }
 
-    private string[] GetCachedDirectories(string path) =>
-        GetOrCache(_directoryCache, path, () => Directory.GetDirectories(path));
+    private string[] GetCachedDirectories(string path)
+    {
+        return GetOrCache(_directoryCache, path, () => Directory.GetDirectories(path));
+    }
 
-    private List<string> GetCachedSectionFiles(string sectionPath) =>
-        GetOrCache(_fileCache, sectionPath, () => ScanSectionFiles(sectionPath));
+    private List<string> GetCachedSectionFiles(string sectionPath)
+    {
+        return GetOrCache(_fileCache, sectionPath, () => ScanSectionFiles(sectionPath));
+    }
 
     public InlineKeyboardMarkup GetSectionsView(long userId, string path)
     {
         var session = sessions.GetOrCreateSession(userId);
 
-        if (IsSectionFileLevel(path))
-        {
-            return BuildFilesKeyboard(session, path);
-        }
-
-        return IsSectionLevel(path)
+        return IsSectionFileLevel(path)
+            ? BuildFilesKeyboard(session, path)
+            : IsSectionLevel(path)
             ? BuildSectionKeyboard(session, path)
             : BuildProjectKeyboard(session, path);
     }
@@ -97,7 +98,7 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
             return callbackArgument;
         }
 
-        IEnumerable<string> candidates = IsSectionFileLevel(currentPath)
+        var candidates = IsSectionFileLevel(currentPath)
             ? GetCachedSectionFiles(currentPath)
             : IsSectionLevel(currentPath)
                 ? EnumerateSectionFolders(currentPath)
@@ -222,6 +223,7 @@ public class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptio
         {
             var root = new DirectoryInfo(rvtDir);
             var topLevel = CollectRevitFiles(root);
+
             if (topLevel.Count > 0)
             {
                 return RevitFileDeduplicator.Deduplicate(topLevel);
