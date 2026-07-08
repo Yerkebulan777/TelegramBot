@@ -14,79 +14,45 @@ public static partial class RevitFileDeduplicator
 
     public static List<string> Deduplicate(IReadOnlyCollection<string> files)
     {
-        var groups = new Dictionary<string, List<(string Path, string Name)>>(files.Count, StringComparer.OrdinalIgnoreCase);
-
-        foreach (var path in files)
-        {
-            var name = Path.GetFileNameWithoutExtension(path);
-            var prefix = name.Length > _prefixLength ? name[.._prefixLength] : name;
-            if (!groups.TryGetValue(prefix, out var bucket))
-            {
-                bucket = [];
-                groups[prefix] = bucket;
-            }
-
-            bucket.Add((path, name));
-        }
-
-        var result = new List<string>(files.Count);
-        foreach (var bucket in groups.Values)
-        {
-            if (bucket.Count == 1)
-            {
-                result.Add(bucket[0].Path);
-                continue;
-            }
-
-            bucket.Sort(static (a, b) =>
-            {
-                var c = a.Name.Length.CompareTo(b.Name.Length);
-                return c != 0 ? c : string.CompareOrdinal(a.Path, b.Path);
-            });
-
-            AddUnique(bucket, result);
-        }
-
-        return result;
+        return [.. files
+            .Select(static path => (Path: path, Name: Path.GetFileNameWithoutExtension(path)))
+            .GroupBy(static file => GetPrefix(file.Name), StringComparer.OrdinalIgnoreCase)
+            .SelectMany(KeepFirstBySimilarNumber)];
     }
 
-    private static void AddUnique(List<(string Path, string Name)> candidates, List<string> result)
+    private static string GetPrefix(string name)
     {
-        var accepted = new List<(int NameLength, HashSet<long> Numbers)>(candidates.Count);
-        foreach (var candidate in candidates)
-        {
-            var nameLength = candidate.Name.Length;
-            var numbers = ExtractNumbers(candidate.Name);
-            var isDuplicate = false;
-            if (numbers is not null)
-            {
-                foreach (var (NameLength, Numbers) in accepted)
-                {
-                    if (Math.Abs(NameLength - nameLength) <= _nameLengthTolerance
-                        && Numbers.Overlaps(numbers))
-                    {
-                        isDuplicate = true;
-                        break;
-                    }
-                }
-            }
+        return name.Length > _prefixLength ? name[.._prefixLength] : name;
+    }
 
-            if (isDuplicate)
+    private static IEnumerable<string> KeepFirstBySimilarNumber(IEnumerable<(string Path, string Name)> files)
+    {
+        var accepted = new List<(int NameLength, HashSet<long> Numbers)>();
+
+        foreach (var file in files
+            .OrderBy(static file => file.Name.Length)
+            .ThenBy(static file => file.Path, StringComparer.Ordinal))
+        {
+            var numbers = ExtractNumbers(file.Name);
+            if (numbers.Count > 0
+                && accepted.Any(known => Math.Abs(known.NameLength - file.Name.Length) <= _nameLengthTolerance
+                    && known.Numbers.Overlaps(numbers)))
             {
                 continue;
             }
 
-            result.Add(candidate.Path);
-            if (numbers is not null)
+            yield return file.Path;
+
+            if (numbers.Count > 0)
             {
-                accepted.Add((nameLength, numbers));
+                accepted.Add((file.Name.Length, numbers));
             }
         }
     }
 
-    private static HashSet<long>? ExtractNumbers(string name)
+    private static HashSet<long> ExtractNumbers(string name)
     {
-        HashSet<long>? result = null;
+        var result = new HashSet<long>();
         foreach (var match in RvtNumberPattern().EnumerateMatches(name))
         {
             if (long.TryParse(
@@ -95,7 +61,7 @@ public static partial class RevitFileDeduplicator
                 CultureInfo.InvariantCulture,
                 out var value))
             {
-                _=(result ??= []).Add(value);
+                result.Add(value);
             }
         }
 
