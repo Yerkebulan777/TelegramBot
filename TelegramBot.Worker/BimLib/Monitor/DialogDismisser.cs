@@ -92,8 +92,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
         {
             // Диалоги есть, но закрыть не удалось — учитываем попытку
             var attempts = _dismissAttempts.AddOrUpdate(processId, 1, (_, count) => count + 1);
-            _logger.LogWarning("Dismiss fail: pid={ProcessId} (attempt {Attempts}/{Max})",
-                processId, attempts, _options.MaxDismissAttempts);
+            _logger.LogWarning("Dismiss fail: pid={ProcessId} (attempt {Attempts}/{Max})", processId, attempts, _options.MaxDismissAttempts);
 
             if (attempts >= _options.MaxDismissAttempts)
             {
@@ -175,9 +174,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
                     continue;
                 }
 
-                _logger.LogDebug(
-                    "Known button: text='{Text}', hwnd={Hwnd}, class='{Class}'",
-                    cleanText, button, WindowUtil.GetWindowClassName(button));
+                _logger.LogDebug("Known button: text='{Text}', hwnd={Hwnd}, class='{Class}'", cleanText, button, cleanText);
 
                 WindowUtil.SendButtonClick(button);
                 WindowUtil.SendButtonCommandClick(hwndDlg, button);
@@ -256,8 +253,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
         try
         {
             using var process = Process.GetProcessById((int)processId);
-            _logger.LogWarning("Kill process: pid={ProcessId} ({ProcessName}) after {Max} dismiss fails",
-                processId, process.ProcessName, _options.MaxDismissAttempts);
+            _logger.LogWarning("Kill process: pid={ProcessId}) after {Max} dismiss fails", processId, _options.MaxDismissAttempts);
             process.Kill(entireProcessTree: true);
         }
         catch (Exception ex)
