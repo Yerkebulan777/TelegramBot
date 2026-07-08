@@ -153,7 +153,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
         foreach (var file in files)
         {
-            var label = $"{(selected.Contains(file) ? "✅ " : "📄 ")}{Path.GetFileName(file)}";
+            var label = $"{(selected.Contains(file) ? "✅ " : "🔵")}{Path.GetFileName(file)}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(file)}")]);
         }
 
@@ -186,36 +186,24 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     /// <summary>Папки-проекты: совпадают с SectionFolderPattern и содержат ProjectDirectoryName.</summary>
     private List<string> GetProjectFolders(string path)
     {
-        return GetOrCache(_projectFolderCache, path, () =>
-        {
-            if (!Directory.Exists(path))
-            {
-                return [];
-            }
-
-            return [.. Directory.GetDirectories(path, "*", _enumOptions)
+        return GetOrCache(_projectFolderCache, path, () => !Directory.Exists(path)
+                ? []
+                : [.. Directory.GetDirectories(path, "*", _enumOptions)
                 .Where(dir =>
                 {
                     var name = Path.GetFileName(dir);
                     return _folderRegex.IsMatch(name) && Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName));
-                })];
-        });
+                })]);
     }
 
     /// <summary>Папки разделов внутри ProjectDirectoryName, имя которых содержит известный acronym.</summary>
     private List<string> GetSectionFolders(string path)
     {
-        return GetOrCache(_sectionFolderCache, path, () =>
-        {
-            if (!Directory.Exists(path))
-            {
-                return [];
-            }
-
-            return Directory.GetDirectories(path, "*", _enumOptions)
+        return GetOrCache(_sectionFolderCache, path, () => !Directory.Exists(path)
+                ? []
+                : Directory.GetDirectories(path, "*", _enumOptions)
                 .Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))
-                .ToList();
-        });
+                .ToList());
     }
 
     /// <summary>Дедуплицированные .rvt-файлы раздела (результат кэшируется).</summary>
