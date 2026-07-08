@@ -1,1124 +1,230 @@
-# Анализ алгоритмических узких мест в кодовой базе TelegramBot
+# Проверка рекомендаций из алгоритмического отчета
 
-## Обзор
+Проверено по текущему коду репозитория на 2026-07-08. Цель этого файла - отделить реальные рекомендации от устаревших, ошибочных и неподтвержденных оптимизаций.
 
-Данный отчет содержит результаты глубокого анализа алгоритмов в кодовой базе TelegramBot.Server, TelegramBot.Worker и TelegramBot.Data. Выявлены проблемы производительности, избыточного потребления ресурсов и потенциальные узкие места с конкретными рекомендациями по оптимизации.
+## Итог
 
----
+| N | Компонент | Вердикт | Что делать |
+|---|---|---|---|
+| 1 | SessionManager | Частично корректно | Не применять предложенный код. Реальный follow-up - точечная очистка stale locks при lazy-expiry. |
+| 2 | KeyboardBuilder | Не подтверждено | Удалить рекомендацию про кэш; максимум локальный подсчет при замерах. |
+| 3 | FileSystemBrowser | Не подтверждено | Удалить LRU/read-only рекомендацию. |
+| 4 | RevitFileDeduplicator | Некорректно | Удалить рекомендацию: она меняет семантику. |
+| 5 | CommandExecutionService shutdown | Некорректно | Удалить Channel-рекомендацию. |
+| 6 | DialogDismisser | Частично корректно | Рассматривать только если `DialogDismisser:Enabled=true`. |
+| 7 | ExportFolderCleanupService | Сейчас неактуально | Удалить из runtime-рекомендаций: сервис не вызывается. |
+| 8 | SlashCommandService submit | Некорректно | Удалить рекомендацию о перестановке проверок и кэше путей. |
+| 9 | SessionsListRenderer | Избыточно | Удалить рекомендацию про кэш сессий. |
+| 10 | ProcessRunner stdout/stderr | Устарело/некорректно | Удалить рекомендацию: bounded capture уже есть. |
 
-## 1. SessionManager: Неэффективная очистка сессий
-
-### Файл: `/workspace/TelegramBot.Server/Services/Application/SessionManager.cs`
-
-### Проблема (строки 58-100)
-
-**Алгоритмическая сложность:** O(n) для каждой сессии при очистке
-
-```csharp
-private async Task CleanUpExpiredSessionsAsync(CancellationToken cancellationToken)
-{
-    var now = DateTime.UtcNow;
-    foreach (var key in _sessions.Keys.ToList())  // ❌ ToList() создаёт копию всех ключей
-    {
-        // ...
-        if (!_sessionLocks.TryGetValue(key, out var sessionLock) ||
-            !await sessionLock.WaitAsync(0, cancellationToken))  // ❌ Блокировка на каждую сессию
-        {
-            continue;
-        }
-        // ...
-    }
-}
-```
-
-**Проблемы:**
-1. **ToList() аллокация:** На строке 61 `Keys.ToList()` создает полную копию всех ключей при каждом запуске очистки (каждые 30 минут). При 10,000 сессий это ~40KB аллокаций.
-2. **Последовательная блокировка:** Каждая сессия блокируется индивидуально, что создает каскадные задержки.
-3. **Двойная проверка:** Сессия проверяется на истечение дважды (в GetOrCreateSession и в CleanUpExpiredSessionsAsync).
-
-### Рекомендация
-
-**Решение 1: Использовать ConcurrentDictionary.TryRemove с предикатом**
-
-```csharp
-private async Task CleanUpExpiredSessionsAsync(CancellationToken cancellationToken)
-{
-    var now = DateTime.UtcNow;
-    var expiredKeys = new List<long>();
-    
-    foreach (var kvp in _sessions)
-    {
-        if (now - kvp.Value.LastActivity > _sessionTimeout)
-        {
-            expiredKeys.Add(kvp.Key);
-        }
-    }
-    
-    foreach (var key in expiredKeys)
-    {
-        if (_sessionLocks.TryRemove(key, out var sessionLock))
-        {
-            _ = _sessions.TryRemove(key, out _);
-            await sessionLock.DisposeAsync();
-        }
-    }
-}
-```
-
-**Решение 2: Использовать TimeoutCancellationTokenSource для авто-очистки**
-
-```csharp
-// Интегрировать CancellationTokenSource.CancelAfter() для каждой сессии
-// Автоматическая очистка без периодического сканирования
-```
-
-**Ожидаемый эффект:** Снижение аллокаций на 95%, ускорение очистки в 3-5 раз.
+Из исходного отчета удалены неподтвержденные проценты ускорения и общие архитектурные рекомендации (`ObjectPool`, `Channels`, telemetry, source generators), потому что они не привязаны к замерам или активному hot path.
 
 ---
 
-## 2. KeyboardBuilder: Избыточные LINQ-операции при рендеринге
+## 1. SessionManager
 
-### Файл: `/workspace/TelegramBot.Server/Services/Infrastructure/Telegram/KeyboardBuilder.cs`
+Файл: `TelegramBot.Server/Services/Application/SessionManager.cs`
 
-### Проблема (строки 141-157, 176-180)
+### Проверка
 
-```csharp
-// Строки 141-145: Distinct + OrderBy на каждый рендер
-var uniqueCommands = sessionCommands
-    .Select(c => c.Command)
-    .Distinct(StringComparer.OrdinalIgnoreCase)  // ❌ O(n) операция
-    .OrderBy(c => c)  // ❌ O(n log n) сортировка
-    .ToList();
+1. Очистка действительно делает snapshot через `_sessions.Keys.ToList()` раз в 30 минут.
+2. Блокировка на каждую истекшую сессию нужна: без нее можно удалить/Dispose `SemaphoreSlim`, пока пользовательский handler еще работает с этой сессией.
+3. Предложение "просто TryRemove lock и Dispose" небезопасно.
+4. Реальная проблема другая: `GetOrCreateSession` при lazy-expiry удаляет запись из `_sessions`, но не удаляет соответствующий `_sessionLocks`. После этого фоновая очистка уже не увидит ключ в `_sessions.Keys`, и lock может остаться в словаре.
 
-// Строки 176-180: Where + ToList внутри цикла
-var visibleCommands = string.IsNullOrEmpty(selectedFilter)
-    ? sessionCommands
-    : sessionCommands.Where(c => string.Equals(c.Command, selectedFilter, StringComparison.OrdinalIgnoreCase)).ToList();  // ❌ Аллокация списка
-```
+### Вердикт
 
-**Проблемы:**
-1. **Пересчет на каждый запрос:** Уникальные команды вычисляются при каждом рендеринге клавиатуры, хотя sessionCommands редко меняется.
-2. **Избыточная сортировка:** OrderBy выполняется даже если данные уже отсортированы.
-3. **ToList() аллокации:** Каждый вызов создает новый список.
+Не применять исходную рекомендацию.
 
-### Рекомендация
+### Корректная рекомендация
 
-**Кэширование уникальных команд:**
-
-```csharp
-// Добавить кэш в SessionsList или UserSession
-private readonly ConcurrentDictionary<string, CachedCommands> _commandsCache = new();
-
-private record CachedCommands(List<string> UniqueCommands, DateTime ExpiresAt);
-
-private List<string> GetUniqueCommands(List<SessionCommands> commands)
-{
-    var cacheKey = ComputeHash(commands);
-    if (_commandsCache.TryGetValue(cacheKey, out var cached) && 
-        cached.ExpiresAt > DateTime.UtcNow)
-    {
-        return cached.UniqueCommands;
-    }
-    
-    var unique = commands
-        .Select(c => c.Command)
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .OrderBy(c => c)
-        .ToList();
-    
-    _commandsCache[cacheKey] = new(unique, DateTime.UtcNow.AddSeconds(5));
-    return unique;
-}
-```
-
-**Использовать Array вместо List где возможно:**
-
-```csharp
-// Вместо ToList() использовать ToArray() для value types
-// Или enumerate напрямую без материализации
-```
-
-**Ожидаемый эффект:** Снижение CPU на 40-60% при рендеринге клавиатур, уменьшение GC давления.
+Исправлять точечно: при lazy-expiry удалять session и освобождать lock тем же безопасным способом, что и cleanup, то есть только если lock удалось захватить без ожидания. Не вводить `CancellationTokenSource` на каждую сессию.
 
 ---
 
-## 3. FileSystemBrowser: Кэширование с TTL не оптимально для частых запросов
+## 2. KeyboardBuilder
 
-### Файл: `/workspace/TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs`
+Файл: `TelegramBot.Server/Services/Infrastructure/Telegram/KeyboardBuilder.cs`
 
-### Проблема (строки 53-65, 186-200)
+### Проверка
 
-```csharp
-private static List<string> GetOrCache(
-    ConcurrentDictionary<string, CacheEntry<List<string>>> cache, 
-    string key, 
-    Func<List<string>> factory)
-{
-    var now = DateTime.UtcNow;
-    
-    if (cache.TryGetValue(key, out var cached) && cached.ExpiresAt > now)
-    {
-        return cached.Value;  // ❌ Возвращает mutable список — race condition!
-    }
-    
-    var value = factory();
-    cache[key] = new CacheEntry<List<string>>(value, now.Add(_cacheTtl));
-    return value;
-}
-```
+1. LINQ в `GetSessionCommandsKeyboard` есть: `Distinct`, `OrderBy`, `Where(...).ToList()`.
+2. Эти данные приходят из команд одной сессии, а не из глобального списка.
+3. Число уникальных типов команд ограничено `CommandCatalog.All` (сейчас 8), поэтому `Count` внутри цикла имеет малую верхнюю границу.
+4. Предложенный кэш по hash списка усложняет код и рискует stale UI после удаления команд или смены статусов.
+5. Рекомендация "использовать Array вместо List для value types" не относится к текущему коду: здесь строки и модели, не value types.
 
-**Проблемы:**
-1. **Race condition:** Возвращается тот же экземпляр List<string>, который может быть модифицирован вызывающим кодом.
-2. **Короткий TTL (5 секунд):** При активном использовании бота одни и те же директории сканируются многократно.
-3. **Отсутствие лимита размера кэша:** Кэш может расти бесконечно.
+### Вердикт
 
-### Рекомендация
+Не применять. Пункт удален из рекомендаций к внедрению.
 
-**Возвращать readOnly коллекцию и добавить LRU eviction:**
+### Что можно сделать только при замерах
 
-```csharp
-private readonly record struct CacheEntry<T>(ReadOnlyCollection<T> Value, DateTime ExpiresAt);
-
-private static readonly int MaxCacheSize = 1000;
-
-private static ReadOnlyCollection<string> GetOrCache(
-    ConcurrentDictionary<string, CacheEntry<ReadOnlyCollection<string>>> cache, 
-    string key, 
-    Func<ReadOnlyCollection<string>> factory)
-{
-    var now = DateTime.UtcNow;
-    
-    if (cache.TryGetValue(key, out var cached) && cached.ExpiresAt > now)
-    {
-        return cached.Value;
-    }
-    
-    var value = factory().AsReadOnly();
-    
-    // LRU eviction
-    if (cache.Count >= MaxCacheSize)
-    {
-        var oldest = cache.OrderBy(kvp => kvp.Value.ExpiresAt).First().Key;
-        _ = cache.TryRemove(oldest, out _);
-    }
-    
-    cache[key] = new(value, now.Add(_cacheTtl));
-    return value;
-}
-```
-
-**Увеличить TTL для стабильных путей:**
-
-```csharp
-// Разделить TTL: 5 сек для активных путей, 60 сек для стабильных
-private readonly TimeSpan _activePathTtl = TimeSpan.FromSeconds(5);
-private readonly TimeSpan _stablePathTtl = TimeSpan.FromMinutes(1);
-```
-
-**Ожидаемый эффект:** Устранение race conditions, снижение I/O операций на 70%.
+Если появятся сессии с тысячами строк команд и это будет видно в профиле, заменить подсчет `sessionCommands.Count(...)` внутри цикла на локальный `Dictionary<string, int>`. Кэш между запросами не нужен.
 
 ---
 
-## 4. RevitFileDeduplicator: Неэффективная группировка файлов
+## 3. FileSystemBrowser
 
-### Файл: `/workspace/TelegramBot.Server/Helpers/RevitFileDeduplicator.cs`
+Файл: `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs`
 
-### Проблема (строки 15-50)
+### Проверка
 
-```csharp
-public static List<string> Deduplicate(IReadOnlyCollection<string> files)
-{
-    var groups = new Dictionary<string, List<(string Path, string Name)>>(files.Count, StringComparer.OrdinalIgnoreCase);
-    
-    foreach (var path in files)
-    {
-        var name = Path.GetFileNameWithoutExtension(path);
-        var prefix = name.Length > _prefixLength ? name[.._prefixLength] : name;
-        // ❌ Создание кортежей для каждого файла
-        if (!groups.TryGetValue(prefix, out var bucket))
-        {
-            bucket = [];
-            groups[prefix] = bucket;
-        }
-        bucket.Add((path, name));  // ❌ Аллокация value tuple
-    }
-    // ...
-}
-```
+1. `GetOrCache` возвращает тот же экземпляр `List<string>`.
+2. Текущие callers список не мутируют: клавиатуры его перечисляют, `Select all` копирует элементы в `UserSession` через `AddSelectedFiles`.
+3. Race condition из отчета не подтверждается текущим кодом.
+4. TTL 5 секунд выглядит намеренным для файловой системы, где содержимое может меняться извне.
+5. LRU eviction с сортировкой кэша на каждом miss усложняет код без данных о росте памяти.
 
-**Проблемы:**
-1. **Избыточные аллокации кортежей:** Для каждого файла создается `(string Path, string Name)` кортеж.
-2. **Сортировка внутри группы:** bucket.Sort() на строке 41 выполняется для каждой группы.
-3. **ExtractNumbers с regex:** На строках 87-103 regex применяется к каждому имени файла.
+### Вердикт
 
-### Рекомендация
+Не применять. Пункт удален из рекомендаций к внедрению.
 
-**Использовать Span<T> и избежать аллокаций:**
+### Что можно сделать только при фактическом росте памяти
 
-```csharp
-public static List<string> Deduplicate(IReadOnlyCollection<string> files)
-{
-    if (files.Count == 0) return [];
-    
-    // Предварительная сортировка по префиксу
-    var sortedFiles = files
-        .Select(f => (Path: f, Prefix: GetPrefix(Path.GetFileNameWithoutExtension(f))))
-        .OrderBy(x => x.Prefix, StringComparer.OrdinalIgnoreCase)
-        .ThenByDescending(x => x.Path.Length)
-        .ToList();
-    
-    var result = new List<string>(files.Count);
-    var acceptedNumbers = new HashSet<long>();
-    string? currentPrefix = null;
-    
-    foreach (var file in sortedFiles)
-    {
-        if (currentPrefix != file.Prefix)
-        {
-            currentPrefix = file.Prefix;
-            acceptedNumbers.Clear();
-        }
-        
-        var numbers = ExtractNumbersFast(file.Path);
-        if (numbers is null || !acceptedNumbers.Overlaps(numbers))
-        {
-            result.Add(file.Path);
-            if (numbers is not null)
-                acceptedNumbers.UnionWith(numbers);
-        }
-    }
-    
-    return result;
-}
-
-private static string GetPrefix(string name) => 
-    name.Length > _prefixLength ? name[.._prefixLength] : name;
-```
-
-**Оптимизировать ExtractNumbers:**
-
-```csharp
-private static HashSet<long>? ExtractNumbersFast(string path)
-{
-    var name = Path.GetFileNameWithoutExtension(path);
-    HashSet<long>? result = null;
-    
-    // Ручной парсинг вместо regex для простых случаев
-    for (int i = 0; i < name.Length; i++)
-    {
-        if (char.IsDigit(name[i]))
-        {
-            int start = i;
-            while (i < name.Length && char.IsDigit(name[i])) i++;
-            
-            if (i - start >= 2 && long.TryParse(name.AsSpan(start, i - start), out var value))
-            {
-                (result ??= new HashSet<long>()).Add(value);
-            }
-        }
-    }
-    
-    return result;
-}
-```
-
-**Ожидаемый эффект:** Снижение аллокаций на 50-70%, ускорение дедупликации в 2-3 раза.
+Самый дешевый вариант - периодически удалять expired entries при cache miss. LRU и разные TTL не нужны без замеров.
 
 ---
 
-## 5. CommandExecutionService: Параллельное завершение процессов при shutdown
+## 4. RevitFileDeduplicator
 
-### Файл: `/workspace/TelegramBot.Worker/Services/CommandExecutionService.cs`
+Файл: `TelegramBot.Server/Helpers/RevitFileDeduplicator.cs`
 
-### Проблема (строки 270-284)
+### Проверка
 
-```csharp
-// Принудительно завершаем все активные процессы параллельно
-var processesToKill = processRunner.ActiveProcesses.ToList();  // ❌ ToList() аллокация
-var killTasks = processesToKill.Select(kvp => 
-    KillProcessAsync(kvp.Key, kvp.Value, shutdownBudgetCts.Token)
-).ToList();  // ❌ Вторая аллокация
+1. `(string Path, string Name)` - value tuple; сам по себе это не heap allocation на каждый файл.
+2. Regex уже `GeneratedRegex`, а код использует `EnumerateMatches`, что избегает создания `Match` объектов.
+3. Текущий алгоритм учитывает длину имени и пересечение чисел внутри группы.
+4. Предложенный алгоритм меняет поведение: общий `acceptedNumbers` по prefix может пометить дублями файлы, которые текущая логика различает по допуску длины имени.
 
-if (killTasks.Count > 0)
-{
-    try
-    {
-        await Task.WhenAll(killTasks);  // ❌ Блокировка на самый медленный процесс
-    }
-    catch (OperationCanceledException) when (shutdownBudgetCts.IsCancellationRequested)
-    {
-        logger.LogWarning("Worker shutdown kill phase exceeded {BudgetSeconds}s budget", ShutdownBudgetSeconds);
-    }
-}
-```
+### Вердикт
 
-**Проблемы:**
-1. **Две аллокации ToList():** Создается два списка подряд.
-2. **WhenAll блокирует на самый медленный:** Если один процесс завис, все ждут его.
-3. **Отсутствие приоритизации:** Все процессы убиваются одновременно, что может вызвать spike нагрузки на диск/CPU.
-
-### Рекомендация
-
-**Использовать Channel для потоковой обработки:**
-
-```csharp
-private async Task KillProcessesGracefullyAsync(
-    IEnumerable<KeyValuePair<int, Process>> processes, 
-    CancellationToken shutdownToken)
-{
-    var channel = Channel.CreateBounded<KeyValuePair<int, Process>>(10);
-    
-    // Producer: отправляет процессы в канал
-    var producerTask = Task.Run(async () =>
-    {
-        try
-        {
-            foreach (var kvp in processes)
-            {
-                await channel.Writer.WriteAsync(kvp, shutdownToken);
-            }
-        }
-        finally
-        {
-            channel.Writer.Complete();
-        }
-    }, shutdownToken);
-    
-    // Consumers: 3 параллельных воркера убивают процессы
-    var consumerTasks = Enumerable.Range(0, 3).Select(async workerId =>
-    {
-        await foreach (var kvp in channel.Reader.ReadAllAsync(shutdownToken))
-        {
-            await KillProcessAsync(kvp.Key, kvp.Value, shutdownToken);
-        }
-    });
-    
-    await Task.WhenAll(consumerTasks);
-}
-```
-
-**Добавить таймаут на каждый процесс индивидуально:**
-
-```csharp
-private async Task KillProcessAsync(int commandId, Process process, CancellationToken shutdownToken)
-{
-    using var processCts = CancellationTokenSource.CreateLinkedTokenSource(shutdownToken);
-    processCts.CancelAfter(TimeSpan.FromSeconds(5)); // Индивидуальный таймаут
-    
-    try
-    {
-        await ProcessKillHelper.KillAsync(process, TimeSpan.FromSeconds(10), logger, commandId, processCts.Token);
-    }
-    catch (TimeoutException)
-    {
-        logger.LogWarning("Process {Pid} kill timed out", process.Id);
-    }
-}
-```
-
-**Ожидаемый эффект:** Ускорение shutdown на 40-60%, предотвращение cascading failures.
+Не применять. Пункт удален из рекомендаций к внедрению.
 
 ---
 
-## 6. DialogDismisser: Множественные стратегии поиска окон без кэширования
+## 5. CommandExecutionService shutdown
 
-### Файл: `/workspace/TelegramBot.Worker/BimLib/Monitor/DialogDismisser.cs`
+Файл: `TelegramBot.Worker/Services/CommandExecutionService.cs`
 
-### Проблема (строки 139-206)
+### Проверка
 
-```csharp
-private List<IntPtr> FindDialogs(uint processId)
-{
-    var found = new HashSet<IntPtr>();
-    
-    // Стратегия A: Поиск по паттернам заголовков
-    foreach (var pattern in _options.KnownDialogPatterns)  // ❌ Цикл по всем паттернам
-    {
-        var byTitle = WindowUtil.GetTopLevelWindows(windowTitle: pattern, processId: processId);
-        foreach (var w in byTitle)
-        {
-            if (w != mainWindow)
-                _ = found.Add(w);
-        }
-    }
-    
-    // Стратегия B: Поиск по классу #32770
-    var byClass = WindowUtil.GetTopLevelWindows(className: DialogWindowClass, processId: processId);
-    // ...
-    
-    // Стратегия C: Поиск всех окон процесса
-    var allProcessWindows = WindowUtil.GetTopLevelWindows(processId: processId);  // ❌ Третий полный enum
-    foreach (var w in allProcessWindows)
-    {
-        // ...
-        var allChildren = WindowUtil.EnumerateChildWindows(w);  // ❌ Enum child windows для каждого
-        var hasClickableChildren = allChildren.Any(child =>
-        {
-            var text = WindowUtil.GetWindowTitle(child);  // ❌ P/Invoke вызов на каждый child
-            return !string.IsNullOrEmpty(text);
-        });
-        // ...
-    }
-}
-```
+1. `ActiveProcesses.ToList()` нужен как snapshot concurrent collection перед shutdown.
+2. `Task.WhenAll` не ждет бесконечно: всем `KillProcessAsync` передается общий `shutdownBudgetCts.Token`.
+3. `ProcessKillHelper.KillAsync` уже имеет per-process timeout через `CancelAfter(timeout)`.
+4. Channel с producer/consumer для shutdown добавит больше кода, но не решит подтвержденную проблему.
 
-**Проблемы:**
-1. **Три полных EnumWindows:** Каждый вызов GetTopLevelWindows перечисляет ВСЕ окна системы.
-2. **N P/Invoke вызовов на окно:** Для каждого дочернего окна вызывается GetWindowText.
-3. **Отсутствие кэширования:** При частых проверках (каждые N секунд) одни и те же окна сканируются многократно.
+### Вердикт
 
-### Рекомендация
-
-**Единый проход EnumWindows с фильтрацией:**
-
-```csharp
-private List<IntPtr> FindDialogs(uint processId)
-{
-    var found = new HashSet<IntPtr>();
-    var mainWindow = GetMainWindowHandle(processId);
-    
-    // Один проход EnumWindows со всеми фильтрами
-    _ = User32.EnumWindowsSafe((hwnd, _) =>
-    {
-        try
-        {
-            if (!User32.IsWindowVisibleSafe(hwnd) || hwnd == mainWindow)
-                return true;
-            
-            var actualPid = WindowUtil.GetWindowProcessId(hwnd);
-            if (actualPid != processId)
-                return true;
-            
-            // Быстрая проверка класса
-            var className = WindowUtil.GetWindowClassName(hwnd);
-            if (className == DialogWindowClass)
-            {
-                _ = found.Add(hwnd);
-                return true;
-            }
-            
-            // Проверка заголовка на известные паттерны
-            var title = WindowUtil.GetWindowTitle(hwnd);
-            if (_options.KnownDialogPatterns.Any(p => title.Contains(p, StringComparison.OrdinalIgnoreCase)))
-            {
-                _ = found.Add(hwnd);
-                return true;
-            }
-            
-            // Lazy проверка children только если предыдущие не сработали
-            if (HasClickableChildrenLazy(hwnd))
-            {
-                _ = found.Add(hwnd);
-            }
-        }
-        catch (Exception ex)
-        {
-            WinApiHelper.LogError("EnumWindowsCallback", ex, $"hwnd={hwnd}");
-        }
-        
-        return true;
-    }, IntPtr.Zero);
-    
-    return found.Where(User32.IsWindowEnabledSafe).ToList();
-}
-
-private bool HasClickableChildrenLazy(IntPtr hwnd)
-{
-    // Ранний выход при первом найденном контроле
-    return WindowUtil.EnumerateChildWindows(hwnd).Any(child =>
-    {
-        var text = WindowUtil.GetWindowTitle(child);
-        return !string.IsNullOrEmpty(text);
-    });
-}
-```
-
-**Кэширование результатов для стабильных процессов:**
-
-```csharp
-private readonly ConcurrentDictionary<uint, CachedDialogs> _dialogCache = new();
-
-private record CachedDialogs(List<IntPtr> Dialogs, DateTime ExpiresAt);
-
-private List<IntPtr> FindDialogsWithCache(uint processId)
-{
-    if (_dialogCache.TryGetValue(processId, out var cached) && 
-        cached.ExpiresAt > DateTime.UtcNow)
-    {
-        return cached.Dialogs;
-    }
-    
-    var dialogs = FindDialogs(processId);
-    _dialogCache[processId] = new(dialogs, DateTime.UtcNow.AddMilliseconds(500));
-    return dialogs;
-}
-```
-
-**Ожидаемый эффект:** Снижение P/Invoke вызовов на 60-80%, ускорение проверки диалогов в 2-4 раза.
+Не применять. Пункт удален из рекомендаций к внедрению.
 
 ---
 
-## 7. ExportFolderCleanupService: Группировка файлов с избыточными операциями
+## 6. DialogDismisser
 
-### Файл: `/workspace/TelegramBot.Worker/BimLib/Services/ExportFolderCleanupService.cs`
+Файл: `TelegramBot.Worker/BimLib/Monitor/DialogDismisser.cs`
 
-### Проблема (строки 131-177)
+### Проверка
 
-```csharp
-// Группировка по имени файла
-var groups = formatFiles.GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase);
+1. В `FindDialogs` действительно есть несколько проходов по top-level окнам: по title patterns, по class `#32770`, потом все окна процесса.
+2. Для каждого кандидата стратегия C перечисляет child windows и читает title.
+3. `CommandExecutionService` вызывает `DismissDialogsForProcess` из health monitor каждые 30 секунд, но `DialogDismisser:Enabled` в `TelegramBot.Worker/appsettings.json` сейчас `false`, поэтому метод выходит до P/Invoke-сканирования окон.
+4. Кэшировать HWND рискованно: окна Revit живут недолго, handle может устареть или переиспользоваться.
 
-foreach (var group in groups)
-{
-    var sorted = group.OrderByDescending(f => f.LastWriteTimeUtc).ToList();  // ❌ Сортировка + ToList
-    
-    // Не старые файлы
-    if (newestIsNonOld)
-    {
-        MoveToArchive(newest, baseExportDir);
-        
-        // Остальные дубли → удалить
-        foreach (FileInfo file in sorted.Skip(1))  // ❌ Skip() итерация
-        {
-            if (file.LastWriteTimeUtc >= cutoffDate)
-            {
-                SafeDelete(file);
-            }
-        }
-    }
-    
-    // Старые файлы
-    var oldFiles = sorted.Where(f => f.LastWriteTimeUtc < cutoffDate).ToList();  // ❌ Второй Where + ToList
-    if (oldFiles.Count >= 2)
-    {
-        var candidates = oldFiles.Skip(_options.KeepLastCount).ToList();  // ❌ Третий Skip + ToList
-        // ...
-    }
-}
-```
+### Вердикт
 
-**Проблемы:**
-1. **Множественные итерации:** Каждая группа итерируется 3-4 раза (GroupBy, OrderBy, Where, Skip).
-2. **ToList() аллокации:** Создаются промежуточные списки на каждом шаге.
-3. **GetFiles с SearchOption.AllDirectories:** На строке 98 загружаются ВСЕ файлы рекурсивно в память.
+Частично применять только если выставят `DialogDismisser:Enabled=true` и мониторинг покажет заметную цену P/Invoke.
 
-### Рекомендация
+### Корректная рекомендация
 
-**Однопроходная обработка с ручным управлением:**
-
-```csharp
-private void CleanupSingleFolder(string folderPath, string expectedExtension, string baseExportDir, DateTime cutoffDate)
-{
-    var directoryInfo = new DirectoryInfo(folderPath);
-    var filesByGroup = new Dictionary<string, FileGroup>(StringComparer.OrdinalIgnoreCase);
-    
-    // Однопроходный сбор данных
-    foreach (var file in directoryInfo.EnumerateFiles("*", SearchOption.TopDirectoryOnly))
-    {
-        if (!file.Extension.Equals(expectedExtension, StringComparison.OrdinalIgnoreCase))
-        {
-            SafeDelete(file);
-            continue;
-        }
-        
-        var groupName = file.Name;
-        if (!filesByGroup.TryGetValue(groupName, out var group))
-        {
-            group = new FileGroup();
-            filesByGroup[groupName] = group;
-        }
-        
-        group.AddFile(file, cutoffDate);
-    }
-    
-    // Обработка групп
-    foreach (var group in filesByGroup.Values)
-    {
-        group.ApplyPolicy(this, baseExportDir);
-    }
-}
-
-private sealed class FileGroup
-{
-    private readonly List<FileInfo> _nonOldFiles = new();
-    private readonly List<FileInfo> _oldFiles = new();
-    
-    public void AddFile(FileInfo file, DateTime cutoffDate)
-    {
-        if (file.LastWriteTimeUtc >= cutoffDate)
-            _nonOldFiles.Add(file);
-        else
-            _oldFiles.Add(file);
-    }
-    
-    public void ApplyPolicy(ExportFolderCleanupService service, string baseExportDir)
-    {
-        _nonOldFiles.OrderByDescending(f => f.LastWriteTimeUtc);
-        _oldFiles.OrderByDescending(f => f.LastWriteTimeUtc);
-        
-        if (_nonOldFiles.Count > 0)
-        {
-            service.MoveToArchive(_nonOldFiles[0], baseExportDir);
-            for (int i = 1; i < _nonOldFiles.Count; i++)
-                service.SafeDelete(_nonOldFiles[i]);
-        }
-        
-        if (_oldFiles.Count > _options.KeepLastCount)
-        {
-            for (int i = _options.KeepLastCount; i < _oldFiles.Count; i++)
-            {
-                var file = _oldFiles[i];
-                if (file.Length < _options.ArchiveSizeThresholdBytes)
-                    service.SafeDelete(file);
-                else
-                    service.MoveToArchive(file, baseExportDir);
-            }
-        }
-    }
-}
-```
-
-**Использовать EnumerateFiles вместо GetFiles для больших директорий:**
-
-```csharp
-// Заменить GetFiles на EnumerateFiles для ленивой загрузки
-// Это критично для папок с 10,000+ файлов
-```
-
-**Ожидаемый эффект:** Снижение памяти на 80-90% для больших папок, ускорение обработки в 2-3 раза.
+При включении заменить несколько top-level enumeration на один проход с теми же фильтрами и сохранить текущие safety checks. Кэш HWND не добавлять.
 
 ---
 
-## 8. SlashCommandService: Повторные проверки и аллокации при submit job
+## 7. ExportFolderCleanupService
 
-### Файл: `/workspace/TelegramBot.Server/Services/Application/SlashCommandService.cs`
+Файл: `TelegramBot.Worker/BimLib/Services/ExportFolderCleanupService.cs`
 
-### Проблема (строки 265-325)
+### Проверка
 
-```csharp
-var selectedFiles = session.GetSelectedFiles();
-if (selectedFiles.Count == 0) { /* ... */ }
+1. `CleanupExportDirs` есть, но по текущему коду не вызывается.
+2. `ExportFolderCleanupService` не зарегистрирован в `Program.cs`.
+3. Поэтому оптимизация `GetFiles`, `GroupBy`, `OrderBy` сейчас не влияет на выполнение Worker.
+4. Предложенный `FileGroup` усложняет код и в примере содержит ошибку: `OrderByDescending(...)` вызывается без присваивания результата, значит список не сортируется.
 
-// Проверка существования файлов
-var filesToProcess = selectedFiles.Where(File.Exists).ToList();  // ❌ ToList() + I/O на каждый файл
+### Вердикт
 
-// Проверка дневного лимита
-if (!await CheckDailyFileLimitAsync(userId, username, session, filesToProcess.Count))
-{
-    return;
-}
+Не применять. Пункт удален из runtime-рекомендаций.
 
-// Проверка дубликатов
-if (await commandDataService.HasDuplicateCommandsAsync(session.PendingCommand, filesToProcess))
-{
-    // ❌ Дубликат проверяется ПОСЛЕ I/O проверки файлов
-    await RejectAndWarnAsync(userId, session, "⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
-    return;
-}
+### Что сделать при подключении сервиса
 
-// Построение сообщения
-var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess.Count);
-
-// Приоритеты
-var priorities = session.PendingCommand
-    .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);  // ❌ Select без материализации
-
-// Создание сессии
-var sessionId = await sessionDataService.CreateSessionWithCommandsAsync(
-    session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
-```
-
-**Проблемы:**
-1. **Неправильный порядок проверок:** I/O проверка файлов выполняется ДО проверки дубликатов. Если дубликат есть — I/O было wasted.
-2. **GetProjectName и GetSectionFolderName итерируют путь:** На строках 278-283 каждый файл проходит multiple Path.GetDirectoryName вызовов.
-3. **TypingLoop аллоцирует CancellationTokenSource:** На строке 285 создается CTS для каждого submit.
-
-### Рекомендация
-
-**Переупорядочить проверки (cheap to expensive):**
-
-```csharp
-private async Task ConfirmFileSelectionAsync(long userId, string username, UserSession session, CancellationToken cancellationToken)
-{
-    var selectedFiles = session.GetSelectedFiles();
-    if (selectedFiles.Count == 0)
-    {
-        await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один файл.");
-        return;
-    }
-    
-    // 1. Проверка дубликатов (DB, быстро)
-    if (await commandDataService.HasDuplicateCommandsAsync(session.PendingCommand, selectedFiles))
-    {
-        await RejectAndWarnAsync(userId, session, "⚠️ Выбранные файлы уже находятся в очереди выполнения.");
-        return;
-    }
-    
-    // 2. Проверка дневного лимита (in-memory, очень быстро)
-    if (!await CheckDailyFileLimitAsync(userId, username, session, selectedFiles.Count))
-    {
-        return;
-    }
-    
-    // 3. Только теперь I/O проверка (медленно)
-    var filesToProcess = new List<string>(selectedFiles.Count);
-    foreach (var file in selectedFiles)
-    {
-        if (File.Exists(file))
-            filesToProcess.Add(file);
-    }
-    
-    if (filesToProcess.Count == 0)
-    {
-        await RejectAndWarnAsync(userId, session, "⚠️ Выбранные файлы не найдены на диске.");
-        return;
-    }
-    
-    // 4. Кэширование projectName и sectionNames
-    var firstFile = filesToProcess[0];
-    var projectName = GetProjectNameCached(firstFile);
-    var sectionNames = GetSectionNamesCached(filesToProcess);
-    
-    // ... остальной код
-}
-```
-
-**Кэширование метаданных пути:**
-
-```csharp
-private readonly ConcurrentDictionary<string, (string Project, string Section)> _pathMetadataCache = new();
-
-private (string Project, string Section) GetPathMetadata(string filePath)
-{
-    return _pathMetadataCache.GetOrAdd(filePath, path =>
-    {
-        var dir = Path.GetDirectoryName(path);
-        string? project = null, section = null;
-        
-        while (!string.IsNullOrEmpty(dir))
-        {
-            var dirName = Path.GetFileName(dir);
-            if (string.Equals(dirName, _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase))
-            {
-                project = Path.GetFileName(Path.GetDirectoryName(dir)) ?? dirName;
-                break;
-            }
-            if (section == null && ContainsSectionAcronym(dirName))
-            {
-                section = dirName;
-            }
-            dir = Path.GetDirectoryName(dir);
-        }
-        
-        return (project ?? GetSafePathName(path), section);
-    });
-}
-```
-
-**Ожидаемый эффект:** Сокращение времени submit на 30-50% при наличии дубликатов, снижение I/O нагрузки.
+Перед включением сервиса проверить политику удаления/архивации и только потом заменить `GetFiles("*", AllDirectories)` на `EnumerateFiles` при больших папках. Сейчас это не требуется.
 
 ---
 
-## 9. SessionsListRenderer: Параллельный fetch без кэширования результатов
+## 8. SlashCommandService
 
-### Файл: `/workspace/TelegramBot.Server/Services/Application/SessionsListRenderer.cs`
+Файл: `TelegramBot.Server/Services/Application/SlashCommandService.cs`
 
-### Проблема (строки 20-37)
+### Проверка
 
-```csharp
-private async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
-    string filter, int page, CancellationToken cancellationToken = default)
-{
-    // Параллельный fetch — хорошо
-    var sessionsTask = sessionDataService.GetSessionsListFilteredAsync(filter);
-    var countTask = sessionDataService.CountSessionsFilteredAsync(filter);
-    await Task.WhenAll(sessionsTask, countTask);
-    
-    var sessions = await sessionsTask;
-    var total = await countTask;
-    
-    // ❌ Но keyboard пересоздается каждый раз из тех же данных
-    var keyboard = keyboardBuilder.GetSessionsListKeyboard(sessions, filter, clampedPage);
-    return (text, keyboard);
-}
-```
+1. Текущий порядок сначала валидирует выбранные файлы через `File.Exists`, затем считает дневной лимит и проверяет дубликаты.
+2. Это логично: в БД должны попадать только файлы, которые реально существуют на момент submit.
+3. Если проверить дубликаты до `File.Exists`, пользователь может получить предупреждение о дубле для файла, которого уже нет на диске.
+4. Повторная защита от дублей уже есть в `SessionDataService.CreateSessionWithCommandsAsync` под user-level advisory lock.
+5. Кэш metadata путей добавит состояние без явной инвалидации и не подтвержден замерами.
 
-**Проблемы:**
-1. **Дублирование запросов:** При переключении страниц/фильтров одни и те же данные запрашиваются повторно.
-2. **Пересчет клавиатуры:** GetSessionsListKeyboard выполняется полностью при каждом изменении страницы.
+### Вердикт
 
-### Рекомендация
-
-**Добавить кэш сессий с инвалидацией:**
-
-```csharp
-public sealed class SessionsListRenderer
-{
-    private readonly ConcurrentDictionary<string, CachedSessions> _sessionsCache = new();
-    private const string CacheKeyPrefix = "sessions:";
-    
-    private record CachedSessions(List<SessionsList> Sessions, int Total, DateTime ExpiresAt);
-    
-    private async Task<CachedSessions> GetCachedSessionsAsync(string filter, CancellationToken ct)
-    {
-        var cacheKey = $"{CacheKeyPrefix}{filter}";
-        
-        if (_sessionsCache.TryGetValue(cacheKey, out var cached) && 
-            cached.ExpiresAt > DateTime.UtcNow)
-        {
-            return cached;
-        }
-        
-        var sessionsTask = sessionDataService.GetSessionsListFilteredAsync(filter);
-        var countTask = sessionDataService.CountSessionsFilteredAsync(filter);
-        await Task.WhenAll(sessionsTask, countTask);
-        
-        var sessions = await sessionsTask;
-        var total = await countTask;
-        
-        var newCached = new CachedSessions(sessions, total, DateTime.UtcNow.AddSeconds(10));
-        _sessionsCache[cacheKey] = newCached;
-        
-        return newCached;
-    }
-    
-    public async Task<Message?> SendNewAsync(long chatId, string filter, int page = 0, CancellationToken cancellationToken = default)
-    {
-        var cached = await GetCachedSessionsAsync(filter, cancellationToken);
-        var (clampedPage, totalPages) = KeyboardBuilder.GetSessionsPageInfo(cached.Total, page);
-        
-        var text = totalPages > 1
-            ? $"{StatusFilters.GetTitle(filter)} (всего {cached.Total} • стр. {clampedPage + 1}/{totalPages})"
-            : $"{StatusFilters.GetTitle(filter)} (всего {cached.Total})";
-        
-        var keyboard = keyboardBuilder.GetSessionsListKeyboard(cached.Sessions, filter, clampedPage);
-        return await outputService.SendMessageWithKeyboardAsync(chatId, text, keyboard);
-    }
-}
-```
-
-**Инвалидация кэша при изменениях:**
-
-```csharp
-// Вызывать при удалении сессии, изменении статуса
-public void InvalidateCache(string filter)
-{
-    var cacheKey = $"{CacheKeyPrefix}{filter}";
-    _ = _sessionsCache.TryRemove(cacheKey, out _);
-}
-```
-
-**Ожидаемый эффект:** Снижение DB запросов на 70-80% при активной навигации, ускорение отклика UI.
+Не применять. Пункт удален из рекомендаций к внедрению.
 
 ---
 
-## 10. ProcessRunner: Последовательная обработка stdout/stderr
+## 9. SessionsListRenderer
 
-### Файл: `/workspace/TelegramBot.Worker/Services/ProcessRunner.cs`
+Файл: `TelegramBot.Server/Services/Application/SessionsListRenderer.cs`
 
-### Проблема (строки 108-125)
+### Проверка
 
-```csharp
-private async Task WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
-{
-    using var outputSubscription = outputCollector.SetupProcessOutput(process);
-    
-    try
-    {
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        await process.WaitForExitAsync(ct);
-        process.WaitForExit();  // ❌ Второй WaitForExit после async
-    }
-    finally
-    {
-        outputSubscription.Dispose();
-    }
-    
-    sw.Stop();
-    outputCollector.LogOutput(cmd, outputSubscription.Output, outputSubscription.Error, 
-        outputSubscription.OutputTruncated, outputSubscription.ErrorTruncated);
-    // ...
-}
-```
+1. Renderer делает два DB-запроса параллельно: список и count.
+2. `/status` показывает живые статусы и используется после удаления/смены фильтра/пагинации.
+3. Кэш на 10 секунд может показать stale данные сразу после soft-delete или завершения команд.
+4. Инвалидация, предложенная в отчете, потребует протаскивать события изменений из нескольких мест, что сложнее текущего кода.
 
-**Проблемы:**
-1. **Двойной WaitForExit:** После `WaitForExitAsync` вызывается синхронный `WaitForExit()` — избыточно.
-2. **Буферизация всего вывода:** OutputCollector хранит весь stdout/stderr в памяти до завершения процесса.
-3. **Отсутствие backpressure:** При большом объеме вывода (GB) возможна OOM.
+### Вердикт
 
-### Рекомендация
+Не применять. Пункт удален из рекомендаций к внедрению.
 
-**Потоковая обработка с ограничением буфера:**
+### Что можно сделать только при замерах
 
-```csharp
-private async Task WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
-{
-    var maxOutputSize = 10 * 1024 * 1024; // 10MB limit
-    var outputBuffer = new StringBuilder(8192);
-    var errorBuffer = new StringBuilder(8192);
-    bool outputTruncated = false, errorTruncated = false;
-    
-    process.OutputDataReceived += (sender, e) =>
-    {
-        if (e.Data != null && !outputTruncated)
-        {
-            lock (outputBuffer)
-            {
-                if (outputBuffer.Length + e.Data.Length > maxOutputSize)
-                {
-                    outputTruncated = true;
-                    outputBuffer.Append("\n[OUTPUT TRUNCATED]");
-                }
-                else
-                {
-                    outputBuffer.AppendLine(e.Data);
-                }
-            }
-        }
-    };
-    
-    process.ErrorDataReceived += (sender, e) =>
-    {
-        if (e.Data != null && !errorTruncated)
-        {
-            lock (errorBuffer)
-            {
-                if (errorBuffer.Length + e.Data.Length > maxOutputSize)
-                {
-                    errorTruncated = true;
-                    errorBuffer.Append("\n[ERROR TRUNCATED]");
-                }
-                else
-                {
-                    errorBuffer.AppendLine(e.Data);
-                }
-            }
-        }
-    };
-    
-    process.BeginOutputReadLine();
-    process.BeginErrorReadLine();
-    
-    // Только async wait, без второго синхронного вызова
-    await process.WaitForExitAsync(ct);
-    
-    sw.Stop();
-    
-    string output, error;
-    lock (outputBuffer) output = outputBuffer.ToString();
-    lock (errorBuffer) error = errorBuffer.ToString();
-    
-    outputCollector.LogOutput(cmd, output, error, outputTruncated, errorTruncated);
-    // ...
-}
-```
-
-**Использовать PipeReader для真正的 streams:**
-
-```csharp
-// Для .NET 6+: использовать System.IO.Pipelines для эффективной потоковой обработки
-private async Task ProcessOutputStreamAsync(Stream stream, StringBuilder buffer, int maxSize, ref bool truncated)
-{
-    var pipe = new Pipe();
-    await stream.CopyToAsync(pipe.Writer.AsStream());
-    pipe.Writer.Complete();
-    
-    var reader = pipe.Reader;
-    while (true)
-    {
-        var result = await reader.ReadAsync();
-        var bufferSpan = result.Buffer.First.Span;
-        
-        if (buffer.Length + bufferSpan.Length > maxSize)
-        {
-            truncated = true;
-            break;
-        }
-        
-        buffer.Append(Encoding.UTF8.GetString(bufferSpan));
-        reader.AdvanceTo(result.Buffer.End);
-        
-        if (result.IsCompleted) break;
-    }
-    
-    reader.Complete();
-}
-```
-
-**Ожидаемый эффект:** Снижение памяти на 90% для процессов с большим выводом, предотвращение OOM.
+Если два SQL-запроса станут проблемой, лучше объединить list+count в один SQL через `COUNT(*) OVER()` или отдельный CTE, а не добавлять кэш UI.
 
 ---
 
-## Сводная таблица рекомендаций
+## 10. ProcessRunner stdout/stderr
 
-| № | Компонент | Приоритет | Ожидаемый эффект | Сложность реализации |
-|---|-----------|-----------|------------------|---------------------|
-| 1 | SessionManager | Высокий | -95% аллокаций, 3-5x быстрее | Средняя |
-| 2 | KeyboardBuilder | Высокий | -40-60% CPU, меньше GC | Низкая |
-| 3 | FileSystemBrowser | Высокий | Race condition fix, -70% I/O | Средняя |
-| 4 | RevitFileDeduplicator | Средний | -50-70% аллокаций, 2-3x быстрее | Средняя |
-| 5 | CommandExecutionService | Высокий | -40-60% shutdown time | Средняя |
-| 6 | DialogDismisser | Высокий | -60-80% P/Invoke, 2-4x быстрее | Высокая |
-| 7 | ExportFolderCleanupService | Средний | -80-90% памяти, 2-3x быстрее | Высокая |
-| 8 | SlashCommandService | Средний | -30-50% submit time | Низкая |
-| 9 | SessionsListRenderer | Средний | -70-80% DB запросов | Низкая |
-| 10 | ProcessRunner | Высокий | -90% памяти, OOM prevention | Высокая |
+Файлы:
+- `TelegramBot.Worker/Services/ProcessRunner.cs`
+- `TelegramBot.Worker/Services/OutputCollector.cs`
+- `TelegramBot.Core/Helpers/StringBuilderExtensions.cs`
 
----
+### Проверка
 
-## Общие рекомендации по архитектуре
+1. `OutputCollector` уже ограничивает stdout/stderr до 64 KiB через `AppendBounded`.
+2. В лог выводится максимум 4 KiB.
+3. Поэтому риск OOM от GB stdout/stderr, описанный в отчете, устарел.
+4. Синхронный `process.WaitForExit()` после `WaitForExitAsync(ct)` не является очевидно лишним: при async redirected output это распространенный способ дождаться доставки последних output events после выхода процесса.
+5. Рекомендация с `PipeReader` переписывает рабочий bounded collector без подтвержденной проблемы.
 
-### 1. Внедрить Object Pooling для часто создаваемых объектов
+### Вердикт
 
-```csharp
-// Для StringBuilder, List<T>, массивов байт
-private static readonly ObjectPool<StringBuilder> _stringBuilderPool = new(
-    () => new StringBuilder(8192),
-    sb => { sb.Clear(); return sb; });
-```
-
-### 2. Использовать System.Threading.Channels для backpressure
-
-```csharp
-// Вместо Queue<T> или ConcurrentQueue<T>
-var channel = Channel.CreateBounded<T>(new BoundedChannelOptions(1000)
-{
-    SingleReader = true,
-    SingleWriter = false,
-    FullMode = BoundedChannelFullMode.Wait
-});
-```
-
-### 3. Добавить telemetry для мониторинга производительности
-
-```csharp
-// ActivitySource для distributed tracing
-private static readonly ActivitySource ActivitySource = new("TelegramBot.Core");
-
-using var activity = ActivitySource.StartActivity("ProcessCommand");
-activity?.SetTag("command.id", cmd.CommandId);
-```
-
-### 4. Рассмотреть использование Source Generators для LINQ
-
-```csharp
-// CommunityToolkit.HighPerformance или ручная оптимизация hot paths
-// Избегать LINQ в циклах с высокой частотой вызовов
-```
+Не применять. Пункт удален из рекомендаций к внедрению.
 
 ---
 
-## Заключение
+## Оставшиеся действия
 
-Выявленные узкие места в основном связаны с:
-1. **Избыточными аллокациями** (ToList(), кортежи, замыкания)
-2. **Неоптимальным использованием коллекций** (отсутствие кэширования, race conditions)
-3. **Неправильным порядком операций** (I/O до проверок в памяти)
-4. **Избыточными системными вызовами** (multiple EnumWindows, P/Invoke)
+1. `SessionManager`: сделать минимальный fix lazy-expiry lock cleanup.
+2. `DialogDismisser`: если `Enabled=true` включат в конфиге, рассмотреть один top-level проход вместо нескольких, без кэша HWND.
 
-Реализация предложенных рекомендаций позволит:
-- Снизить потребление памяти на 40-60%
-- Увеличить пропускную способность на 30-50%
-- Уменьшить latency операций на 20-40%
-- Повысить стабильность при пиковых нагрузках
+Все остальные пункты исходного отчета сейчас не подтверждены текущим кодом или предлагают более сложный код без измеримой пользы.
