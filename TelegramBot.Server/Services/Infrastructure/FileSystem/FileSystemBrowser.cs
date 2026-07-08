@@ -76,7 +76,9 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         return IsSectionLevel(path) ? BuildSectionKeyboard(session, path) : BuildProjectKeyboard(session, path);
     }
 
-    /// <summary>Файлы для кнопки "Выбрать все": доступна только на уровне файлов одного раздела.</summary>
+    /// <summary>
+    /// Файлы для кнопки "Выбрать все": доступна только на уровне файлов одного раздела.
+    /// </summary>
     public List<string> GetSelectableFiles(string path)
     {
         return GetSectionFiles(path);
