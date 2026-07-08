@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using System.Collections.Frozen;
 using System.Text;
 using Telegram.Bot.Exceptions;
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
@@ -392,10 +393,19 @@ public sealed partial class SlashCommandService(
         return false;
     }
 
-    private Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
+    private async Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
     {
-        return HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, userId, session,
-                keyboardBuilder.GetFileActionsReplyKeyboard);
+        if (session.LastActionsMessageId.HasValue)
+        {
+            await outputService.DeleteMessageAsync(userId, session.LastActionsMessageId.Value);
+            session.LastActionsMessageId = null;
+        }
+
+        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
+        var message = await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard),
+            session);
+        session.LastActionsMessageId = message?.Id;
     }
 
     private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
@@ -463,17 +473,22 @@ public sealed partial class SlashCommandService(
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
     {
         var warning = session.IsFileSelectionActive
-            ? await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
-                outputService, messageTrackingService,
-                userId, session, message,
-                keyboardBuilder.GetFileActionsReplyKeyboard)
+            ? await SendWarningWithReplyKeyboardAsync(userId, session, message, keyboardBuilder.GetFileActionsReplyKeyboard())
             : session.CommandSelectionMessageId.HasValue || session.PendingCommand.Count > 0
-                ? await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
-                    outputService, messageTrackingService,
-                userId, session, message,
-                keyboardBuilder.GetCommandActionsReplyKeyboard)
+                ? await SendWarningWithReplyKeyboardAsync(userId, session, message, keyboardBuilder.GetCommandActionsReplyKeyboard())
                 : await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session);
         await CleanupCurrentViewAsync(userId, session, warning?.Id);
+    }
+
+    private async Task<Message?> SendWarningWithReplyKeyboardAsync(
+        long userId,
+        UserSession session,
+        string message,
+        ReplyKeyboardMarkup replyKeyboard)
+    {
+        return await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard),
+            session);
     }
 
     private async Task CleanupCurrentViewAsync(long userId, UserSession session, int? extraKeepMessageId = null)
@@ -597,4 +612,3 @@ public sealed partial class SlashCommandService(
         return null;
     }
 }
-

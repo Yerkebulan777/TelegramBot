@@ -26,7 +26,7 @@
 | `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
 | `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
 | `TelegramBot.Worker/Services/` | `CommandExecutionService.cs`, `CommandPreparer.cs`, `ProcessStarter.cs`, `ProcessRunner.cs`, `OutputCollector.cs`, `ResultAnalyzer.cs`, `ErrorClassifier.cs`, `SessionCleanupService.cs` |
-| `TelegramBot.Worker/BimLib/` | `RevitVersionDetector.cs`, `NavisworksPathResolver.cs`, `DialogDismisser.cs`, `ExportFolderCleanupService.cs` |
+| `TelegramBot.Worker/BimLib/` | `RevitVersionDetector.cs`, `NavisworksPathResolver.cs`, `DialogDismisser.cs` |
 | `TelegramBot.Worker/Program.cs` | Worker DI + startup |
 
 ## Build
@@ -88,7 +88,7 @@ LISTEN new_tasks → DrainPendingCommands → ClaimPendingCommands → ProcessRu
 
 ### Worker DI
 
-`Program.cs` регистрирует: `CommandDataService`, `SessionDataService`, `WorkerOptions`, `FileSystemOptions`, `BimIntegrationOptions`, `DialogDismisserOptions`, `ExportFolderCleanupOptions`, `RevitVersionDetector`, `NavisworksPathResolver`, `RevitPathResolver`, `DialogDismisser`, `CommandPreparer`, `ProcessStarter`, `OutputCollector`, `ResultAnalyzer`, `ProcessRunner`, `CommandExecutionService`, `SessionCleanupService`, `ExportFolderCleanupService`.
+`Program.cs` регистрирует: `CommandDataService`, `SessionDataService`, `WorkerOptions`, `FileSystemOptions`, `BimIntegrationOptions`, `DialogDismisserOptions`, `RevitVersionDetector`, `NavisworksPathResolver`, `RevitPathResolver`, `DialogDismisser`, `CommandPreparer`, `ProcessStarter`, `OutputCollector`, `ResultAnalyzer`, `ProcessRunner`, `CommandExecutionService`, `SessionCleanupService`.
 
 ## BIM-контракт
 

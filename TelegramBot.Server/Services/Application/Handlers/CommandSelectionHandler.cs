@@ -2,7 +2,6 @@ using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
-using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
@@ -51,9 +50,23 @@ public sealed class CommandSelectionHandler(
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
-            keyboardBuilder.GetFileActionsReplyKeyboard);
+        await SendFileActionsReplyKeyboardAsync(context);
 
+    }
+
+    private async Task SendFileActionsReplyKeyboardAsync(CallbackContext context)
+    {
+        if (context.Session.LastActionsMessageId.HasValue)
+        {
+            await outputService.DeleteMessageAsync(context.UserId, context.Session.LastActionsMessageId.Value);
+            context.Session.LastActionsMessageId = null;
+        }
+
+        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
+        var message = await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard),
+            context.Session);
+        context.Session.LastActionsMessageId = message?.Id;
     }
 
     private async Task HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)

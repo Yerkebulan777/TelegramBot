@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Npgsql;
-using TelegramBot.Data.Helpers;
 
 namespace TelegramBot.Data;
 
@@ -42,8 +41,10 @@ public abstract class DataAccessBase
     /// <summary>
     /// Создаёт и открывает подключение к PostgreSQL.
     /// </summary>
-    protected Task<NpgsqlConnection> CreateOpenConnectionAsync()
+    protected async Task<NpgsqlConnection> CreateOpenConnectionAsync()
     {
-        return NpgsqlHelper.CreateOpenConnectionAsync(_connectionString);
+        var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        return conn;
     }
 }

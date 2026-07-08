@@ -2,7 +2,6 @@ using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
-using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
@@ -46,16 +45,30 @@ public sealed class FileNavigationHandler(
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        await HandlerHelpers.SendActionsReplyKeyboardAsync(outputService, messageTrackingService, context,
-            keyboardBuilder.GetFileActionsReplyKeyboard);
+        await SendActionsReplyKeyboardAsync(context);
 
     }
 
-    private Task SendErrorWithKeyboardAsync(CallbackContext context, string message)
+    private async Task SendActionsReplyKeyboardAsync(CallbackContext context)
     {
-        return HandlerHelpers.SendWarningWithReplyKeyboardAsync(
-            outputService, messageTrackingService,
-            context.UserId, context.Session, message,
-            keyboardBuilder.GetFileActionsReplyKeyboard);
+        if (context.Session.LastActionsMessageId.HasValue)
+        {
+            await outputService.DeleteMessageAsync(context.UserId, context.Session.LastActionsMessageId.Value);
+            context.Session.LastActionsMessageId = null;
+        }
+
+        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
+        var message = await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard),
+            context.Session);
+        context.Session.LastActionsMessageId = message?.Id;
+    }
+
+    private async Task SendErrorWithKeyboardAsync(CallbackContext context, string message)
+    {
+        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
+        _ = await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(context.UserId, message, replyKeyboard),
+            context.Session);
     }
 }

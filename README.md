@@ -77,8 +77,6 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 | `Worker:CompletedSessionRetentionDays` | `30`; `0` отключает |
 | `Worker:MaxConcurrentCommands` | `5` |
 | `Worker:Commands` | маппинг команд |
-| `ExportFolderCleanup:OldFileThresholdDays` | `100` |
-| `ExportFolderCleanup:ArchiveSizeThresholdBytes` | `30 MiB` |
 
 Defaults — из option-классов. Полный пример — `appsettings.json` в каждом проекте.
 

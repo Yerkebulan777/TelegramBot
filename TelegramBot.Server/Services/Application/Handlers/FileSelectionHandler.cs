@@ -2,7 +2,6 @@ using Microsoft.Extensions.Options;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
-using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
@@ -97,11 +96,10 @@ public sealed class FileSelectionHandler(
         var filePath = fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
-            _=await HandlerHelpers.SendWarningWithReplyKeyboardAsync(
-                outputService, messageTrackingService,
-                context.UserId, context.Session,
-                "⚠ Error: File not found.",
-                keyboardBuilder.GetFileActionsReplyKeyboard);
+            var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
+            _ = await messageTrackingService.TrackAsync(
+                outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "⚠ Error: File not found.", replyKeyboard),
+                context.Session);
             return;
         }
 

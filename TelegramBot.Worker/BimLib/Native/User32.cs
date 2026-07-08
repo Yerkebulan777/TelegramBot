@@ -27,9 +27,6 @@ internal static class User32
     internal static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
-    internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
@@ -180,40 +177,6 @@ internal static class User32
             WinApiHelper.LogError(nameof(EnumChildWindows), ex, $"parent={hWndParent}");
             return false;
         }
-    }
-
-    /// <summary>
-    /// Safe: sends a window message with timeout protection.
-    /// Runs on a background thread to prevent hanging if the target window is unresponsive.
-    /// Returns <see cref="IntPtr.Zero"/> on failure or timeout.
-    /// </summary>
-    internal static IntPtr SendMessageSafe(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam)
-    {
-        return WinApiHelper.RunWithTimeout(
-            () =>
-            {
-                try
-                {
-                    var result = SendMessage(hWnd, msg, wParam, lParam);
-                    if (result == IntPtr.Zero)
-                    {
-                        var error = Marshal.GetLastWin32Error();
-                        if (error != 0)
-                        {
-                            WinApiHelper.LogWarning(nameof(SendMessage), $"msg=0x{msg:X}, hWnd={hWnd}", error);
-                        }
-                    }
-
-                    return result;
-                }
-                catch (Exception ex)
-                {
-                    WinApiHelper.LogError(nameof(SendMessage), ex, $"msg=0x{msg:X}, hWnd={hWnd}");
-                    return IntPtr.Zero;
-                }
-            },
-            $"SendMessage(0x{msg:X})",
-            IntPtr.Zero);
     }
 
     /// <summary>

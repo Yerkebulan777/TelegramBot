@@ -3,7 +3,6 @@ using Npgsql;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using TelegramBot.Data;
-using TelegramBot.Data.Helpers;
 using TelegramBot.Server.Models;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -53,7 +52,8 @@ public sealed class CommandNotificationService(
 
     private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
     {
-        await using var conn = await NpgsqlHelper.CreateOpenConnectionAsync(_connectionString, stoppingToken);
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(stoppingToken);
 
         _=await conn.ExecuteAsync("LISTEN command_completed; LISTEN session_started;");
         conn.Notification += OnNotificationReceived;
