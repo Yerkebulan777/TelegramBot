@@ -60,10 +60,10 @@ public static partial class RevitFileDeduplicator
             var isDuplicate = false;
             if (numbers is not null)
             {
-                foreach (var acceptedCandidate in accepted)
+                foreach (var (NameLength, Numbers) in accepted)
                 {
-                    if (Math.Abs(acceptedCandidate.NameLength - nameLength) <= _nameLengthTolerance
-                        && acceptedCandidate.Numbers.Overlaps(numbers))
+                    if (Math.Abs(NameLength - nameLength) <= _nameLengthTolerance
+                        && Numbers.Overlaps(numbers))
                     {
                         isDuplicate = true;
                         break;
@@ -95,7 +95,7 @@ public static partial class RevitFileDeduplicator
                 CultureInfo.InvariantCulture,
                 out var value))
             {
-                (result ??= new HashSet<long>()).Add(value);
+                _=(result ??= []).Add(value);
             }
         }
 

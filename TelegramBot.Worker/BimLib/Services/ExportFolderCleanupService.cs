@@ -36,14 +36,14 @@ public sealed class ExportFolderCleanupService(
             return;
         }
 
-        DateTime cutoffDate = DateTime.UtcNow - TimeSpan.FromDays(_options.OldFileThresholdDays);
+        var cutoffDate = DateTime.UtcNow - TimeSpan.FromDays(_options.OldFileThresholdDays);
 
         // 2. Обход каждой подпапки экспорта с фильтром по формату
         foreach (var entry in _options.ExportFolderMap)
         {
-            string subfolder = entry.Key;
-            string extension = entry.Value;
-            string dir = Path.Combine(baseExportDir, subfolder);
+            var subfolder = entry.Key;
+            var extension = entry.Value;
+            var dir = Path.Combine(baseExportDir, subfolder);
             if (!Directory.Exists(dir))
             {
                 continue;
@@ -59,7 +59,7 @@ public sealed class ExportFolderCleanupService(
 
     private bool IsCleanupDoneToday(string baseExportDir)
     {
-        string markerPath = Path.Combine(baseExportDir, MarkerFileName);
+        var markerPath = Path.Combine(baseExportDir, MarkerFileName);
         if (!File.Exists(markerPath))
         {
             return false;
@@ -67,7 +67,7 @@ public sealed class ExportFolderCleanupService(
 
         try
         {
-            string lastDate = File.ReadAllText(markerPath).Trim();
+            var lastDate = File.ReadAllText(markerPath).Trim();
             return string.Equals(lastDate, DateTime.UtcNow.ToString("yyyy-MM-dd"), StringComparison.Ordinal);
         }
         catch (IOException ex)
@@ -79,7 +79,7 @@ public sealed class ExportFolderCleanupService(
 
     private void MarkCleanupDoneToday(string baseExportDir)
     {
-        string markerPath = Path.Combine(baseExportDir, MarkerFileName);
+        var markerPath = Path.Combine(baseExportDir, MarkerFileName);
         try
         {
             File.WriteAllText(markerPath, DateTime.UtcNow.ToString("yyyy-MM-dd"));
@@ -110,7 +110,7 @@ public sealed class ExportFolderCleanupService(
 
         // Разделяем на профильные (соответствуют формату папки) и посторонние
         var formatFiles = new List<FileInfo>();
-        foreach (FileInfo file in allFiles)
+        foreach (var file in allFiles)
         {
             if (file.Extension.Equals(expectedExtension, StringComparison.OrdinalIgnoreCase))
             {
@@ -135,8 +135,8 @@ public sealed class ExportFolderCleanupService(
             var sorted = group.OrderByDescending(f => f.LastWriteTimeUtc).ToList();
 
             // Определяем, есть ли среди файлов не старые (≤ N дней)
-            FileInfo newest = sorted[0];
-            bool newestIsNonOld = newest.LastWriteTimeUtc >= cutoffDate;
+            var newest = sorted[0];
+            var newestIsNonOld = newest.LastWriteTimeUtc >= cutoffDate;
 
             // Не старые: политика для файлов ≤ N дней
             if (newestIsNonOld)
@@ -144,7 +144,7 @@ public sealed class ExportFolderCleanupService(
                 MoveToArchive(newest, baseExportDir);
 
                 // Остальные дубли среди не старых → удалить
-                foreach (FileInfo file in sorted.Skip(1))
+                foreach (var file in sorted.Skip(1))
                 {
                     if (file.LastWriteTimeUtc >= cutoffDate)
                     {
@@ -161,7 +161,7 @@ public sealed class ExportFolderCleanupService(
                 // Keep last N — оставляем
                 var candidates = oldFiles.Skip(_options.KeepLastCount).ToList();
 
-                foreach (FileInfo file in candidates)
+                foreach (var file in candidates)
                 {
                     if (file.Length < _options.ArchiveSizeThresholdBytes)
                     {
@@ -182,11 +182,11 @@ public sealed class ExportFolderCleanupService(
     {
         try
         {
-            string archiveDir = Path.Combine(baseExportDir, _options.ArchiveFolderName,
+            var archiveDir = Path.Combine(baseExportDir, _options.ArchiveFolderName,
                 file.LastWriteTimeUtc.ToString("yyyy-MM-dd"));
-            Directory.CreateDirectory(archiveDir);
+            _=Directory.CreateDirectory(archiveDir);
 
-            string destPath = Path.Combine(archiveDir, file.Name);
+            var destPath = Path.Combine(archiveDir, file.Name);
 
             if (File.Exists(destPath))
             {

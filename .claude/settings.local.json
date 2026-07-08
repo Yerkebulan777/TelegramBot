@@ -11,7 +11,15 @@
       "Read(//c/Users/y.zhumabayev/.claude//**)",
       "Read(//c/Users/y.zhumabayev/.claude/plugins//**)",
       "Bash(powershell.exe -Command ' *)",
-      "Bash(claude plugins *)"
+      "Bash(claude plugins *)",
+      "Bash(where bash *)",
+      "Bash(where env *)",
+      "Bash(git --version)",
+      "Bash(git reset *)",
+      "PowerShell($fso = New-Object -ComObject Scripting.FileSystemObject; $fso.GetFile\\(\"C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe\"\\).ShortPath)",
+      "Bash(git add *)",
+      "Bash(env -i PATH=\"/mingw64/bin:/usr/bin\" git commit -m \"test: verify commit-msg hook fix\" --dry-run)",
+      "Bash(env -i PATH=\"C:\\\\\\\\Windows\\\\\\\\System32\" \"/c/Program Files/Git/bin/git.exe\" commit -m \"test: verify hook works standalone\")"
     ]
   },
   "hooks": {
