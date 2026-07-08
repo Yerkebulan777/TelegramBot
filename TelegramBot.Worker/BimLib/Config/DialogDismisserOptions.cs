@@ -9,49 +9,32 @@ public sealed class DialogDismisserOptions
     public const string SectionName = "DialogDismisser";
 
     /// <summary>
-    /// Включает автоматическое закрытие диалогов. false — DialogDismisser ничего не делает
-    /// (ранний return в <see cref="Monitor.DialogDismisser.DismissDialogsForProcess"/> до любых
-    /// P/Invoke-вызовов). Используется для диагностики: чтобы проверить, не он ли сам убивает
-    /// Revit-процессы через Win32 API.
-    /// ⚠️ ВРЕМЕННО ОТКЛЮЧЕНО (<c>false</c> в appsettings.json) для тестирования на реальных
-    /// задачах — проверяется гипотеза о крашах Revit (<c>ACCESS_VIOLATION</c>) от P/Invoke.
-    /// После диагностики вернуть <c>true</c>.
-    /// </summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>
     /// Максимальное количество неудачных попыток закрыть диалог перед завершением процесса.
     /// Значение 0 отключает принудительное завершение.
     /// </summary>
     public int MaxDismissAttempts { get; set; } = 10;
 
     /// <summary>
-    /// Известные заголовки диалоговых окон (поиск по Contains).
-    /// Окна, заголовок которых содержит хотя бы один из этих паттернов, считаются диалогами.
-    /// </summary>
-    public string[] KnownDialogPatterns { get; set; } = [
-        "Error",
-        "Warning",
-        "Information",
-        "Ошибка",
-        "Предупреждение",
-        "Внимание"
-    ];
-
-    /// <summary>
-    /// Текст кнопок, которые будут автоматически нажаты для закрытия диалога.
+    /// Текст кнопок, которые будут автоматически нажаты для закрытия диалога, в порядке приоритета.
     /// </summary>
     public string[] CloseButtonTexts { get; set; } = [
-        "OK", "ОК", "Принять", "Accept", "Закрыть", "Close",
-        "Игнорировать", "Ignore", "Отмена", "Cancel", "Нет", "No",
-        "Да", "Yes", "Продолжить", "Continue",
-        "Не сохранять", "Don't Save", "Сохранить", "Save"
+        "OK", "ОК", "Close", "Закрыть",
+        "Do not save the project", "Don't Save", "Не сохранять проект", "Не сохранять",
+        "No", "Нет",
+        "Always Load", "Всегда загружать",
+        "Ignore and open the project", "Ignore", "Игнорировать и открыть проект", "Игнорировать",
+        "Relinquish all elements and worksets", "Relinquish elements and worksets",
+        "Освободить все элементы и рабочие наборы", "Освободить элементы и рабочие наборы",
+        "Accept", "Принять",
+        "Continue", "Продолжить",
+        "Cancel", "Отмена"
     ];
 
     /// <summary>
     /// Заголовки диалогов, которые НЕ нужно автоматически закрывать.
     /// </summary>
     public string[] ExclusionDialogTitles { get; set; } = [
-        "Информация", "Information", "Справка", "Help"
+        "Model Upgrade", "Обновление модели",
+        "Load Link", "Загрузка связи"
     ];
 }

@@ -13,7 +13,3 @@
 ### 2. Stagger для Process.Start()
 
 Удалён. При CEF collision — вернуть `await` внутри `_launchGate`.
-
-### 3. DialogDismisser вернуть в `Enabled=true`
-
-После подтверждения гипотезы о Revit crash.

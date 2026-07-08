@@ -10,16 +10,9 @@ namespace TelegramBot.Worker.BimLib.Monitor;
 
 /// <summary>
 /// Автоматическое закрытие диалоговых окон Revit (#32770).
-/// Использует многоуровневую стратегию поиска:
+/// Закрытие — 3 стратегии:
 /// <list type="number">
-///   <item>Поиск top-level окон по известным заголовкам (KnownDialogPatterns)</item>
-///   <item>Поиск окон класса #32770 (стандартный класс диалогов)</item>
-///   <item>Поиск top-level окон с любыми дочерними контролами</item>
-/// </list>
-/// Закрытие — 4 стратегии:
-/// <list type="number">
-///   <item>Клик известной кнопки по тексту (CloseButtonTexts) среди ВСЕХ дочерних окон</item>
-///   <item>Клик первой enabled кнопки/контрола среди ВСЕХ дочерних окон</item>
+///   <item>Клик известной кнопки по тексту (CloseButtonTexts) среди Button-контролов</item>
 ///   <item>WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE</item>
 ///   <item>Принудительное завершение процесса (после MaxDismissAttempts)</item>
 /// </list>
@@ -37,11 +30,6 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
     /// </summary>
     internal bool DismissDialogsForProcess(uint processId)
     {
-        if (!_options.Enabled)
-        {
-            return false;
-        }
-
         var dialogs = FindDialogs(processId);
         if (dialogs.Count == 0)
         {
@@ -74,7 +62,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             // (у многих диалогов пустой заголовок, а Debug-уровень обычно выключен).
             var content = DescribeDialogContent(hwndDlg);
 
-            // Стратегия 1: поиск и клик по известному тексту кнопки (среди ВСЕХ child-окон)
+            // Стратегия 1: поиск и клик по известному тексту кнопки
             if (TryClickKnownButton(hwndDlg, out var knownButton))
             {
                 logger.LogInformation("Dialog dismissed: title='{Title}', button='{Button}', strategy=known, pid={Pid}, content=[{Content}]",
@@ -83,16 +71,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
                 continue;
             }
 
-            // Стратегия 2: клик первой доступной enabled кнопки/контрола (среди ВСЕХ child-окон)
-            if (TryClickFirstButton(hwndDlg, out var fallbackButton))
-            {
-                logger.LogInformation("Dialog dismissed: title='{Title}', button='{Button}', strategy=fallback, pid={Pid}, content=[{Content}]",
-                    info.WindowTitle, fallbackButton, processId, content);
-                dismissed = true;
-                continue;
-            }
-
-            // Стратегия 3: WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE
+            // Стратегия 2: WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE
             if (TryCloseDialogViaWindowMessage(hwndDlg))
             {
                 logger.LogInformation("Dialog dismissed: title='{Title}', strategy=WM_CLOSE, pid={Pid}, content=[{Content}]",
@@ -133,73 +112,16 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
     }
 
     /// <summary>
-    /// Многоуровневый поиск диалоговых окон для указанного процесса.
-    /// Комбинирует несколько стратегий для максимального покрытия.
+    /// Ищет enabled Revit-диалоги класса #32770 для указанного процесса.
     /// </summary>
     private List<IntPtr> FindDialogs(uint processId)
     {
-        var found = new HashSet<IntPtr>();
-
-        // Главное окно Revit нужно исключать из ВСЕХ стратегий поиска, а не только
-        // из C: его заголовок ("ProjectName - Autodesk Revit 2023") содержит подстроку
-        // "Autodesk Revit" из KnownDialogPatterns, поэтому Strategy A ловила его как
-        // диалог и закрывала через WM_CLOSE/SC_CLOSE — фактически завершая Revit.
         var mainWindow = GetMainWindowHandle(processId);
 
-        // Стратегия A: top-level окна, чей заголовок содержит известные паттерны
-        foreach (var pattern in _options.KnownDialogPatterns)
-        {
-            var byTitle = WindowUtil.GetTopLevelWindows(
-                windowTitle: pattern,
-                processId: processId);
-            foreach (var w in byTitle)
-            {
-                if (w != mainWindow)
-                {
-                    _ = found.Add(w);
-                }
-            }
-        }
-
-        // Стратегия B: окна стандартного класса диалогов #32770
-        var byClass = WindowUtil.GetTopLevelWindows(
+        return WindowUtil.GetTopLevelWindows(
             className: DialogWindowClass,
-            processId: processId);
-        foreach (var w in byClass)
-        {
-            if (w != mainWindow)
-            {
-                _ = found.Add(w);
-            }
-        }
-
-        // Стратегия C: top-level окна с любыми дочерними контролами (не только Button)
-        // Family Editor и кастомные Revit-диалоги могут использовать классы
-        // отличные от "Button" (RevitBitmapButton, ToolbarWindow32 и т.д.)
-        var allProcessWindows = WindowUtil.GetTopLevelWindows(processId: processId);
-        foreach (var w in allProcessWindows)
-        {
-            if (found.Contains(w) || w == mainWindow)
-            {
-                continue;
-            }
-
-            // Ищем ЛЮБЫЕ дочерние окна с непустым текстом — признак кликабельного контрола
-            var allChildren = WindowUtil.EnumerateChildWindows(w);
-            var hasClickableChildren = allChildren.Any(child =>
-            {
-                var text = WindowUtil.GetWindowTitle(child);
-                return !string.IsNullOrEmpty(text);
-            });
-
-            if (hasClickableChildren)
-            {
-                _ = found.Add(w);
-            }
-        }
-
-        // Фильтруем: оставляем только enabled окна
-        return found
+            processId: processId)
+            .Where(hwnd => hwnd != mainWindow)
             .Where(User32.IsWindowEnabledSafe)
             .OrderBy(WindowUtil.GetWindowTitle)
             .ToList();
@@ -228,94 +150,43 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
     }
 
     /// <summary>
-    /// Ищет кнопку/контрол с известным текстом среди ВСЕХ дочерних окон (не только "Button").
+    /// Ищет кнопку с известным текстом среди Button-контролов.
     /// Для найденного контрола применяет BM_CLICK + WM_COMMAND + BN_CLICKED.
     /// </summary>
     private bool TryClickKnownButton(IntPtr hwndDlg, out string? clickedButtonText)
     {
         clickedButtonText = null;
 
-        // Ищем среди ВСЕХ дочерних окон, не только класса "Button"
-        var allChildren = WindowUtil.EnumerateChildWindows(hwndDlg);
-        if (allChildren.Count == 0)
+        var buttons = WindowUtil.EnumerateChildWindows(hwndDlg, "Button");
+        if (buttons.Count == 0)
         {
             return false;
         }
 
-        foreach (var child in allChildren)
+        foreach (var name in _options.CloseButtonTexts)
         {
-            var childText = WindowUtil.GetWindowTitle(child);
-            if (string.IsNullOrEmpty(childText))
+            foreach (var button in buttons)
             {
-                continue;
-            }
+                if (!User32.IsWindowEnabledSafe(button))
+                {
+                    continue;
+                }
 
-            var cleanText = childText.Replace("&", "").Trim();
+                var cleanText = WindowUtil.GetWindowTitle(button).Replace("&", "").Trim();
+                if (!string.Equals(cleanText, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
-            if (_options.CloseButtonTexts.Any(name =>
-                string.Equals(cleanText, name, StringComparison.OrdinalIgnoreCase)))
-            {
                 logger.LogDebug(
                     "Known button found: text='{Text}', hwnd={Hwnd}, class='{Class}'",
-                    cleanText, child, WindowUtil.GetWindowClassName(child));
+                    cleanText, button, WindowUtil.GetWindowClassName(button));
 
-                // Отправляем оба типа клика для максимальной совместимости
-                WindowUtil.SendButtonClick(child);
-                WindowUtil.SendButtonCommandClick(hwndDlg, child);
+                WindowUtil.SendButtonClick(button);
+                WindowUtil.SendButtonCommandClick(hwndDlg, button);
                 clickedButtonText = cleanText;
                 return true;
             }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Fallback: кликает первый доступный enabled дочерний контрол с непустым текстом.
-    /// Ищет среди ВСЕХ классов окон (не только "Button").
-    /// </summary>
-    private static bool TryClickFirstButton(IntPtr hwndDlg, out string? clickedButtonText)
-    {
-        clickedButtonText = null;
-
-        var allChildren = WindowUtil.EnumerateChildWindows(hwndDlg);
-        if (allChildren.Count == 0)
-        {
-            return false;
-        }
-
-        // Сначала ищем enabled контролы с непустым текстом
-        foreach (var child in allChildren)
-        {
-            if (!User32.IsWindowEnabledSafe(child))
-            {
-                continue;
-            }
-
-            var text = WindowUtil.GetWindowTitle(child);
-            if (string.IsNullOrEmpty(text))
-            {
-                continue;
-            }
-
-            WindowUtil.SendButtonClick(child);
-            WindowUtil.SendButtonCommandClick(hwndDlg, child);
-            clickedButtonText = text.Replace("&", "").Trim();
-            return true;
-        }
-
-        // Если ни один с текстом не найден — кликаем первый enabled (любой)
-        foreach (var child in allChildren)
-        {
-            if (!User32.IsWindowEnabledSafe(child))
-            {
-                continue;
-            }
-
-            WindowUtil.SendButtonClick(child);
-            WindowUtil.SendButtonCommandClick(hwndDlg, child);
-            clickedButtonText = "<no text>";
-            return true;
         }
 
         return false;

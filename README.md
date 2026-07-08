@@ -67,7 +67,7 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 | `ConnectionStrings:Postgres` | DSN |
 | `FileSystem:TaskDirectory` | `%USERPROFILE%\\...\\TaskDirectory` |
 | `BimIntegration:Min/MaxSupportedVersion` | `2018` / `2026` |
-| `DialogDismisser:Enabled` | временно `false` |
+| `DialogDismisser:MaxDismissAttempts` | `10`; `0` отключает kill после неудачных попыток |
 | `Worker:ProcessTimeoutMinutes` | `180` |
 | `Worker:MaxRetries` | `5` |
 | `Worker:RetryDelayBaseSeconds` | `60` |
@@ -84,7 +84,8 @@ Defaults — из option-классов. Полный пример — `appsetti
 ## BIM-контракт
 
 Worker создаёт `task_{project}_{commandId}.xml` и ждёт `result_{project}_{commandId}.xml` в `TaskDirectory`.
-- Revit: без CLI-аргументов, TaskFile через `REVITBIMFUSION_TASK_FILE`
+- Revit: без command/file CLI-аргументов, TaskFile через `REVITBIMFUSION_TASK_FILE`
+- Revit запускается с `/language RUS`
 - Revit-команды: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`, `BIMDOC`
 - ResultFile обязателен для Revit; exit-code fallback — только wrapper-командам
 

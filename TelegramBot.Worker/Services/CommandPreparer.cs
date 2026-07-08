@@ -29,6 +29,7 @@ public sealed class CommandPreparer(
     private readonly string? _fileSystemRoot = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.RootPath)];
     private static readonly XmlSerializer TaskFileSerializer = new(typeof(TaskFile));
     private static readonly XmlSerializerNamespaces EmptyXmlNamespaces = new([XmlQualifiedName.Empty]);
+    private const string RevitRussianLanguageArguments = "/language RUS";
 
     /// <summary>
     /// Возвращает пути к task-файлу и result-файлу для указанной команды.
@@ -281,7 +282,7 @@ public sealed class CommandPreparer(
 
         var isRevitCommand = IsRevitCommand(cmd.CommandText);
         var args = isRevitCommand
-            ? string.Empty
+            ? RevitRussianLanguageArguments
             : cfg.ArgumentsTemplate
                 .Replace("{CommandText}", cmd.CommandText)
                 .Replace("{FilePath}", cmd.FilePath)
