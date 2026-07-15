@@ -77,7 +77,7 @@ public static class Program
                     _ = loggerConfiguration.WriteTo.Logger(lc => lc
                         .MinimumLevel.Information()
                         .Enrich.FromLogContext()
-                        .WriteToRollingFile(Path.Combine("Worker", "BimLib"), logBasePath));
+                        .WriteToRollingFile("BimLib", logBasePath));
                 })
                 .Build();
 
