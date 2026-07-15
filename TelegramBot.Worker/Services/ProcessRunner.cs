@@ -173,6 +173,10 @@ public sealed class ProcessRunner(
 
         var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, exitCode, _workerOptions.PermanentFailureExitCodes, ex);
 
+        // Лог решения классификатора — развилка retry/Failed: по exitCode, типу исключения или паттерну текста.
+        logger.LogInformation("Classify: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}/{Max}, exit={ExitCode}, permanent={IsPermanent}, err={Msg}",
+            cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, _workerOptions.MaxRetries, ExitCodeFormatter.Format(exitCode), isPermanent, errorMessage);
+
         if (isPermanent)
         {
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);

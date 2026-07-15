@@ -1,5 +1,6 @@
 using System.Text;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
@@ -159,6 +160,20 @@ public sealed class NotificationSenderService(
         if (session.FailedFiles > 0 && session.FailedCommands.Count > 0)
         {
             AppendFailedCommands(summary, session.FailedCommands);
+        }
+
+        // Сводка failed-команд для трассировки: дошли ли причины из БД до уведомления.
+        var failedWithMsg = session.FailedCommands.Count(c => !string.IsNullOrWhiteSpace(c.ErrorMessage));
+        logger.LogInformation("Notify summary: session={SessionId}, corr={CorrelationId}, done={Done}, failed={Failed}, failedWithMsg={FailedWithMsg}, total={Total}",
+            sessionId, correlationId, session.DoneFiles, session.FailedFiles, failedWithMsg, session.TotalFiles);
+
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            foreach (var failed in session.FailedCommands)
+            {
+                logger.LogDebug("Notify failed detail: session={SessionId}, file={File}, err={Msg}",
+                    sessionId, Path.GetFileName(failed.FilePath), failed.ErrorMessage ?? "<null>");
+            }
         }
 
         _=await telegramOutput.SendMessageAsync(session.UserId, ClampToTelegramLimit(summary));

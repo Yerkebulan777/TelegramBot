@@ -36,7 +36,8 @@ public static class DependencyInjectionExtensions
         _=services.AddOptions<BotOptions>()
             .Bind(configuration.GetSection(BotOptions.SectionName))
             .ValidateOnStart()
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required");
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required")
+            .Validate(options => options.AdminUserId > 0, "TelegramBot:AdminUserId is required");
 
         _=services.AddOptions<RateLimitOptions>()
             .Bind(configuration.GetSection(RateLimitOptions.SectionName))

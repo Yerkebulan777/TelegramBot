@@ -55,6 +55,7 @@ public static class Program
                         CreatedAt = now,
                         UpdatedAt = now
                     });
+                Log.Information("Admin user seeded: {UserId}", adminId);
             }
 
             await host.RunAsync();
