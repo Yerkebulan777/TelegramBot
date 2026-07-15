@@ -49,8 +49,17 @@ public sealed class CommandExecutionService(
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        _cleanupTask = StartCleanupTaskAsync();
-        _processMonitorTask = StartProcessMonitoringTaskAsync();
+        _cleanupTask = StartPeriodicBackgroundTaskAsync(
+            intervalSeconds: _workerOptions.CleanupIntervalSeconds,
+            disabledMessage: interval => $"Cleanup disabled: interval={interval}s",
+            cycleName: "lease cleanup",
+            cycle: commandDataService.ReleaseExpiredLeasesAsync);
+
+        _processMonitorTask = StartPeriodicBackgroundTaskAsync(
+            intervalSeconds: RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds),
+            disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
+            cycleName: "process monitor",
+            cycle: () => { CheckProcessesHealth(); return Task.CompletedTask; });
 
         try
         {
@@ -155,29 +164,6 @@ public sealed class CommandExecutionService(
         {
             conn.Notification -= OnNotification;
         }
-    }
-
-    private Task StartCleanupTaskAsync()
-    {
-        return StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: _workerOptions.CleanupIntervalSeconds,
-            disabledMessage: interval => $"Cleanup disabled: interval={interval}s",
-            cycleName: "lease cleanup",
-            cycle: commandDataService.ReleaseExpiredLeasesAsync);
-    }
-
-    private Task StartProcessMonitoringTaskAsync()
-    {
-        var intervalSeconds = RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds);
-        return StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: intervalSeconds,
-            disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
-            cycleName: "process monitor",
-            cycle: () =>
-            {
-                CheckProcessesHealth();
-                return Task.CompletedTask;
-            });
     }
 
     /// <summary>
@@ -287,7 +273,7 @@ public sealed class CommandExecutionService(
             await _shutdownCts.CancelAsync();
         }
 
-        LogActiveProcessesOnShutdown();
+        logger.LogInformation("Shutdown: active={Count}", processRunner.ActiveProcesses.Count(p => !p.Value.HasExited));
 
         // Принудительно завершаем все активные процессы параллельно в общем shutdown-бюджете.
         var processesToKill = processRunner.ActiveProcesses.ToList();
@@ -307,10 +293,10 @@ public sealed class CommandExecutionService(
 
         int Remaining() => Math.Max(1, ShutdownBudgetSeconds - (int)(DateTime.UtcNow - shutdownStartedAt).TotalSeconds);
 #pragma warning disable VSTHRD003
-        await WaitForBackgroundTaskCompletionAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
-        await WaitForBackgroundTaskCompletionAsync(_processMonitorTask, "Process monitoring task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
+        await WaitForTasksAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
+        await WaitForTasksAsync(_processMonitorTask, "Process monitor", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
+        await WaitForTasksAsync(null, "Running tasks", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 #pragma warning restore VSTHRD003
-        await WaitForRunningTasksCompletionAsync(shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 
         _shutdownCts?.Dispose();
         _drainGate.Dispose();
@@ -348,80 +334,51 @@ public sealed class CommandExecutionService(
         }
     }
 
-    private void LogActiveProcessesOnShutdown()
+    private async Task WaitForTasksAsync(Task? single, string name, CancellationToken token, int timeoutSeconds)
     {
-        var activeCount = processRunner.ActiveProcesses.Count(item => !item.Value.HasExited);
-        logger.LogInformation("Shutdown: active={Count}", activeCount);
-    }
-
-    private async Task WaitForBackgroundTaskCompletionAsync(Task? task, string taskName, CancellationToken shutdownToken, int timeoutSeconds)
-    {
-        if (task == null)
+        if (token.IsCancellationRequested)
         {
-            return;
-        }
-
-        if (shutdownToken.IsCancellationRequested)
-        {
-            logger.LogWarning("{TaskName} skip: budget exhausted", taskName);
+            logger.LogWarning("{Name} skip: budget exhausted", name);
             return;
         }
 
         try
         {
-            await task.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
+            if (single != null)
+            {
+                await single.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), token);
+            }
+            else
+            {
+                Task[] tasks;
+                lock (_runningTasksLock)
+                {
+                    tasks = _runningTasks.ToArray();
+                }
+
+                if (tasks.Length == 0)
+                {
+                    return;
+                }
+
+                logger.LogInformation("Wait {Timeout}s for {Count} task(s)", timeoutSeconds, tasks.Length);
+                await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), token);
+            }
         }
         catch (TimeoutException)
         {
-            logger.LogWarning("{TaskName} timeout ({Timeout}s)", taskName, timeoutSeconds);
+            var unfinished = single != null
+                ? !single.IsCompleted ? 1 : 0
+                : _runningTasks.Count(t => !t.IsCompleted);
+            logger.LogWarning("{Name}: {Count} unfinished ({Timeout}s)", name, unfinished, timeoutSeconds);
         }
         catch (OperationCanceledException)
         {
-            // штатное завершение фоновой задачи при остановке Worker
+            // штатное завершение
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "{TaskName} shutdown fail", taskName);
-        }
-    }
-
-    private async Task WaitForRunningTasksCompletionAsync(CancellationToken shutdownToken, int timeoutSeconds)
-    {
-        Task[] runningTasks;
-        lock (_runningTasksLock)
-        {
-            runningTasks = _runningTasks.ToArray();
-        }
-
-        if (runningTasks.Length == 0)
-        {
-            return;
-        }
-
-        if (shutdownToken.IsCancellationRequested)
-        {
-            logger.LogWarning("Task wait skip: budget exhausted");
-            return;
-        }
-
-        logger.LogInformation("Wait {Timeout}s for {Count} task(s)", timeoutSeconds, runningTasks.Length);
-
-        try
-        {
-            await Task.WhenAll(runningTasks).WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), shutdownToken);
-        }
-        catch (TimeoutException)
-        {
-            logger.LogWarning("{Count} task(s) timeout ({Timeout}s)",
-                runningTasks.Count(task => !task.IsCompleted), timeoutSeconds);
-        }
-        catch (OperationCanceledException)
-        {
-            // штатное завершение command task'ов при остановке Worker
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Task shutdown fail");
+            logger.LogWarning(ex, "{Name} shutdown fail", name);
         }
     }
 
