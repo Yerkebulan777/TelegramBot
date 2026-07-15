@@ -217,8 +217,8 @@ internal static partial class SqlQueries
             WHERE SessionId = @SessionId
               AND Status IN ('pending', 'processing')";
 
-        internal const string GetFailedFilePathsBySession = @"
-            SELECT FilePath
+        internal const string GetFailedCommandsBySession = @"
+            SELECT FilePath, ErrorMessage
             FROM Commands
             WHERE SessionId = @SessionId
               AND Status = 'Failed'

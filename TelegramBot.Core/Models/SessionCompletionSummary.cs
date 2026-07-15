@@ -12,5 +12,12 @@ public sealed class SessionCompletionSummary
     public int FailedFiles { get; set; }
     public int TotalFiles { get; set; }
     public int? DurationSeconds { get; set; }
-    public List<string> FailedFilePaths { get; set; } = [];
+    public List<FailedCommandInfo> FailedCommands { get; set; } = [];
+}
+
+/// <summary>Упавшая команда сессии: путь файла и причина сбоя для Telegram-уведомления.</summary>
+public sealed class FailedCommandInfo
+{
+    public string FilePath { get; set; } = string.Empty;
+    public string? ErrorMessage { get; set; }
 }

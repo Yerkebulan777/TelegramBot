@@ -1,5 +1,6 @@
 using System.Text;
 using System.Threading.Channels;
+using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
 using TelegramBot.Server.Models;
@@ -155,23 +156,82 @@ public sealed class NotificationSenderService(
                 ? summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {session.FailedFiles} файлов с ошибками")
                 : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {session.DoneFiles} ✅, {session.FailedFiles} ❌ из {session.TotalFiles}");
 
-        if (session.FailedFiles > 0 && session.FailedFilePaths.Count > 0)
+        if (session.FailedFiles > 0 && session.FailedCommands.Count > 0)
         {
-            _=summary.Append("\n\nОшибки:\n");
-            for (var i = 0; i < session.FailedFilePaths.Count; i++)
-            {
-                if (i > 0)
-                {
-                    _ = summary.AppendLine();
-                }
+            AppendFailedCommands(summary, session.FailedCommands);
+        }
 
-                _ = summary.Append("- ").Append(Path.GetFileName(session.FailedFilePaths[i]));
+        _=await telegramOutput.SendMessageAsync(session.UserId, ClampToTelegramLimit(summary));
+        logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+            session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
+    }
+
+    /// <summary>Максимум пунктов с ошибками в одном сообщении; остальные схлопываются в «и ещё N».</summary>
+    private const int MaxFailedFilesInMessage = 15;
+
+    /// <summary>Лимит длины причины сбоя на один файл — чтобы стек/портянка не раздула сообщение.</summary>
+    private const int MaxReasonLength = 200;
+
+    /// <summary>Жёсткий лимит текста под потолок Telegram (4096) с запасом на маркер обрыва.</summary>
+    private const int MaxMessageLength = 4000;
+
+    private static void AppendFailedCommands(StringBuilder summary, List<FailedCommandInfo> failedCommands)
+    {
+        _=summary.Append("\n\nОшибки:\n");
+
+        var shown = Math.Min(failedCommands.Count, MaxFailedFilesInMessage);
+        for (var i = 0; i < shown; i++)
+        {
+            if (i > 0)
+            {
+                _ = summary.AppendLine();
+            }
+
+            _ = summary.Append("- ").Append(Path.GetFileName(failedCommands[i].FilePath));
+
+            var reason = FormatReason(failedCommands[i].ErrorMessage);
+            if (reason.Length > 0)
+            {
+                _ = summary.Append(" — ").Append(reason);
             }
         }
 
-        _=await telegramOutput.SendMessageAsync(session.UserId, summary.ToString());
-        logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
-            session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
+        if (failedCommands.Count > MaxFailedFilesInMessage)
+        {
+            _ = summary.Append("\n…и ещё ").Append(failedCommands.Count - MaxFailedFilesInMessage);
+        }
+    }
+
+    /// <summary>Оставляет первую строку причины (без стека) и обрезает до <see cref="MaxReasonLength"/>.</summary>
+    private static string FormatReason(string? errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage))
+        {
+            return string.Empty;
+        }
+
+        // Стек/детали обычно идут с переноса — пользователю нужна только первая строка (суть ошибки).
+        var firstLine = errorMessage.AsSpan();
+        var newline = firstLine.IndexOfAny('\r', '\n');
+        if (newline >= 0)
+        {
+            firstLine = firstLine[..newline];
+        }
+
+        return firstLine.Length > MaxReasonLength
+            ? $"{firstLine[..MaxReasonLength]}…"
+            : firstLine.ToString();
+    }
+
+    /// <summary>Гарантирует, что сообщение не превысит лимит Telegram — иначе SendAsync выбросит исключение.</summary>
+    private static string ClampToTelegramLimit(StringBuilder summary)
+    {
+        if (summary.Length <= MaxMessageLength)
+        {
+            return summary.ToString();
+        }
+
+        return summary.ToString(0, MaxMessageLength - 1) + "…";
     }
 
     private static string FormatDurationPrefix(int? durationSeconds)

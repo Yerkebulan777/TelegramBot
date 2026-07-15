@@ -167,11 +167,11 @@ public sealed class SessionDataService(
             new { SessionId = sessionId })
             ?? throw new KeyNotFoundException($"Session {sessionId} not found");
 
-        var failedFiles = await conn.QueryAsync<string>(
-            SqlQueries.Commands.GetFailedFilePathsBySession,
+        var failedCommands = await conn.QueryAsync<FailedCommandInfo>(
+            SqlQueries.Commands.GetFailedCommandsBySession,
             new { SessionId = sessionId });
 
-        summary.FailedFilePaths = failedFiles.ToList();
+        summary.FailedCommands = failedCommands.ToList();
         return summary;
     }
 
