@@ -38,7 +38,7 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 
 ```json
 {
-  "TelegramBot": { "Token": "BOT_TOKEN", "AdminUserIds": [123456789] },
+  "TelegramBot": { "Token": "BOT_TOKEN", "AdminUserId": 0 },
   "FileSystem": { "RootPath": "B:\\" }
 }
 ```
@@ -109,7 +109,7 @@ docker exec -it postgres_telegram psql -U postgres -d telegram_bot
   },
   "TelegramBot": {
     "Token": "BOT_TOKEN",
-    "AdminUserIds": [123456789]
+    "AdminUserId": 0
   },
   "FileSystem": {
     "RootPath": "B:\\"
@@ -134,7 +134,7 @@ docker exec -it postgres_telegram psql -U postgres -d telegram_bot
 
 ### 5. Создать схему БД
 
-Ручные SQL-скрипты для чистой установки не нужны. Server при старте выполняет idempotent-инициализацию схемы: создает `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutbox`, индексы и добавляет админов из `TelegramBot:AdminUserIds`.
+Ручные SQL-скрипты для чистой установки не нужны. Server при старте выполняет idempotent-инициализацию схемы: создает `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutbox`, индексы и добавляет администратора из `TelegramBot:AdminUserId`.
 
 ```powershell
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
@@ -224,7 +224,7 @@ docker compose up -d
 | Параметр | Назначение |
 |---|---|
 | `TelegramBot:Token` | обязателен |
-| `TelegramBot:AdminUserIds` | ID администраторов |
+| `TelegramBot:AdminUserId` | ID администратора |
 | `ConnectionStrings:Postgres` | DSN |
 | `FileSystem:RootPath` | обязательный каталог |
 | `FileSystem:RvtDirectoryName` | `01_RVT` |
