@@ -81,3 +81,11 @@ target/
 *.sln.docstates
 *.slnLaunch.user
 appsettings.Local.json
+
+# Freebuff local database
+.freebuff/
+
+# AI agent runtime artifacts
+.omo/
+.opencode/
+.zcode/

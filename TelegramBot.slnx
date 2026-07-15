@@ -2,7 +2,6 @@
   <Folder Name="/Docs/">
     <File Path="Docs/ExecutionAlgorithm.md" />
     <File Path="Docs/RevitCrashes.md" />
-    <File Path="ALGORITHM_ANALYSIS_REPORT.md" />
     <File Path="Docs/ADR.md" />
     <File Path="Docs/TODO.md" />
   </Folder>
