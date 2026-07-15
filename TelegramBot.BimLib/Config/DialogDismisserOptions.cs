@@ -1,4 +1,4 @@
-namespace TelegramBot.Worker.BimLib.Config;
+namespace TelegramBot.BimLib.Config;
 
 /// <summary>
 /// Конфигурация автоматического закрытия диалоговых окон Revit/Navisworks.

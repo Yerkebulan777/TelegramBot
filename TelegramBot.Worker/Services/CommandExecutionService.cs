@@ -5,7 +5,7 @@ using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Worker.BimLib.Monitor;
+using TelegramBot.BimLib.Monitor;
 using TelegramBot.Worker.Helpers;
 
 namespace TelegramBot.Worker.Services;
@@ -239,7 +239,7 @@ public sealed class CommandExecutionService(
             {
                 var health = ProcessHealthHelper.CheckHealth(process, logger, $"Command#{commandId}");
 
-                if (health.Status == BimLib.Models.RevitProcessStatus.NotResponding)
+                if (health.Status == TelegramBot.BimLib.Models.RevitProcessStatus.NotResponding)
                 {
                     var since = _unresponsiveSince.GetOrAdd(commandId, _ => DateTime.UtcNow);
                     var stuckFor = DateTime.UtcNow - since;

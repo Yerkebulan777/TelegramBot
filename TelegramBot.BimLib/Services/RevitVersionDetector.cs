@@ -1,10 +1,11 @@
+using Microsoft.Extensions.Logging;
 using OpenMcdf;
 using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using System.Text;
-using TelegramBot.Worker.BimLib.Models;
+using TelegramBot.BimLib.Models;
 
-namespace TelegramBot.Worker.BimLib.Services;
+namespace TelegramBot.BimLib.Services;
 
 /// <summary>
 /// Определяет версию Revit по OLE-потоку BasicFileInfo внутри .rvt/.rfa-файла.

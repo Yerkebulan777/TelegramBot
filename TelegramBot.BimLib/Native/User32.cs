@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text;
-using TelegramBot.Worker.BimLib.Helpers;
+using TelegramBot.BimLib.Helpers;
 
-namespace TelegramBot.Worker.BimLib.Native;
+namespace TelegramBot.BimLib.Native;
 
 internal static class User32
 {

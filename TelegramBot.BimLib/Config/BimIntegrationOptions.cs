@@ -1,4 +1,4 @@
-namespace TelegramBot.Worker.BimLib.Config;
+namespace TelegramBot.BimLib.Config;
 
 /// <summary>Диапазон поддерживаемых версий Revit и Navisworks.</summary>
 public sealed class BimIntegrationOptions

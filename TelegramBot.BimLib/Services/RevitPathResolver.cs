@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 using System.Runtime.Versioning;
-using TelegramBot.Worker.BimLib.Config;
-namespace TelegramBot.Worker.BimLib.Services;
+using TelegramBot.BimLib.Config;
+
+namespace TelegramBot.BimLib.Services;
 
 /// <summary>
 /// Определяет установленные версии Revit через Windows Registry
@@ -68,7 +70,7 @@ public sealed class RevitPathResolver(
 
         // Попробовать WOW6432Node для 32-битных версий на 64-битной OS
         path = TryGetRegistryPath($@"SOFTWARE\WOW6432Node\Autodesk\Revit\{version}");
-        return path ??null;
+        return path ?? null;
     }
 
     /// <summary>

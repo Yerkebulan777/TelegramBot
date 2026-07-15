@@ -1,11 +1,13 @@
-namespace TelegramBot.Worker.BimLib.Helpers;
+using Microsoft.Extensions.Logging;
+
+namespace TelegramBot.BimLib.Helpers;
 
 /// <summary>
 /// Shared validation and safety utilities for WinAPI (P/Invoke) calls.
 /// Provides timeout protection, structured logging, and handle validation.
 /// Logger must be initialized once at startup via <see cref="SetLogger"/>.
 /// </summary>
-internal static class WinApiHelper
+public static class WinApiHelper
 {
     private static ILogger? _logger;
 
@@ -17,7 +19,7 @@ internal static class WinApiHelper
     /// (e.g., from Program.cs) before any WinAPI calls are made.
     /// Thread-safe: only the first call takes effect.
     /// </summary>
-    internal static void SetLogger(ILogger logger)
+    public static void SetLogger(ILogger logger)
     {
         _logger ??= logger;
     }

@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 using System.Runtime.Versioning;
-using TelegramBot.Worker.BimLib.Config;
-namespace TelegramBot.Worker.BimLib.Services;
+using TelegramBot.BimLib.Config;
+
+namespace TelegramBot.BimLib.Services;
 
 /// <summary>
 /// Резолвит последнюю поддерживаемую установку Navisworks через Windows Registry.
@@ -62,7 +64,7 @@ public sealed class NavisworksPathResolver(
 
         // WOW6432Node для 32-битных версий
         path = TryGetRegistryInstallPath($@"SOFTWARE\WOW6432Node\Autodesk\Navisworks\R{versionYear}");
-        return path ??null;
+        return path ?? null;
     }
 
     /// <summary>

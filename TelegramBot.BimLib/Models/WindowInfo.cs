@@ -1,6 +1,6 @@
-using TelegramBot.Worker.BimLib.Native;
+using TelegramBot.BimLib.Native;
 
-namespace TelegramBot.Worker.BimLib.Models;
+namespace TelegramBot.BimLib.Models;
 
 /// <summary>Информация об окне Windows: дескриптор, заголовок, класс, процесс.</summary>
 internal sealed class WindowInfo

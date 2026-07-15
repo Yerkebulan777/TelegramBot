@@ -1,12 +1,13 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using TelegramBot.Worker.BimLib.Config;
-using TelegramBot.Worker.BimLib.Helpers;
-using TelegramBot.Worker.BimLib.Models;
-using TelegramBot.Worker.BimLib.Native;
+using TelegramBot.BimLib.Config;
+using TelegramBot.BimLib.Helpers;
+using TelegramBot.BimLib.Models;
+using TelegramBot.BimLib.Native;
 
-namespace TelegramBot.Worker.BimLib.Monitor;
+namespace TelegramBot.BimLib.Monitor;
 
 /// <summary>
 /// Автоматическое закрытие диалоговых окон Revit (#32770).
@@ -29,7 +30,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
     /// Проверяет и закрывает диалоговые окна для указанного процесса.
     /// Возвращает true, если хотя бы один диалог был закрыт.
     /// </summary>
-    internal bool DismissDialogsForProcess(uint processId)
+    public bool DismissDialogsForProcess(uint processId)
     {
         var dialogs = FindDialogs(processId);
         if (dialogs.Count == 0)

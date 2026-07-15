@@ -7,7 +7,7 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.Worker.BimLib.Services;
+using TelegramBot.BimLib.Services;
 using TelegramBot.Worker.Schemas;
 namespace TelegramBot.Worker.Services;
 

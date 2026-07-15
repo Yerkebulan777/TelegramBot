@@ -1,4 +1,4 @@
-namespace TelegramBot.Worker.BimLib.Models;
+namespace TelegramBot.BimLib.Models;
 
 /// <summary>Результат определения версии Revit по заголовку .rvt/.rfa-файла.</summary>
 public sealed record RevitDetectedVersion

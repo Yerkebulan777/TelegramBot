@@ -1,4 +1,4 @@
-namespace TelegramBot.Worker.BimLib.Native;
+namespace TelegramBot.BimLib.Native;
 
 internal static class Win32Consts
 {

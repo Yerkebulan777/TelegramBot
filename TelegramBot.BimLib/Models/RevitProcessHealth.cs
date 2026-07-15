@@ -1,4 +1,4 @@
-namespace TelegramBot.Worker.BimLib.Models;
+namespace TelegramBot.BimLib.Models;
 
 /// <summary>Результат проверки здоровья процесса Revit.</summary>
 public sealed record RevitProcessHealth(
@@ -13,5 +13,3 @@ public enum RevitProcessStatus
     NotResponding,
     Error
 }
-
-

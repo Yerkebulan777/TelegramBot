@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using TelegramBot.Worker.BimLib.Models;
+using TelegramBot.BimLib.Models;
 
 namespace TelegramBot.Worker.Helpers;
 

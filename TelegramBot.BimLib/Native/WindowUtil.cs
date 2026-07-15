@@ -1,7 +1,8 @@
+using Microsoft.Extensions.Logging;
 using System.Text;
-using TelegramBot.Worker.BimLib.Helpers;
+using TelegramBot.BimLib.Helpers;
 
-namespace TelegramBot.Worker.BimLib.Native;
+namespace TelegramBot.BimLib.Native;
 
 /// <summary>Win32-утилиты: поиск окон, получение информации, клики.</summary>
 internal static class WindowUtil

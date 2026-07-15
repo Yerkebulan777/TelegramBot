@@ -5,10 +5,10 @@ using System.Text;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Data;
-using TelegramBot.Worker.BimLib.Config;
-using TelegramBot.Worker.BimLib.Helpers;
-using TelegramBot.Worker.BimLib.Monitor;
-using TelegramBot.Worker.BimLib.Services;
+using TelegramBot.BimLib.Config;
+using TelegramBot.BimLib.Helpers;
+using TelegramBot.BimLib.Monitor;
+using TelegramBot.BimLib.Services;
 using TelegramBot.Worker.Services;
 
 [assembly: SupportedOSPlatform("windows")]
@@ -72,7 +72,7 @@ public static class Program
                 {
                     SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Worker");
 
-                    // Отдельный файл для BIM-специфичных логов (Revit, Navisworks — TelegramBot.Worker.BimLib.*)
+                    // Отдельный файл для BIM-специфичных логов (Revit, Navisworks — TelegramBot.BimLib.*)
                     var logBasePath = SerilogSetup.GetConfiguredLogBasePath(context.Configuration);
                     _ = loggerConfiguration.WriteTo.Logger(lc => lc
                         .MinimumLevel.Information()
@@ -83,7 +83,7 @@ public static class Program
 
             // Initialize WinApiHelper logger for safe P/Invoke error logging
             var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
-            WinApiHelper.SetLogger(loggerFactory.CreateLogger("TelegramBot.Worker.BimLib.Native.WinApiHelper"));
+            WinApiHelper.SetLogger(loggerFactory.CreateLogger("TelegramBot.BimLib.Native.WinApiHelper"));
 
             // Гарантируем, что TaskDirectory существует — иначе первая же команда упадёт при записи task_*.xml.
             // Путь настраивается через FileSystem:TaskDirectory; по умолчанию %USERPROFILE%\Documents\TelegramBot\TaskDirectory.
