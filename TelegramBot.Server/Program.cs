@@ -42,11 +42,19 @@ public static class Program
 
             await host.Services.GetRequiredService<DatabaseInitializerService>().InitializeDatabaseAsync();
 
-            var adminIds = host.Services.GetRequiredService<IOptions<BotOptions>>().Value.AdminUserIds;
-            if (adminIds.Length > 0)
+            var adminId = host.Services.GetRequiredService<IOptions<BotOptions>>().Value.AdminUserId;
+            if (adminId != 0)
             {
-                await host.Services.GetRequiredService<UserDataService>().UpsertUsersBatchAsync(
-                    adminIds, (int)UserRole.Admin, (int)UserAccessStatus.Approved);
+                var now = DateTime.UtcNow;
+                await host.Services.GetRequiredService<UserDataService>().UpsertUserAsync(
+                    new BotUser
+                    {
+                        UserId = adminId,
+                        Role = UserRole.Admin,
+                        Status = UserAccessStatus.Approved,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    });
             }
 
             await host.RunAsync();

@@ -16,13 +16,14 @@ public sealed class AccessRequestHandler(
     IOptions<BotOptions> botOptions,
     ILogger<AccessRequestHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly long[] _adminIds = botOptions.Value.AdminUserIds;
+    private readonly long _adminId = botOptions.Value.AdminUserId;
 
     protected override HashSet<string> SupportedPrefixes { get; } =
     [
         CallbackPrefixes.RequestAccess,
         CallbackPrefixes.ApproveUser,
-        CallbackPrefixes.RejectUser
+        CallbackPrefixes.RejectUser,
+        CallbackPrefixes.BlockUser
     ];
 
     public override Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -32,6 +33,7 @@ public sealed class AccessRequestHandler(
             CallbackPrefixes.RequestAccess => HandleRequestAccessAsync(context),
             CallbackPrefixes.ApproveUser => HandleApproveAsync(context),
             CallbackPrefixes.RejectUser => HandleRejectAsync(context),
+            CallbackPrefixes.BlockUser => HandleBlockAsync(context),
             _ => Task.CompletedTask
         };
     }
@@ -55,6 +57,13 @@ public sealed class AccessRequestHandler(
             return;
         }
 
+        if (existing?.Status == UserAccessStatus.Blocked)
+        {
+            await outputService.EditMessageReplyTextAsync(context.UserId, context.MessageId,
+                "Вы заблокированы. Обратитесь к администратору.");
+            return;
+        }
+
         var now = DateTime.UtcNow;
         await userDataService.UpsertUserAsync(new BotUser
         {
@@ -71,16 +80,17 @@ public sealed class AccessRequestHandler(
 
         var keyboard = new InlineKeyboardMarkup([[
             InlineKeyboardButton.WithCallbackData("✅ Одобрить", $"{CallbackPrefixes.ApproveUser}{context.UserId}"),
-            InlineKeyboardButton.WithCallbackData("❌ Отклонить", $"{CallbackPrefixes.RejectUser}{context.UserId}")
+            InlineKeyboardButton.WithCallbackData("❌ Отклонить", $"{CallbackPrefixes.RejectUser}{context.UserId}"),
+            InlineKeyboardButton.WithCallbackData("🚫 Заблокировать", $"{CallbackPrefixes.BlockUser}{context.UserId}")
         ]]);
 
         var displayName = string.IsNullOrEmpty(context.Username)
             ? context.UserId.ToString()
             : $"@{context.Username}";
 
-        foreach (var adminId in _adminIds)
+        if (_adminId != 0)
         {
-            _=await outputService.SendMessageWithKeyboardAsync(adminId,
+            _=await outputService.SendMessageWithKeyboardAsync(_adminId,
                 $"Запрос доступа от {displayName} (ID: {context.UserId})",
                 keyboard);
         }
@@ -101,6 +111,14 @@ public sealed class AccessRequestHandler(
                 UserAccessStatus.Rejected,
                 displayName => $"❌ Пользователь {displayName} отклонён.",
                 "Ваш запрос на доступ отклонён. Обратитесь к администратору.");
+    }
+
+    private Task HandleBlockAsync(CallbackContext context)
+    {
+        return HandleAccessDecisionAsync(context,
+                UserAccessStatus.Blocked,
+                displayName => $"🚫 Пользователь {displayName} заблокирован.",
+                "Вы заблокированы администратором. Обратитесь к администратору.");
     }
 
     private async Task HandleAccessDecisionAsync(

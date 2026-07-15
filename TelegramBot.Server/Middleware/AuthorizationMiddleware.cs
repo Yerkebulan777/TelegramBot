@@ -22,7 +22,8 @@ public sealed class AuthorizationMiddleware(
         return callbackPrefix is
             CallbackPrefixes.RequestAccess or
             CallbackPrefixes.ApproveUser or
-            CallbackPrefixes.RejectUser;
+            CallbackPrefixes.RejectUser or
+            CallbackPrefixes.BlockUser;
     }
 
     /// <summary>

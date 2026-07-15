@@ -74,6 +74,9 @@ public static class CallbackPrefixes
     /// <summary>Отклонить пользователя.</summary>
     public const string RejectUser = "REJECTUSER:";
 
+    /// <summary>Заблокировать пользователя.</summary>
+    public const string BlockUser = "BLOCKUSER:";
+
     /// <summary>Фильтр статуса в /status.</summary>
     public const string StatusFilter = "STATUSFILTER:";
 
