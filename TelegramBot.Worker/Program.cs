@@ -112,7 +112,4 @@ public static class Program
             await Log.CloseAndFlushAsync();
         }
     }
-
-
-
 }
