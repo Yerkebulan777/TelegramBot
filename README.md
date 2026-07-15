@@ -71,7 +71,7 @@ cd TelegramBot
 ### 3. Запустить PostgreSQL
 
 `docker-compose.yml` уже содержит готовый PostgreSQL:
-- container: `telegram-bot-db`
+- container: `postgres_telegram`
 - database: `telegram_bot`
 - user/password: `postgres` / `postgres`
 - port: `5432`
@@ -85,13 +85,13 @@ docker compose up -d
 
 ```powershell
 docker compose ps
-docker exec telegram-bot-db pg_isready -U postgres -d telegram_bot
+docker exec postgres_telegram pg_isready -U postgres -d telegram_bot
 ```
 
 Проверить подключение и список таблиц:
 
 ```powershell
-docker exec -it telegram-bot-db psql -U postgres -d telegram_bot
+docker exec -it postgres_telegram psql -U postgres -d telegram_bot
 \dt
 \q
 ```
@@ -143,7 +143,7 @@ dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 После успешного старта можно проверить таблицы:
 
 ```powershell
-docker exec -it telegram-bot-db psql -U postgres -d telegram_bot
+docker exec -it postgres_telegram psql -U postgres -d telegram_bot
 \dt
 SELECT UserId, Role, Status FROM BotUsers;
 \q
@@ -176,21 +176,21 @@ docker compose up -d
 Посмотреть логи PostgreSQL:
 
 ```powershell
-docker logs telegram-bot-db
+docker logs postgres_telegram
 ```
 
 Сделать backup:
 
 ```powershell
-docker exec telegram-bot-db pg_dump -U postgres -d telegram_bot -Fc -f /tmp/telegram_bot.dump
-docker cp telegram-bot-db:/tmp/telegram_bot.dump .\telegram_bot.dump
+docker exec postgres_telegram pg_dump -U postgres -d telegram_bot -Fc -f /tmp/telegram_bot.dump
+docker cp postgres_telegram:/tmp/telegram_bot.dump .\telegram_bot.dump
 ```
 
 Восстановить backup в пустую БД:
 
 ```powershell
-docker cp .\telegram_bot.dump telegram-bot-db:/tmp/telegram_bot.dump
-docker exec telegram-bot-db pg_restore -U postgres -d telegram_bot --clean --if-exists /tmp/telegram_bot.dump
+docker cp .\telegram_bot.dump postgres_telegram:/tmp/telegram_bot.dump
+docker exec postgres_telegram pg_restore -U postgres -d telegram_bot --clean --if-exists /tmp/telegram_bot.dump
 ```
 
 Полностью удалить локальную БД и volume:
@@ -199,6 +199,23 @@ docker exec telegram-bot-db pg_restore -U postgres -d telegram_bot --clean --if-
 docker compose down -v
 docker compose up -d
 ```
+
+### Автозапуск PostgreSQL при старте Windows
+
+Чтобы база данных PostgreSQL автоматически запускалась при старте Windows, необходимо настроить автозапуск самого Docker Desktop и убедиться в наличии политики перезапуска контейнера.
+
+1. **Автозапуск Docker Desktop:**
+   - Откройте **Docker Desktop**.
+   - Перейдите в настройки, нажав на иконку шестеренки (**Settings**) в правом верхнем углу.
+   - На вкладке **General** активируйте опцию **"Start Docker Desktop when you log in"** (или **"Start Docker Desktop when you start Windows"**).
+   - Нажмите кнопку **Apply & restart** в правом нижнем углу.
+
+2. **Автозапуск контейнера в Docker:**
+   - В проекте файл [docker-compose.yml](file:///C:/Users/y.zhumabayev/Repository/TelegramBot/docker-compose.yml) уже настроен с директивой `restart: unless-stopped`. Это означает, что при запуске Docker Desktop контейнер PostgreSQL поднимется автоматически, если он не был принудительно остановлен вами вручную (`docker compose stop` / `docker compose down`) перед выключением ПК.
+   - Если вы запускаете контейнер через CLI (`docker run`), используйте флаг `--restart`:
+     ```powershell
+     docker run -d --name postgres_telegram --restart unless-stopped -p 5432:5432 postgres:18
+     ```
 
 ## Конфигурация
 

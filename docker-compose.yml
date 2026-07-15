@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:18
-    container_name: telegram-bot-db
+    container_name: postgres_telegram
     environment:
       POSTGRES_DB: telegram_bot
       POSTGRES_USER: postgres
@@ -10,7 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
