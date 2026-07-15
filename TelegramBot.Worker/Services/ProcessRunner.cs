@@ -140,7 +140,8 @@ public sealed class ProcessRunner(
         }
         else if (commandResult.IsFailure)
         {
-            await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode);
+            await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode,
+                isPluginOrigin: commandResult.IsPluginOrigin);
         }
     }
 
@@ -167,9 +168,19 @@ public sealed class ProcessRunner(
     /// <summary>
     /// Планирует retry (для ProcessCrashError) или помечает команду как Failed (для InvalidFileError).
     /// </summary>
-    private async Task HandleFailureAsync(PendingCommand cmd, string errorMessage, Stopwatch sw, int? exitCode = null, Exception? ex = null)
+    private async Task HandleFailureAsync(PendingCommand cmd, string errorMessage, Stopwatch sw, int? exitCode = null, Exception? ex = null, bool isPluginOrigin = false)
     {
         sw.Stop();
+
+        if (isPluginOrigin)
+        {
+            // Валидный result.xml status=Failed — плагин осознанно записал ошибку: permanent, retry бессмысленен.
+            logger.LogInformation("Plugin permanent fail (no retry): cmd={Cmd}, id={Id}, corr={CorrelationId}, ms={ElapsedMs}, err={Msg}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, sw.ElapsedMilliseconds, errorMessage);
+            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
+            await NotifySessionCompletionAsync(cmd);
+            return;
+        }
 
         var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, exitCode, _workerOptions.PermanentFailureExitCodes, ex);
 
