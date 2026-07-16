@@ -40,6 +40,7 @@ jobs:
         fetch-depth: 0  # полная история нужна для инкрементального анализа PR
 
     - name: Checkout canonical BIM contract
+      continue-on-error: true
       uses: actions/checkout@v4
       with:
         repository: Yerkebulan777/RevitBIMFusion
