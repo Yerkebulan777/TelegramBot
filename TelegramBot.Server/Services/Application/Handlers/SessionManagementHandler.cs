@@ -177,9 +177,14 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("{Username} requested delete confirmation for command {CommandId}",
             context.Username, commandId);
 
-        var keyboard = BuildConfirmationKeyboard(
-            CallbackPrefixes.ConfirmDeleteCommand, $"{commandId}:{filter}",
-            CallbackPrefixes.SessionDetails, $"{sessionId.Value}:{filter}");
+        var keyboard = new InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton.WithCallbackData("🔴 Удалить", $"{CallbackPrefixes.ConfirmDeleteCommand}{commandId}:{filter}"),
+            InlineKeyboardButton.WithCallbackData("🔁 Повторить", $"{CallbackPrefixes.RerunCommand}{commandId}:{filter}")
+        ],
+        [
+            InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{CallbackPrefixes.SessionDetails}{sessionId.Value}:{filter}")
+        ]]);
 
         await outputService.EditMessageTextWithKeyboardAsync(
             context.UserId, context.MessageId,
@@ -334,13 +339,13 @@ public sealed class SessionManagementHandler(
         return true;
     }
 
-    /// <summary>Строит inline-клавиатуру подтверждения: "✅ Да, удалить" + "↩️ Назад".</summary>
+    /// <summary>Строит inline-клавиатуру подтверждения: "🔴 Удалить" + "↩️ Назад".</summary>
     private static InlineKeyboardMarkup BuildConfirmationKeyboard(
         string confirmPrefix, string confirmArg, string backPrefix, string backArg)
     {
         return new InlineKeyboardMarkup([
         [
-            InlineKeyboardButton.WithCallbackData("✅ Да, удалить", $"{confirmPrefix}{confirmArg}"),
+            InlineKeyboardButton.WithCallbackData("🔴 Удалить", $"{confirmPrefix}{confirmArg}"),
             InlineKeyboardButton.WithCallbackData("↩️ Назад", $"{backPrefix}{backArg}")
         ]]);
     }

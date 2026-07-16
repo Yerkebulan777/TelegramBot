@@ -19,7 +19,11 @@
       "PowerShell($fso = New-Object -ComObject Scripting.FileSystemObject; $fso.GetFile\\(\"C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe\"\\).ShortPath)",
       "Bash(git add *)",
       "Bash(env -i PATH=\"/mingw64/bin:/usr/bin\" git commit -m \"test: verify commit-msg hook fix\" --dry-run)",
-      "Bash(env -i PATH=\"C:\\\\\\\\Windows\\\\\\\\System32\" \"/c/Program Files/Git/bin/git.exe\" commit -m \"test: verify hook works standalone\")"
+      "Bash(env -i PATH=\"C:\\\\\\\\Windows\\\\\\\\System32\" \"/c/Program Files/Git/bin/git.exe\" commit -m \"test: verify hook works standalone\")",
+      "Bash(grep -riA3 \"dotnet run\\\\|Kestrel\\\\|UseUrls\\\\|applicationUrl\" AGENTS.md)",
+      "Bash(mkdir -p .claude && test -f .claude/launch.json && cat .claude/launch.json || echo \"no existing launch.json\")",
+      "Bash(dotnet run *)",
+      "WebFetch(domain:github.com)"
     ]
   },
   "hooks": {
@@ -53,14 +57,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'CONTEXT REMINDER: This is a C# .NET 8 Telegram Bot project. Build: dotnet build TelegramBotServer/TelegramBotServer.csproj. No tests. Entry point: TelegramBotHostedService → CommandAppService. Do NOT edit appsettings.json or botdata.db. Always communicate in Russian.'"
+            "command": "echo 'CONTEXT REMINDER: This is a C# .NET 10 Telegram Bot project. Build: dotnet build TelegramBot.slnx. No tests. Do NOT edit appsettings.json or botdata.db. Always communicate in Russian.'"
           }
         ]
       }
     ]
   },
-  "enabledPlugins": {
-    "skill-creator@claude-plugins-official": true,
-    "notion@claude-plugins-official": true
-  }
+  "enabledPlugins": {}
 }

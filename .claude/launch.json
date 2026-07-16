@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "TelegramBot.Server",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "TelegramBot.Server/TelegramBot.Server.csproj"]
+    },
+    {
+      "name": "TelegramBot.Worker",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "TelegramBot.Worker/TelegramBot.Worker.csproj"]
+    }
+  ]
+}

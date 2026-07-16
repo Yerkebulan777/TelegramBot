@@ -4,7 +4,7 @@
 # Exit 2 = заблокировать, Exit 0 = разрешить.
 
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/\\\\/\\/g')
 
 if [ -z "$FILE_PATH" ]; then
   exit 0

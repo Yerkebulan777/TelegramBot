@@ -192,27 +192,14 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
             var fileName = Path.GetFileName(sessionCommand.FileName);
             var commandPrefix = isFiltered || uniqueCommands.Count == 1 ? "" : $"{sessionCommand.Command}: ";
+            var label = $"{statusIcon} {commandPrefix}{fileName}";
 
-            if (sessionCommand.Status == "pending")
-            {
-                var label = $"{statusIcon} {commandPrefix}{fileName} ✖️";
-                buttons.Add(
-                [
-                    InlineKeyboardButton.WithCallbackData(
-                        TruncateListButtonText(label),
-                        $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}:{selectedFilter}")
-                ]);
-            }
-            else
-            {
-                var label = $"{statusIcon} {commandPrefix}{fileName} 🔁";
-                buttons.Add(
-                [
-                    InlineKeyboardButton.WithCallbackData(
-                        TruncateListButtonText(label),
-                        $"{CallbackPrefixes.RerunCommand}{sessionCommand.CommandId}:{selectedFilter}")
-                ]);
-            }
+            buttons.Add(
+            [
+                InlineKeyboardButton.WithCallbackData(
+                    TruncateListButtonText(label),
+                    $"{CallbackPrefixes.DeleteCommand}{sessionCommand.CommandId}:{selectedFilter}")
+            ]);
         }
 
         if (totalFilePages > 1)
