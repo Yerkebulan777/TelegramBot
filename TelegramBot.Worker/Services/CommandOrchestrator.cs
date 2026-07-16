@@ -89,7 +89,7 @@ public sealed class CommandOrchestrator(
 
                         if (!ct.IsCancellationRequested)
                         {
-                            _ = TriggerDrainAsync(ct);
+                            _ = SafeTriggerDrainAsync(ct);
                         }
                     }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 }
@@ -102,6 +102,20 @@ public sealed class CommandOrchestrator(
         finally
         {
             _ = _drainGate.Release();
+        }
+    }
+
+    // Fire-and-forget обёртка: TriggerDrainAsync может кинуть OperationCanceledException
+    // ещё до входа в свой try (WaitAsync(0, ct)) — без обёртки это unobserved exception.
+    private async Task SafeTriggerDrainAsync(CancellationToken ct)
+    {
+        try
+        {
+            await TriggerDrainAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // штатное завершение (shutdown)
         }
     }
 
