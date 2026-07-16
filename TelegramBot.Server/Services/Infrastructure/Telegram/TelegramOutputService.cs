@@ -45,9 +45,14 @@ public class TelegramOutputService(
                 throw;
             }
         }
+
+        // Контракт «удалили в Telegram → удалили из БД»: синхронно вычищаем tracking-строку,
+        // чтобы отработанные сообщения не копились как мусор в TrackedMessages.
+        // Fire-and-forget по БД (TryExecuteTrackedAsync глушит ошибки) — успех Telegram важнее.
+        await messageTrackingService.DeleteTrackedMessagesByChatAsync(chatId, [messageId]);
     }
 
-    public async Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default)
+    private async Task DeleteMessagesAsync(long chatId, IEnumerable<int> messageIds, CancellationToken cancellationToken = default)
     {
         var ids = messageIds.Distinct().ToArray();
         if (ids.Length == 0)

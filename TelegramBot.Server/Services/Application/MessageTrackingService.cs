@@ -28,4 +28,16 @@ public sealed class MessageTrackingService(MessageTrackingDataService messageTra
         var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
         await messageTrackingDataService.TrackMessageAsync(chatId, messageId, sessionId);
     }
+
+    /// <summary>
+    /// Регистрирует сообщение, отправленное вне интерактивной сессии (уведомления Worker/Revit),
+    /// привязкой к <paramref name="sessionId"/> для последующей очистки чата.
+    /// </summary>
+    public async Task TrackAsync(Message? message, int sessionId)
+    {
+        if (message != null)
+        {
+            await messageTrackingDataService.TrackMessageAsync(message.Chat.Id, message.MessageId, sessionId);
+        }
+    }
 }

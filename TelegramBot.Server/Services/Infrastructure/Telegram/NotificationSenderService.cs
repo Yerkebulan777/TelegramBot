@@ -5,6 +5,7 @@ using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
 using TelegramBot.Server.Models;
+using TelegramBot.Server.Services.Application;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
@@ -16,6 +17,7 @@ public sealed class NotificationSenderService(
     SessionDataService sessionDataService,
     NotificationOutboxDataService notificationOutboxDataService,
     TelegramOutputService telegramOutput,
+    MessageTrackingService messageTrackingService,
     ILogger<NotificationSenderService> logger) : BackgroundService
 {
     private static readonly TimeSpan OutboxLeaseDuration = TimeSpan.FromMinutes(5);
@@ -80,7 +82,8 @@ public sealed class NotificationSenderService(
 
             if (item.UserId.HasValue)
             {
-                _=await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
+                var startedMessage = await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
+                await messageTrackingService.TrackAsync(startedMessage, item.SessionId!.Value);
                 var startedUsername = await sessionDataService.GetSessionUsernameAsync(item.SessionId!.Value) ?? "(unnamed)";
                 logger.LogInformation("Session started notify: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}",
                     startedUsername, item.UserId.Value, item.SessionId, item.CorrelationId);
@@ -176,7 +179,8 @@ public sealed class NotificationSenderService(
             }
         }
 
-        _=await telegramOutput.SendMessageAsync(session.UserId, ClampToTelegramLimit(summary));
+        var completionMessage = await telegramOutput.SendMessageAsync(session.UserId, ClampToTelegramLimit(summary));
+        await messageTrackingService.TrackAsync(completionMessage, sessionId);
         logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
             session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
     }

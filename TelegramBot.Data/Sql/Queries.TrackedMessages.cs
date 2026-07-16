@@ -16,15 +16,6 @@ internal static partial class SqlQueries
             DELETE FROM TrackedMessages
             WHERE ChatId = @ChatId AND MessageIdPg = ANY(@MessageIds)";
 
-        internal const string DeleteByIds = @"
-            DELETE FROM TrackedMessages
-            WHERE SessionId = @SessionId AND MessageIdPg = ANY(@MessageIds)";
-
-        internal const string GetBySession = @"
-            SELECT MessageIdPg FROM TrackedMessages
-            WHERE SessionId = @SessionId
-            ORDER BY CreatedAt ASC";
-
         internal const string GetByChat = @"
             SELECT MessageIdPg FROM TrackedMessages
             WHERE ChatId = @ChatId

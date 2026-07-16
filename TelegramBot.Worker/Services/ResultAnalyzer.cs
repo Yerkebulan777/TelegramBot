@@ -96,7 +96,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
 
         if (resultReadStatus == ResultFileReadStatus.Invalid)
         {
-            return CommandResult.Failure(resultReadError ?? "Invalid plugin result file", null, sw.ElapsedMilliseconds);
+            return CommandResult.Failure(resultReadError ?? "Invalid plugin result file", null);
         }
 
         // Fallback по exit code
@@ -106,7 +106,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
                 "Exit=0 no result file: id={Id}, corr={CorrelationId}, cmd={Cmd}, ms={ElapsedMs}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds);
 
-            return CommandResult.Success(sw.ElapsedMilliseconds);
+            return CommandResult.Success();
         }
 
         var errorMessage = process.ExitCode == 0
@@ -124,7 +124,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             }
         }
 
-        return CommandResult.Failure(errorMessage, process.ExitCode, sw.ElapsedMilliseconds);
+        return CommandResult.Failure(errorMessage, process.ExitCode);
     }
 
     private CommandResult AnalyzePluginResult(PendingCommand cmd, ResultFile result, Stopwatch sw)
@@ -135,7 +135,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
                 "Plugin done: id={Id}, corr={CorrelationId}, cmd={Cmd}, status={Status}, out={OutputPath}, ms={ElapsedMs}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles ?? "<none>", sw.ElapsedMilliseconds);
 
-            return CommandResult.Success(sw.ElapsedMilliseconds);
+            return CommandResult.Success();
         }
 
         if (result.Status == ResultStatus.Cancelled)
@@ -145,7 +145,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
                 "Plugin cancelled: id={Id}, corr={CorrelationId}, cmd={Cmd}, ms={ElapsedMs}, err={Error}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds, cancellationMessage);
 
-            return CommandResult.Cancelled(cancellationMessage, sw.ElapsedMilliseconds);
+            return CommandResult.Cancelled(cancellationMessage);
         }
 
         // Failed
@@ -158,7 +158,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             logger.LogDebug("Plugin errDetails: id={Id}: {Details}", cmd.CommandId, result.ErrorDetails);
         }
 
-        return CommandResult.Failure(result.ErrorMessage ?? "Plugin reported failure", null, sw.ElapsedMilliseconds, isPluginOrigin: true);
+        return CommandResult.Failure(result.ErrorMessage ?? "Plugin reported failure", null, isPluginOrigin: true);
     }
 
     private void RenameToBadFile(string path)
@@ -211,32 +211,30 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         public bool IsPluginOrigin { get; private set; }
         public string? ErrorMessage { get; }
         public int? ExitCode { get; }
-        public long ElapsedMs { get; }
 
-        private CommandResult(bool isSuccess, bool isFailure, bool isCancelled, string? errorMessage, int? exitCode, long elapsedMs, bool isPluginOrigin)
+        private CommandResult(bool isSuccess, bool isFailure, bool isCancelled, string? errorMessage, int? exitCode, bool isPluginOrigin)
         {
             IsSuccess = isSuccess;
             IsFailure = isFailure;
             IsCancelled = isCancelled;
             ErrorMessage = errorMessage;
             ExitCode = exitCode;
-            ElapsedMs = elapsedMs;
             IsPluginOrigin = isPluginOrigin;
         }
 
-        public static CommandResult Success(long elapsedMs)
+        public static CommandResult Success()
         {
-            return new(true, false, false, null, null, elapsedMs, false);
+            return new(true, false, false, null, null, false);
         }
 
-        public static CommandResult Failure(string errorMessage, int? exitCode, long elapsedMs, bool isPluginOrigin = false)
+        public static CommandResult Failure(string errorMessage, int? exitCode, bool isPluginOrigin = false)
         {
-            return new(false, true, false, errorMessage, exitCode, elapsedMs, isPluginOrigin);
+            return new(false, true, false, errorMessage, exitCode, isPluginOrigin);
         }
 
-        public static CommandResult Cancelled(string errorMessage, long elapsedMs)
+        public static CommandResult Cancelled(string errorMessage)
         {
-            return new(false, false, true, errorMessage, null, elapsedMs, false);
+            return new(false, false, true, errorMessage, null, false);
         }
     }
 }
