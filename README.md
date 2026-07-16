@@ -262,7 +262,7 @@ Worker создаёт `task_{project}_{commandId}.xml` и ждёт `result_{proj
 - Revit-команды: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
 - ResultFile обязателен для Revit; exit-code fallback — только wrapper-командам
 
-Canonical XSD — `RevitBIMFusion/Docs`. Детали — [AGENTS.md](AGENTS.md).
+XSD-схемы — vendored копия в `Docs/BimContract/` (источник истины — `RevitBIMFusion/Docs`, ресинк вручную). Детали — [AGENTS.md](AGENTS.md).
 
 ## Логи
 

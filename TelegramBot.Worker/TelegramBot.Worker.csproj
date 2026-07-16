@@ -5,8 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>TelegramBot.Worker</RootNamespace>
-    <BimContractDirectory Condition="'$(BimContractDirectory)' == ''">$(BIM_CONTRACT_DIRECTORY)</BimContractDirectory>
-    <BimContractDirectory Condition="'$(BimContractDirectory)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\RevitBIMFusion\Docs'))</BimContractDirectory>
+    <BimContractDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Docs\BimContract'))</BimContractDirectory>
   </PropertyGroup>
 
   <ItemGroup>
