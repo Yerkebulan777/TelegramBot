@@ -36,9 +36,11 @@ Partition = "file:" + md5(lower(FilePath))
 
 ## 2. Claim очереди
 
-`CommandExecutionService` слушает `new_tasks`. При connect: освобождает expired leases → drain очереди → ждёт NOTIFY → fallback polling при таймауте → reconnect с backoff.
+`CommandExecutionService` слушает `new_tasks` и владеет только соединением/reconnect-backoff. Сам claim/launch делегирует `CommandOrchestrator`.
 
-Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim атомарно выбирает `pending`-команды с наступившим `NextRetryAt`, исключая partition с `processing`-командой, используя `FOR UPDATE SKIP LOCKED` и partition advisory xact lock. Сортировка по `Priority`, `CreatedAt`, `CommandId`. `_drainGate` не допускает параллельные drain-циклы.
+`CommandOrchestrator` триггерится двумя независимыми путями: NOTIFY (мгновенно, через `TriggerDrainAsync`) и собственный `PeriodicTimer` (safety-net, интервал `FallbackPollingIntervalSeconds`) — оба ведут к одному и тому же drain. `_drainGate` (внутри оркестратора) не допускает параллельные drain-циклы.
+
+Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim атомарно выбирает `pending`-команды с наступившим `NextRetryAt`, исключая partition с `processing`-командой, используя `FOR UPDATE SKIP LOCKED` и partition advisory xact lock. Сортировка по `Priority`, `CreatedAt`, `CommandId`. Запуск — fire-and-forget `Task` (без ожидания), чтобы долгая команда не блокировала claim остальных.
 
 ## 3. Подготовка и запуск
 
@@ -51,7 +53,7 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 `ProcessStarter.StartAsync`:
 - создаёт TaskFile (`task_{project}_{commandId}.xml`) с XSD-валидацией
 - заполняет `ProcessStartInfo` (Revit: пустые args, TaskFile path в `REVITBIMFUSION_TASK_FILE`)
-- сериализованный `Process.Start()` через `_launchGate`
+- сериализованный `Process.Start()` через собственный `_launchGate` (`ProcessStarter`, отдельно от `_drainGate` оркестратора)
 
 ## 4. Ожидание и результат
 

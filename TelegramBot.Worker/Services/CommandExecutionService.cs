@@ -12,11 +12,12 @@ using TelegramBot.Worker.Helpers;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
-/// Background service: orchestrator для событийной обработки очереди команд через PostgreSQL LISTEN/NOTIFY.
-/// Делегирует выполнение специализированному ProcessRunner.
+/// Background service: слушает PostgreSQL LISTEN/NOTIFY и триггерит <see cref="CommandOrchestrator"/>.
+/// Сам claim/launch не делает — владеет только соединением, reconnect-backoff, cleanup и health-мониторингом.
 /// </summary>
 public sealed class CommandExecutionService(
     CommandDataService commandDataService,
+    CommandOrchestrator orchestrator,
     ProcessRunner processRunner,
     IOptions<WorkerOptions> workerOptions,
     IConfiguration configuration,
@@ -24,16 +25,10 @@ public sealed class CommandExecutionService(
     DialogDismisser dialogDismisser) : BackgroundService
 {
     private const string ListenChannel = "new_tasks";
-    private const int DefaultBatchSize = 5;
     private const int ShutdownBudgetSeconds = 30;
     private const int TaskWaitTimeoutSeconds = 15;
 
-    // Трекинг выполняемых задач для корректного ожидания при shutdown
-    private readonly HashSet<Task> _runningTasks = [];
     private readonly ConcurrentDictionary<int, DateTime> _unresponsiveSince = new();
-    private readonly object _runningTasksLock = new();
-    private readonly SemaphoreSlim _drainGate = new(1, 1);
-    private readonly int _maxConcurrentCommands = Math.Max(1, workerOptions.Value.MaxConcurrentCommands);
 
     private readonly string _connectionString = configuration.GetConnectionString("Postgres")
         ?? DataAccessBase.DefaultConnectionString;
@@ -45,9 +40,10 @@ public sealed class CommandExecutionService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}", _maxConcurrentCommands);
+        logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}", _workerOptions.MaxConcurrentCommands);
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        orchestrator.StartTimer(_shutdownCts.Token);
 
         _cleanupTask = StartPeriodicBackgroundTaskAsync(
             intervalSeconds: _workerOptions.CleanupIntervalSeconds,
@@ -103,23 +99,20 @@ public sealed class CommandExecutionService(
         logger.LogInformation("Listen {Channel}", ListenChannel);
 
         await commandDataService.ReleaseExpiredLeasesAsync();
-        await DrainPendingCommandsAsync(stoppingToken);
+        await orchestrator.TriggerDrainAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Таймаут тут — только liveness-check соединения; периодический drain уже покрыт
+            // собственным PeriodicTimer оркестратора (safety-net), дублировать не нужно.
             var fallbackTimeoutSec = _workerOptions.FallbackPollingIntervalSeconds;
             var notificationReceived = await WaitForNotificationAsync(conn, TimeSpan.FromSeconds(fallbackTimeoutSec), stoppingToken);
 
             if (notificationReceived)
             {
                 logger.LogDebug("NOTIFY {Channel}", ListenChannel);
+                await orchestrator.TriggerDrainAsync(stoppingToken);
             }
-            else
-            {
-                logger.LogInformation("Heartbeat: poll pending ({TimeoutSec}s)", fallbackTimeoutSec);
-            }
-
-            await DrainPendingCommandsAsync(stoppingToken);
         }
     }
 
@@ -299,7 +292,6 @@ public sealed class CommandExecutionService(
 #pragma warning restore VSTHRD003
 
         _shutdownCts?.Dispose();
-        _drainGate.Dispose();
 
         logger.LogInformation("Shutdown done");
     }
@@ -350,11 +342,7 @@ public sealed class CommandExecutionService(
             }
             else
             {
-                Task[] tasks;
-                lock (_runningTasksLock)
-                {
-                    tasks = _runningTasks.ToArray();
-                }
+                var tasks = orchestrator.SnapshotRunningTasks();
 
                 if (tasks.Length == 0)
                 {
@@ -369,7 +357,7 @@ public sealed class CommandExecutionService(
         {
             var unfinished = single != null
                 ? !single.IsCompleted ? 1 : 0
-                : _runningTasks.Count(t => !t.IsCompleted);
+                : orchestrator.RunningTaskCount;
             logger.LogWarning("{Name}: {Count} unfinished ({Timeout}s)", name, unfinished, timeoutSeconds);
         }
         catch (OperationCanceledException)
@@ -379,108 +367,6 @@ public sealed class CommandExecutionService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "{Name} shutdown fail", name);
-        }
-    }
-
-    /// <summary>
-    /// Drain-цикл: claim'ит команды, запускает их без ожидания и сразу пытается claim'ить ещё,
-    /// пока очередь не опустеет. Это устраняет head-of-line blocking, при котором одна
-    /// долгая команда (3h timeout Revit) блокировала запуск остальных 4 из батча.
-    /// </summary>
-    private async Task DrainPendingCommandsAsync(CancellationToken ct)
-    {
-        if (!await _drainGate.WaitAsync(0, ct))
-        {
-            return;
-        }
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                PruneCompletedTasks();
-
-                var availableSlots = _maxConcurrentCommands - GetRunningTaskCount();
-                if (availableSlots <= 0)
-                {
-                    break;
-                }
-
-                // Lease = ProcessTimeoutMinutes + 5 мин буфер для crash recovery
-                var leaseTimeoutMinutes = _workerOptions.ProcessTimeoutMinutes + 5;
-                var claimLimit = Math.Min(DefaultBatchSize, availableSlots);
-                var claimed = await commandDataService.ClaimPendingCommandsAsync(claimLimit, leaseTimeoutMinutes);
-
-                if (claimed.Count == 0)
-                {
-                    break;
-                }
-
-                logger.LogInformation("Claimed: {Count}", claimed.Count);
-
-                foreach (var cmd in claimed)
-                {
-                    var task = ProcessCommandAsync(cmd, ct);
-
-                    lock (_runningTasksLock)
-                    {
-                        _ = _runningTasks.Add(task);
-                    }
-
-                    // Удаляем завершённые задачи из трекинга.
-                    // Используем CancellationToken.None, чтобы ContinueWith выполнялся
-                    // всегда — даже при отмене ct (shutdown).
-                    _ = task.ContinueWith(completed =>
-                    {
-                        lock (_runningTasksLock)
-                        {
-                            _=_runningTasks.Remove(completed);
-                        }
-
-                        if (!ct.IsCancellationRequested)
-                        {
-                            _ = DrainPendingCommandsAsync(ct);
-                        }
-                    }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                }
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "Drain error");
-        }
-        finally
-        {
-            _ = _drainGate.Release();
-        }
-    }
-
-    private async Task ProcessCommandAsync(PendingCommand cmd, CancellationToken ct)
-    {
-        try
-        {
-            await processRunner.RunAsync(cmd, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "Exec error: id={CommandId}, corr={CorrelationId}",
-                cmd.CommandId, cmd.CorrelationId);
-        }
-    }
-
-    private int GetRunningTaskCount()
-    {
-        lock (_runningTasksLock)
-        {
-            return _runningTasks.Count;
-        }
-    }
-
-    private void PruneCompletedTasks()
-    {
-        lock (_runningTasksLock)
-        {
-            _=_runningTasks.RemoveWhere(task => task.IsCompleted);
         }
     }
 }
