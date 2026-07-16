@@ -20,7 +20,7 @@ dotnet build TelegramBot.slnx
 - Worker: tracked tasks + SQL partition scheduling
 - Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, CLI args пусты
 - `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC
-- Canonical BIM: `RevitBIMFusion/Docs`
+- BIM contract XSD: vendored copy в `Docs/BimContract/` (источник истины — `RevitBIMFusion/Docs`, ресинкать вручную при изменении контракта)
 
 ## GitNexus
 
@@ -30,7 +30,7 @@ dotnet build TelegramBot.slnx
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1244 symbols, 3258 relationships, 100 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1215 symbols, 3297 relationships, 98 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

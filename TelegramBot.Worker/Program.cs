@@ -63,6 +63,7 @@ public static class Program
                     _=services.AddSingleton<OutputCollector>();
                     _=services.AddSingleton<ResultAnalyzer>();
                     _=services.AddSingleton<ProcessRunner>();
+                    _=services.AddSingleton<CommandOrchestrator>();
 
                     _=services.AddHostedService<CommandExecutionService>();
                     _=services.AddHostedService<SessionCleanupService>();

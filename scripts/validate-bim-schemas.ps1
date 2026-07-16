@@ -3,18 +3,14 @@
     Validates BIM TaskFile/ResultFile XML samples against their XSD schemas.
 .DESCRIPTION
     This script validates sample XML files against the BIM contract schemas
-    from the canonical RevitBIMFusion/Docs directory to detect drift
-    between C# models and XSD schemas.
+    vendored in Docs/BimContract/ (source of truth: RevitBIMFusion/Docs,
+    resync manually) to detect drift between C# models and XSD schemas.
 #>
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$SchemaDir = if ($env:BIM_CONTRACT_DIRECTORY) {
-    $env:BIM_CONTRACT_DIRECTORY
-} else {
-    Join-Path (Split-Path -Parent $RepoRoot) "RevitBIMFusion" "Docs"
-}
+$SchemaDir = Join-Path $RepoRoot "Docs" "BimContract"
 $SamplesDir = Join-Path $RepoRoot "scripts" "bim-schema-test-samples"
 
 function Test-XmlSchema {
