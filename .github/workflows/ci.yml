@@ -116,6 +116,7 @@ jobs:
         ref: master
         path: .contract/RevitBIMFusion
         sparse-checkout: Docs
+        token: ${{ secrets.BIM_CONTRACT_PAT }}
 
     - name: Validate BIM XML Schemas (TaskFile + ResultFile)
       shell: pwsh
