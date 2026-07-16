@@ -37,13 +37,19 @@ public sealed class CommandExecutionService(
     private CancellationTokenSource? _shutdownCts;
     private Task? _cleanupTask;
     private Task? _processMonitorTask;
+    private Task? _drainTimerTask;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}", _workerOptions.MaxConcurrentCommands);
 
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        orchestrator.StartTimer(_shutdownCts.Token);
+
+        _drainTimerTask = StartPeriodicBackgroundTaskAsync(
+            intervalSeconds: _workerOptions.FallbackPollingIntervalSeconds,
+            disabledMessage: interval => $"Drain safety-net disabled: interval={interval}s",
+            cycleName: "drain safety-net",
+            cycle: () => orchestrator.TriggerDrainAsync(_shutdownCts!.Token));
 
         _cleanupTask = StartPeriodicBackgroundTaskAsync(
             intervalSeconds: _workerOptions.CleanupIntervalSeconds,
@@ -104,7 +110,7 @@ public sealed class CommandExecutionService(
         while (!stoppingToken.IsCancellationRequested)
         {
             // Таймаут тут — только liveness-check соединения; периодический drain уже покрыт
-            // собственным PeriodicTimer оркестратора (safety-net), дублировать не нужно.
+            // отдельным "drain safety-net" циклом (StartPeriodicBackgroundTaskAsync), дублировать не нужно.
             var fallbackTimeoutSec = _workerOptions.FallbackPollingIntervalSeconds;
             var notificationReceived = await WaitForNotificationAsync(conn, TimeSpan.FromSeconds(fallbackTimeoutSec), stoppingToken);
 
@@ -286,6 +292,7 @@ public sealed class CommandExecutionService(
 
         int Remaining() => Math.Max(1, ShutdownBudgetSeconds - (int)(DateTime.UtcNow - shutdownStartedAt).TotalSeconds);
 #pragma warning disable VSTHRD003
+        await WaitForTasksAsync(_drainTimerTask, "Drain safety-net", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
         await WaitForTasksAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
         await WaitForTasksAsync(_processMonitorTask, "Process monitor", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
         await WaitForTasksAsync(null, "Running tasks", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));

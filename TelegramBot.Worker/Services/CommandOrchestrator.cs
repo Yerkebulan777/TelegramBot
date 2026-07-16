@@ -6,8 +6,9 @@ using TelegramBot.Data;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
-/// Владеет циклом claim → async-launch. Два независимых триггера drain'а: собственный
-/// <see cref="PeriodicTimer"/> (safety-net) и внешний <see cref="TriggerDrainAsync"/> (NOTIFY/initial connect).
+/// Владеет циклом claim → async-launch. Триггерится извне (NOTIFY, initial connect, или
+/// периодический safety-net — см. <see cref="CommandExecutionService"/>, который переиспользует
+/// свой общий <c>StartPeriodicBackgroundTaskAsync</c> вместо отдельного таймера здесь).
 /// Single-flight через семафор; launch не блокирует следующий claim (fire-and-forget Task),
 /// что устраняет head-of-line blocking от долгих (до 3ч) Revit-задач.
 /// </summary>
@@ -26,8 +27,6 @@ public sealed class CommandOrchestrator(
     private readonly object _runningTasksLock = new();
     private readonly SemaphoreSlim _drainGate = new(1, 1);
 
-    private PeriodicTimer? _timer;
-
     public int RunningTaskCount
     {
         get { lock (_runningTasksLock) return _runningTasks.Count; }
@@ -38,31 +37,7 @@ public sealed class CommandOrchestrator(
         lock (_runningTasksLock) return [.. _runningTasks];
     }
 
-    /// <summary>Запускает periodic timer как safety-net. Вызвать один раз при старте воркера.</summary>
-    public void StartTimer(CancellationToken ct)
-    {
-        var intervalSeconds = Math.Max(1, _options.FallbackPollingIntervalSeconds);
-        _timer = new PeriodicTimer(TimeSpan.FromSeconds(intervalSeconds));
-        _ = RunTimerLoopAsync(ct);
-    }
-
-    private async Task RunTimerLoopAsync(CancellationToken ct)
-    {
-        try
-        {
-            while (await _timer!.WaitForNextTickAsync(ct))
-            {
-                logger.LogInformation("Heartbeat: poll pending");
-                await TriggerDrainAsync(ct);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // штатное завершение
-        }
-    }
-
-    /// <summary>Внешний триггер (NOTIFY / initial connect) — немедленный drain.</summary>
+    /// <summary>Внешний триггер (NOTIFY / initial connect / periodic safety-net) — drain.</summary>
     public async Task TriggerDrainAsync(CancellationToken ct)
     {
         if (!await _drainGate.WaitAsync(0, ct))
@@ -153,7 +128,6 @@ public sealed class CommandOrchestrator(
 
     public void Dispose()
     {
-        _timer?.Dispose();
         _drainGate.Dispose();
     }
 }

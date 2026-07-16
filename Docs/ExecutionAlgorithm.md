@@ -38,7 +38,7 @@ Partition = "file:" + md5(lower(FilePath))
 
 `CommandExecutionService` слушает `new_tasks` и владеет только соединением/reconnect-backoff. Сам claim/launch делегирует `CommandOrchestrator`.
 
-`CommandOrchestrator` триггерится двумя независимыми путями: NOTIFY (мгновенно, через `TriggerDrainAsync`) и собственный `PeriodicTimer` (safety-net, интервал `FallbackPollingIntervalSeconds`) — оба ведут к одному и тому же drain. `_drainGate` (внутри оркестратора) не допускает параллельные drain-циклы.
+`CommandOrchestrator.TriggerDrainAsync` триггерится двумя независимыми путями из `CommandExecutionService`: NOTIFY (мгновенно) и отдельный периодический цикл `StartPeriodicBackgroundTaskAsync` (safety-net, интервал `FallbackPollingIntervalSeconds`, тот же generic-хелпер, что и для lease cleanup/health-monitor) — оба ведут к одному и тому же drain. `_drainGate` (внутри оркестратора) не допускает параллельные drain-циклы.
 
 Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim атомарно выбирает `pending`-команды с наступившим `NextRetryAt`, исключая partition с `processing`-командой, используя `FOR UPDATE SKIP LOCKED` и partition advisory xact lock. Сортировка по `Priority`, `CreatedAt`, `CommandId`. Запуск — fire-and-forget `Task` (без ожидания), чтобы долгая команда не блокировала claim остальных.
 
