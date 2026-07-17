@@ -13,6 +13,7 @@ Windows-сервис на .NET 10: Telegram-бот принимает задан
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Pipeline, статусы, retry, БД |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | История `ACCESS_VIOLATION` |
 | [Docs/ADR.md](Docs/ADR.md) | Architecture Decision Log |
+| [Docs/deployment_notes.md](Docs/deployment_notes.md) | Windows Service, сетевые ресурсы |
 | [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Контракт BIM-исполнителей |
 
 ## Возможности
@@ -20,202 +21,56 @@ Windows-сервис на .NET 10: Telegram-бот принимает задан
 - `/export`: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
 - `/automation`: `CLASHREP`, `AUTORES`
 - Навигация `RootPath → проект → разделы → 01_RVT`, фильтры `/status`, soft-delete
-- Дедупликация RVT, дневной лимит, защита от дублей
 - PostgreSQL `LISTEN/NOTIFY`, partition scheduling, retry, durable notifications
 
 ## Быстрый старт
 
-Требования: .NET 10 SDK, PostgreSQL 18, Windows.
+Требования: .NET 10 SDK, Docker Desktop, Windows.
 
 ```powershell
-docker compose up -d
+git clone https://github.com/Yerkebulan777/TelegramBot.git
+cd TelegramBot
+docker compose up -d          # PostgreSQL: telegram_bot@localhost:5432
 dotnet build TelegramBot.slnx
-dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
-dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 ```
 
-Секреты в gitignored `appsettings.Local.json`:
+### Локальная конфигурация
+
+Создать `appsettings.Local.json` в **каждом** проекте (`Server/` и `Worker/`). Значения ниже — дефолт docker-compose.
+
+**TelegramBot.Server/**:
 
 ```json
 {
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Timeout=30;Minimum Pool Size=2;Connection Idle Lifetime=300"
+  },
   "TelegramBot": { "Token": "BOT_TOKEN", "AdminUserId": 0 },
   "FileSystem": { "RootPath": "B:\\" }
 }
 ```
 
-## Настройка PostgreSQL в Docker на новом компьютере
-
-### 1. Установить зависимости
-
-Нужны:
-- Docker Desktop с включенным Linux containers mode
-- .NET 10 SDK
-- Git
-
-Проверка:
-
-```powershell
-docker --version
-docker compose version
-dotnet --version
-git --version
-```
-
-### 2. Получить репозиторий
-
-```powershell
-git clone https://github.com/Yerkebulan777/TelegramBot.git
-cd TelegramBot
-```
-
-### 3. Запустить PostgreSQL
-
-`docker-compose.yml` уже содержит готовый PostgreSQL:
-- container: `postgres_telegram`
-- database: `telegram_bot`
-- user/password: `postgres` / `postgres`
-- port: `5432`
-- volume: `pgdata`
-
-```powershell
-docker compose up -d
-```
-
-Проверить, что контейнер поднялся:
-
-```powershell
-docker compose ps
-docker exec postgres_telegram pg_isready -U postgres -d telegram_bot
-```
-
-Проверить подключение и список таблиц:
-
-```powershell
-docker exec -it postgres_telegram psql -U postgres -d telegram_bot
-\dt
-\q
-```
-
-На чистой базе таблиц может еще не быть — они создаются Server-приложением при первом запуске.
-
-### 4. Настроить локальные appsettings
-
-Создать `appsettings.Local.json` в `TelegramBot.Server/`:
+**TelegramBot.Worker/**:
 
 ```json
 {
   "ConnectionStrings": {
     "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Timeout=30;Minimum Pool Size=2;Connection Idle Lifetime=300"
   },
-  "TelegramBot": {
-    "Token": "BOT_TOKEN",
-    "AdminUserId": 0
-  },
-  "FileSystem": {
-    "RootPath": "B:\\"
-  }
+  "FileSystem": { "TaskDirectory": "C:\\TelegramBot\\TaskDirectory" }
 }
 ```
 
-Создать `appsettings.Local.json` в `TelegramBot.Worker/`:
+Схема БД создаётся автоматически при первом запуске Server.
 
-```json
-{
-  "ConnectionStrings": {
-    "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Timeout=30;Minimum Pool Size=2;Connection Idle Lifetime=300"
-  },
-  "FileSystem": {
-    "TaskDirectory": "C:\\TelegramBot\\TaskDirectory"
-  }
-}
-```
-
-Если меняются `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` или порт в `docker-compose.yml`, такую же правку нужно сделать в обеих строках `ConnectionStrings:Postgres`.
-
-### 5. Создать схему БД
-
-Ручные SQL-скрипты для чистой установки не нужны. Server при старте выполняет idempotent-инициализацию схемы: создает `BotUsers`, `Sessions`, `Commands`, `TrackedMessages`, `NotificationOutbox`, индексы и добавляет администратора из `TelegramBot:AdminUserId`.
+### Запуск
 
 ```powershell
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
-```
-
-После успешного старта можно проверить таблицы:
-
-```powershell
-docker exec -it postgres_telegram psql -U postgres -d telegram_bot
-\dt
-SELECT UserId, Role, Status FROM BotUsers;
-\q
-```
-
-### 6. Запустить Worker
-
-В отдельном PowerShell:
-
-```powershell
 dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 ```
 
 Server и Worker должны использовать одну и ту же строку подключения.
-
-### Обслуживание Docker-БД
-
-Остановить контейнер без удаления данных:
-
-```powershell
-docker compose stop
-```
-
-Запустить снова:
-
-```powershell
-docker compose up -d
-```
-
-Посмотреть логи PostgreSQL:
-
-```powershell
-docker logs postgres_telegram
-```
-
-Сделать backup:
-
-```powershell
-docker exec postgres_telegram pg_dump -U postgres -d telegram_bot -Fc -f /tmp/telegram_bot.dump
-docker cp postgres_telegram:/tmp/telegram_bot.dump .\telegram_bot.dump
-```
-
-Восстановить backup в пустую БД:
-
-```powershell
-docker cp .\telegram_bot.dump postgres_telegram:/tmp/telegram_bot.dump
-docker exec postgres_telegram pg_restore -U postgres -d telegram_bot --clean --if-exists /tmp/telegram_bot.dump
-```
-
-Полностью удалить локальную БД и volume:
-
-```powershell
-docker compose down -v
-docker compose up -d
-```
-
-### Автозапуск PostgreSQL при старте Windows
-
-Чтобы база данных PostgreSQL автоматически запускалась при старте Windows, необходимо настроить автозапуск самого Docker Desktop и убедиться в наличии политики перезапуска контейнера.
-
-1. **Автозапуск Docker Desktop:**
-   - Откройте **Docker Desktop**.
-   - Перейдите в настройки, нажав на иконку шестеренки (**Settings**) в правом верхнем углу.
-   - На вкладке **General** активируйте опцию **"Start Docker Desktop when you log in"** (или **"Start Docker Desktop when you start Windows"**).
-   - Нажмите кнопку **Apply & restart** в правом нижнем углу.
-
-2. **Автозапуск контейнера в Docker:**
-   - В проекте файл [docker-compose.yml](file:///C:/Users/y.zhumabayev/Repository/TelegramBot/docker-compose.yml) уже настроен с директивой `restart: unless-stopped`. Это означает, что при запуске Docker Desktop контейнер PostgreSQL поднимется автоматически, если он не был принудительно остановлен вами вручную (`docker compose stop` / `docker compose down`) перед выключением ПК.
-   - Если вы запускаете контейнер через CLI (`docker run`), используйте флаг `--restart`:
-     ```powershell
-     docker run -d --name postgres_telegram --restart unless-stopped -p 5432:5432 postgres:18
-     ```
 
 ## Конфигурация
 
@@ -266,7 +121,7 @@ XSD-схемы — vendored копия в `Docs/BimContract/` (источник 
 
 ## Логи
 
-Serilog: Console + Seq (`http://localhost:5341`) + rolling files (`%USERPROFILE%\\...\\Logs\\Server\\`, `\\Worker\\`, `\\BimLib\\`). Ежедневно + 50 MiB, до 31 файла. Структурированные с `CommandId`, `SessionId`, `CorrelationId`.
+Serilog: Console + Seq (`http://localhost:5341`) + rolling files (`%USERPROFILE%\\...\\Logs\\Server\\`, `\\Worker\\`, `\\BimLib\\`). Ежедневно + 50 MiB, до 31 файла.
 
 ## Проверка
 

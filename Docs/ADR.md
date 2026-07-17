@@ -12,30 +12,6 @@
 
 ---
 
-## ADR-002: Worker simplification — slot semaphore удалён
-
-**Дата:** 2026-07-02 | **Статус:** реализовано
-
-**Контекст:** Worker имел отдельный `SemaphoreSlim` для ограничения параллельных команд, дублирующий логику `_drainGate` + `_runningTasks.Count`.
-
-**Решение:** Удалить command-slot semaphore. `_drainGate` и tracked running-task count уже ограничивают claim до `MaxConcurrentCommands`.
-
-**Последствия:** (+) Меньше concurrency primitives. (-) Нет change — поведение не изменилось.
-
----
-
-## ADR-003: Worker — async Revit detection → sync
-
-**Дата:** 2026-07-02 | **Статус:** реализовано
-
-**Контекст:** `RevitVersionDetector.DetectVersion` был async, но OpenMcdf не имеет async API — фактически метод выполнялся синхронно с фейковым `Task.Run`.
-
-**Решение:** Сделать `DetectVersion` синхронным.
-
-**Последствия:** (+) Прозрачность: вызов не скрывает реальную работу. (-) Не блокирует — метод вызывается до Process.Start в рамках одной команды.
-
----
-
 ## ADR-004: Soft-delete вместо DELETE
 
 **Дата:** 2026-07 (начало проекта) | **Статус:** действует
