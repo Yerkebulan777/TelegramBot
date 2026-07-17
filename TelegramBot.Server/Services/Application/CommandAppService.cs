@@ -34,22 +34,16 @@ public sealed class CommandAppService(
             message.MessageId,
             session);
 
-        // Server restart detection: session is fresh after restart (not yet initialized)
-        // and user sends a non-slash text — redirect to /start for a clean slate
+        // Stale-session detection: a fresh session (after restart, idle timeout, or first run)
+        // is not yet initialized. A slash command initializes it; any other text gets a single
+        // redirect-to-/start hint. Initialized is then set unconditionally — true is idempotent
+        // for already-initialized sessions.
         if (!session.Initialized && !message.Text!.StartsWith('/'))
         {
-            logger.LogDebug("Post-restart redirect to /start: {Username} ({UserId})",
-                message.Username, message.UserId);
-            _=await outputService.RemoveReplyKeyboardAsync(message.UserId,
-                "⚡️ Сервер был перезапущен.\nСтарые сообщения больше неактуальны.\n\nИспользуйте /start для начала.");
+            await NotifyStaleSessionAsync(session, message.UserId, message.Username);
             return;
         }
-
-        // Any slash command marks the session as initialized (after restart or fresh start)
-        if (message.Text!.StartsWith('/'))
-        {
-            session.Initialized = true;
-        }
+        session.Initialized = true;
 
         await slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
     }
@@ -71,8 +65,21 @@ public sealed class CommandAppService(
 
         var session = sessionManager.GetOrCreateSession(callback.UserId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
+        var bypassesAccess = accessValidator.BypassesAccessCheck(parsed.Prefix);
 
-        if (!accessValidator.BypassesAccessCheck(parsed.Prefix))
+        // Stale-session detection for callbacks. Bootstrap callbacks (REQACCESS, APPROVEUSER,
+        // REJECTUSER) operate on DB state, not session state, so they bypass this check — same
+        // exemption as the access check below. All other callbacks depend on session-local state
+        // (pending commands, file selection, status filters) that no longer exists after restart,
+        // so a fresh session is redirected to /start via a single hint.
+        if (!session.Initialized && !bypassesAccess)
+        {
+            await NotifyStaleSessionAsync(session, callback.UserId, callback.Username);
+            return;
+        }
+        session.Initialized = true;
+
+        if (!bypassesAccess)
         {
             var access = await accessValidator.ValidateAsync(callback.UserId);
             if (!access.IsActive)
@@ -98,6 +105,22 @@ public sealed class CommandAppService(
         };
 
         await callbackDispatcher.DispatchAsync(context, cancellationToken);
+    }
+
+    /// <summary>
+    /// Notifies the user that their previous session is gone (server restart, idle timeout, or
+    /// first run) and they should start over. Removes any lingering reply keyboard, tracks the
+    /// sent message so it is cleaned up by ClearChatHistoryAsync, and marks the session
+    /// initialized so the hint fires at most once per session.
+    /// </summary>
+    private async Task NotifyStaleSessionAsync(UserSession session, long userId, string? username)
+    {
+        logger.LogDebug("Stale session redirected to /start: {Username} ({UserId})", username, userId);
+        _ = await messageTrackingService.TrackAsync(
+            outputService.RemoveReplyKeyboardAsync(userId,
+                "⚡️ Сервер перезапущен или сессия истекла.\nСтарые сообщения неактуальны.\n\nВведите /start."),
+            session);
+        session.Initialized = true;
     }
 
 }

@@ -30,7 +30,8 @@ public class UserSession
     /// <summary>Текущая страница в /status (0-based). Сбрасывается при смене фильтра.</summary>
     public int StatusPage { get; set; }
 
-    /// <summary>False after server restart — set to true on first slash command to suppress stale-message detection.</summary>
+    /// <summary>False until the first user interaction on this session (slash command, text message, or callback).
+    /// Used to detect stale sessions (after restart, idle eviction, or first run) and redirect to /start once.</summary>
     public bool Initialized { get; set; }
     public int SessionId { get; set; }
     public int? CommandSelectionMessageId { get; set; }
