@@ -2,6 +2,7 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
 using TelegramBot.Data;
+using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application;
@@ -26,7 +27,7 @@ public sealed class SessionsListRenderer(
 
         var sessions = await sessionsTask;
         var total = await countTask;
-        var (clampedPage, totalPages) = KeyboardBuilder.GetSessionsPageInfo(total, page);
+        var (clampedPage, totalPages) = Pagination.Calculate(total, page, KeyboardBuilder.SessionsPageSize);
 
         var text = totalPages > 1
             ? $"{StatusFilters.GetTitle(filter)} (всего {total} • стр. {clampedPage + 1}/{totalPages})"

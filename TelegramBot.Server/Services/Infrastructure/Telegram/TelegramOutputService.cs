@@ -143,7 +143,7 @@ public class TelegramOutputService(
             return await botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
         }
-        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
+        catch (ApiRequestException ex) when (TelegramErrors.IsReplyMarkupTooLong(ex))
         {
             logger.LogWarning(
                 "Reply markup too long: {UserId}, fallback text-only",
@@ -181,7 +181,7 @@ public class TelegramOutputService(
         {
             _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
         }
-        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
+        catch (ApiRequestException ex) when (TelegramErrors.IsMessageNotModified(ex))
         {
             logger.LogDebug("Reply text unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
@@ -197,11 +197,11 @@ public class TelegramOutputService(
         {
             _=await botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
         }
-        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
+        catch (ApiRequestException ex) when (TelegramErrors.IsMessageNotModified(ex))
         {
             logger.LogDebug("Reply markup unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
-        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
+        catch (ApiRequestException ex) when (TelegramErrors.IsReplyMarkupTooLong(ex))
         {
             // Существующая клавиатура остаётся — фронт не ломаем, только логируем.
             logger.LogWarning(
@@ -220,11 +220,11 @@ public class TelegramOutputService(
         {
             _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
         }
-        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
+        catch (ApiRequestException ex) when (TelegramErrors.IsMessageNotModified(ex))
         {
             logger.LogDebug("Text+keyboard unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
-        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
+        catch (ApiRequestException ex) when (TelegramErrors.IsReplyMarkupTooLong(ex))
         {
             logger.LogWarning(
                 "Reply markup too long: {UserId} msg={MessageId}; fallback text-only",
@@ -233,7 +233,7 @@ public class TelegramOutputService(
             {
                 _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
             }
-            catch (ApiRequestException fbEx) when (IsMessageNotModified(fbEx))
+            catch (ApiRequestException fbEx) when (TelegramErrors.IsMessageNotModified(fbEx))
             {
                 logger.LogDebug(
                     "Text fallback unchanged: {UserId} msg={MessageId}", userId, messageId);
@@ -265,25 +265,6 @@ public class TelegramOutputService(
         {
             logger.LogDebug(ex, "Send chat action fail: {UserId}", userId);
         }
-    }
-
-    private static bool IsMessageNotModified(ApiRequestException ex)
-    {
-        return ex.ErrorCode == 400
-            && ex.Message.Contains("message is not modified", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// Telegram API: HTTP 400 «Bad Request: reply markup is too long».
-    /// Срабатывает, когда суммарный размер callback_data всех кнопок inline-клавиатуры
-    /// превышает ~4096 байт. Лечится пагинацией (см. KeyboardBuilder.SessionsPageSize)
-    /// или fallback на текст без клавиатуры.
-    /// </summary>
-    private static bool IsReplyMarkupTooLong(ApiRequestException ex)
-    {
-        return ex.ErrorCode == 400
-            && ex.Message.Contains("reply markup", StringComparison.OrdinalIgnoreCase)
-            && ex.Message.Contains("too long", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

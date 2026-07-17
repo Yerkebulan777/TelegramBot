@@ -272,9 +272,9 @@ public sealed partial class SlashCommandService(
             username, userId, session.PendingCommand.Count, selectedFiles.Count);
 
         var commandNames = session.PendingCommandName;
-        var projectName = GetProjectName(selectedFiles.First());
+        var projectName = ProjectPathHelper.GetProjectName(selectedFiles.First(), _options.ProjectDirectoryName);
         var sectionNames = selectedFiles
-            .Select(GetSectionFolderName)
+            .Select(file => ProjectPathHelper.GetSectionFolderName(file, _options.ProjectDirectoryName))
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -311,7 +311,7 @@ public sealed partial class SlashCommandService(
                 return;
             }
 
-            var queuedMessage = BuildJobQueuedMessage(commandNames, projectName, sectionNames, queuedFileCount, skippedPairs);
+            var queuedMessage = JobMessageFormatter.BuildJobQueuedMessage(commandNames, projectName, sectionNames, queuedFileCount, skippedPairs);
 
             logger.LogInformation(
                 "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}, skipped={SkippedCount}",
@@ -522,95 +522,5 @@ public sealed partial class SlashCommandService(
         }
 
         return text.ToLowerInvariant();
-    }
-
-    private static string BuildJobQueuedMessage(
-        IReadOnlyList<string> commandNames,
-        string projectName,
-        IEnumerable<string> sectionNames,
-        int fileCount,
-        IReadOnlyList<(string Command, string FilePath)>? skippedPairs = null)
-    {
-        var builder = new StringBuilder()
-            .AppendLine("✅ *Задание успешно добавлено в очередь*")
-            .AppendLine()
-            .AppendLine("🧰 *Команды*");
-
-        foreach (var commandName in commandNames)
-        {
-            _=builder.AppendLine($"• {MarkdownHelper.Escape(commandName)}");
-        }
-
-        _=builder
-            .AppendLine()
-            .AppendLine("📌 *Проект*")
-            .AppendLine($"`{MarkdownHelper.Escape(projectName)}`")
-            .AppendLine()
-            .AppendLine("📂 *Разделы*");
-
-        foreach (var sectionName in sectionNames)
-        {
-            _=builder.AppendLine($"• {MarkdownHelper.Escape(sectionName)}");
-        }
-
-        _=builder
-            .AppendLine()
-            .AppendLine($"📄 *Количество файлов:* `{fileCount}`");
-
-        if (skippedPairs is { Count: > 0 })
-        {
-            _=builder
-                .AppendLine()
-                .AppendLine($"⚠️ *Уже в очереди, пропущено:* `{skippedPairs.Count}`");
-
-            foreach (var (command, filePath) in skippedPairs)
-            {
-                _=builder.AppendLine($"• {MarkdownHelper.Escape(Path.GetFileName(filePath))} — {MarkdownHelper.Escape(command)}");
-            }
-        }
-
-        return builder.ToString();
-    }
-
-    /// <summary>Имя папки проекта (родитель 01_PROJECT) для выбранного файла.</summary>
-    private string GetProjectName(string filePath)
-    {
-        var dir = Path.GetDirectoryName(filePath);
-        while (!string.IsNullOrEmpty(dir))
-        {
-            if (string.Equals(Path.GetFileName(dir), _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase))
-            {
-                var parent = Path.GetDirectoryName(dir);
-                return parent != null ? GetSafePathName(parent) : GetSafePathName(dir);
-            }
-
-            dir = Path.GetDirectoryName(dir);
-        }
-
-        return GetSafePathName(filePath);
-    }
-
-    private static string GetSafePathName(string path)
-    {
-        var name = Path.GetFileName(path);
-        return string.IsNullOrWhiteSpace(name) ? path : name;
-    }
-
-    /// <summary>Имя папки раздела (родитель которой — 01_PROJECT) для выбранного файла, либо null.</summary>
-    private string? GetSectionFolderName(string filePath)
-    {
-        var dir = Path.GetDirectoryName(filePath);
-        while (!string.IsNullOrEmpty(dir))
-        {
-            var parent = Path.GetDirectoryName(dir);
-            if (parent != null && string.Equals(Path.GetFileName(parent), _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase))
-            {
-                return GetSafePathName(dir);
-            }
-
-            dir = parent;
-        }
-
-        return null;
     }
 }

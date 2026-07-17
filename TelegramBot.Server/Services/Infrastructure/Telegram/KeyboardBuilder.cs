@@ -1,6 +1,7 @@
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
+using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Infrastructure.FileSystem;
 
@@ -44,13 +45,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
     public InlineKeyboardMarkup GetSessionsListKeyboard(
         List<SessionsList> sessionsList, string currentFilter, int page = 0)
     {
-        var total = sessionsList.Count;
-        var totalPages = total > 0
-            ? (total + SessionsPageSize - 1) / SessionsPageSize
-            : 0;
-        var clampedPage = totalPages > 0
-            ? Math.Clamp(page, 0, totalPages - 1)
-            : 0;
+        var (clampedPage, totalPages) = Pagination.Calculate(sessionsList.Count, page, SessionsPageSize);
 
         var buttons = new List<List<InlineKeyboardButton>>
         {
@@ -61,7 +56,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
                 .ToList()
         };
 
-        foreach (var session in sessionsList.Skip(clampedPage * SessionsPageSize).Take(SessionsPageSize))
+        foreach (var session in Pagination.Page(sessionsList, clampedPage, SessionsPageSize))
         {
             var finished = session.DoneCommands + session.FailedCommands == session.TotalCommands;
             var progressIcon = finished ? "✅" : "🔄";
@@ -97,18 +92,6 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         }
 
         return new InlineKeyboardMarkup(buttons);
-    }
-
-    /// <summary>Вычисляет (clampedPage, totalPages) для отображения в тексте сообщения /status.</summary>
-    public static (int ClampedPage, int TotalPages) GetSessionsPageInfo(int totalCount, int page)
-    {
-        var totalPages = totalCount > 0
-            ? (totalCount + SessionsPageSize - 1) / SessionsPageSize
-            : 0;
-        var clampedPage = totalPages > 0
-            ? Math.Clamp(page, 0, totalPages - 1)
-            : 0;
-        return (clampedPage, totalPages);
     }
 
     private static string FilterLabel(string title, string currentFilter, string filterKey)
@@ -179,15 +162,9 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             ? sessionCommands
             : sessionCommands.Where(c => string.Equals(c.Command, selectedFilter, StringComparison.OrdinalIgnoreCase)).ToList();
 
-        var totalFiles = visibleCommands.Count;
-        var totalFilePages = totalFiles > 0
-            ? (totalFiles + SessionsPageSize - 1) / SessionsPageSize
-            : 0;
-        var clampedFilePage = totalFilePages > 0
-            ? Math.Clamp(page, 0, totalFilePages - 1)
-            : 0;
+        var (clampedFilePage, totalFilePages) = Pagination.Calculate(visibleCommands.Count, page, SessionsPageSize);
 
-        foreach (var sessionCommand in visibleCommands.Skip(clampedFilePage * SessionsPageSize).Take(SessionsPageSize))
+        foreach (var sessionCommand in Pagination.Page(visibleCommands, clampedFilePage, SessionsPageSize))
         {
             var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
             var fileName = Path.GetFileName(sessionCommand.FileName);
