@@ -54,9 +54,7 @@ public sealed class FileSelectionHandler(
 
         session.CurrentPath = newPath;
 
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
-        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+        await ReRenderSelectionAsync(context, "");
     }
 
     private async Task HandleSelectAllAsync(CallbackContext context, CancellationToken cancellationToken)
@@ -82,9 +80,7 @@ public sealed class FileSelectionHandler(
                 path);
         }
 
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
-        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "Все файлы выбраны");
+        await ReRenderSelectionAsync(context, "Все файлы выбраны");
 
     }
 
@@ -115,10 +111,18 @@ public sealed class FileSelectionHandler(
             _=session.ToggleSelectedFile(filePath);
         }
 
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
-        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+        await ReRenderSelectionAsync(context, "");
 
     }
 
+    /// <summary>
+    /// Перестраивает selection-клавиатуру из текущего состояния сессии, обновляет
+    /// сообщение и подтверждает callback. Общая механика toggle/select-all/open-folder.
+    /// </summary>
+    private async Task ReRenderSelectionAsync(CallbackContext context, string ackText)
+    {
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, context.Session);
+        await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, ackText);
+    }
 }

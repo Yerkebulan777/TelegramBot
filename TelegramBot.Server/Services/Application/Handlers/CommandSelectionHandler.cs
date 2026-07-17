@@ -9,7 +9,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class CommandSelectionHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
-    MessageTrackingService messageTrackingService,
+    FileActionsKeyboardService fileActionsKeyboardService,
     IOptions<FileSystemOptions> options,
     ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -50,23 +50,7 @@ public sealed class CommandSelectionHandler(
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
-        await SendFileActionsReplyKeyboardAsync(context);
-
-    }
-
-    private async Task SendFileActionsReplyKeyboardAsync(CallbackContext context)
-    {
-        if (context.Session.LastActionsMessageId.HasValue)
-        {
-            await outputService.DeleteMessageAsync(context.UserId, context.Session.LastActionsMessageId.Value);
-            context.Session.LastActionsMessageId = null;
-        }
-
-        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
-        var message = await messageTrackingService.TrackAsync(
-            outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "Действия:", replyKeyboard),
-            context.Session);
-        context.Session.LastActionsMessageId = message?.Id;
+        await fileActionsKeyboardService.RefreshAsync(context.UserId, context.Session);
     }
 
     private async Task HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)
@@ -78,6 +62,5 @@ public sealed class CommandSelectionHandler(
 
         // Удаляем все отслеживаемые сообщения, ничего не выводим
         await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
-
     }
 }

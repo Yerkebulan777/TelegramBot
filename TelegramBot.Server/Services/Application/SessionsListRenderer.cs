@@ -1,6 +1,7 @@
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Constants;
+using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -51,5 +52,63 @@ public sealed class SessionsListRenderer(
         var (text, keyboard) = await BuildAsync(filter, page, cancellationToken);
         logger.LogInformation("{Username} view sessions: filter={Filter}, page={Page}", username, filter, page);
         await outputService.EditMessageTextWithKeyboardAsync(chatId, targetMessageId, text, keyboard);
+    }
+
+    /// <summary>
+    /// Строит текст статуса одной сессии: шапка (проект/дата) + сводка по группам команд.
+    /// Вынесено из SessionManagementHandler — presentation-логика централизована в рендерере.
+    /// </summary>
+    public static string BuildStatusReply(SessionStatus sessionStatus, List<SessionCommands>? sessionCommands = null)
+    {
+        var statusIcon = sessionStatus.Status switch
+        {
+            "Done" => "✅",
+            "Failed" => "❌",
+            "Deleted" => "🗑",
+            _ => "🔄"
+        };
+
+        var projectName = MarkdownHelper.Escape(sessionStatus.ProjectName!);
+
+        var header = $"{statusIcon} *{projectName}*\n  📅 {sessionStatus.CreatedAt:dd.MM.yyyy · HH:mm}";
+
+        if (sessionCommands == null || sessionCommands.Count == 0)
+        {
+            return $"*{projectName}*\n  📅 {sessionStatus.CreatedAt:dd.MM.yyyy · HH:mm}";
+        }
+
+        var commandLines = sessionCommands
+            .GroupBy(c => c.Command)
+            .OrderBy(g => g.Key)
+            .Select(group =>
+            {
+                var totalInGroup = group.Count();
+                var doneInGroup = group.Count(c => c.Status == "Done");
+                var failedInGroup = group.Count(c => c.Status == "Failed");
+                var processingInGroup = group.Count(c => c.Status == "processing");
+                var filesLabel = totalInGroup == 1 ? "файл" : "файлов";
+
+                var groupStatusIcon = "⏳";
+                if (doneInGroup == totalInGroup)
+                {
+                    groupStatusIcon = "✅";
+                }
+                else if (failedInGroup > 0)
+                {
+                    groupStatusIcon = "❌";
+                }
+                else if (processingInGroup > 0)
+                {
+                    groupStatusIcon = "🔄";
+                }
+
+                return $"📦 *{group.Key}* ({doneInGroup}/{totalInGroup}) {groupStatusIcon} · {totalInGroup} {filesLabel}";
+            });
+
+        var commandsText = string.Join("\n", commandLines);
+
+        return $"{header}\n" +
+               $"━━━━━━━━━━━━━━━━━━━━\n" +
+               $"{commandsText}";
     }
 }

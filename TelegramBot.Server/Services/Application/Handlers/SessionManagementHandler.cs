@@ -102,7 +102,7 @@ public sealed class SessionManagementHandler(
         var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
         var keyboard = keyboardBuilder.GetSessionCommandsKeyboard(sessionCommands, sessionId, filter, page);
         await outputService.EditMessageTextWithKeyboardAsync(
-            context.UserId, context.MessageId, BuildStatusReply(sessionStatus, sessionCommands), keyboard);
+            context.UserId, context.MessageId, SessionsListRenderer.BuildStatusReply(sessionStatus, sessionCommands), keyboard);
         context.Session.StatusMessageId = context.MessageId;
     }
 
@@ -126,7 +126,7 @@ public sealed class SessionManagementHandler(
             var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
             var keyboard = keyboardBuilder.GetSessionStatusKeyboard(sessionStatus, sessionId);
             await outputService.EditMessageTextWithKeyboardAsync(
-                context.UserId, context.MessageId, BuildStatusReply(sessionStatus), keyboard);
+                context.UserId, context.MessageId, SessionsListRenderer.BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;
         }
         else
@@ -393,57 +393,4 @@ public sealed class SessionManagementHandler(
         session.StatusMessageId ??= context.MessageId;
     }
 
-    private static string BuildStatusReply(SessionStatus sessionStatus, List<SessionCommands>? sessionCommands = null)
-    {
-        var statusIcon = sessionStatus.Status switch
-        {
-            "Done" => "✅",
-            "Failed" => "❌",
-            "Deleted" => "🗑",
-            _ => "🔄"
-        };
-
-        var projectName = MarkdownHelper.Escape(sessionStatus.ProjectName!);
-
-        var header = $"{statusIcon} *{projectName}*\n  📅 {sessionStatus.CreatedAt:dd.MM.yyyy · HH:mm}";
-
-        if (sessionCommands == null || sessionCommands.Count == 0)
-        {
-            return $"*{projectName}*\n  📅 {sessionStatus.CreatedAt:dd.MM.yyyy · HH:mm}";
-        }
-
-        var commandLines = sessionCommands
-            .GroupBy(c => c.Command)
-            .OrderBy(g => g.Key)
-            .Select(group =>
-            {
-                var totalInGroup = group.Count();
-                var doneInGroup = group.Count(c => c.Status == "Done");
-                var failedInGroup = group.Count(c => c.Status == "Failed");
-                var processingInGroup = group.Count(c => c.Status == "processing");
-                var filesLabel = totalInGroup == 1 ? "файл" : "файлов";
-
-                var groupStatusIcon = "⏳";
-                if (doneInGroup == totalInGroup)
-                {
-                    groupStatusIcon = "✅";
-                }
-                else if (failedInGroup > 0)
-                {
-                    groupStatusIcon = "❌";
-                }
-                else if (processingInGroup > 0)
-                {
-                    groupStatusIcon = "🔄";
-                }
-
-                return $"📦 *{group.Key}* ({doneInGroup}/{totalInGroup}) {groupStatusIcon} · {totalInGroup} {filesLabel}";
-            });
-
-        var commandsText = string.Join("\n", commandLines);
-
-        return $"{header}\n" +
-               $"━━━━━━━━━━━━━━━━━━━━\n" +
-               $"{commandsText}";
-    }
 }

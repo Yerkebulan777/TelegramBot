@@ -19,6 +19,7 @@ namespace TelegramBot.Server.Services.Application;
 public sealed partial class SlashCommandService(
     SessionDataService sessionDataService,
     MessageTrackingService messageTrackingService,
+    FileActionsKeyboardService fileActionsKeyboardService,
     TelegramOutputService outputService,
     KeyboardBuilder keyboardBuilder,
     AuthorizationMiddleware accessValidator,
@@ -218,7 +219,7 @@ public sealed partial class SlashCommandService(
         var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
         var selectionMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
         session.FileSelectionMessageId = selectionMessage?.Id;
-        await SendFileActionsReplyKeyboardAsync(userId, session);
+        await fileActionsKeyboardService.RefreshAsync(userId, session);
     }
 
     private async Task ConfirmFileSelectionAsync(long userId, string username, UserSession session, CancellationToken cancellationToken)
@@ -250,7 +251,7 @@ public sealed partial class SlashCommandService(
 
             var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
             await outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
-            await SendFileActionsReplyKeyboardAsync(userId, session);
+            await fileActionsKeyboardService.RefreshAsync(userId, session);
             await CleanupCurrentViewAsync(userId, session);
             return;
         }
@@ -380,21 +381,6 @@ public sealed partial class SlashCommandService(
 
         await RejectAndWarnAsync(userId, session, message);
         return false;
-    }
-
-    private async Task SendFileActionsReplyKeyboardAsync(long userId, UserSession session)
-    {
-        if (session.LastActionsMessageId.HasValue)
-        {
-            await outputService.DeleteMessageAsync(userId, session.LastActionsMessageId.Value);
-            session.LastActionsMessageId = null;
-        }
-
-        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
-        var message = await messageTrackingService.TrackAsync(
-            outputService.SendMessageWithReplyKeyboardAsync(userId, "Действия:", replyKeyboard),
-            session);
-        session.LastActionsMessageId = message?.Id;
     }
 
     private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
