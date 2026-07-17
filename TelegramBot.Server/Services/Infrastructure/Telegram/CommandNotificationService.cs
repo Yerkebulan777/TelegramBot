@@ -16,8 +16,7 @@ public sealed class CommandNotificationService(
     Channel<NotificationItem> notificationChannel,
     ILogger<CommandNotificationService> logger) : BackgroundService
 {
-    private readonly string _connectionString = configuration.GetConnectionString("Postgres")
-        ?? DataAccessBase.DefaultConnectionString;
+    private readonly string _connectionString = DataAccessBase.ResolveConnectionString(configuration);
 
     // Dedup: одно уведомление о старте на сессию; очищается при завершении
     private readonly ConcurrentDictionary<int, byte> _startedSessions = new();

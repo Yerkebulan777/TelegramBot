@@ -317,7 +317,7 @@ public sealed partial class SlashCommandService(
                 "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}, skipped={SkippedCount}",
                 sessionId, correlationId, username, userId, session.PendingCommand.Count, queuedFileCount, skippedPairs.Count);
 
-            session.SessionId = checked((int)sessionId.Value);
+            session.SessionId = sessionId.Value;
             await outputService.ClearChatHistoryAsync(userId, session);
 
             session.ResetNavigation(_options.RootPath);

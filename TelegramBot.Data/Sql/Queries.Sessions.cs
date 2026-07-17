@@ -71,6 +71,11 @@ internal static partial class SqlQueries
               AND Status != 'Deleted'
               AND CreatedAt >= @SinceUtc;";
 
+        internal const string GetUsername = @"
+            SELECT Username
+            FROM Sessions
+            WHERE SessionId = @SessionId;";
+
         internal const string GetStatus = @"
             SELECT
                 s.Status,

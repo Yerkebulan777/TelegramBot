@@ -106,6 +106,9 @@ public static class Program
         }
         catch (Exception ex)
         {
+            // Ненулевой exit code обязателен: иначе супервизор (NSSM/sc/Task Scheduler) сочтёт процесс
+            // завершённым штатно и не перезапустит. Сериложный Fatal сам по себе exit code не выставляет.
+            Environment.ExitCode = 1;
             Log.Fatal(ex, "Worker terminated unexpectedly");
         }
         finally

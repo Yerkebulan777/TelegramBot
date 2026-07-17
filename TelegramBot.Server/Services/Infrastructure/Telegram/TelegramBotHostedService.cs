@@ -184,8 +184,16 @@ public class TelegramBotHostedService(
                 using (await sessionManager.AcquireUserLockAsync(callback.UserId))
                 {
                     _ = sessionManager.GetOrCreateSession(callback.UserId);
-                    await commandAppService.HandleCallbackAsync(callback, ct);
-                    await botClient.AnswerCallbackQuery(callback.CallbackQueryId, cancellationToken: ct);
+                    try
+                    {
+                        await commandAppService.HandleCallbackAsync(callback, ct);
+                    }
+                    finally
+                    {
+                        // AnswerCallbackQuery обязан сработать даже при исключении handler'а —
+                        // иначе у пользователя остаются «часики» на кнопке до таймаута Telegram (~30 с).
+                        await botClient.AnswerCallbackQuery(callback.CallbackQueryId, cancellationToken: ct);
+                    }
                 }
                 break;
         }

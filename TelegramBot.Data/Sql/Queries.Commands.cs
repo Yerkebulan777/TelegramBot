@@ -156,7 +156,7 @@ internal static partial class SqlQueries
 
         internal const string Requeue = @"
             WITH target AS (
-                SELECT c.CommandId, c.Status
+                SELECT c.CommandId, c.Status, c.SessionId
                 FROM Commands c
                 JOIN Sessions s ON s.SessionId = c.SessionId
                 WHERE c.CommandId = @CommandId
@@ -175,7 +175,17 @@ internal static partial class SqlQueries
                 FROM target t
                 WHERE c.CommandId = t.CommandId
                   AND t.Status != 'processing'
-                RETURNING c.CommandId
+                RETURNING c.CommandId, c.SessionId
+            ),
+            -- Сбрасываем CompletionNotified сессии: иначе повторный запуск останется «уже уведомлённым»,
+            -- и NotifySessionCompletedOnceAsync вернёт 0 — пользователь не узнает о результате requeue.
+            session_reset AS (
+                UPDATE Sessions s
+                SET CompletionNotified = FALSE,
+                    UpdatedAt = NOW()
+                FROM requeued r
+                WHERE s.SessionId = r.SessionId
+                RETURNING s.SessionId
             ),
             notified AS (
                 SELECT pg_notify('new_tasks', @CommandId::text) FROM requeued
@@ -203,9 +213,18 @@ internal static partial class SqlQueries
 
         internal const string ReleaseExpiredLeases = @"
             UPDATE Commands
-            SET Status = 'pending', 
+            SET Status = CASE
+                    -- Poison-command guard: при превышении MaxRetries считаем команду перманентно
+                    -- невыполнимой (Worker падает, не записав статус) — фиксируем Failed, иначе цикл
+                    -- «claim → crash → lease expiry → pending» длится бесконечно, а MaxRetries из обычного
+                    -- retry-пути (ScheduleRetry) этого сценария не покрывает.
+                    WHEN RetryCount + 1 >= @MaxRetries THEN 'Failed'
+                    ELSE 'pending'
+                END,
+                RetryCount = RetryCount + 1,
                 Lease = NULL,
                 StartedAt = NULL,
+                CompletedAt = CASE WHEN RetryCount + 1 >= @MaxRetries THEN NOW() ELSE CompletedAt END,
                 ErrorMessage = 'Lease expired: worker crash or timeout'
             WHERE Status = 'processing'
               AND Lease IS NOT NULL

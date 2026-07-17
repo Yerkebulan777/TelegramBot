@@ -114,6 +114,10 @@ public sealed class ProcessRunner(
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             await process.WaitForExitAsync(ct);
+            // Sync WaitForExit после WaitForExitAsync — НЕ ошибка и НЕ sync-over-async в вредном смысле.
+            // Это рекомендуемый .NET-приём для redirected output: после асинхронного выхода процесса
+            // sync-перегрузка дочитывает остатки stdout/stderr-буферов, гарантируя, что OutputDataReceived
+            // успел отстрелять до разбора ResultFile. НЕ заменять на один только WaitForExitAsync.
             process.WaitForExit();
         }
         finally
@@ -145,7 +149,17 @@ public sealed class ProcessRunner(
         }
     }
 
-    /// <summary>Обрабатывает таймаут процесса: убивает процесс, записывает Failed.</summary>
+    /// <summary>
+    /// Обрабатывает таймаут процесса: убивает процесс, записывает Failed.
+    /// </summary>
+    /// <remarks>
+    /// Таймаут intentionally идёт в Failed напрямую, минуя ErrorClassifier и retry-механизм
+    /// (в отличие от crash-исключения, который ретраится). Причина: <see cref="WorkerOptions.ProcessTimeoutMinutes"/>
+    /// по умолчанию 180 минут (3 ч) — повтор такой задачи ещё 5 раз обойдётся в 15 часов CPU.
+    /// Типичные причины таймаута (зависший сетевой диск, modal dialog) классифицируются как transient,
+    /// но стоимость retry непропорциональна выгоде. Если потребуется retry-семантика для таймаута —
+    /// пускать эту ветку через HandleFailureAsync (isPermanent: false).
+    /// </remarks>
     private async Task HandleTimeoutAsync(PendingCommand cmd, Process? process, Stopwatch sw)
     {
         sw.Stop();

@@ -10,7 +10,7 @@ namespace TelegramBot.Data;
 public sealed class DatabaseInitializerService(
     IConfiguration configuration,
     ILogger<DatabaseInitializerService> logger)
-    : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
+    : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     /// <inheritdoc/>
     public async Task InitializeDatabaseAsync()
@@ -30,6 +30,9 @@ public sealed class DatabaseInitializerService(
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateNotificationOutboxTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureNotificationOutboxColumns, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.AddCommandsStatusCheck, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.AddSessionsStatusCheck, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.AddNotificationOutboxStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled, transaction: tx);
 
             await tx.CommitAsync();

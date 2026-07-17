@@ -9,7 +9,7 @@ namespace TelegramBot.Data;
 public sealed class MessageTrackingDataService(
     IConfiguration configuration,
     ILogger<MessageTrackingDataService> logger)
-    : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
+    : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     /// <inheritdoc/>
     public async Task TrackMessageAsync(long chatId, int messageId, int? sessionId = null)

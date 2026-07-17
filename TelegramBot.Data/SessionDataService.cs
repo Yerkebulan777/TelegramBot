@@ -12,7 +12,7 @@ namespace TelegramBot.Data;
 public sealed class SessionDataService(
     IConfiguration configuration,
     ILogger<SessionDataService> logger)
-    : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
+    : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     private sealed record InsertedRow(string CommandText, string FilePath);
 
@@ -23,7 +23,7 @@ public sealed class SessionDataService(
     /// (напр. если DWG для файла уже в очереди, а PDF для того же файла — нет, PDF всё равно queued).
     /// SessionId = null, если дубликатами оказались все пары (очередь пополнить нечем).
     /// </summary>
-    public async Task<(long? SessionId, int QueuedFileCount, IReadOnlyList<(string Command, string FilePath)> SkippedPairs)> CreateSessionWithCommandsAsync(
+    public async Task<(int? SessionId, int QueuedFileCount, IReadOnlyList<(string Command, string FilePath)> SkippedPairs)> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
         long userId,
@@ -45,7 +45,7 @@ public sealed class SessionDataService(
         await using var tx = await conn.BeginTransactionAsync();
 
         correlationId ??= Guid.NewGuid().ToString("N");
-        var sessionId = await conn.QuerySingleAsync<long>(
+        var sessionId = await conn.QuerySingleAsync<int>(
             SqlQueries.Sessions.Insert,
             new { UserId = userId, Username = username, CorrelationId = correlationId, ProjectName = projectName, FilesAmount = filesAmount },
             tx);
@@ -144,7 +144,7 @@ public sealed class SessionDataService(
     {
         await using var conn = await CreateOpenConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<string>(
-            "SELECT Username FROM Sessions WHERE SessionId = @SessionId",
+            SqlQueries.Sessions.GetUsername,
             new { SessionId = sessionId });
     }
 

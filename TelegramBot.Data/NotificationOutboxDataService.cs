@@ -9,9 +9,17 @@ namespace TelegramBot.Data;
 public sealed class NotificationOutboxDataService(
     IConfiguration configuration,
     ILogger<NotificationOutboxDataService> logger)
-    : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
+    : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     public const string SessionCompletedEvent = "session_completed";
+
+    /// <summary>
+    /// Потолок попыток отправки outbox-уведомления. При превышении элемент переходит в статус
+    /// 'failed' (dead-letter) — защищает от вечного ретрая перманентно неотправляемого уведомления
+    /// (пользователь заблокировал бота, чат удалён). Эвристический потолок: типичная transient-ошибка
+    /// (429, сетевая) укладывается в десяток попыток с задержкой до 5 минут.
+    /// </summary>
+    public const int MaxSendAttempts = 50;
 
     // namespace: telegram_bot_outbox_sender — mutual exclusion между репликами Server.
     // Не конфликтует с 1_234_567 (lease cleanup) и 1_234_568 (partition claim).
@@ -22,9 +30,9 @@ public sealed class NotificationOutboxDataService(
         int limit,
         TimeSpan leaseDuration)
     {
+        // Одиночный CTE-стейтмент атомарен сам по себе — explicit-транзакция не нужна (в отличие от
+        // Commands.ClaimAndReturn, где транзакция удерживает pg_try_advisory_xact_lock до commit).
         await using var conn = await CreateOpenConnectionAsync();
-        await using var tx = await conn.BeginTransactionAsync();
-
         var items = await conn.QueryAsync<NotificationOutboxItem>(
             SqlQueries.NotificationOutbox.ClaimPending,
             new
@@ -32,10 +40,8 @@ public sealed class NotificationOutboxDataService(
                 EventType = eventType,
                 Limit = limit,
                 LeaseSeconds = (int)leaseDuration.TotalSeconds
-            },
-            tx);
+            });
 
-        await tx.CommitAsync();
         return items.ToList().AsReadOnly();
     }
 
@@ -66,7 +72,8 @@ public sealed class NotificationOutboxDataService(
             {
                 OutboxId = outboxId,
                 RetryDelaySeconds = retryDelaySeconds,
-                LastError = error
+                LastError = error,
+                MaxAttempts = MaxSendAttempts
             });
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
@@ -9,18 +10,28 @@ namespace TelegramBot.Data;
 /// </summary>
 public abstract class DataAccessBase
 {
-    /// <summary>Строка подключения по умолчанию.</summary>
+    /// <summary>
+    /// Резолвит строку подключения к Postgres из конфигурации.
+    /// При отсутствии <c>ConnectionStrings:Postgres</c> бросает — fail-fast лучше тихого падения на
+    /// захардкоженную localhost-строку с паролем «postgres» (опечатка в ключе конфига иначе маскируется).
+    /// Dev-значение должно лежать в <c>appsettings.Development.json</c> явно.
+    /// </summary>
     /// <remarks>
-    /// <c>Minimum Pool Size=2</c> — держит 2 подключения «тёплыми» для снижения latency на cold-start.
-    /// <c>Connection Idle Lifetime=300</c> — закрывает idle-подключения старше 5 минут.
-    /// <c>Max Pool Size</c> намеренно не задан (default=100 достаточно для текущей нагрузки:
-    /// Server: Parallel.ForEachAsync DOP=10 + notification; Worker: drain loop + cleanup + health).
-    /// <c>Multiplexing</c> не задан (default=true в Npgsql 6+).
+    /// Рекомендуемые параметры строки (см. appsettings.json):
+    /// <c>Minimum Pool Size=2</c> — держит 2 подключения «тёплыми» для снижения latency на cold-start;
+    /// <c>Connection Idle Lifetime=300</c> — закрывает idle-подключения старше 5 минут;
+    /// <c>Max Pool Size</c> не задаётся (default=100 достаточно: Server DOP=10 + notification, Worker drain+cleanup+health);
+    /// <c>Multiplexing</c> не задаётся (default=true в Npgsql 6+);
     /// <c>Timeout=30</c> — budget на cold-start TCP-handshake под пиковой нагрузкой (default 15s
     /// недостаточен при 5+ параллельных Revit: localhost-connect таймаутился при старте Worker).
     /// </remarks>
-    public const string DefaultConnectionString =
-        "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Timeout=30;Minimum Pool Size=2;Connection Idle Lifetime=300";
+    public static string ResolveConnectionString(IConfiguration configuration)
+    {
+        return configuration.GetConnectionString("Postgres")
+            ?? throw new InvalidOperationException(
+                "ConnectionStrings:Postgres is not configured. Set it in appsettings.json " +
+                "(or environment/appsettings.Development.json) — implicit localhost fallback was removed.");
+    }
 
     private readonly string _connectionString;
 

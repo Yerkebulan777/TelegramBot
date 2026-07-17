@@ -12,7 +12,7 @@ namespace TelegramBot.Data;
 public sealed class CommandDataService(
     IConfiguration configuration,
     ILogger<CommandDataService> logger)
-    : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
+    : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     private const int AdvisoryLockId = 1_234_567; // namespace: telegram_bot_lease_cleanup
 
@@ -33,14 +33,17 @@ public sealed class CommandDataService(
         return result.ToList().AsReadOnly();
     }
 
-    /// <summary>Освобождает истёкшие leases.</summary>
-    public async Task ReleaseExpiredLeasesAsync()
+    /// <summary>
+    /// Освобождает истёкшие leases. Команды, чей RetryCount после инкремента достигает
+    /// <paramref name="maxRetries"/>, переводятся в 'Failed' (poison-command guard), остальные — в 'pending'.
+    /// </summary>
+    public async Task ReleaseExpiredLeasesAsync(int maxRetries)
     {
         _ = await TryExecuteWithAdvisoryLockAsync(
             "release expired leases",
             conn => conn.ExecuteAsync(
                 SqlQueries.Commands.ReleaseExpiredLeases,
-                new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }));
+                new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), MaxRetries = maxRetries }));
     }
 
     /// <summary>Обновляет статус команды.</summary>

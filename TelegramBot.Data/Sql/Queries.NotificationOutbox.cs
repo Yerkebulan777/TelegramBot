@@ -44,7 +44,7 @@ internal static partial class SqlQueries
 
         internal const string MarkFailed = @"
             UPDATE NotificationOutbox
-            SET Status = 'pending',
+            SET Status = CASE WHEN Attempts >= @MaxAttempts THEN 'failed' ELSE 'pending' END,
                 NextAttemptAt = NOW() + (@RetryDelaySeconds * INTERVAL '1 second'),
                 LockedUntil = NULL,
                 LastError = @LastError,

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using Telegram.Bot.Types;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
@@ -135,7 +136,17 @@ public sealed class NotificationSenderService(
     {
         try
         {
-            await SendCompletionNotificationAsync(item.SessionId, item.CorrelationId);
+            // SendCompletionNotificationAsync возвращает Message?, которое ExecuteWithRetryAsync
+            // отдаёт как null при исчерпании ретраев (429, сетевые) без исключения. null означает
+            // НЕдоставку: трактуем как fail, чтобы outbox сохранил at-least-once (MarkSent только при
+            // подтверждённой доставке).
+            var sent = await SendCompletionNotificationAsync(item.SessionId, item.CorrelationId);
+            if (sent == null)
+            {
+                throw new InvalidOperationException(
+                    "Completion notification not delivered: SendMessageAsync returned null after retries");
+            }
+
             await notificationOutboxDataService.MarkSentAsync(item.OutboxId);
         }
         catch (Exception ex)
@@ -146,7 +157,7 @@ public sealed class NotificationSenderService(
         }
     }
 
-    private async Task SendCompletionNotificationAsync(int sessionId, string correlationId)
+    private async Task<Message?> SendCompletionNotificationAsync(int sessionId, string correlationId)
     {
         var session = await sessionDataService.GetSessionCompletionSummaryAsync(sessionId);
         var prefix = string.IsNullOrEmpty(session.ProjectName) ? "" : $"{session.ProjectName} — ";
@@ -183,6 +194,7 @@ public sealed class NotificationSenderService(
         await messageTrackingService.TrackAsync(completionMessage, sessionId);
         logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
             session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
+        return completionMessage;
     }
 
     /// <summary>Максимум пунктов с ошибками в одном сообщении; остальные схлопываются в «и ещё N».</summary>

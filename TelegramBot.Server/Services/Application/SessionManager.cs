@@ -49,6 +49,13 @@ public class SessionManager : IDisposable
     /// <summary>
     /// Асинхронно захватывает блокировку на доступ к сессии пользователя.
     /// </summary>
+    /// <remarks>
+    /// Семафор намеренно НЕ удаляется из <c>_sessionLocks</c> при истечении сессии: между
+    /// <c>GetOrAdd</c> и <c>WaitAsync</c> cleanup мог успеть <c>TryRemove + Dispose</c>, что приводило
+    /// к <see cref="ObjectDisposedException"/> и, хуже, к созданию нового семафора для того же
+    /// пользователя — нарушению per-user взаимоисключения. Ленивое удержание семафоров безопасно:
+    /// их размер мал, а число пользователей ограничено.
+    /// </remarks>
     public async Task<IDisposable> AcquireUserLockAsync(long userId)
     {
         var sessionLock = _sessionLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
@@ -92,6 +99,8 @@ public class SessionManager : IDisposable
             return false;
         }
 
+        // Семафор не удаляем (см. комментарий в AcquireUserLockAsync): оставляем его в словаре,
+        // чтобы исключить гонку с dispose. Если он занят — сессией пользуются прямо сейчас, не трогаем.
         if (!_sessionLocks.TryGetValue(userId, out var sessionLock))
         {
             return _sessions.TryRemove(userId, out _);
@@ -102,7 +111,6 @@ public class SessionManager : IDisposable
             return false;
         }
 
-        var lockRemoved = false;
         try
         {
             if (!_sessions.TryGetValue(userId, out var candidate) ||
@@ -111,23 +119,13 @@ public class SessionManager : IDisposable
                 return false;
             }
 
-            _ = _sessions.TryRemove(userId, out _);
-            lockRemoved = _sessionLocks.TryRemove(userId, out _);
-            return true;
+            return _sessions.TryRemove(userId, out _);
         }
         finally
         {
-            if (lockRemoved)
-            {
-                try { sessionLock.Dispose(); }
-                catch (ObjectDisposedException) { /* already disposed */ }
-            }
-            else
-            {
-                try { _ = sessionLock.Release(); }
-                catch (ObjectDisposedException) { /* already disposed */ }
-                catch (SemaphoreFullException) { /* already released */ }
-            }
+            try { _ = sessionLock.Release(); }
+            catch (ObjectDisposedException) { /* already disposed */ }
+            catch (SemaphoreFullException) { /* already released */ }
         }
     }
 

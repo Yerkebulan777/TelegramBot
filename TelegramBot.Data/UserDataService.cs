@@ -11,7 +11,7 @@ namespace TelegramBot.Data;
 public sealed class UserDataService(
     IConfiguration configuration,
     ILogger<UserDataService> logger)
-    : DataAccessBase(configuration.GetConnectionString("Postgres") ?? DefaultConnectionString, logger)
+    : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     /// <summary>Возвращает запись пользователя или null.</summary>
     public async Task<BotUser?> GetUserAsync(long userId)

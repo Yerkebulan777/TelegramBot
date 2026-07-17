@@ -30,8 +30,7 @@ public sealed class CommandExecutionService(
 
     private readonly ConcurrentDictionary<int, DateTime> _unresponsiveSince = new();
 
-    private readonly string _connectionString = configuration.GetConnectionString("Postgres")
-        ?? DataAccessBase.DefaultConnectionString;
+    private readonly string _connectionString = DataAccessBase.ResolveConnectionString(configuration);
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
     private CancellationTokenSource? _shutdownCts;
@@ -55,7 +54,7 @@ public sealed class CommandExecutionService(
             intervalSeconds: _workerOptions.CleanupIntervalSeconds,
             disabledMessage: interval => $"Cleanup disabled: interval={interval}s",
             cycleName: "lease cleanup",
-            cycle: commandDataService.ReleaseExpiredLeasesAsync);
+            cycle: () => commandDataService.ReleaseExpiredLeasesAsync(_workerOptions.MaxRetries));
 
         _processMonitorTask = StartPeriodicBackgroundTaskAsync(
             intervalSeconds: RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds),
@@ -104,7 +103,7 @@ public sealed class CommandExecutionService(
 
         logger.LogInformation("Listen {Channel}", ListenChannel);
 
-        await commandDataService.ReleaseExpiredLeasesAsync();
+        await commandDataService.ReleaseExpiredLeasesAsync(_workerOptions.MaxRetries);
         await orchestrator.TriggerDrainAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -212,6 +211,14 @@ public sealed class CommandExecutionService(
         var thresholdSeconds = Math.Max(
             RoundUpTo30Seconds(_workerOptions.UnresponsiveThresholdSeconds),
             RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds));
+
+        // Чистим «висячие» записи: команда могла завершиться, пока числилась NotResponding, и
+        // выйти из ActiveProcesses между тиками монитора — иначе запись остаётся в _unresponsiveSince навсегда.
+        var activeIds = processRunner.ActiveProcesses.Select(p => p.Key).ToHashSet();
+        foreach (var staleCommandId in _unresponsiveSince.Keys.Where(id => !activeIds.Contains(id)).ToList())
+        {
+            _ = _unresponsiveSince.TryRemove(staleCommandId, out _);
+        }
 
         foreach (var (commandId, process) in processRunner.ActiveProcesses)
         {

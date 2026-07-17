@@ -163,5 +163,33 @@ internal static partial class SqlQueries
             CREATE INDEX IF NOT EXISTS idx_notification_outbox_pending
                 ON NotificationOutbox(Status, NextAttemptAt, CreatedAt, OutboxId)
                 WHERE Status IN ('pending', 'processing');";
+
+        // CHECK-constraints на допустимые значения Status. Статусы в коде — смешанного регистра
+        // ('pending'/'processing' lowercase, 'Done'/'Failed'/'Deleted' PascalCase), SQL-сравнения строгие —
+        // опечатка регистра в новом запросе даёт молча пустой результат. CHECK ловит такие ошибки на
+        // insert/update, а не при последующем SELECT. Idempotent через DO/EXCEPTION (в PG нет
+        // ADD CONSTRAINT IF NOT EXISTS). Каждая константа — ровно один стейтмент (Dapper ExecuteAsync
+        // выполняет одну команду за вызов).
+
+        internal const string AddCommandsStatusCheck = @"
+            DO $$ BEGIN
+                ALTER TABLE Commands
+                    ADD CONSTRAINT chk_commands_status
+                    CHECK (Status IN ('pending', 'processing', 'Done', 'Failed', 'Deleted'));
+            EXCEPTION WHEN duplicate_object THEN NULL; END $$;";
+
+        internal const string AddSessionsStatusCheck = @"
+            DO $$ BEGIN
+                ALTER TABLE Sessions
+                    ADD CONSTRAINT chk_sessions_status
+                    CHECK (Status IN ('pending', 'Deleted'));
+            EXCEPTION WHEN duplicate_object THEN NULL; END $$;";
+
+        internal const string AddNotificationOutboxStatusCheck = @"
+            DO $$ BEGIN
+                ALTER TABLE NotificationOutbox
+                    ADD CONSTRAINT chk_notification_outbox_status
+                    CHECK (Status IN ('pending', 'processing', 'sent', 'failed'));
+            EXCEPTION WHEN duplicate_object THEN NULL; END $$;";
     }
 }
