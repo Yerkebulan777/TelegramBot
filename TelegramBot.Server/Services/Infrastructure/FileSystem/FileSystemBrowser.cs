@@ -14,8 +14,6 @@ namespace TelegramBot.Server.Services.Infrastructure.FileSystem;
 
 public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptions> options, ILogger<FileSystemBrowser> logger)
 {
-    private static readonly TimeSpan _cacheTtl = TimeSpan.FromSeconds(5);
-
     private readonly FileSystemOptions _options = options.Value;
     private readonly Regex _folderRegex = new(options.Value.SectionFolderPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -25,12 +23,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     [GeneratedRegex(@"\.\d{3,5}$", RegexOptions.Compiled)]
     private static partial Regex RevitBackupFilePattern();
 
-    // Кэши хранят уже отфильтрованные результаты: I/O-проверки выполняются один раз за TTL,
-    // а не на каждом рендере клавиатуры.
-    private readonly ConcurrentDictionary<string, CacheEntry<List<string>>> _projectFolderCache = new();
-    private readonly ConcurrentDictionary<string, CacheEntry<List<string>>> _sectionFolderCache = new();
-    private readonly ConcurrentDictionary<string, CacheEntry<List<string>>> _sectionFileCache = new();
-    // Токены выбора путей стабильны (SHA256 от нормализованного пути) — кэшируются без TTL.
+    // Токены выбора путей стабильны (SHA256 от нормализованного пути) и не зависят от содержимого ФС.
     private readonly ConcurrentDictionary<string, string> _tokenCache = new();
 
     private static readonly HashSet<string> _sectionAcronyms = new(StringComparer.OrdinalIgnoreCase)
@@ -51,22 +44,6 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         MatchCasing = MatchCasing.CaseInsensitive,
         AttributesToSkip = FileAttributes.ReparsePoint,
     };
-
-    private readonly record struct CacheEntry<T>(T Value, DateTime ExpiresAt);
-
-    private static List<string> GetOrCache(ConcurrentDictionary<string, CacheEntry<List<string>>> cache, string key, Func<List<string>> factory)
-    {
-        var now = DateTime.UtcNow;
-
-        if (cache.TryGetValue(key, out var cached) && cached.ExpiresAt > now)
-        {
-            return cached.Value;
-        }
-
-        var value = factory();
-        cache[key] = new CacheEntry<List<string>>(value, now.Add(_cacheTtl));
-        return value;
-    }
 
     public InlineKeyboardMarkup GetSectionsView(long userId, string path)
     {
@@ -182,46 +159,40 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     /// <summary>Папки-проекты: совпадают с SectionFolderPattern и содержат ProjectDirectoryName.</summary>
     private List<string> GetProjectFolders(string path)
     {
-        return GetOrCache(_projectFolderCache, path, () => !Directory.Exists(path)
-                ? []
-                : [.. Directory.GetDirectories(path, "*", _enumOptions)
-                .Where(dir =>
-                {
-                    var name = Path.GetFileName(dir);
-                    return _folderRegex.IsMatch(name) && Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName));
-                })]);
+        if (!Directory.Exists(path))
+        {
+            return [];
+        }
+
+        return [.. Directory.GetDirectories(path, "*", _enumOptions)
+            .Where(dir =>
+            {
+                var name = Path.GetFileName(dir);
+                return _folderRegex.IsMatch(name) && Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName));
+            })];
     }
 
     /// <summary>Папки разделов внутри ProjectDirectoryName, имя которых содержит известный acronym.</summary>
     private List<string> GetSectionFolders(string path)
     {
-        return GetOrCache(_sectionFolderCache, path, () => !Directory.Exists(path)
-                ? []
-                : Directory.GetDirectories(path, "*", _enumOptions)
-                .Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))
-                .ToList());
-    }
+        if (!Directory.Exists(path))
+        {
+            return [];
+        }
 
-    /// <summary>Дедуплицированные .rvt-файлы раздела (результат кэшируется).</summary>
-    private List<string> GetSectionFiles(string sectionPath)
-    {
-        return GetOrCache(_sectionFileCache, sectionPath, () => ScanSectionFiles(sectionPath));
-    }
-
-    private static bool ContainsSectionAcronym(string folderName)
-    {
-        var nameSegments = folderName.Split(_nameSeparators, StringSplitOptions.RemoveEmptyEntries);
-        return nameSegments.Any(_sectionAcronyms.Contains);
+        return Directory.GetDirectories(path, "*", _enumOptions)
+            .Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))
+            .ToList();
     }
 
     /// <summary>
-    /// Синхронный быстрый поиск RVT-файлов раздела.
+    /// Дедуплицированные .rvt-файлы раздела.
     /// Стратегия (максимальная производительность — без глубокого рекурсивного скана):
     /// 1. Файлы верхнего уровня <c>01_RVT</c>. Если они есть — возвращаются только они.
     /// 2. Иначе — файлы в прямых субпапках <c>01_RVT</c>. Дальше не углубляемся.
     /// Единственный try/catch — safety net против race (каталог удалён между Exists и enumerate).
     /// </summary>
-    private List<string> ScanSectionFiles(string sectionPath)
+    private List<string> GetSectionFiles(string sectionPath)
     {
         var rvtDir = _options.GetRvtPath(sectionPath);
 
@@ -258,6 +229,12 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         return [];
     }
 
+    private static bool ContainsSectionAcronym(string folderName)
+    {
+        var nameSegments = folderName.Split(_nameSeparators, StringSplitOptions.RemoveEmptyEntries);
+        return nameSegments.Any(_sectionAcronyms.Contains);
+    }
+
     private static List<string> CollectRevitFiles(DirectoryInfo dir)
     {
         return [.. dir.EnumerateFiles("*.rvt", _enumOptions).Where(IsValidRevitFile).Select(fi => fi.FullName)];
@@ -273,7 +250,4 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             && fi.Length > _rvtMinFileSizeBytes
             && !_rvtBackupFilePattern.IsMatch(name);
     }
-
-
-
 }
