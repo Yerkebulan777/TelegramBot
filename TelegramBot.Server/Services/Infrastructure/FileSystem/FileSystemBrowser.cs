@@ -31,8 +31,6 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         "AR", "AS", "APT", "KJ", "KR", "KG", "OV", "VK", "EOM", "EM", "PS", "SS", "OViK"
     };
 
-    private static readonly char[] _nameSeparators = ['_', '-', ' ', '.'];
-
     private const long _rvtMinFileSizeBytes = 50L * 1024 * 1024;
 
     private static readonly Regex _rvtSectionPattern = ValidRvtFilePattern();
@@ -54,9 +52,6 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             : IsSectionLevel(path) ? BuildSectionKeyboard(session, path) : BuildProjectKeyboard(session, path);
     }
 
-    /// <summary>
-    /// Файлы для кнопки "Выбрать все": доступна только на уровне файлов одного раздела.
-    /// </summary>
     public List<string> GetSelectableFiles(string path)
     {
         return GetSectionFiles(path);
@@ -74,9 +69,9 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             return callbackArgument;
         }
 
-        var candidates = IsSectionFileLevel(currentPath)
-            ? GetSectionFiles(currentPath)
+        var candidates = IsSectionFileLevel(currentPath) ? GetSectionFiles(currentPath)
             : IsSectionLevel(currentPath) ? GetSectionFolders(currentPath) : GetProjectFolders(currentPath);
+
         return candidates.FirstOrDefault(c => string.Equals(CreateSelectionToken(c), callbackArgument, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -156,33 +151,35 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         });
     }
 
-    /// <summary>Папки-проекты: совпадают с SectionFolderPattern и содержат ProjectDirectoryName.</summary>
+    /// <summary>
+    /// Папки-проекты: совпадают с SectionFolderPattern и содержат ProjectDirectoryName.
+    /// </summary>
     private List<string> GetProjectFolders(string path)
     {
-        if (!Directory.Exists(path))
+        var result = new List<string>(100);
+
+        if (Directory.Exists(path))
         {
-            return [];
+            foreach (var dir in Directory.EnumerateDirectories(path, "*", _enumOptions))
+            {
+                var folderName = Path.GetFileName(dir.AsSpan());
+                var projectDirPath = Path.Combine(dir, _options.ProjectDirectoryName);
+                if (_folderRegex.IsMatch(folderName) && Directory.Exists(projectDirPath))
+                {
+                    result.Add(dir);
+                }
+            }
         }
 
-        return [.. Directory.GetDirectories(path, "*", _enumOptions)
-            .Where(dir =>
-            {
-                var name = Path.GetFileName(dir);
-                return _folderRegex.IsMatch(name) && Directory.Exists(Path.Combine(dir, _options.ProjectDirectoryName));
-            })];
+        return result;
     }
 
     /// <summary>Папки разделов внутри ProjectDirectoryName, имя которых содержит известный acronym.</summary>
-    private List<string> GetSectionFolders(string path)
+    private static List<string> GetSectionFolders(string path)
     {
-        if (!Directory.Exists(path))
-        {
-            return [];
-        }
-
-        return Directory.GetDirectories(path, "*", _enumOptions)
-            .Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))
-            .ToList();
+        return !Directory.Exists(path)
+            ? []
+            : [.. Directory.GetDirectories(path, "*", _enumOptions).Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))];
     }
 
     /// <summary>
@@ -216,7 +213,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             }
             catch (IOException ex)
             {
-                logger.LogWarning(ex, "Scan RVT dir fail: {RvtDir}", rvtDir);
+                logger.LogWarning(ex, "Scan RVT dirInfo fail: {RvtDir}", rvtDir);
                 return [];
             }
             catch (UnauthorizedAccessException ex)
@@ -231,23 +228,57 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
     private static bool ContainsSectionAcronym(string folderName)
     {
-        var nameSegments = folderName.Split(_nameSeparators, StringSplitOptions.RemoveEmptyEntries);
-        return nameSegments.Any(_sectionAcronyms.Contains);
+        var folderSpan = folderName.AsSpan();
+
+        foreach (var acronym in _sectionAcronyms)
+        {
+            if (folderSpan.Length <= 10 && folderSpan.EndsWith(acronym, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    private static List<string> CollectRevitFiles(DirectoryInfo dir)
+    private static List<string> CollectRevitFiles(DirectoryInfo dirInfo)
     {
-        return [.. dir.EnumerateFiles("*.rvt", _enumOptions).Where(IsValidRevitFile).Select(fi => fi.FullName)];
-    }
+        var mandatoryOnly = new List<string>(10);
+        var sectionMatched = new List<string>(10);
 
-    private static bool IsValidRevitFile(FileInfo fi)
-    {
-        var name = Path.GetFileNameWithoutExtension(fi.Name);
+        foreach (var fileInfo in dirInfo.EnumerateFiles("*.rvt", _enumOptions))
+        {
+            var name = Path.GetFileNameWithoutExtension(fileInfo.Name);
 
-        return name.Length is >= 10 and <= 50
-            && !name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase)
-            && _rvtSectionPattern.IsMatch(name)
-            && fi.Length > _rvtMinFileSizeBytes
-            && !_rvtBackupFilePattern.IsMatch(name);
+            if (name.Length is < 10 or > 50)
+            {
+                continue;
+            }
+            if (_rvtBackupFilePattern.IsMatch(name))
+            {
+                continue;
+            }
+            if (fileInfo.Length < _rvtMinFileSizeBytes)
+            {
+                continue;
+            }
+            if (name.EndsWith("detached", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (name.EndsWith("отсоединено", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (_rvtSectionPattern.IsMatch(name))
+            {
+                sectionMatched.Add(fileInfo.FullName);
+            }
+
+            mandatoryOnly.Add(fileInfo.FullName);
+        }
+
+        return sectionMatched.Count > 0 ? sectionMatched : mandatoryOnly;
     }
 }
