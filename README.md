@@ -13,7 +13,6 @@ Windows-сервис на .NET 10: Telegram-бот принимает задан
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Pipeline, статусы, retry, БД |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | История `ACCESS_VIOLATION` |
 | [Docs/ADR.md](Docs/ADR.md) | Architecture Decision Log |
-| [Docs/deployment_notes.md](Docs/deployment_notes.md) | Windows Service, сетевые ресурсы |
 | [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Контракт BIM-исполнителей |
 
 ## Возможности
@@ -71,6 +70,26 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 ```
 
 Server и Worker должны использовать одну и ту же строку подключения.
+
+## Деплой (production)
+
+Server и Worker разворачиваются как Windows Services (`Host.UseWindowsService()` — под SCM переключается в режим службы, при `dotnet run` работает как консоль).
+
+Инсталлятор — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (Inno Setup 6):
+
+```powershell
+dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
+dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Installer\publish\Worker
+iscc Installer\TelegramBot.iss
+```
+
+Мастер установки:
+- выбор компонентов — Server / Worker / оба;
+- учётная запись службы (не `LocalSystem`/`NetworkService` — им нужен явный доступ к сетевой шаре) и пароль;
+- путь к файловой шаре — буква смонтированного диска (`B:`) автоматически резолвится в UNC (`\\server\share`) в сессии инсталлятора, поскольку сама служба маппинг дисков не видит;
+- токен бота и `AdminUserId` — только для Server.
+
+Регистрирует службы через `sc.exe create` с авто-рестартом при падении (`sc.exe failure ... actions= restart/...`), патчит `appsettings.Local.json` каждого выбранного компонента, выдаёт NTFS-права на папку установки и на сетевую шару. Удаление — через стандартный деинсталлятор Inno (останавливает и удаляет обе службы).
 
 ## Конфигурация
 

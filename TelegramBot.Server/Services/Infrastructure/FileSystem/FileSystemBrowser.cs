@@ -177,9 +177,14 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     /// <summary>Папки разделов внутри ProjectDirectoryName, имя которых содержит известный acronym.</summary>
     private static List<string> GetSectionFolders(string path)
     {
-        return !Directory.Exists(path)
-            ? []
-            : [.. Directory.GetDirectories(path, "*", _enumOptions).Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))];
+        if (Directory.Exists(path))
+        {
+            return [.. Directory.GetDirectories(path, "*", _enumOptions).Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))];
+        }
+        else
+        {
+            return [];
+        }
     }
 
     /// <summary>
