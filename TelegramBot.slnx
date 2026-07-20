@@ -1,10 +1,6 @@
 <Solution>
   <Folder Name="/Docs/">
-    <File Path="Docs/ExecutionAlgorithm.md" />
-    <File Path="Docs/Review-Server-Data-Worker.md" />
     <File Path="Docs/RevitCrashes.md" />
-    <File Path="Docs/ADR.md" />
-    <File Path="Docs/TODO.md" />
   </Folder>
   <Project Path="TelegramBot.Core\TelegramBot.Core.csproj" />
   <Project Path="TelegramBot.Data\TelegramBot.Data.csproj" />
