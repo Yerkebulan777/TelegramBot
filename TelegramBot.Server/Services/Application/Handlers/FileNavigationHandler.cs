@@ -30,10 +30,8 @@ public sealed class FileNavigationHandler(
             return;
         }
 
-        if (!_options.IsPathWithinRoot(newPath))
+        if (!ValidatePathWithinRoot(_options, newPath, "navigation", context))
         {
-            Logger.LogWarning("Rejected navigation outside root. User={Username} ({UserId}), Path={Path}",
-                context.Username, context.UserId, newPath);
             await SendErrorWithKeyboardAsync(context, "⚠ Error: Недопустимый путь.");
             session.CurrentPath = _options.RootPath;
             return;

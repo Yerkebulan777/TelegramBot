@@ -43,11 +43,8 @@ public sealed class FileSelectionHandler(
             ? Path.GetDirectoryName(session.CurrentPath)
             : fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
 
-        if (string.IsNullOrEmpty(newPath) || !_options.IsPathWithinRoot(newPath))
+        if (!ValidatePathWithinRoot(_options, newPath, "folder navigation", context))
         {
-            Logger.LogWarning(
-                "Rejected folder navigation outside root. User={Username} ({UserId}), Path={Path}",
-                context.Username, context.UserId, newPath);
             await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
             return;
         }
@@ -66,18 +63,10 @@ public sealed class FileSelectionHandler(
             ? session.CurrentPath
             : context.ParsedCallback.Argument;
 
-        if (_options.IsPathWithinRoot(path))
+        if (ValidatePathWithinRoot(_options, path, "select-all", context))
         {
             var filePaths = fileBrowser.GetSelectableFiles(path);
             session.AddSelectedFiles(filePaths);
-        }
-        else
-        {
-            Logger.LogWarning(
-                "Rejected select-all outside root. User={Username} ({UserId}), Path={Path}",
-                context.Username,
-                context.UserId,
-                path);
         }
 
         await ReRenderSelectionAsync(context, "Все файлы выбраны");

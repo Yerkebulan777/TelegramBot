@@ -1,3 +1,4 @@
+using TelegramBot.Core.Config;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 
@@ -33,5 +34,21 @@ public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
             return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Проверяет, что путь не выходит за пределы корневой директории.
+    /// При нарушении логирует предупреждение; реакцию на отказ выбирает вызывающий код.
+    /// </summary>
+    protected bool ValidatePathWithinRoot(FileSystemOptions options, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? path, string action, CallbackContext context)
+    {
+        if (!string.IsNullOrEmpty(path) && options.IsPathWithinRoot(path))
+        {
+            return true;
+        }
+
+        Logger.LogWarning("Rejected {Action} outside root. User={Username} ({UserId}), Path={Path}",
+            action, context.Username, context.UserId, path);
+        return false;
     }
 }
