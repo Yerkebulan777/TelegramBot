@@ -59,7 +59,7 @@ function WNetGetConnectionA(lpLocalName: String; lpRemoteName: String; var cbRem
 
 var
   AccountPage: TInputQueryWizardPage;
-  PathPage: TInputQueryWizardPage;
+  PathPage: TInputDirWizardPage;
   TelegramPage: TInputQueryWizardPage;
   ResolvedPath: String;
 
@@ -106,11 +106,12 @@ begin
   AccountPage.Add('Пароль:', True);
   AccountPage.Values[0] := ExpandConstant('{%USERDOMAIN}\{username}');
 
-  PathPage := CreateInputQueryPage(AccountPage.ID,
+  PathPage := CreateInputDirPage(AccountPage.ID,
     'Путь к файловой шаре', 'Где лежат файлы Revit/проектов?',
     'Можно ввести букву смонтированного диска (B:) — она будет преобразована в UNC-путь ' +
-    'на основе текущей сессии, либо сразу UNC (\\сервер\шара).');
-  PathPage.Add('Путь:', False);
+    'на основе текущей сессии, либо нажать «Обзор» и выбрать сетевую папку (\\сервер\шара) напрямую.',
+    True, '');
+  PathPage.Add('Путь:');
   PathPage.Values[0] := 'B:';
 
   TelegramPage := CreateInputQueryPage(PathPage.ID,
@@ -322,3 +323,10 @@ Filename: "{sys}\sc.exe"; Parameters: "stop {#ServerSvc}"; Flags: runhidden; Com
 Filename: "{sys}\sc.exe"; Parameters: "delete {#ServerSvc}"; Flags: runhidden; Components: server; RunOnceId: "DeleteServer"
 Filename: "{sys}\schtasks.exe"; Parameters: "/end /tn ""{#WorkerSvc}"""; Flags: runhidden; Components: worker; RunOnceId: "EndWorkerTask"
 Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""{#WorkerSvc}"" /f"; Flags: runhidden; Components: worker; RunOnceId: "DeleteWorkerTask"
+
+[UninstallDelete]
+; [Files] tracks only what was shipped in publish\ — appsettings.Local.json for
+; Worker (and any runtime logs) are written directly by CurStepChanged/the app
+; itself, so Inno's uninstaller doesn't know about them and leaves the folder
+; non-empty. Delete the whole tree explicitly instead.
+Type: filesandordirs; Name: "{app}"

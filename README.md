@@ -120,7 +120,7 @@ dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Instal
 | Параметр | Назначение |
 |---|---|
 | `TelegramBot:Token` | обязателен |
-| `TelegramBot:AdminUserId` | ID администратора |
+| `TelegramBot:AdminUserId` | ID администратора — узнать свой числовой Telegram ID можно у бота [@userinfobot](https://t.me/userinfobot) |
 | `ConnectionStrings:Postgres` | DSN |
 | `FileSystem:RootPath` | обязательный каталог |
 | `FileSystem:RvtDirectoryName` | `01_RVT` |
