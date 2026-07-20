@@ -89,3 +89,6 @@ appsettings.Local.json
 .omo/
 .opencode/
 .zcode/
+
+# Installer publish artifacts
+[Ii]nstaller/publish/
