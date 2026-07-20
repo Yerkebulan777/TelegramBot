@@ -260,7 +260,7 @@ begin
   if not Result then exit;
   { Best-effort: auto-restart policy isn't required for the service to work. }
   RunAdminCommand('{sys}\sc.exe',
-    SvcName + ' failure reset= 86400 actions= restart/5000/restart/10000/restart/30000',
+    'failure ' + SvcName + ' reset= 86400 actions= restart/5000/restart/10000/restart/30000',
     'Не удалось настроить авто-рестарт для ' + SvcName);
 end;
 
@@ -286,10 +286,40 @@ begin
     'Не удалось сразу запустить задачу Worker (запустится при следующем входе)');
 end;
 
+{ Reinstall-over-existing support: sc.exe create fails if the service already
+  exists, and a running Server/Worker exe keeps its own file locked so [Files]
+  can't overwrite it. Tear down the previous registration first — same
+  stop/delete/end commands as [UninstallRun], just quiet (missing service or
+  task here is the normal first-install case, not an error worth a MsgBox).
+  ponytail: fixed 2s wait for the SCM to actually release the exe handle after
+  "sc stop" returns — no polling; bump the delay or poll SERVICE_STOPPED if a
+  slower machine still hits a file-in-use error during copy. }
+procedure PrepareReinstall;
+var
+  ResultCode: Integer;
+begin
+  if WizardIsComponentSelected('server') then
+  begin
+    Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServerSvc}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(2000);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServerSvc}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  if WizardIsComponentSelected('worker') then
+  begin
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/end /tn "{#WorkerSvc}"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/delete /tn "{#WorkerSvc}" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Account, Password: String;
 begin
+  if CurStep = ssInstall then
+  begin
+    PrepareReinstall;
+    exit;
+  end;
   if CurStep <> ssPostInstall then exit;
 
   Account := AccountPage.Values[0];
