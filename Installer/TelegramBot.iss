@@ -54,9 +54,6 @@ Source: "publish\Server\*"; DestDir: "{app}\Server"; Components: server; Flags: 
 Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: recursesubdirs ignoreversion
 
 [Code]
-function WNetGetConnectionA(lpLocalName: String; lpRemoteName: String; var cbRemoteName: DWORD): Longint;
-  external 'WNetGetConnectionA@mpr.dll stdcall';
-
 var
   AccountPage: TInputQueryWizardPage;
   PathPage: TInputDirWizardPage;
@@ -65,38 +62,28 @@ var
 
 { Resolves "B:" (or "B:\", which is what CreateInputDirPage actually hands
   back for a drive root — it normalizes with a trailing backslash) to
-  "\\server\share" using the CURRENT session's drive map.
-  ponytail: WNetGetConnectionA via Pascal Script FFI is a known-finicky idiom
-  (buffer marshalling varies by Inno version) — falls back to raw input
-  unresolved, so a typo'd/already-UNC path still installs, just unresolved. }
-function ResolveDriveToUNC(const Input: String): String;
+  "\\server\share" using the CURRENT session's drive map. ExpandUNCFileName
+  is a built-in Pascal Script function that does this natively — no manual
+  WNetGetConnection FFI (that was the actual bug: Inno 6 Pascal strings are
+  Unicode, but WNetGetConnectionA is the ANSI entry point, so the buffer
+  marshalling silently failed and every install kept the raw "B:\", which is
+  invisible to a Windows service — see chat).
+  Success is False when Input was a bare drive letter that ExpandUNCFileName
+  couldn't map to a network path (not connected, or a genuinely local disk);
+  the caller must block on that — an unresolved drive letter is invisible to
+  a Windows service and is exactly what caused the Server outage this was
+  written to fix, so this can no longer be a soft warning that lets Next
+  through. An input that's already a UNC path always succeeds untouched. }
+function ResolveDriveToUNC(const Input: String; var Success: Boolean): String;
 var
-  Buffer: String;
-  BufferSize: DWORD;
-  NullPos: Integer;
   DriveSpec: String;
 begin
-  Result := Trim(Input);
-  DriveSpec := Result;
+  Result := ExpandUNCFileName(Trim(Input));
+  DriveSpec := Trim(Input);
   if (Length(DriveSpec) = 3) and (DriveSpec[2] = ':') and (DriveSpec[3] = '\') then
     DriveSpec := Copy(DriveSpec, 1, 2);
-  if (Length(DriveSpec) = 2) and (DriveSpec[2] = ':') then
-  begin
-    Buffer := StringOfChar(' ', 260);
-    BufferSize := 260;
-    if WNetGetConnectionA(DriveSpec, Buffer, BufferSize) = 0 then
-    begin
-      NullPos := Pos(#0, Buffer);
-      if NullPos > 1 then
-        Result := Copy(Buffer, 1, NullPos - 1)
-      else if NullPos = 0 then
-        Result := Trim(Buffer);
-    end
-    else
-      MsgBox('Не удалось определить сетевой путь для диска ' + DriveSpec + '. ' +
-        'Проверьте, что диск подключён (net use), либо введите UNC-путь напрямую (\\сервер\шара).',
-        mbError, MB_OK);
-  end;
+  Success := not ((Length(DriveSpec) = 2) and (DriveSpec[2] = ':') and
+    (CompareText(Copy(Result, 1, 2), DriveSpec) = 0));
 end;
 
 procedure InitializeWizard;
@@ -135,6 +122,8 @@ begin
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ResolveOk: Boolean;
 begin
   Result := True;
   if CurPageID = PathPage.ID then
@@ -145,7 +134,15 @@ begin
       Result := False;
       exit;
     end;
-    ResolvedPath := ResolveDriveToUNC(PathPage.Values[0]);
+    ResolvedPath := ResolveDriveToUNC(PathPage.Values[0], ResolveOk);
+    if not ResolveOk then
+    begin
+      MsgBox('Не удалось определить сетевой путь для диска ' + Trim(PathPage.Values[0]) + '. ' +
+        'Проверьте, что диск подключён (net use), либо введите UNC-путь напрямую (\\сервер\шара).',
+        mbError, MB_OK);
+      Result := False;
+      exit;
+    end;
   end
   else if CurPageID = AccountPage.ID then
   begin
