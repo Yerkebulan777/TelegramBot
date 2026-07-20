@@ -1,7 +1,4 @@
 <Solution>
-  <Folder Name="/Docs/">
-    <File Path="Docs/RevitCrashes.md" />
-  </Folder>
   <Project Path="TelegramBot.Core\TelegramBot.Core.csproj" />
   <Project Path="TelegramBot.Data\TelegramBot.Data.csproj" />
   <Project Path="TelegramBot.Server\TelegramBot.Server.csproj" />
