@@ -63,7 +63,9 @@ var
   TelegramPage: TInputQueryWizardPage;
   ResolvedPath: String;
 
-{ Resolves "B:" to "\\server\share" using the CURRENT session's drive map.
+{ Resolves "B:" (or "B:\", which is what CreateInputDirPage actually hands
+  back for a drive root — it normalizes with a trailing backslash) to
+  "\\server\share" using the CURRENT session's drive map.
   ponytail: WNetGetConnectionA via Pascal Script FFI is a known-finicky idiom
   (buffer marshalling varies by Inno version) — falls back to raw input
   unresolved, so a typo'd/already-UNC path still installs, just unresolved. }
@@ -72,13 +74,17 @@ var
   Buffer: String;
   BufferSize: DWORD;
   NullPos: Integer;
+  DriveSpec: String;
 begin
   Result := Trim(Input);
-  if (Length(Result) = 2) and (Result[2] = ':') then
+  DriveSpec := Result;
+  if (Length(DriveSpec) = 3) and (DriveSpec[2] = ':') and (DriveSpec[3] = '\') then
+    DriveSpec := Copy(DriveSpec, 1, 2);
+  if (Length(DriveSpec) = 2) and (DriveSpec[2] = ':') then
   begin
     Buffer := StringOfChar(' ', 260);
     BufferSize := 260;
-    if WNetGetConnectionA(Result, Buffer, BufferSize) = 0 then
+    if WNetGetConnectionA(DriveSpec, Buffer, BufferSize) = 0 then
     begin
       NullPos := Pos(#0, Buffer);
       if NullPos > 1 then
@@ -87,7 +93,7 @@ begin
         Result := Trim(Buffer);
     end
     else
-      MsgBox('Не удалось определить сетевой путь для диска ' + Result + '. ' +
+      MsgBox('Не удалось определить сетевой путь для диска ' + DriveSpec + '. ' +
         'Проверьте, что диск подключён (net use), либо введите UNC-путь напрямую (\\сервер\шара).',
         mbError, MB_OK);
   end;
