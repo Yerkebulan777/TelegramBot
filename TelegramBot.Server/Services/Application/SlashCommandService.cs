@@ -185,12 +185,7 @@ public sealed partial class SlashCommandService(
 
             case ButtonTexts.Cancel:
                 logger.LogDebug("{Username} ({UserId}) cancelled selection", username, userId);
-
-                await outputService.ClearChatHistoryAsync(userId, session);
-                session.Reset(_options.RootPath);
-
-                await SendHelpMessageAsync(userId, session);
-
+                await CancelSelectionAsync(userId, session);
                 return true;
 
             default:
@@ -308,7 +303,7 @@ public sealed partial class SlashCommandService(
             {
                 // Каждая пара (команда, файл) пойман уникальным индексом idx_commands_active_unique — все пары дубли
                 logger.LogWarning("Job blocked: {Username} ({UserId}), reason=all_dup_cmds", username, userId);
-                await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
+                await CancelSelectionAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
                 return;
             }
 
@@ -434,6 +429,25 @@ public sealed partial class SlashCommandService(
             .ToString();
 
         _=await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, helpText), session);
+    }
+
+    /// <summary>
+    /// Полный сброс сессии (как по кнопке "Отмена"): чистит историю чата, сбрасывает состояние
+    /// и отправляет либо переданное сообщение, либо стандартную справку.
+    /// </summary>
+    private async Task CancelSelectionAsync(long userId, UserSession session, string? message = null)
+    {
+        await outputService.ClearChatHistoryAsync(userId, session);
+        session.Reset(_options.RootPath);
+
+        if (message is null)
+        {
+            await SendHelpMessageAsync(userId, session);
+        }
+        else
+        {
+            await SendSafeResponseAsync(userId, message, session);
+        }
     }
 
     /// <summary>
