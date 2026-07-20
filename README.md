@@ -75,18 +75,25 @@ Server и Worker должны использовать одну и ту же с�
 
 Server и Worker разворачиваются как Windows Services (`Host.UseWindowsService()` — под SCM переключается в режим службы, при `dotnet run` работает как консоль).
 
-Исходник инсталлятора — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (Inno Setup 6, в git не компилируется). Сборка даёт готовый `TelegramBotSetup.exe`:
+Исходник инсталлятора — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (solution item в `TelegramBot.slnx`, Inno Setup 6, в git не компилируется).
+
+**Требование:** [Inno Setup 6](https://jrsoftware.org/isdl.php) — компилятор `ISCC.exe` (не входит в .NET SDK, ставится отдельно).
+
+Пересборка `TelegramBotSetup.exe`:
 
 ```powershell
 dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
 dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Installer\publish\Worker
-iscc Installer\TelegramBot.iss
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" Installer\TelegramBot.iss
+# admin-установка Inno Setup → "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 # → Installer\Output\TelegramBotSetup.exe (не коммитится, *.exe в .gitignore)
 ```
 
+Через GUI — открыть `TelegramBot.iss` в Inno Setup Compiler (`Compil32.exe`) и нажать F9.
+
 Мастер установки:
 - выбор компонентов — Server / Worker / оба;
-- учётная запись службы (не `LocalSystem`/`NetworkService` — им нужен явный доступ к сетевой шаре) и пароль;
+- учётная запись службы (не `LocalSystem`/`NetworkService` — им нужен явный доступ к сетевой шаре); поле автоподставляет текущего пользователя (`{userdomain}\{username}`), пароль вводится вручную всегда — Windows не отдаёт его программно ни одному процессу;
 - путь к файловой шаре — буква смонтированного диска (`B:`) автоматически резолвится в UNC (`\\server\share`) в сессии инсталлятора, поскольку сама служба маппинг дисков не видит;
 - токен бота и `AdminUserId` — только для Server.
 

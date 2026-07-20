@@ -89,10 +89,11 @@ begin
   AccountPage := CreateInputQueryPage(wpSelectComponents,
     'Учётная запись службы', 'Под какой учёткой будут работать службы?',
     'Не используйте LocalSystem/NetworkService — им нужен явный доступ к сетевой шаре. ' +
-    'Укажите выделенную учётку (например, .\svc_telegram_bot или DOMAIN\svc_telegram_bot).');
+    'По умолчанию подставлена текущая учётка (у неё уже есть доступ к сетевой шаре в этой сессии). ' +
+    'Пароль Windows не хранит в доступном виде — введите его вручную.');
   AccountPage.Add('Имя учётной записи:', False);
   AccountPage.Add('Пароль:', True);
-  AccountPage.Values[0] := '.\svc_telegram_bot';
+  AccountPage.Values[0] := ExpandConstant('{userdomain}\{username}');
 
   PathPage := CreateInputQueryPage(AccountPage.ID,
     'Путь к файловой шаре', 'Где лежат файлы Revit/проектов?',
