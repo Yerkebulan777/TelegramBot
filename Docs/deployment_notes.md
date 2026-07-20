@@ -1,37 +1,81 @@
-### 📂 Развертывание как Windows Service и доступ к сетевым ресурсам
+# Деплой как Windows Service
 
-Если необходимо перевести приложение из режима консольного запуска в режим Windows-службы (Service), важно учитывать особенности работы служб с сетевыми протоколами.
+Server и Worker — два процесса, две отдельные службы. Обе уже используют
+`Host.UseWindowsService(...)` ([Server/Program.cs](../TelegramBot.Server/Program.cs),
+[Worker/Program.cs](../TelegramBot.Worker/Program.cs)) — при запуске под SCM
+хост сам переключается в режим службы, при обычном `dotnet run` работает как консоль.
 
-#### 1. Почему нельзя полагаться на отключение UAC
-Отключение **UAC (User Account Control)** не решает проблему доступа к сети.
-*   **Суть проблемы:** UAC влияет только на запрос прав администратора при запуске интерфейса или команды пользователем. Оно не меняет права учетной записи, под которой работает процесс в фоне.
-*   **Результат:** Даже с отключенным UAC, если служба запущена от системного аккаунта без сетевой идентичности, доступ к `\\server\share` будет заблокиван системой безопасности Windows.
+## 1. Publish
 
-#### 2. Проблема "Session 0" и учетных записей
-Windows-службы работают в так называемой «Сессии 0», которая изолирована от пользовательского интерфейса и интерактивных сессий. Это приводит к следующим нюансам:
-*   **LocalSystem:** Обладает высокими правами на локальной машине, но не имеет сетевого профиля. Доступ к общим папкам через этот аккаунт часто блокируется, так как система не знает, от чьего имени (какого пользователя) запрашивается доступ в сети.
-*   **NetworkService:** Использует системную учетную запись для сетевых запросов. Может работать с сетью, но только если на целевом сервере разрешен доступ для этого аккаунта (что сложно настроить в смешанных средах).
+```powershell
+dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o C:\Services\TelegramBotServer
+dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o C:\Services\TelegramBotWorker
+```
 
-#### 3. Рекомендуемая схема реализации (для проверки гипотезы)
-Чтобы гарантировать доступ к сетевым ресурсам, необходимо выполнить следующие шаги:
+Положить `appsettings.Local.json` рядом с exe в каждой папке (см. [README.md](../README.md#локальная-конфигурация)).
 
-**Шаг А: Создание выделенной учетной записи**
-1. Создайте в Windows отдельную локальную или доменную учетную запись (например, `svc_telegram_bot`).
-2. Настройте на этой учетке пароль и дайте ей права доступа к необходимым сетевым папкам на удаленном сервере.
+## 2. Service account
 
-**Шаг Б: Настройка службы**
-1. При регистрации службы через `sc create` или установку через инсталлятор, укажите в качестве **Log On** (Войти как) именно созданную учетную запись (`svc_telegram_bot`).
-2. Это гарантирует, что у процесса будет "сетевая идентичность".
+**Не LocalSystem.** LocalSystem работает под identity `PC$` — без явных прав на
+сетевую шару доступ к `\\server\share` будет отклонён. NetworkService не лучше —
+тоже зависит от прав, выданных именно этой системной учётке на удалённой машине.
 
-**Шаг В: Использование UNC-путей**
-*   **Категорически запрещено:** Использовать смонтированные диски (например, `Z:\data\file.txt`). Службы часто не видят дисков, примонтированных в пользовательской сессии.
-*   **Обязательно:** Использовать полные сетевые пути: `\\192.168.x.x\share\folder\file.txt` или `\\server_name\share\...`.
+1. Создать выделенную локальную/доменную учётку, например `svc_telegram_bot`.
+2. Выдать пароль без истечения срока.
+3. `secpol.msc` → Local Policies → User Rights Assignment → **Log on as a service** → добавить `svc_telegram_bot`.
+4. Выдать NTFS/share права на всё, что нужно приложению: `FileSystem:RootPath`,
+   `FileSystem:TaskDirectory`, лог-папки, сетевые шары с Revit-файлами:
 
-#### 4. Чек-лист для тестирования (Verification)
-Чтобы подтвердить работоспособность, выполните следующие тесты:
+   ```powershell
+   icacls "\\server\share\path" /grant svc_telegram_bot:(OI)(CI)F
+   ```
+
+5. В коде и конфиге — только UNC-пути (`\\server\share\...`). Смонтированные
+   буквы дисков (`Z:\...`) служба не видит — они существуют в пользовательской сессии.
+
+## 3. Регистрация служб
+
+Из PowerShell/cmd с правами администратора:
+
+```powershell
+sc.exe create TelegramBotServer binPath= "C:\Services\TelegramBotServer\TelegramBot.Server.exe" obj= ".\svc_telegram_bot" password= "ПАРОЛЬ" start= delayed-auto
+sc.exe create TelegramBotWorker binPath= "C:\Services\TelegramBotWorker\TelegramBot.Worker.exe" obj= ".\svc_telegram_bot" password= "ПАРОЛЬ" start= delayed-auto
+
+sc.exe failure TelegramBotServer reset= 86400 actions= restart/5000/restart/10000/restart/30000
+sc.exe failure TelegramBotWorker reset= 86400 actions= restart/5000/restart/10000/restart/30000
+```
+
+`start= delayed-auto` — старт после системных служб (сеть, PostgreSQL успевают подняться).
+`sc.exe failure ... actions= restart/...` — авто-рестарт при краше; Worker уже
+выставляет `Environment.ExitCode = 1` при фатальной ошибке ([Worker/Program.cs](../TelegramBot.Worker/Program.cs)),
+без этого SCM считал бы падение штатным завершением и не перезапускал.
+
+Пробелы после `=` в `sc.exe` обязательны — без них команда молча падает.
+
+## 4. Запуск и проверка
+
+```powershell
+Start-Service TelegramBotServer
+Start-Service TelegramBotWorker
+Get-Service TelegramBotServer, TelegramBotWorker
+```
 
 | Тест | Действие | Ожидаемый результат |
-| :--- | :--- | :--- |
-| **Тест 1 (Локальный)** | Запустить приложение от текущего пользователя и проверить доступ к `\\server\share` через код. | Успешное чтение/запись. |
-| **Тест 2 (Системный)** | Запустить службу от `LocalSystem` и попытаться обратиться к сети. | *Скорее всего, ошибка доступа.* |
-| **Тест 3 (Целевой)** | Запустить службу от созданного аккаунта `svc_telegram_bot` по UNC-пути. | Успешное чтение/запись из службы. |
+|---|---|---|
+| Локальный доступ | Запустить exe вручную под текущим пользователем, обратиться к `\\server\share` | OK |
+| Служба, не тот account | Служба от `LocalSystem`/`NetworkService` | Скорее всего отказ доступа к сети |
+| Служба, целевой account | Служба от `svc_telegram_bot` по UNC-пути | OK |
+
+Логи: Event Viewer → Windows Logs → Application, плюс Serilog rolling files
+(`%USERPROFILE%\...\Logs\Server\`, `\Worker\`) — но под service-account это
+профиль `svc_telegram_bot`, не текущего пользователя.
+
+## Удаление / обновление
+
+```powershell
+Stop-Service TelegramBotServer, TelegramBotWorker
+sc.exe delete TelegramBotServer
+sc.exe delete TelegramBotWorker
+```
+
+Для обновления — `Stop-Service`, заменить файлы в `C:\Services\...`, `Start-Service`.

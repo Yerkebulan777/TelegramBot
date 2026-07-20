@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using Serilog;
 using System.Runtime.InteropServices;
@@ -30,6 +31,7 @@ public static class Program
         try
         {
             var host = Host.CreateDefaultBuilder(args)
+                .UseWindowsService(options => options.ServiceName = "TelegramBotServer")
                 .ConfigureAppConfiguration((context, config) =>
                 {
                     _=config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);

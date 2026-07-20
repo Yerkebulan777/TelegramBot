@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using Serilog;
 using System.Runtime.Versioning;
@@ -26,6 +27,8 @@ public static class Program
         try
         {
             using var host = Host.CreateDefaultBuilder(args)
+
+                .UseWindowsService(options => options.ServiceName = "TelegramBotWorker")
 
                 .ConfigureAppConfiguration((context, config) =>
                 {
