@@ -159,6 +159,23 @@ jobs:
         name: telegram-bot-build
         path: ./publish
 
+    - name: Publish Server (for installer)
+      run: dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release -o ./Installer/publish/Server
+
+    - name: Publish Worker (for installer)
+      run: dotnet publish TelegramBot.Worker/TelegramBot.Worker.csproj -c Release -o ./Installer/publish/Worker
+
+    - name: Build installer (Inno Setup, preinstalled on windows-latest)
+      shell: pwsh
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" Installer\TelegramBot.iss
+
+    - name: Upload installer artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: telegram-bot-installer
+        path: ./Installer/Output/TelegramBotSetup.exe
+
   # ──────────────────────────────────────────────
   # Qodana Code Quality (Community for .NET, ReSharper-based, Docker-only)
   # QODANA_TOKEN опционален — нужен только для загрузки отчётов в Qodana Cloud
