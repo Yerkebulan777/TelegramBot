@@ -93,7 +93,7 @@ begin
     'Пароль Windows не хранит в доступном виде — введите его вручную.');
   AccountPage.Add('Имя учётной записи:', False);
   AccountPage.Add('Пароль:', True);
-  AccountPage.Values[0] := ExpandConstant('{userdomain}\{username}');
+  AccountPage.Values[0] := ExpandConstant('{%USERDOMAIN}\{username}');
 
   PathPage := CreateInputQueryPage(AccountPage.ID,
     'Путь к файловой шаре', 'Где лежат файлы Revit/проектов?',
