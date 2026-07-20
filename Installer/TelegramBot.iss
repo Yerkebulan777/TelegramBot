@@ -278,8 +278,13 @@ function RegisterWorkerTask(const TaskName, ExePath, Account: String): Boolean;
 var
   CreateCmd: String;
 begin
-  CreateCmd := Format('/create /tn %s /tr %s /sc onlogon /ru %s /it /rl highest /f', [
-    QuoteSc(TaskName), QuoteSc(ExePath), QuoteSc(Account)]);
+  { schtasks' /tr parsing (unlike sc.exe's binPath) truncates at the first
+    space when the path is only wrapped in one layer of quotes — it needs the
+    quote characters embedded in the value itself, hence the escaped \"...\". }
+  { /delay 0000:05 — 5s after logon (which happens at boot via auto-logon)
+    gives the desktop/network a moment to settle before Worker/Revit starts. }
+  CreateCmd := Format('/create /tn %s /tr "\"%s\"" /sc onlogon /ru %s /it /rl highest /delay 0000:05 /f', [
+    QuoteSc(TaskName), ExePath, QuoteSc(Account)]);
   Result := RunAdminCommand('{sys}\schtasks.exe', CreateCmd,
     'Не удалось создать задачу планировщика для Worker');
   if not Result then exit;
