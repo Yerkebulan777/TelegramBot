@@ -75,12 +75,13 @@ Server и Worker должны использовать одну и ту же с�
 
 Server и Worker разворачиваются как Windows Services (`Host.UseWindowsService()` — под SCM переключается в режим службы, при `dotnet run` работает как консоль).
 
-Инсталлятор — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (Inno Setup 6):
+Исходник инсталлятора — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (Inno Setup 6, в git не компилируется). Сборка даёт готовый `TelegramBotSetup.exe`:
 
 ```powershell
 dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
 dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Installer\publish\Worker
 iscc Installer\TelegramBot.iss
+# → Installer\Output\TelegramBotSetup.exe (не коммитится, *.exe в .gitignore)
 ```
 
 Мастер установки:
