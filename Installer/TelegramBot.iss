@@ -1,4 +1,5 @@
-; TelegramBot installer — Server and/or Worker as Windows Services.
+; TelegramBot installer — Server as a Windows Service, Worker as a Task
+; Scheduler job (see below for why Worker can't be a plain service).
 ;
 ; Prerequisite (run before compiling this script):
 ;   dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
@@ -11,7 +12,15 @@
 ;     services can't see per-user drive mappings, so this must happen here,
 ;     not at service startup)
 ;   - writes that UNC path into each component's appsettings.Local.json
-;   - registers the service(s) under a dedicated account with auto-restart
+;   - registers Server under a dedicated account with auto-restart
+;   - registers Worker as an interactive Task Scheduler job, NOT a service:
+;     Worker launches Revit, and Windows services run in Session 0, isolated
+;     from any real desktop since Vista — a service-spawned Revit renders on
+;     an invisible desktop no human can see or click through. A logon-trigger
+;     task runs in the actual user's session instead, so Revit shows up
+;     normally. Trade-off: the target account must stay logged on (configure
+;     auto-logon on dedicated machines) — Worker won't run between reboot and
+;     next interactive logon.
 
 #define AppName "TelegramBot"
 #define ServerExe "TelegramBot.Server.exe"
@@ -87,10 +96,12 @@ end;
 procedure InitializeWizard;
 begin
   AccountPage := CreateInputQueryPage(wpSelectComponents,
-    'Учётная запись службы', 'Под какой учёткой будут работать службы?',
+    'Учётная запись службы', 'Под какой учёткой будут работать Server/Worker?',
     'Не используйте LocalSystem/NetworkService — им нужен явный доступ к сетевой шаре. ' +
     'По умолчанию подставлена текущая учётка (у неё уже есть доступ к сетевой шаре в этой сессии). ' +
-    'Пароль Windows не хранит в доступном виде — введите его вручную.');
+    'Пароль Windows не хранит в доступном виде — введите его вручную (нужен только для Server; ' +
+    'Worker запускается как задача планировщика в сессии этого пользователя при входе в систему — ' +
+    'машина должна оставаться залогиненной под этой учёткой, иначе Worker не стартует).');
   AccountPage.Add('Имя учётной записи:', False);
   AccountPage.Add('Пароль:', True);
   AccountPage.Values[0] := ExpandConstant('{%USERDOMAIN}\{username}');
@@ -225,22 +236,53 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-procedure RegisterService(const SvcName, DisplayName, ExePath, Account, Password: String);
+{ Shared mechanic: run a privileged CLI command, report exit code on failure.
+  Both sc.exe and schtasks.exe registration follow this exact shape — only
+  the command line and the domain-specific failure message differ. }
+function RunAdminCommand(const Exe, Args, ErrorContext: String): Boolean;
 var
   ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant(Exe), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  if not Result then
+    MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + ').', mbError, MB_OK);
+end;
+
+function RegisterService(const SvcName, DisplayName, ExePath, Account, Password: String): Boolean;
+var
   CreateCmd: String;
 begin
   CreateCmd := Format('create %s binPath= %s obj= %s password= %s start= delayed-auto DisplayName= %s', [
     SvcName, QuoteSc(ExePath), QuoteSc(Account), QuoteSc(Password), QuoteSc(DisplayName)]);
-  if not Exec(ExpandConstant('{sys}\sc.exe'), CreateCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-  begin
-    MsgBox('Не удалось создать службу ' + SvcName + ' (код ' + IntToStr(ResultCode) + '). ' +
-      'Проверьте имя учётной записи и пароль.', mbError, MB_OK);
-    exit;
-  end;
-  Exec(ExpandConstant('{sys}\sc.exe'), SvcName + ' failure reset= 86400 actions= restart/5000/restart/10000/restart/30000',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  GrantAccess(ExpandConstant('{app}'), Account);
+  Result := RunAdminCommand('{sys}\sc.exe', CreateCmd,
+    'Не удалось создать службу ' + SvcName + '. Проверьте имя учётной записи и пароль');
+  if not Result then exit;
+  { Best-effort: auto-restart policy isn't required for the service to work. }
+  RunAdminCommand('{sys}\sc.exe',
+    SvcName + ' failure reset= 86400 actions= restart/5000/restart/10000/restart/30000',
+    'Не удалось настроить авто-рестарт для ' + SvcName);
+end;
+
+{ Worker runs Revit, which needs a real, visible desktop — a Windows Service
+  can't provide one (Session 0 isolation, no "interact with desktop" option
+  since Vista). /it runs the task in Account's own interactive logon session
+  instead of headless, so Revit renders normally.
+  ponytail: no crash-auto-restart — schtasks' basic switches don't expose an
+  equivalent of sc.exe's "failure actions"; add an XML-imported task with
+  <RestartOnFailure> if that's needed later. }
+function RegisterWorkerTask(const TaskName, ExePath, Account: String): Boolean;
+var
+  CreateCmd: String;
+begin
+  CreateCmd := Format('/create /tn %s /tr %s /sc onlogon /ru %s /it /rl highest /f', [
+    QuoteSc(TaskName), QuoteSc(ExePath), QuoteSc(Account)]);
+  Result := RunAdminCommand('{sys}\schtasks.exe', CreateCmd,
+    'Не удалось создать задачу планировщика для Worker');
+  if not Result then exit;
+  { Best-effort immediate start so the admin doesn't have to log off/on now;
+    only works if the installer is running under Account's own session. }
+  RunAdminCommand('{sys}\schtasks.exe', '/run /tn ' + QuoteSc(TaskName),
+    'Не удалось сразу запустить задачу Worker (запустится при следующем входе)');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -257,13 +299,15 @@ begin
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'RootPath', ResolvedPath, True);
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0], True);
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'AdminUserId', Trim(TelegramPage.Values[1]), False);
-    RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password);
+    if RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password) then
+      GrantAccess(ExpandConstant('{app}'), Account);
   end;
 
   if WizardIsComponentSelected('worker') then
   begin
     WriteWorkerRootPath(ExpandConstant('{app}\Worker\appsettings.Local.json'), ResolvedPath);
-    RegisterService('{#WorkerSvc}', 'TelegramBot Worker', ExpandConstant('{app}\Worker\{#WorkerExe}'), Account, Password);
+    if RegisterWorkerTask('{#WorkerSvc}', ExpandConstant('{app}\Worker\{#WorkerExe}'), Account) then
+      GrantAccess(ExpandConstant('{app}'), Account);
   end;
 
   { Grant network share access on the resolved UNC path itself (best-effort —
@@ -276,5 +320,5 @@ end;
 [UninstallRun]
 Filename: "{sys}\sc.exe"; Parameters: "stop {#ServerSvc}"; Flags: runhidden; Components: server; RunOnceId: "StopServer"
 Filename: "{sys}\sc.exe"; Parameters: "delete {#ServerSvc}"; Flags: runhidden; Components: server; RunOnceId: "DeleteServer"
-Filename: "{sys}\sc.exe"; Parameters: "stop {#WorkerSvc}"; Flags: runhidden; Components: worker; RunOnceId: "StopWorker"
-Filename: "{sys}\sc.exe"; Parameters: "delete {#WorkerSvc}"; Flags: runhidden; Components: worker; RunOnceId: "DeleteWorker"
+Filename: "{sys}\schtasks.exe"; Parameters: "/end /tn ""{#WorkerSvc}"""; Flags: runhidden; Components: worker; RunOnceId: "EndWorkerTask"
+Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""{#WorkerSvc}"" /f"; Flags: runhidden; Components: worker; RunOnceId: "DeleteWorkerTask"
