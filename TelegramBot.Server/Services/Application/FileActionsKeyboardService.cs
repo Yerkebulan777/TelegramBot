@@ -34,4 +34,16 @@ public sealed class FileActionsKeyboardService(
             session);
         session.LastActionsMessageId = message?.Id;
     }
+
+    /// <summary>
+    /// Отправляет сообщение об ошибке с постоянной «file actions» reply-клавиатурой и трекает его.
+    /// Вынесено из дословно дублированных копий в FileNavigationHandler / FileSelectionHandler.
+    /// </summary>
+    public async Task SendErrorAsync(long userId, string message, UserSession session)
+    {
+        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
+        _ = await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard),
+            session);
+    }
 }

@@ -18,15 +18,14 @@ namespace TelegramBot.Worker.Services;
 public sealed class CommandPreparer(
     IOptions<WorkerOptions> workerOptions,
     IOptions<FileSystemOptions> fileSystemOptions,
-    IConfiguration configuration,
     CommandDataService commandDataService,
     RevitVersionDetector versionDetector,
     NavisworksPathResolver navisworksPathResolver,
     ILogger<CommandPreparer> logger)
 {
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
+    private readonly FileSystemOptions _fileSystemOptions = fileSystemOptions.Value;
     private readonly string _taskDirectory = fileSystemOptions.Value.GetEffectiveTaskDirectory();
-    private readonly string? _fileSystemRoot = configuration.GetSection(FileSystemOptions.SectionName)[nameof(FileSystemOptions.RootPath)];
     private static readonly XmlSerializer TaskFileSerializer = new(typeof(TaskFile));
     private static readonly XmlSerializerNamespaces EmptyXmlNamespaces = new([XmlQualifiedName.Empty]);
     private const string RevitRussianLanguageArguments = "/language RUS";
@@ -132,10 +131,10 @@ public sealed class CommandPreparer(
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(_fileSystemRoot) && !IsPathWithinRoot(fullPath, _fileSystemRoot))
+            if (!string.IsNullOrWhiteSpace(_fileSystemOptions.RootPath) && !_fileSystemOptions.IsPathWithinRoot(fullPath))
             {
                 logger.LogWarning("Validation: path outside root '{File}' ({Id}), root='{Root}'",
-                    cmd.FilePath, cmd.CommandId, _fileSystemRoot);
+                    cmd.FilePath, cmd.CommandId, _fileSystemOptions.RootPath);
                 return false;
             }
         }
@@ -183,25 +182,6 @@ public sealed class CommandPreparer(
         }
 
         return true;
-    }
-
-    private static bool IsPathWithinRoot(string fullPath, string rootPath)
-    {
-        try
-        {
-            var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var candidate = Path.GetFullPath(fullPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            return candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
-                || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                || candidate.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException or System.Security.SecurityException)
-        {
-            // Path.GetFullPath бросает конкретные типы при невалидном пути.
-            // Трактовка: путь за пределами root (defensive default для security-check).
-            return false;
-        }
     }
 
     /// <summary>Пытается определить версию Revit/Navisworks через BimLib и вернуть полный путь к исполняемому файлу.</summary>

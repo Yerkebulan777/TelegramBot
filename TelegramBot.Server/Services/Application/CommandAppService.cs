@@ -19,16 +19,8 @@ public sealed class CommandAppService(
 
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
-        if (!rateLimiter.IsAllowed(message.UserId))
+        if (!await TryAdmitAsync(message.UserId, message.Username))
         {
-            _=await outputService.SendMessageAsync(message.UserId,
-                "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(message.Username))
-        {
-            await RejectAnonymousAsync(message.UserId);
             return;
         }
 
@@ -57,16 +49,8 @@ public sealed class CommandAppService(
 
     public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
     {
-        if (!rateLimiter.IsAllowed(callback.UserId))
+        if (!await TryAdmitAsync(callback.UserId, callback.Username))
         {
-            _ = await outputService.SendMessageAsync(callback.UserId,
-                "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(callback.Username))
-        {
-            await RejectAnonymousAsync(callback.UserId);
             return;
         }
 
@@ -94,13 +78,32 @@ public sealed class CommandAppService(
             UserId = callback.UserId,
             ChatId = callback.ChatId,
             MessageId = callback.MessageId,
-            Username = callback.Username,
+            Username = callback.Username!, // non-null: TryAdmitAsync rejected blank usernames above
             CallbackQueryId = callback.CallbackQueryId,
             ParsedCallback = parsed,
             Session = session
         };
 
         await callbackDispatcher.DispatchAsync(context, cancellationToken);
+    }
+
+    /// <summary>Общие входные гейты для сообщений и коллбэков: rate limit, затем анонимность.</summary>
+    private async Task<bool> TryAdmitAsync(long userId, string? username)
+    {
+        if (!rateLimiter.IsAllowed(userId))
+        {
+            _ = await outputService.SendMessageAsync(userId,
+                "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            await RejectAnonymousAsync(userId);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>Отшивает безликий аккаунт: логирует и шлёт инструкцию заполнить профиль.</summary>

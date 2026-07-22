@@ -9,7 +9,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileSelectionHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
-    MessageTrackingService messageTrackingService,
+    FileActionsKeyboardService fileActionsKeyboardService,
     TelegramBot.Server.Services.Infrastructure.FileSystem.FileSystemBrowser fileBrowser,
     IOptions<FileSystemOptions> options,
     ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
@@ -81,10 +81,7 @@ public sealed class FileSelectionHandler(
         var filePath = fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
-            var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
-            _ = await messageTrackingService.TrackAsync(
-                outputService.SendMessageWithReplyKeyboardAsync(context.UserId, "⚠ Error: File not found.", replyKeyboard),
-                context.Session);
+            await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: File not found.", context.Session);
             return;
         }
 

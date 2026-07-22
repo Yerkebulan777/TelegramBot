@@ -10,7 +10,6 @@ public sealed class FileNavigationHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
     FileActionsKeyboardService fileActionsKeyboardService,
-    MessageTrackingService messageTrackingService,
     IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -26,13 +25,13 @@ public sealed class FileNavigationHandler(
         var newPath = context.ParsedCallback.Argument;
         if (string.IsNullOrEmpty(newPath))
         {
-            await SendErrorWithKeyboardAsync(context, "⚠ Error: Path not found.");
+            await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: Path not found.", context.Session);
             return;
         }
 
         if (!ValidatePathWithinRoot(_options, newPath, "navigation", context))
         {
-            await SendErrorWithKeyboardAsync(context, "⚠ Error: Недопустимый путь.");
+            await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: Недопустимый путь.", context.Session);
             session.CurrentPath = _options.RootPath;
             return;
         }
@@ -45,13 +44,5 @@ public sealed class FileNavigationHandler(
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
 
         await fileActionsKeyboardService.RefreshAsync(context.UserId, context.Session);
-    }
-
-    private async Task SendErrorWithKeyboardAsync(CallbackContext context, string message)
-    {
-        var replyKeyboard = keyboardBuilder.GetFileActionsReplyKeyboard();
-        _ = await messageTrackingService.TrackAsync(
-            outputService.SendMessageWithReplyKeyboardAsync(context.UserId, message, replyKeyboard),
-            context.Session);
     }
 }
