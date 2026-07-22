@@ -12,6 +12,7 @@
     <Error Condition="!Exists('$(IsccExe)')" Text="ISCC.exe not found at '$(IsccExe)'. Install Inno Setup 6, or pass /p:IsccExe=&lt;path&gt;." />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Server\TelegramBot.Server.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Server&quot;" />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Worker\TelegramBot.Worker.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Worker&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)GrantLogonRight\GrantLogonRight.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight&quot;" />
     <Exec Command="&quot;$(IsccExe)&quot; &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
   </Target>
 
