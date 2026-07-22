@@ -6,6 +6,10 @@
   <PropertyGroup>
     <RepoRoot>$(MSBuildThisFileDirectory)..\</RepoRoot>
     <IsccExe Condition="'$(IsccExe)' == ''">C:\Program Files (x86)\Inno Setup 6\ISCC.exe</IsccExe>
+    <SignToolExe Condition="'$(SignToolExe)' == ''">signtool.exe</SignToolExe>
+    <TimestampUrl Condition="'$(TimestampUrl)' == ''">http://timestamp.digicert.com</TimestampUrl>
+    <!-- Signing is opt-in: pass /p:SignThumbprint=<cert thumbprint> (cert must be in Cert:\CurrentUser\My). No thumbprint → build is unsigned, same as before. -->
+    <SignCommand>&quot;$(SignToolExe)&quot; sign /sha1 $(SignThumbprint) /fd SHA256 /tr $(TimestampUrl) /td SHA256</SignCommand>
   </PropertyGroup>
 
   <Target Name="Installer">
@@ -13,7 +17,12 @@
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Server\TelegramBot.Server.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Server&quot;" />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Worker\TelegramBot.Worker.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Worker&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)GrantLogonRight\GrantLogonRight.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight&quot;" />
+
+    <Exec Condition="'$(SignThumbprint)' != ''" Command="$(SignCommand) &quot;$(MSBuildThisFileDirectory)publish\Server\TelegramBot.Server.exe&quot; &quot;$(MSBuildThisFileDirectory)publish\Worker\TelegramBot.Worker.exe&quot; &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight\GrantLogonRight.exe&quot;" />
+
     <Exec Command="&quot;$(IsccExe)&quot; &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
+
+    <Exec Condition="'$(SignThumbprint)' != ''" Command="$(SignCommand) &quot;$(MSBuildThisFileDirectory)Output\TelegramBotSetup.exe&quot;" />
   </Target>
 
 </Project>
