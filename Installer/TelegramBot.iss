@@ -245,6 +245,91 @@ begin
     MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + ').', mbError, MB_OK);
 end;
 
+procedure InsertArrayLine(var Lines: TArrayOfString; Index: Integer; const NewLine: String);
+var
+  I, Len: Integer;
+begin
+  Len := GetArrayLength(Lines);
+  SetArrayLength(Lines, Len + 1);
+  for I := Len downto Index + 1 do
+    Lines[I] := Lines[I - 1];
+  Lines[Index] := NewLine;
+end;
+
+{ Grants "Log on as a service" (SeServiceLogonRight) to Account via secedit,
+  merging it into whatever the policy already lists instead of overwriting
+  it — secedit /configure with /areas USER_RIGHTS only touches the rights
+  present in the .cfg it's given, so exporting current state, appending
+  Account to the existing SeServiceLogonRight line, and reapplying leaves
+  every other right untouched. This is what the Services GUI does silently
+  via LsaAddAccountRights when you set a service's logon account by hand;
+  sc.exe create skips that step entirely, which is the actual reason a fresh
+  install otherwise needs a manual secpol.msc visit.
+  Best-effort only: if a domain GPO enforces this right, it overwrites the
+  local grant again on its own refresh cycle — no local fix survives that,
+  see README troubleshooting section. }
+procedure GrantServiceLogonRight(const Account: String);
+var
+  CfgPath, DbPath, LogPath: String;
+  Lines: TArrayOfString;
+  I: Integer;
+  KeyFound, SectionFound: Boolean;
+begin
+  CfgPath := ExpandConstant('{tmp}\secpol_export.cfg');
+  DbPath := ExpandConstant('{tmp}\secpol_apply.sdb');
+  LogPath := ExpandConstant('{tmp}\secpol_apply.log');
+
+  if not RunAdminCommand('{sys}\secedit.exe',
+    Format('/export /cfg "%s" /areas USER_RIGHTS', [CfgPath]),
+    'Не удалось выгрузить текущую политику "Вход в качестве службы"') then
+    exit;
+
+  if not LoadStringsFromFile(CfgPath, Lines) then
+  begin
+    MsgBox('Не удалось прочитать выгруженную политику: ' + CfgPath, mbError, MB_OK);
+    exit;
+  end;
+
+  KeyFound := False;
+  SectionFound := False;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    if Pos('SeServiceLogonRight', Lines[I]) = 1 then
+    begin
+      if Pos(Account, Lines[I]) = 0 then
+        Lines[I] := TrimRight(Lines[I]) + ',' + Account;
+      KeyFound := True;
+      break;
+    end;
+    if Trim(Lines[I]) = '[Privilege Rights]' then
+      SectionFound := True;
+  end;
+
+  if not KeyFound then
+  begin
+    if not SectionFound then
+    begin
+      MsgBox('В выгруженной политике нет секции [Privilege Rights] — право "Вход в качестве службы" ' +
+        'не выдано, настройте вручную через secpol.msc.', mbError, MB_OK);
+      exit;
+    end;
+    for I := 0 to GetArrayLength(Lines) - 1 do
+    begin
+      if Trim(Lines[I]) = '[Privilege Rights]' then
+      begin
+        InsertArrayLine(Lines, I + 1, 'SeServiceLogonRight = ' + Account);
+        break;
+      end;
+    end;
+  end;
+
+  SaveStringsToFile(CfgPath, Lines, False);
+
+  RunAdminCommand('{sys}\secedit.exe',
+    Format('/configure /db "%s" /cfg "%s" /areas USER_RIGHTS /log "%s"', [DbPath, CfgPath, LogPath]),
+    'Не удалось применить право "Вход в качестве службы". Подробности в логе: ' + LogPath);
+end;
+
 function RegisterService(const SvcName, DisplayName, ExePath, Account, Password: String): Boolean;
 var
   CreateCmd: String;
@@ -330,6 +415,7 @@ begin
   begin
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'RootPath', ResolvedPath, True);
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0], True);
+    GrantServiceLogonRight(Account);
     if RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password) then
       GrantAccess(ExpandConstant('{app}'), Account);
   end;
