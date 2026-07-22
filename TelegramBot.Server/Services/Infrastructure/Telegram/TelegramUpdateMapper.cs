@@ -12,7 +12,8 @@ public class TelegramUpdateMapper
         return new MessageDto
         {
             UserId = msg.Id,
-            Username = msg.Username,
+            // @handle в приоритете; иначе отображаемое имя. Пустота обоих = аноним (см. CommandAppService).
+            Username = msg.Username ?? msg.FirstName,
             ChatId = message.Chat.Id,
             Text = message.Text,
             MessageId = message.MessageId
@@ -27,7 +28,8 @@ public class TelegramUpdateMapper
         return new CallbackQueryDto
         {
             UserId = callback.From.Id,
-            Username = callback.From.Username,
+            // @handle в приоритете; иначе отображаемое имя. Пустота обоих = аноним (см. CommandAppService).
+            Username = callback.From.Username ?? callback.From.FirstName,
             ChatId = msg.Chat.Id,
             MessageText = msg.Text,
             MessageId = msg.MessageId,

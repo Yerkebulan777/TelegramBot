@@ -5,7 +5,6 @@ using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Interfaces;
 using TelegramBot.Data;
-using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Application;
 using TelegramBot.Server.Services.Application.Handlers;
@@ -36,8 +35,7 @@ public static class DependencyInjectionExtensions
         _=services.AddOptions<BotOptions>()
             .Bind(configuration.GetSection(BotOptions.SectionName))
             .ValidateOnStart()
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required")
-            .Validate(options => options.AdminUserId > 0, "TelegramBot:AdminUserId is required");
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Token), "TelegramBot:Token is required");
 
         _=services.AddOptions<RateLimitOptions>()
             .Bind(configuration.GetSection(RateLimitOptions.SectionName))
@@ -51,7 +49,6 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddCallbackHandlers(this IServiceCollection services)
     {
-        _=services.AddSingleton<ICallbackHandler, AccessRequestHandler>();
         _=services.AddSingleton<ICallbackHandler, FileNavigationHandler>();
         _=services.AddSingleton<ICallbackHandler, FileSelectionHandler>();
         _=services.AddSingleton<ICallbackHandler, CommandToggleHandler>();
@@ -65,7 +62,6 @@ public static class DependencyInjectionExtensions
     private static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
         _=services.AddSingleton<CommandAppService>();
-        _=services.AddSingleton<AuthorizationMiddleware>();
         _=services.AddSingleton<RateLimiter>();
         _=services.AddSingleton<SlashCommandService>();
         _=services.AddSingleton<SessionsListRenderer>();
@@ -77,7 +73,6 @@ public static class DependencyInjectionExtensions
 
     private static IServiceCollection AddInfrastructureServices(this IServiceCollection services)
     {
-        _=services.AddSingleton<UserDataService>();
         _=services.AddSingleton<CommandDataService>();
         _=services.AddSingleton<SessionDataService>();
         _=services.AddSingleton<MessageTrackingDataService>();

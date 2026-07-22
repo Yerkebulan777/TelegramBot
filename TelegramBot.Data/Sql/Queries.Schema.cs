@@ -4,16 +4,6 @@ internal static partial class SqlQueries
 {
     internal static class Schema
     {
-        internal const string CreateBotUsersTable = @"
-            CREATE TABLE IF NOT EXISTS BotUsers (
-                UserId BIGINT PRIMARY KEY,
-                Username TEXT,
-                Role INTEGER NOT NULL DEFAULT 0,
-                Status INTEGER NOT NULL DEFAULT 0,
-                CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );";
-
         internal const string CreateSessionsTable = @"
             CREATE TABLE IF NOT EXISTS Sessions (
                 SessionId SERIAL PRIMARY KEY,

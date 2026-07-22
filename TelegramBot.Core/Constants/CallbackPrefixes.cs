@@ -65,18 +65,6 @@ public static class CallbackPrefixes
     /// <summary>Подтверждение удаления сессии по типу.</summary>
     public const string ConfirmDeleteSessionByType = "CONFIRMDELETESESSIONBYTYPE:";
 
-    /// <summary>Запрос доступа.</summary>
-    public const string RequestAccess = "REQACCESS:";
-
-    /// <summary>Одобрить пользователя.</summary>
-    public const string ApproveUser = "APPROVEUSER:";
-
-    /// <summary>Отклонить пользователя.</summary>
-    public const string RejectUser = "REJECTUSER:";
-
-    /// <summary>Заблокировать пользователя.</summary>
-    public const string BlockUser = "BLOCKUSER:";
-
     /// <summary>Фильтр статуса в /status.</summary>
     public const string StatusFilter = "STATUSFILTER:";
 

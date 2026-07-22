@@ -1,11 +1,8 @@
 using Microsoft.Extensions.Hosting.WindowsServices;
-using Microsoft.Extensions.Options;
 using Serilog;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
-using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Extensions;
 
@@ -43,22 +40,6 @@ public static class Program
                 .Build();
 
             await host.Services.GetRequiredService<DatabaseInitializerService>().InitializeDatabaseAsync();
-
-            var adminId = host.Services.GetRequiredService<IOptions<BotOptions>>().Value.AdminUserId;
-            if (adminId != 0)
-            {
-                var now = DateTime.UtcNow;
-                await host.Services.GetRequiredService<UserDataService>().UpsertUserAsync(
-                    new BotUser
-                    {
-                        UserId = adminId,
-                        Role = UserRole.Admin,
-                        Status = UserAccessStatus.Approved,
-                        CreatedAt = now,
-                        UpdatedAt = now
-                    });
-                Log.Information("Admin user seeded: {UserId}", adminId);
-            }
 
             await host.RunAsync();
         }

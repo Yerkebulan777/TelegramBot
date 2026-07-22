@@ -10,7 +10,6 @@ using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
-using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
@@ -22,7 +21,6 @@ public sealed partial class SlashCommandService(
     FileActionsKeyboardService fileActionsKeyboardService,
     TelegramOutputService outputService,
     KeyboardBuilder keyboardBuilder,
-    AuthorizationMiddleware accessValidator,
     SessionsListRenderer sessionsListRenderer,
     IOptions<FileSystemOptions> fileSystemOptions,
     IOptions<RateLimitOptions> rateLimitOptions,
@@ -44,28 +42,11 @@ public sealed partial class SlashCommandService(
     public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
     {
         var userId = message.UserId;
-        var username = message.Username;
+        var username = message.Username!;
         var rawText = message.Text!;
         var command = NormalizeCommandText(rawText);
 
-        ArgumentNullException.ThrowIfNullOrWhiteSpace(username);
         logger.LogDebug("Cmd: cmd={Command}, user={Username} ({UserId})", command, username, userId);
-
-        var access = await accessValidator.ValidateAsync(userId);
-        if (command == "/start" && !access.IsActive)
-        {
-            _ = await accessValidator.RefreshApprovedAdminUserAsync(userId, username, access.User);
-            access = await accessValidator.ValidateAsync(userId);
-        }
-
-        if (command != "/start" && !access.IsActive)
-        {
-            logger.LogWarning("Cmd rejected: cmd={Command}, user={Username} ({UserId}), reason=access",
-                command, username, userId);
-            var chatId = message.ChatId == 0 ? userId : message.ChatId;
-            await SendSafeResponseAsync(chatId, "У вас нет доступа. Введите /start для запроса доступа.", session);
-            return;
-        }
 
         if (command.StartsWith('/'))
         {
@@ -75,14 +56,7 @@ public sealed partial class SlashCommandService(
         if (command == "/start")
         {
             session.Reset(_options.RootPath);
-            if (access.IsActive)
-            {
-                await SendHelpMessageAsync(userId, session);
-            }
-            else
-            {
-                await SendRegistrationMessageAsync(userId, session);
-            }
+            await SendHelpMessageAsync(userId, session);
             return;
         }
 
@@ -391,19 +365,6 @@ public sealed partial class SlashCommandService(
         session.CommandSelectionMessageId = commandSelectionMessage?.Id;
         var actionsMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
         session.LastActionsMessageId = actionsMessage?.Id;
-    }
-
-    private async Task SendRegistrationMessageAsync(long userId, UserSession session)
-    {
-        var keyboard = new InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton.WithCallbackData("Запросить доступ", CallbackPrefixes.RequestAccess)
-            ]
-        ]);
-        _=await messageTrackingService.TrackAsync(outputService.SendMessageWithKeyboardAsync(userId,
-            "Добро пожаловать!\n\nУ вас нет доступа к этому боту. Нажмите кнопку ниже, чтобы запросить доступ.",
-            keyboard), session);
     }
 
     private async Task SendSafeResponseAsync(long chatId, string message, UserSession session)

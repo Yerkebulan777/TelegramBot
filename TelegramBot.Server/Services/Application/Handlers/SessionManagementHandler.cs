@@ -380,8 +380,8 @@ public sealed class SessionManagementHandler(
         return sessionId;
     }
 
-    // Все одобренные пользователи могут управлять любыми сессиями (проверка доступа — в AuthorizationMiddleware).
-    // Для SQL-параметра @IsAdmin достаточно true.
+    // Бот открытый: любой верифицированный (не-аноним) пользователь может управлять любыми сессиями.
+    // Проверка «не аноним» — в CommandAppService. Для SQL-параметра @IsAdmin достаточно true.
     private static bool IsAdmin => true;
 
     private async Task ShowSessionsListAsync(CallbackContext context)

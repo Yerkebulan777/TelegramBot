@@ -20,7 +20,6 @@ public sealed class DatabaseInitializerService(
 
         try
         {
-            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateBotUsersTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateSessionsTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureSessionsColumns, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateCommandsTable, transaction: tx);

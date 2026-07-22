@@ -1,14 +1,12 @@
 using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
-using TelegramBot.Server.Middleware;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application;
 
 public sealed class CommandAppService(
     TelegramOutputService outputService,
-    AuthorizationMiddleware accessValidator,
     CallbackDispatcher callbackDispatcher,
     SlashCommandService slashCommandService,
     SessionManager sessionManager,
@@ -16,12 +14,21 @@ public sealed class CommandAppService(
     RateLimiter rateLimiter,
     ILogger<CommandAppService> logger)
 {
+    private const string AnonymousProfileMessage =
+        "Ваш профиль анонимен. Укажите имя или @username в настройках Telegram, чтобы пользоваться ботом.";
+
     public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
         if (!rateLimiter.IsAllowed(message.UserId))
         {
             _=await outputService.SendMessageAsync(message.UserId,
                 "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(message.Username))
+        {
+            await RejectAnonymousAsync(message.UserId);
             return;
         }
 
@@ -57,7 +64,13 @@ public sealed class CommandAppService(
             return;
         }
 
-        if (callback.Username == null || callback.MessageText == null || callback.CallbackData == null || callback.CallbackQueryId == null)
+        if (string.IsNullOrWhiteSpace(callback.Username))
+        {
+            await RejectAnonymousAsync(callback.UserId);
+            return;
+        }
+
+        if (callback.MessageText == null || callback.CallbackData == null || callback.CallbackQueryId == null)
         {
             logger.LogWarning("Incomplete callback: user={UserId}", callback.UserId);
             return;
@@ -65,33 +78,16 @@ public sealed class CommandAppService(
 
         var session = sessionManager.GetOrCreateSession(callback.UserId);
         var parsed = CallbackDataParser.Parse(callback.CallbackData);
-        var bypassesAccess = accessValidator.BypassesAccessCheck(parsed.Prefix);
 
-        // Stale-session detection for callbacks. Bootstrap callbacks (REQACCESS, APPROVEUSER,
-        // REJECTUSER) operate on DB state, not session state, so they bypass this check — same
-        // exemption as the access check below. All other callbacks depend on session-local state
+        // Stale-session detection for callbacks. Callbacks depend on session-local state
         // (pending commands, file selection, status filters) that no longer exists after restart,
         // so a fresh session is redirected to /start via a single hint.
-        if (!session.Initialized && !bypassesAccess)
+        if (!session.Initialized)
         {
             await NotifyStaleSessionAsync(session, callback.UserId, callback.Username);
             return;
         }
         session.Initialized = true;
-
-        if (!bypassesAccess)
-        {
-            var access = await accessValidator.ValidateAsync(callback.UserId);
-            if (!access.IsActive)
-            {
-                _ = await messageTrackingService.TrackAsync(
-                    outputService.SendMessageAsync(callback.UserId, "У вас нет доступа. Введите /start для запроса доступа."),
-                    session);
-
-                logger.LogWarning("Callback rejected: prefix={Prefix}, user={Username} ({UserId}), reason=access", parsed.Prefix, callback.Username, callback.UserId);
-                return;
-            }
-        }
 
         var context = new CallbackContext
         {
@@ -105,6 +101,13 @@ public sealed class CommandAppService(
         };
 
         await callbackDispatcher.DispatchAsync(context, cancellationToken);
+    }
+
+    /// <summary>Отшивает безликий аккаунт: логирует и шлёт инструкцию заполнить профиль.</summary>
+    private async Task RejectAnonymousAsync(long userId)
+    {
+        logger.LogWarning("Anonymous user rejected: {UserId}", userId);
+        _ = await outputService.SendMessageAsync(userId, AnonymousProfileMessage);
     }
 
     /// <summary>
