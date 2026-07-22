@@ -11,7 +11,7 @@
 // Exit codes: 0 = granted, non-zero = see stderr message.
 
 using System.Runtime.InteropServices;
-using System.Text;
+using System.Security.Principal;
 
 if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
 {
@@ -21,84 +21,55 @@ if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
 
 string account = args[0];
 
-if (!TryLookupSid(account, out byte[] sid, out string lookupError))
+byte[] sid;
+try
 {
-    Console.Error.WriteLine($"LookupAccountName failed for '{account}': {lookupError}");
+    var identifier = (SecurityIdentifier)new NTAccount(account).Translate(typeof(SecurityIdentifier));
+    sid = new byte[identifier.BinaryLength];
+    identifier.GetBinaryForm(sid, 0);
+}
+catch (Exception ex)
+{
+    // ex.Message is localized (Cyrillic on a RU-locale box) and can come out
+    // mojibake once redirected through cmd.exe's OEM codepage — the type
+    // name alone (e.g. IdentityNotMappedException) is enough to diagnose and
+    // survives any codepage.
+    Console.Error.WriteLine($"Account lookup failed for '{account}': {ex.GetType().Name}");
     return 3;
 }
 
+// One-shot CLI helper: the process exits right after this, so the OS
+// reclaims the unmanaged buffer and LSA handle regardless — no try/finally
+// needed for either.
 IntPtr sidPtr = Marshal.AllocHGlobal(sid.Length);
-try
+Marshal.Copy(sid, 0, sidPtr, sid.Length);
+
+var objectAttributes = default(NativeMethods.LSA_OBJECT_ATTRIBUTES);
+uint status = NativeMethods.LsaOpenPolicy(
+    IntPtr.Zero, ref objectAttributes, NativeMethods.POLICY_CREATE_ACCOUNT | NativeMethods.POLICY_LOOKUP_NAMES, out IntPtr policyHandle);
+if (status != 0)
 {
-    Marshal.Copy(sid, 0, sidPtr, sid.Length);
-
-    var objectAttributes = default(NativeMethods.LSA_OBJECT_ATTRIBUTES);
-    uint status = NativeMethods.LsaOpenPolicy(
-        IntPtr.Zero, ref objectAttributes, NativeMethods.POLICY_CREATE_ACCOUNT | NativeMethods.POLICY_LOOKUP_NAMES, out IntPtr policyHandle);
-    if (status != 0)
-    {
-        Console.Error.WriteLine($"LsaOpenPolicy failed: {Win32MessageFor(status)}");
-        return 4;
-    }
-
-    try
-    {
-        var rights = new[] { NativeMethods.ToLsaString("SeServiceLogonRight") };
-        try
-        {
-            status = NativeMethods.LsaAddAccountRights(policyHandle, sidPtr, rights, rights.Length);
-            if (status != 0)
-            {
-                Console.Error.WriteLine($"LsaAddAccountRights failed: {Win32MessageFor(status)}");
-                return 5;
-            }
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(rights[0].Buffer);
-        }
-    }
-    finally
-    {
-        NativeMethods.LsaClose(policyHandle);
-    }
+    Console.Error.WriteLine($"LsaOpenPolicy failed: {Win32MessageFor(status)}");
+    return 4;
 }
-finally
+
+var rights = new[] { NativeMethods.ToLsaString("SeServiceLogonRight") };
+status = NativeMethods.LsaAddAccountRights(policyHandle, sidPtr, rights, rights.Length);
+NativeMethods.LsaClose(policyHandle);
+
+if (status != 0)
 {
-    Marshal.FreeHGlobal(sidPtr);
+    Console.Error.WriteLine($"LsaAddAccountRights failed: {Win32MessageFor(status)}");
+    return 5;
 }
 
 Console.WriteLine($"OK: granted SeServiceLogonRight to {account}");
 return 0;
 
-// Error text from Win32Exception/FormatMessage is localized (Cyrillic on a
-// RU-locale Windows box) and can come out mojibake once redirected through
-// cmd.exe's OEM codepage and read back by Inno as ANSI — exactly the kind of
-// encoding mismatch that made the earlier secedit approach unreadable
-// remotely. Numeric codes are locale-independent and enough to diagnose:
-// ERROR_ACCESS_DENIED=5, ERROR_NONE_MAPPED=1332, etc.
 static string Win32MessageFor(uint ntStatus)
 {
     int win32Error = NativeMethods.LsaNtStatusToWinError(ntStatus);
     return $"Win32 error {win32Error}, NTSTATUS 0x{ntStatus:X8}";
-}
-
-static bool TryLookupSid(string account, out byte[] sid, out string error)
-{
-    uint sidSize = 0;
-    uint domainSize = 0;
-    NativeMethods.LookupAccountName(null, account, null, ref sidSize, null, ref domainSize, out _);
-
-    sid = new byte[sidSize];
-    var domainName = new StringBuilder((int)domainSize);
-    if (!NativeMethods.LookupAccountName(null, account, sid, ref sidSize, domainName, ref domainSize, out _))
-    {
-        error = $"Win32 error {Marshal.GetLastWin32Error()}";
-        return false;
-    }
-
-    error = "";
-    return true;
 }
 
 internal static class NativeMethods
@@ -148,11 +119,4 @@ internal static class NativeMethods
 
     [DllImport("advapi32.dll")]
     public static extern uint LsaClose(IntPtr objectHandle);
-
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern bool LookupAccountName(
-        string? systemName, string accountName,
-        byte[]? sid, ref uint cbSid,
-        StringBuilder? referencedDomainName, ref uint cchReferencedDomainName,
-        out int use);
 }

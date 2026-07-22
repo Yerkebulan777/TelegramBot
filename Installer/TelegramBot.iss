@@ -221,7 +221,7 @@ begin
     '}' + #13#10, False);
 end;
 
-function QuoteSc(const S: String): String;
+function QuoteArg(const S: String): String;
 begin
   Result := '"' + S + '"';
 end;
@@ -231,17 +231,8 @@ var
   ResultCode: Integer;
 begin
   Exec(ExpandConstant('{sys}\icacls.exe'),
-    Format('%s /grant %s:(OI)(CI)F', [QuoteSc(Path), QuoteSc(Account)]),
+    Format('%s /grant %s:(OI)(CI)F', [QuoteArg(Path), QuoteArg(Account)]),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-end;
-
-function JoinLines(const Lines: TArrayOfString): String;
-var
-  I: Integer;
-begin
-  Result := '';
-  for I := 0 to GetArrayLength(Lines) - 1 do
-    Result := Result + Lines[I] + #13#10;
 end;
 
 { Single, shared mechanic for every privileged CLI call in this script
@@ -257,17 +248,19 @@ end;
 function RunAdminCommand(const Exe, Args, ErrorContext: String): Boolean;
 var
   LogPath, CmdArgs, LogText: String;
+  LogTextA: AnsiString;
   ResultCode: Integer;
-  LogLines: TArrayOfString;
 begin
   LogPath := ExpandConstant('{tmp}\admin_cmd.log');
   CmdArgs := Format('/c ""%s" %s > "%s" 2>&1"', [ExpandConstant(Exe), Args, LogPath]);
   Result := Exec(ExpandConstant('{cmd}'), CmdArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
   if Result then exit;
 
-  LogText := '';
-  if LoadStringsFromFile(LogPath, LogLines) then
-    LogText := Trim(JoinLines(LogLines));
+  { LoadStringFromFile reads into AnsiString (unlike LoadStringsFromFile's
+    per-line Unicode split) — convert once here rather than threading
+    AnsiString through the rest of the function. }
+  LoadStringFromFile(LogPath, LogTextA);
+  LogText := Trim(String(LogTextA));
 
   if LogText <> '' then
     MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + '):' + #13#10#13#10 + LogText, mbError, MB_OK)
@@ -289,7 +282,7 @@ end;
   see README troubleshooting section. }
 procedure GrantServiceLogonRight(const Account: String);
 begin
-  RunAdminCommand('{app}\Tools\GrantLogonRight.exe', QuoteSc(Account),
+  RunAdminCommand('{app}\Tools\GrantLogonRight.exe', QuoteArg(Account),
     'Не удалось выдать право "Вход в качестве службы"');
 end;
 
@@ -298,7 +291,7 @@ var
   CreateCmd: String;
 begin
   CreateCmd := Format('create %s binPath= %s obj= %s password= %s start= delayed-auto DisplayName= %s', [
-    SvcName, QuoteSc(ExePath), QuoteSc(Account), QuoteSc(Password), QuoteSc(DisplayName)]);
+    SvcName, QuoteArg(ExePath), QuoteArg(Account), QuoteArg(Password), QuoteArg(DisplayName)]);
   Result := RunAdminCommand('{sys}\sc.exe', CreateCmd,
     'Не удалось создать службу ' + SvcName + '. Проверьте имя учётной записи и пароль');
   if not Result then exit;
@@ -325,13 +318,13 @@ begin
   { /delay 0000:05 — 5s after logon (which happens at boot via auto-logon)
     gives the desktop/network a moment to settle before Worker/Revit starts. }
   CreateCmd := Format('/create /tn %s /tr "\"%s\"" /sc onlogon /ru %s /it /rl highest /delay 0000:05 /f', [
-    QuoteSc(TaskName), ExePath, QuoteSc(Account)]);
+    QuoteArg(TaskName), ExePath, QuoteArg(Account)]);
   Result := RunAdminCommand('{sys}\schtasks.exe', CreateCmd,
     'Не удалось создать задачу планировщика для Worker');
   if not Result then exit;
   { Best-effort immediate start so the admin doesn't have to log off/on now;
     only works if the installer is running under Account's own session. }
-  RunAdminCommand('{sys}\schtasks.exe', '/run /tn ' + QuoteSc(TaskName),
+  RunAdminCommand('{sys}\schtasks.exe', '/run /tn ' + QuoteArg(TaskName),
     'Не удалось сразу запустить задачу Worker (запустится при следующем входе)');
 end;
 
