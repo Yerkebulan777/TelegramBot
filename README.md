@@ -43,7 +43,7 @@ dotnet build TelegramBot.slnx
   "ConnectionStrings": {
     "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Timeout=30;Minimum Pool Size=2;Connection Idle Lifetime=300"
   },
-  "TelegramBot": { "Token": "BOT_TOKEN", "AdminUserId": 0 },
+  "TelegramBot": { "Token": "BOT_TOKEN" },
   "FileSystem": { "RootPath": "B:\\" }
 }
 ```
@@ -98,7 +98,7 @@ dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Instal
 - выбор компонентов — Server / Worker / оба;
 - учётная запись (не `LocalSystem`/`NetworkService` — им нужен явный доступ к сетевой шаре); поле автоподставляет текущего пользователя (`{userdomain}\{username}`); пароль нужен только для Server (регистрируется через `sc.exe`) — Worker как интерактивная задача планировщика запускается без хранения пароля, но требует, чтобы эта учётка была залогинена в системе;
 - путь к файловой шаре — буква смонтированного диска (`B:`) автоматически резолвится в UNC (`\\server\share`) в сессии инсталлятора, поскольку ни служба, ни задача планировщика в фоновом режиме маппинг дисков не видят;
-- токен бота и `AdminUserId` — только для Server.
+- токен бота — только для Server.
 
 Регистрирует Server через `sc.exe create` с авто-рестартом при падении (`sc.exe failure ... actions= restart/...`), Worker — через `schtasks /create` с триггером `/sc onlogon /it` (см. выше про Session 0). Патчит `appsettings.Local.json` каждого выбранного компонента, выдаёт NTFS-права на папку установки и на сетевую шару. Удаление — через стандартный деинсталлятор Inno (останавливает/удаляет службу Server и задачу планировщика Worker).
 
@@ -120,7 +120,6 @@ dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Instal
 | Параметр | Назначение |
 |---|---|
 | `TelegramBot:Token` | обязателен |
-| `TelegramBot:AdminUserId` | ID администратора — узнать свой числовой Telegram ID можно у бота [@userinfobot](https://t.me/userinfobot) |
 | `ConnectionStrings:Postgres` | DSN |
 | `FileSystem:RootPath` | обязательный каталог |
 | `FileSystem:RvtDirectoryName` | `01_RVT` |

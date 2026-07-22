@@ -108,10 +108,9 @@ begin
   PathPage.Values[0] := 'B:';
 
   TelegramPage := CreateInputQueryPage(PathPage.ID,
-    'Настройки Telegram-бота', 'Только для Server — токен бота и Telegram ID администратора.',
-    'Токен выдаёт @BotFather. AdminUserId — числовой Telegram ID (узнать можно у @userinfobot).');
+    'Настройки Telegram-бота', 'Только для Server — токен бота.',
+    'Токен выдаёт @BotFather.');
   TelegramPage.Add('Bot token:', False);
-  TelegramPage.Add('Admin Telegram ID:', False);
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -157,12 +156,6 @@ begin
     if Trim(TelegramPage.Values[0]) = '' then
     begin
       MsgBox('Укажите токен бота.', mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
-    if StrToIntDef(Trim(TelegramPage.Values[1]), -1) <= 0 then
-    begin
-      MsgBox('Admin Telegram ID должен быть положительным числом.', mbError, MB_OK);
       Result := False;
     end;
   end;
@@ -337,7 +330,6 @@ begin
   begin
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'RootPath', ResolvedPath, True);
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0], True);
-    PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'AdminUserId', Trim(TelegramPage.Values[1]), False);
     if RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password) then
       GrantAccess(ExpandConstant('{app}'), Account);
   end;
