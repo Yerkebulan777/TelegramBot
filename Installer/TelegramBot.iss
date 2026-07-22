@@ -256,6 +256,25 @@ begin
   Lines[Index] := NewLine;
 end;
 
+// secedit deletes its own temp working files (and Inno wipes its tmp dir)
+// once the installer exits, so a bare "код 1" MsgBox gives no way to
+// diagnose a /configure failure after the fact — pull the log's own tail
+// into the box instead of just pointing at a path that won't exist a
+// minute later.
+function JoinTailLines(const Lines: TArrayOfString; MaxLines: Integer): String;
+var
+  I, Start, Len: Integer;
+begin
+  Len := GetArrayLength(Lines);
+  if Len > MaxLines then
+    Start := Len - MaxLines
+  else
+    Start := 0;
+  Result := '';
+  for I := Start to Len - 1 do
+    Result := Result + Lines[I] + #13#10;
+end;
+
 { Grants "Log on as a service" (SeServiceLogonRight) to Account via secedit,
   merging it into whatever the policy already lists instead of overwriting
   it — secedit /configure with /areas USER_RIGHTS only touches the rights
@@ -271,7 +290,7 @@ end;
 procedure GrantServiceLogonRight(const Account: String);
 var
   CfgPath, DbPath, LogPath: String;
-  Lines: TArrayOfString;
+  Lines, LogLines: TArrayOfString;
   I: Integer;
   KeyFound, SectionFound: Boolean;
 begin
@@ -341,9 +360,16 @@ begin
 
   SaveStringsToFile(CfgPath, Lines, False);
 
-  RunAdminCommand('{sys}\secedit.exe',
+  if not RunAdminCommand('{sys}\secedit.exe',
     Format('/configure /db "%s" /cfg "%s" /areas USER_RIGHTS /log "%s"', [DbPath, CfgPath, LogPath]),
-    'Не удалось применить право "Вход в качестве службы". Подробности в логе: ' + LogPath);
+    'Не удалось применить право "Вход в качестве службы".') then
+  begin
+    if LoadStringsFromFile(LogPath, LogLines) then
+      MsgBox('Лог secedit /configure (последние строки):' + #13#10#13#10 +
+        JoinTailLines(LogLines, 40), mbInformation, MB_OK)
+    else
+      MsgBox('Лог secedit не найден: ' + LogPath, mbError, MB_OK);
+  end;
 end;
 
 function RegisterService(const SvcName, DisplayName, ExePath, Account, Password: String): Boolean;
