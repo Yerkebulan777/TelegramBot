@@ -72,47 +72,52 @@ Server и Worker должны использовать одну и ту же с�
 
 ## Деплой (production)
 
-Server разворачивается как Windows Service (`Host.UseWindowsService()` — под SCM переключается в режим службы, при `dotnet run` работает как консоль).
+Server — Windows Service (`Host.UseWindowsService()`; под SCM — служба, при `dotnet run` — консоль).
 
-**Worker — НЕ служба, а задача Task Scheduler с триггером "при входе в систему".** Worker запускает Revit, а Revit — GUI-приложение; службы Windows работают в изолированной Session 0 без доступа к реальному рабочему столу (опция "Allow service to interact with desktop" убрана ещё в Vista), поэтому окна и диалоги Revit, запущенного службой, никто не видит и не может закрыть — процесс виснет молча. Задача планировщика с флагом `/it` запускается в интерактивной сессии реального пользователя, и Revit отображается как обычно.
+**Worker — НЕ служба, а задача Task Scheduler** (триггер "при входе в систему"). Причина: Worker запускает Revit (GUI), а службы работают в изолированной Session 0 без рабочего стола — окна и диалоги Revit, запущенного службой, никто не видит, процесс виснет молча. Задача планировщика с флагом `/it` запускается в интерактивной сессии — Revit отображается нормально.
 
-Плата за это: машина должна оставаться залогиненной под учёткой Worker'а (для выделенных машин — настроить авто-логон), иначе Worker не запустится до следующего входа в систему. Также у `schtasks` в базовом режиме нет аналога `sc.exe`-политики автоперезапуска при падении — при необходимости можно добавить через XML-задачу с `<RestartOnFailure>`.
+Плата: машина должна оставаться залогиненной под учёткой Worker'а (на выделенных машинах — авто-логон), иначе Worker не запустится до следующего входа.
 
-Исходник инсталлятора — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (solution item в `TelegramBot.slnx`, Inno Setup 6, в git не компилируется).
+### Сборка инсталлятора
 
-**Требование:** [Inno Setup 6](https://jrsoftware.org/isdl.php) — компилятор `ISCC.exe` (не входит в .NET SDK, ставится отдельно).
-
-Пересборка `TelegramBotSetup.exe`:
+Скрипт — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (Inno Setup, не компилируется в git). Требование: [Inno Setup](https://jrsoftware.org/isdl.php) — компилятор `ISCC.exe` (не входит в .NET SDK).
 
 ```powershell
-dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
-dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Installer\publish\Worker
-dotnet publish Installer\GrantLogonRight\GrantLogonRight.csproj -c Release -o Installer\publish\GrantLogonRight
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" Installer\TelegramBot.iss
-# admin-установка Inno Setup → "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+dotnet build Installer\Installer.build.proj -t:Installer
 # → Installer\Output\TelegramBotSetup.exe (не коммитится, *.exe в .gitignore)
 ```
 
-Через GUI — открыть `TelegramBot.iss` в Inno Setup Compiler (`Compil32.exe`) и нажать F9.
+Публикует Server/Worker/GrantLogonRight и вызывает ISCC — по умолчанию `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`. Другая версия/путь (например, Inno Setup 7):
 
-Мастер установки:
+```powershell
+dotnet build Installer\Installer.build.proj -t:Installer /p:IsccExe="C:\Program Files\Inno Setup 7\ISCC.exe"
+```
+
+Через GUI — открыть `TelegramBot.iss` в Inno Setup Compiler (`Compil32.exe`), F9.
+
+### Мастер установки
+
 - выбор компонентов — Server / Worker / оба;
-- учётная запись (не `LocalSystem`/`NetworkService` — им нужен явный доступ к сетевой шаре); поле автоподставляет текущего пользователя (`{userdomain}\{username}`); пароль нужен только для Server (регистрируется через `sc.exe`) — Worker как интерактивная задача планировщика запускается без хранения пароля, но требует, чтобы эта учётка была залогинена в системе;
-- путь к файловой шаре — буква смонтированного диска (`B:`) автоматически резолвится в UNC (`\\server\share`) в сессии инсталлятора, поскольку ни служба, ни задача планировщика в фоновом режиме маппинг дисков не видят;
+- учётная запись (не `LocalSystem`/`NetworkService` — нужен доступ к сетевой шаре), поле автоподставляет текущего пользователя; пароль — только для Server (`sc.exe`), Worker как интерактивная задача пароль не хранит, но требует, чтобы учётка была залогинена;
+- путь к файловой шаре — буква диска (`B:`) резолвится в UNC (`\\server\share`) в сессии инсталлятора (служба/задача в фоне маппинг дисков не видят);
 - токен бота — только для Server.
 
-Регистрирует Server через `sc.exe create` с авто-рестартом при падении (`sc.exe failure ... actions= restart/...`), Worker — через `schtasks /create` с триггером `/sc onlogon /it` (см. выше про Session 0). Патчит `appsettings.Local.json` каждого выбранного компонента, выдаёт NTFS-права на папку установки и на сетевую шару. Удаление — через стандартный деинсталлятор Inno (останавливает/удаляет службу Server и задачу планировщика Worker).
+Регистрирует Server через `sc.exe create` с авто-рестартом (`sc.exe failure ... restart/...`), Worker — через `schtasks /create /sc onlogon /it`. Патчит `appsettings.Local.json` каждого компонента, выдаёт NTFS-права на папку установки и сетевую шару. Право **"Вход в качестве службы"** выдаётся автоматически через `Installer\GrantLogonRight` (`LsaAddAccountRights`, до `sc.exe create` — сам `sc.exe` это право не назначает). Удаление — стандартный деинсталлятор Inno.
 
-**Server не стартует (ошибка входа, event ID 7000/7041 в System log):** учётной записи не хватает права **"Вход в качестве службы"** (`Log on as a service`). Инсталлятор выдаёт его автоматически при установке — через `Installer\GrantLogonRight` (маленький .NET-помощник, вызывающий `LsaAddAccountRights` напрямую, то же API, что и GUI-мастер служб), до вызова `sc.exe create`, поскольку сам `sc.exe` это право не назначает. Если ошибка всё равно возникает, скорее всего доменная GPO откатывает локально выданное право при своём обновлении — тогда чинить нужно на стороне домена (см. ниже), локальная переустановка не поможет. Выдать вручную для диагностики/временного фикса:
+### Troubleshooting
 
-1. `Win+R` → `secpol.msc`
-2. Локальные политики → Назначение прав пользователя → **"Вход в качестве службы"**
-3. Добавить учётную запись службы (например, `DOMAIN\username`)
-4. `gpupdate /force`, затем `Start-Service TelegramBotServer`
+**Server не стартует (event ID 7000/7041):** не хватает права "Вход в качестве службы". Проверить/выдать вручную:
 
-Если право пропадает повторно — политику перезаписывает доменная GPO, нужно менять её у администратора домена, а не локально.
+```powershell
+GrantLogonRight.exe DOMAIN\username    # Installer\publish\GrantLogonRight
+# или secpol.msc → Локальные политики → Назначение прав пользователя → "Вход в качестве службы"
+gpupdate /force
+Start-Service TelegramBotServer
+```
 
-**Worker не запускается / Revit "висит" без результата:** Worker — задача планировщика, не служба (см. выше), поэтому запускается только при интерактивном входе учётки в систему. Проверить: `schtasks /query /tn TelegramBotWorker /v /fo list`. Если задача есть, но не запущена — учётка не залогинена; если процессы Revit запущены, но зависли без результата — проверьте `Get-Process Revit | Select Id,SI` (столбец `SI` = 0 означает, что задача всё-таки выполнилась в Session 0, а не интерактивно — перепроверьте `/it` в определении задачи).
+Если право пропадает повторно после `gpupdate` — доменная GPO откатывает его при каждом обновлении; чинить на стороне домена, локальная переустановка не поможет.
+
+**Worker не запускается / Revit "висит":** `schtasks /query /tn TelegramBotWorker /v /fo list` — если задача не запущена, учётка не залогинена. Если Revit запущен, но завис — `Get-Process Revit | Select Id,SI`: `SI=0` означает, что процесс выполнился в Session 0, а не интерактивно (проверить `/it` в определении задачи).
 
 ## Конфигурация
 
