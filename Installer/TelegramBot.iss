@@ -290,6 +290,16 @@ begin
     exit;
   end;
 
+  { secedit exports as UTF-16 (declared by "Unicode=yes" under [Unicode]), but
+    SaveStringsToFile below only writes ANSI — there's no Unicode-writing
+    counterpart in Pascal Script. Left as "yes", the re-saved ANSI file would
+    still claim to be UTF-16 and secedit /configure would fail to parse it.
+    Flip the flag to match what we actually write; safe here since every
+    value involved (account name, key names) is plain ASCII. }
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    if Trim(Lines[I]) = 'Unicode=yes' then
+      Lines[I] := 'Unicode=no';
+
   KeyFound := False;
   SectionFound := False;
   for I := 0 to GetArrayLength(Lines) - 1 do
