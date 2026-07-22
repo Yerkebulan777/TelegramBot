@@ -307,19 +307,25 @@ begin
 
   if not KeyFound then
   begin
-    if not SectionFound then
+    if SectionFound then
     begin
-      MsgBox('В выгруженной политике нет секции [Privilege Rights] — право "Вход в качестве службы" ' +
-        'не выдано, настройте вручную через secpol.msc.', mbError, MB_OK);
-      exit;
-    end;
-    for I := 0 to GetArrayLength(Lines) - 1 do
-    begin
-      if Trim(Lines[I]) = '[Privilege Rights]' then
+      for I := 0 to GetArrayLength(Lines) - 1 do
       begin
-        InsertArrayLine(Lines, I + 1, 'SeServiceLogonRight = ' + Account);
-        break;
+        if Trim(Lines[I]) = '[Privilege Rights]' then
+        begin
+          InsertArrayLine(Lines, I + 1, 'SeServiceLogonRight = ' + Account);
+          break;
+        end;
       end;
+    end
+    else
+    begin
+      { No local Privilege Rights at all — typical when a domain GPO owns
+        User Rights Assignment for this machine and the local security
+        database has nothing of its own to export. secedit still accepts a
+        template that introduces a brand-new section, so append one. }
+      InsertArrayLine(Lines, GetArrayLength(Lines), '[Privilege Rights]');
+      InsertArrayLine(Lines, GetArrayLength(Lines), 'SeServiceLogonRight = ' + Account);
     end;
   end;
 
