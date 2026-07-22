@@ -87,6 +87,7 @@ Server разворачивается как Windows Service (`Host.UseWindowsSe
 ```powershell
 dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
 dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Installer\publish\Worker
+dotnet publish Installer\GrantLogonRight\GrantLogonRight.csproj -c Release -o Installer\publish\GrantLogonRight
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" Installer\TelegramBot.iss
 # admin-установка Inno Setup → "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 # → Installer\Output\TelegramBotSetup.exe (не коммитится, *.exe в .gitignore)
@@ -102,7 +103,7 @@ dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Instal
 
 Регистрирует Server через `sc.exe create` с авто-рестартом при падении (`sc.exe failure ... actions= restart/...`), Worker — через `schtasks /create` с триггером `/sc onlogon /it` (см. выше про Session 0). Патчит `appsettings.Local.json` каждого выбранного компонента, выдаёт NTFS-права на папку установки и на сетевую шару. Удаление — через стандартный деинсталлятор Inno (останавливает/удаляет службу Server и задачу планировщика Worker).
 
-**Server не стартует (ошибка входа, event ID 7000/7041 в System log):** учётной записи не хватает права **"Вход в качестве службы"** (`Log on as a service`). Инсталлятор выдаёт его автоматически при установке (через `secedit`, до вызова `sc.exe create` — `sc.exe` сам это право не назначает, в отличие от GUI-мастера служб). Если ошибка всё равно возникает, скорее всего доменная GPO откатывает локально выданное право при своём обновлении — тогда чинить нужно на стороне домена (см. ниже), локальная переустановка не поможет. Выдать вручную для диагностики/временного фикса:
+**Server не стартует (ошибка входа, event ID 7000/7041 в System log):** учётной записи не хватает права **"Вход в качестве службы"** (`Log on as a service`). Инсталлятор выдаёт его автоматически при установке — через `Installer\GrantLogonRight` (маленький .NET-помощник, вызывающий `LsaAddAccountRights` напрямую, то же API, что и GUI-мастер служб), до вызова `sc.exe create`, поскольку сам `sc.exe` это право не назначает. Если ошибка всё равно возникает, скорее всего доменная GPO откатывает локально выданное право при своём обновлении — тогда чинить нужно на стороне домена (см. ниже), локальная переустановка не поможет. Выдать вручную для диагностики/временного фикса:
 
 1. `Win+R` → `secpol.msc`
 2. Локальные политики → Назначение прав пользователя → **"Вход в качестве службы"**

@@ -4,6 +4,7 @@
 ; Prerequisite (run before compiling this script):
 ;   dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
 ;   dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Installer\publish\Worker
+;   dotnet publish Installer\GrantLogonRight\GrantLogonRight.csproj -c Release -o Installer\publish\GrantLogonRight
 ;
 ; What this script does that a plain "sc.exe create" walkthrough doesn't:
 ;   - lets the admin pick Server / Worker / both
@@ -52,6 +53,7 @@ Name: "worker"; Description: "TelegramBot Worker"; Types: full worker
 [Files]
 Source: "publish\Server\*"; DestDir: "{app}\Server"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: recursesubdirs ignoreversion
+Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server; Flags: recursesubdirs ignoreversion
 
 [Code]
 var
@@ -245,130 +247,48 @@ begin
     MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + ').', mbError, MB_OK);
 end;
 
-procedure InsertArrayLine(var Lines: TArrayOfString; Index: Integer; const NewLine: String);
+function JoinLines(const Lines: TArrayOfString): String;
 var
-  I, Len: Integer;
+  I: Integer;
 begin
-  Len := GetArrayLength(Lines);
-  SetArrayLength(Lines, Len + 1);
-  for I := Len downto Index + 1 do
-    Lines[I] := Lines[I - 1];
-  Lines[Index] := NewLine;
-end;
-
-// secedit deletes its own temp working files (and Inno wipes its tmp dir)
-// once the installer exits, so a bare "код 1" MsgBox gives no way to
-// diagnose a /configure failure after the fact — pull the log's own tail
-// into the box instead of just pointing at a path that won't exist a
-// minute later.
-function JoinTailLines(const Lines: TArrayOfString; MaxLines: Integer): String;
-var
-  I, Start, Len: Integer;
-begin
-  Len := GetArrayLength(Lines);
-  if Len > MaxLines then
-    Start := Len - MaxLines
-  else
-    Start := 0;
   Result := '';
-  for I := Start to Len - 1 do
+  for I := 0 to GetArrayLength(Lines) - 1 do
     Result := Result + Lines[I] + #13#10;
 end;
 
-{ Grants "Log on as a service" (SeServiceLogonRight) to Account via secedit,
-  merging it into whatever the policy already lists instead of overwriting
-  it — secedit /configure with /areas USER_RIGHTS only touches the rights
-  present in the .cfg it's given, so exporting current state, appending
-  Account to the existing SeServiceLogonRight line, and reapplying leaves
-  every other right untouched. This is what the Services GUI does silently
-  via LsaAddAccountRights when you set a service's logon account by hand;
-  sc.exe create skips that step entirely, which is the actual reason a fresh
-  install otherwise needs a manual secpol.msc visit.
+{ Grants "Log on as a service" (SeServiceLogonRight) to Account — the same
+  right the Services GUI grants silently via LsaAddAccountRights when you set
+  a service's logon account by hand; sc.exe create skips that step entirely,
+  which is the actual reason a fresh install otherwise needs a manual
+  secpol.msc visit. Calls the LSA API directly through the bundled
+  GrantLogonRight.exe helper (Installer\GrantLogonRight) rather than hand-
+  patching a secedit-exported INF template — that approach turned out too
+  fragile to debug remotely (encoding mismatches, missing sections, and a
+  bare exit code with an empty log).
   Best-effort only: if a domain GPO enforces this right, it overwrites the
   local grant again on its own refresh cycle — no local fix survives that,
   see README troubleshooting section. }
 procedure GrantServiceLogonRight(const Account: String);
 var
-  CfgPath, DbPath, LogPath: String;
-  Lines, LogLines: TArrayOfString;
-  I: Integer;
-  KeyFound, SectionFound: Boolean;
+  HelperExe, LogPath, CmdArgs: String;
+  ResultCode: Integer;
+  LogLines: TArrayOfString;
 begin
-  CfgPath := ExpandConstant('{tmp}\secpol_export.cfg');
-  DbPath := ExpandConstant('{tmp}\secpol_apply.sdb');
-  LogPath := ExpandConstant('{tmp}\secpol_apply.log');
+  HelperExe := ExpandConstant('{app}\Tools\GrantLogonRight.exe');
+  LogPath := ExpandConstant('{tmp}\grant_logon_right.log');
+  { cmd.exe's /c quoting quirk: when the argument starts and ends with a
+    quote, cmd strips exactly that outer pair before parsing the rest —
+    the same trick RegisterWorkerTask uses for schtasks /tr below. }
+  CmdArgs := Format('/c ""%s" "%s" > "%s" 2>&1"', [HelperExe, Account, LogPath]);
 
-  if not RunAdminCommand('{sys}\secedit.exe',
-    Format('/export /cfg "%s" /areas USER_RIGHTS', [CfgPath]),
-    'Не удалось выгрузить текущую политику "Вход в качестве службы"') then
-    exit;
-
-  if not LoadStringsFromFile(CfgPath, Lines) then
-  begin
-    MsgBox('Не удалось прочитать выгруженную политику: ' + CfgPath, mbError, MB_OK);
-    exit;
-  end;
-
-  { secedit exports as UTF-16 (declared by "Unicode=yes" under [Unicode]), but
-    SaveStringsToFile below only writes ANSI — there's no Unicode-writing
-    counterpart in Pascal Script. Left as "yes", the re-saved ANSI file would
-    still claim to be UTF-16 and secedit /configure would fail to parse it.
-    Flip the flag to match what we actually write; safe here since every
-    value involved (account name, key names) is plain ASCII. }
-  for I := 0 to GetArrayLength(Lines) - 1 do
-    if Trim(Lines[I]) = 'Unicode=yes' then
-      Lines[I] := 'Unicode=no';
-
-  KeyFound := False;
-  SectionFound := False;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-  begin
-    if Pos('SeServiceLogonRight', Lines[I]) = 1 then
-    begin
-      if Pos(Account, Lines[I]) = 0 then
-        Lines[I] := TrimRight(Lines[I]) + ',' + Account;
-      KeyFound := True;
-      break;
-    end;
-    if Trim(Lines[I]) = '[Privilege Rights]' then
-      SectionFound := True;
-  end;
-
-  if not KeyFound then
-  begin
-    if SectionFound then
-    begin
-      for I := 0 to GetArrayLength(Lines) - 1 do
-      begin
-        if Trim(Lines[I]) = '[Privilege Rights]' then
-        begin
-          InsertArrayLine(Lines, I + 1, 'SeServiceLogonRight = ' + Account);
-          break;
-        end;
-      end;
-    end
-    else
-    begin
-      { No local Privilege Rights at all — typical when a domain GPO owns
-        User Rights Assignment for this machine and the local security
-        database has nothing of its own to export. secedit still accepts a
-        template that introduces a brand-new section, so append one. }
-      InsertArrayLine(Lines, GetArrayLength(Lines), '[Privilege Rights]');
-      InsertArrayLine(Lines, GetArrayLength(Lines), 'SeServiceLogonRight = ' + Account);
-    end;
-  end;
-
-  SaveStringsToFile(CfgPath, Lines, False);
-
-  if not RunAdminCommand('{sys}\secedit.exe',
-    Format('/configure /db "%s" /cfg "%s" /areas USER_RIGHTS /log "%s"', [DbPath, CfgPath, LogPath]),
-    'Не удалось применить право "Вход в качестве службы".') then
+  if not (Exec(ExpandConstant('{cmd}'), CmdArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0)) then
   begin
     if LoadStringsFromFile(LogPath, LogLines) then
-      MsgBox('Лог secedit /configure (последние строки):' + #13#10#13#10 +
-        JoinTailLines(LogLines, 40), mbInformation, MB_OK)
+      MsgBox('Не удалось выдать право "Вход в качестве службы" (код ' + IntToStr(ResultCode) + '):' + #13#10#13#10 +
+        JoinLines(LogLines), mbError, MB_OK)
     else
-      MsgBox('Лог secedit не найден: ' + LogPath, mbError, MB_OK);
+      MsgBox('Не удалось выдать право "Вход в качестве службы" (код ' + IntToStr(ResultCode) + ').',
+        mbError, MB_OK);
   end;
 end;
 

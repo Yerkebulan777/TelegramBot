@@ -4,6 +4,7 @@
   <Project Path="TelegramBot.Server\TelegramBot.Server.csproj" />
   <Project Path="TelegramBot.Worker\TelegramBot.Worker.csproj" />
   <Project Path="TelegramBot.BimLib\TelegramBot.BimLib.csproj" />
+  <Project Path="Installer\GrantLogonRight\GrantLogonRight.csproj" />
   <Folder Name="/Installer/">
     <File Path="Installer\TelegramBot.iss" />
   </Folder>
