@@ -17,7 +17,6 @@ public static class Program
 {
     public static async Task Main(string[]? args)
     {
-        // Проверка платформы во время выполнения (дополнительная защита)
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             throw new PlatformNotSupportedException("Это приложение разработано исключительно для операционной системы Windows.");
