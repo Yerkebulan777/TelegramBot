@@ -235,18 +235,6 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-{ Shared mechanic: run a privileged CLI command, report exit code on failure.
-  Both sc.exe and schtasks.exe registration follow this exact shape — only
-  the command line and the domain-specific failure message differ. }
-function RunAdminCommand(const Exe, Args, ErrorContext: String): Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := Exec(ExpandConstant(Exe), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
-  if not Result then
-    MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + ').', mbError, MB_OK);
-end;
-
 function JoinLines(const Lines: TArrayOfString): String;
 var
   I: Integer;
@@ -254,6 +242,37 @@ begin
   Result := '';
   for I := 0 to GetArrayLength(Lines) - 1 do
     Result := Result + Lines[I] + #13#10;
+end;
+
+{ Single, shared mechanic for every privileged CLI call in this script
+  (sc.exe, schtasks.exe, our own GrantLogonRight.exe helper): run it through
+  cmd.exe with stdout+stderr redirected to a log file, and on failure show
+  that log alongside the exit code. A bare "код 1" says nothing about *why*
+  a command failed — this used to be a one-off hack specific to the logon-
+  right helper; it's the one command runner everything else should go
+  through too, instead of each caller improvising its own capture.
+  cmd.exe's /c quoting quirk: when the argument starts and ends with a
+  quote, cmd strips exactly that outer pair before parsing the rest — same
+  trick RegisterWorkerTask uses for schtasks /tr below. }
+function RunAdminCommand(const Exe, Args, ErrorContext: String): Boolean;
+var
+  LogPath, CmdArgs, LogText: String;
+  ResultCode: Integer;
+  LogLines: TArrayOfString;
+begin
+  LogPath := ExpandConstant('{tmp}\admin_cmd.log');
+  CmdArgs := Format('/c ""%s" %s > "%s" 2>&1"', [ExpandConstant(Exe), Args, LogPath]);
+  Result := Exec(ExpandConstant('{cmd}'), CmdArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  if Result then exit;
+
+  LogText := '';
+  if LoadStringsFromFile(LogPath, LogLines) then
+    LogText := Trim(JoinLines(LogLines));
+
+  if LogText <> '' then
+    MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + '):' + #13#10#13#10 + LogText, mbError, MB_OK)
+  else
+    MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + ').', mbError, MB_OK);
 end;
 
 { Grants "Log on as a service" (SeServiceLogonRight) to Account — the same
@@ -269,27 +288,9 @@ end;
   local grant again on its own refresh cycle — no local fix survives that,
   see README troubleshooting section. }
 procedure GrantServiceLogonRight(const Account: String);
-var
-  HelperExe, LogPath, CmdArgs: String;
-  ResultCode: Integer;
-  LogLines: TArrayOfString;
 begin
-  HelperExe := ExpandConstant('{app}\Tools\GrantLogonRight.exe');
-  LogPath := ExpandConstant('{tmp}\grant_logon_right.log');
-  { cmd.exe's /c quoting quirk: when the argument starts and ends with a
-    quote, cmd strips exactly that outer pair before parsing the rest —
-    the same trick RegisterWorkerTask uses for schtasks /tr below. }
-  CmdArgs := Format('/c ""%s" "%s" > "%s" 2>&1"', [HelperExe, Account, LogPath]);
-
-  if not (Exec(ExpandConstant('{cmd}'), CmdArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0)) then
-  begin
-    if LoadStringsFromFile(LogPath, LogLines) then
-      MsgBox('Не удалось выдать право "Вход в качестве службы" (код ' + IntToStr(ResultCode) + '):' + #13#10#13#10 +
-        JoinLines(LogLines), mbError, MB_OK)
-    else
-      MsgBox('Не удалось выдать право "Вход в качестве службы" (код ' + IntToStr(ResultCode) + ').',
-        mbError, MB_OK);
-  end;
+  RunAdminCommand('{app}\Tools\GrantLogonRight.exe', QuoteSc(Account),
+    'Не удалось выдать право "Вход в качестве службы"');
 end;
 
 function RegisterService(const SvcName, DisplayName, ExePath, Account, Password: String): Boolean;
