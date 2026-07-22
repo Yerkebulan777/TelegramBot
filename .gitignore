@@ -92,3 +92,7 @@ appsettings.Local.json
 
 # Installer publish artifacts
 [Ii]nstaller/publish/
+
+# Code-signing keys/certs — never commit
+*.pfx
+*.cer

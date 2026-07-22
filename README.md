@@ -95,6 +95,14 @@ dotnet build Installer\Installer.build.proj -t:Installer /p:IsccExe="C:\Program 
 
 Через GUI — открыть `TelegramBot.iss` в Inno Setup Compiler (`Compil32.exe`), F9.
 
+**Подпись (опционально):** свежесобранный неподписанный `TelegramBotSetup.exe` Windows Defender может удалить как `Trojan:Win32/Bearfoos.B!ml` (ML-эвристика на непроверенный installer с privileged-действиями). Подписать — передать thumbprint сертификата из `Cert:\CurrentUser\My`:
+
+```powershell
+dotnet build Installer\Installer.build.proj -t:Installer /p:SignThumbprint=<thumbprint> /p:SignToolExe="<путь к signtool.exe>"
+```
+
+Подписывает `Server.exe`/`Worker.exe`/`GrantLogonRight.exe` и финальный `TelegramBotSetup.exe`. `signtool.exe` не входит в .NET SDK — часть Windows SDK или `Microsoft SDKs\ClickOnce\SignTool`. Self-signed сертификат достаточно создать один раз: `New-SelfSignedCertificate -Type CodeSigning -Subject "CN=..." -CertStoreLocation Cert:\CurrentUser\My`.
+
 ### Мастер установки
 
 - выбор компонентов — Server / Worker / оба;
