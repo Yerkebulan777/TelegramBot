@@ -71,7 +71,8 @@ public sealed class WorkerOptions
 
     /// <summary>
     /// Маппинг кодов команд (CommandText) на конфигурацию исполняемого файла.
-    /// По умолчанию: PDF/DWG/NWC/DATA/IFC → Revit.exe, CLASHREP → FileConvert.exe, AUTORES → python ai_agent.py
+    /// По умолчанию: PDF/DWG/NWC/DATA/IFC → Revit.exe, CLASHREP → FileConvert.exe (временный wrapper;
+    /// целевая реализация — Navisworks AddIn). AUTORES — не в Worker; planned в Revit AddIn.
     /// </summary>
     public Dictionary<string, CommandConfig> Commands { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);

@@ -26,11 +26,8 @@ public static class CallbackPrefixes
     /// <summary>Выбор файла IFC.</summary>
     public const string Ifc = "IFC:";
 
-    /// <summary>Выбор файла CLASHREP.</summary>
+    /// <summary>Выбор файла CLASHREP (сейчас FileConvert.exe; planned — Navisworks AddIn).</summary>
     public const string ClashRep = "CLASHREP:";
-
-    /// <summary>Выбор файла AUTORES.</summary>
-    public const string AutoRes = "AUTORES:";
 
     /// <summary>Применение выбранных команд.</summary>
     public const string ApplyCommands = "APPLYCOMMANDS:";

@@ -17,7 +17,7 @@ Windows-сервис на .NET 10: Telegram-бот принимает задан
 ## Возможности
 
 - `/export`: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
-- `/automation`: `CLASHREP`, `AUTORES`
+- `/automation`: `CLASHREP` (временный wrapper; целевой — Navisworks AddIn), `AUTORES` — planned в Revit AddIn
 - Навигация `RootPath → проект → разделы → 01_RVT`, фильтры `/status`, soft-delete
 - PostgreSQL `LISTEN/NOTIFY`, partition scheduling, retry, durable notifications
 
@@ -171,8 +171,9 @@ Worker создаёт `task_{project}_{commandId}.xml`, ждёт `result_{projec
 - Revit: без контрактных CLI-аргументов; TaskFile path — `REVITBIMFUSION_TASK_FILE`; допускается `/language RUS`
 - `.rvt` только в TaskFile XML, не в process args
 - Revit `commandText`: `PDF`, `DWG`, `NWC`, `IFC`, `DATA`
-- ResultFile обязателен для Revit; exit-code fallback — только wrapper (`CLASHREP`, `AUTORES`)
+- ResultFile обязателен для Revit; exit-code fallback — только текущий wrapper `CLASHREP` (`FileConvert.exe`)
 - `status=failed` / `cancelled` от плагина → permanent Failed без retry; нет/битый ResultFile → retry policy
+- Planned вне текущего handoff: `CLASHREP` → Navisworks AddIn (пока оставить FileConvert); `AUTORES` / `BIMDOC` → Revit AddIn (в TelegramBot нет)
 
 ## Логи
 

@@ -9,6 +9,4 @@ public static class CommandCodes
     public const string Data = "DATA";
     public const string Ifc = "IFC";
     public const string ClashRep = "CLASHREP";
-    public const string AutoRes = "AUTORES";
-
 }

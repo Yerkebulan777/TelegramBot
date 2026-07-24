@@ -66,7 +66,7 @@ Telegram SDK → Channel<Update> (200) → Parallel.ForEachAsync (max 10) → Te
 | Группа | Коды |
 |---|---|
 | Export | `PDF`, `DWG`, `NWC`, `DATA`, `IFC` |
-| Automation | `CLASHREP`, `AUTORES` |
+| Automation | `CLASHREP` (сейчас FileConvert; planned — Navisworks AddIn); `AUTORES` — planned Revit AddIn, не в каталоге |
 
 Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs`.
 
