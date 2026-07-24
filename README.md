@@ -82,18 +82,30 @@ Server — Windows Service (`Host.UseWindowsService()`; под SCM — служ�
 
 Скрипт — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (Inno Setup, не компилируется в git). Требование: [Inno Setup](https://jrsoftware.org/isdl.php) — компилятор `ISCC.exe` (не входит в .NET SDK).
 
+| Среда | Путь к `ISCC.exe` |
+|---|---|
+| Локально (Inno Setup 7, 64-bit) | `C:\Program Files\Inno Setup 7\ISCC.exe` |
+| CI (`windows-latest`, Inno Setup 6) | `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` |
+
+Проверка, что компилятор на месте:
+
+```powershell
+Test-Path "C:\Program Files\Inno Setup 7\ISCC.exe"   # локально → True
+& "C:\Program Files\Inno Setup 7\ISCC.exe" /?        # версия / справка
+```
+
 ```powershell
 dotnet build Installer\Installer.build.proj -t:Installer
 # → Installer\Output\TelegramBotSetup.exe (не коммитится, *.exe в .gitignore)
 ```
 
-Публикует Server/Worker/GrantLogonRight и вызывает ISCC — по умолчанию `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`. Другая версия/путь (например, Inno Setup 7):
+Публикует Server/Worker/GrantLogonRight и вызывает ISCC. `Installer.build.proj` сам ищет путь: сначала IS 7 (`Program Files`), затем IS 6 (`Program Files (x86)`). Явный override:
 
 ```powershell
 dotnet build Installer\Installer.build.proj -t:Installer /p:IsccExe="C:\Program Files\Inno Setup 7\ISCC.exe"
 ```
 
-Через GUI — открыть `TelegramBot.iss` в Inno Setup Compiler (`Compil32.exe`), F9.
+Через GUI — открыть `TelegramBot.iss` в Inno Setup Compiler (`Compil32.exe` рядом с `ISCC.exe`), F9.
 
 **Подпись (опционально):** свежесобранный неподписанный `TelegramBotSetup.exe` Windows Defender может удалить как `Trojan:Win32/Bearfoos.B!ml` (ML-эвристика на непроверенный installer с privileged-действиями). Подписать — передать thumbprint сертификата из `Cert:\CurrentUser\My`:
 
