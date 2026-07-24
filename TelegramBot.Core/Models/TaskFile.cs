@@ -4,42 +4,43 @@ namespace TelegramBot.Core.Models;
 
 /// <summary>
 /// Файл задания для BIM-плагина. Worker создаёт <c>task_{projectName}_{commandId}.xml</c> в TaskDirectory
-/// перед запуском процесса. Плагин читает этот файл, получает все параметры команды и после
-/// выполнения пишет результат в <c>result_{projectName}_{commandId}.xml</c>.
+/// перед запуском процесса. Revit AddIn получает путь через <c>REVITBIMFUSION_TASK_FILE</c>.
 /// </summary>
 /// <remarks>
-/// Формат полностью соответствует <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> и
-/// XML-схеме <c>…\RevitBIMFusion\Docs\TaskFile.schema.xsd</c>.
-/// Плагин НЕ должен полагаться только на аргументы командной строки —
-/// task-файл содержит полную и структурированную информацию о задании.
+/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-07-24) и
+/// <c>Docs/BimContract/TaskFile.schema.xsd</c> (vendored).
 /// </remarks>
 [XmlRoot("taskFile")]
 public sealed class TaskFile
 {
-    /// <summary>ID команды в БД (соответствует CommandId в Commands таблице).</summary>
+    /// <summary>ID команды в БД (опционально по XSD).</summary>
     [XmlElement("commandId")]
     public required int CommandId { get; set; }
 
     /// <summary>
-    /// Тип команды (код экспорта): <c>"PDF"</c>, <c>"DWG"</c>, <c>"NWC"</c>, <c>"DATA"</c>,
-    /// <c>"IFC"</c>, <c>"CLASHREP"</c>, <c>"AUTORES"</c>.
-    /// Соответствует <see cref="Constants.CommandCodes"/>.
+    /// Канон Revit AddIn: <c>PDF</c>, <c>DWG</c>, <c>NWC</c>, <c>IFC</c>, <c>DATA</c> (регистр не важен).
     /// </summary>
     [XmlElement("commandText")]
     public required string CommandText { get; set; }
 
     /// <summary>
-    /// Полный путь к исходному файлу (.rvt, .rfa, .nwc, .nwd, .ifc и т.д.).
-    /// AddIn открывает файл сам — через <c>OpenOptions { Audit = true, DetachAndPreserveWorksets }</c> для .rvt.
+    /// Абсолютный путь к <c>.rvt</c>. AddIn открывает сам (<c>Audit</c>, detach).
     /// </summary>
     [XmlElement("filePath")]
     public required string FilePath { get; set; }
 
     /// <summary>
-    /// Полный путь к файлу результата в TaskDirectory. Плагин обязан записать сюда XML с
-    /// <see cref="ResultFile"/> (см. <c>…\RevitBIMFusion\Docs\ResultFile.schema.xsd</c>).
+    /// Абсолютный путь к ResultFile. AddIn не вычисляет путь сам.
     /// </summary>
     [XmlElement("resultFilePath")]
     public required string ResultFilePath { get; set; }
 
+    /// <summary>Зарезервировано; сейчас пусто (контрактный sample — <c>&lt;options /&gt;</c>).</summary>
+    [XmlElement("options")]
+    public TaskFileOptions? Options { get; set; }
+}
+
+/// <summary>Пустой контейнер <c>options</c> — зарезервирован, дочерних элементов нет.</summary>
+public sealed class TaskFileOptions
+{
 }

@@ -9,8 +9,8 @@ public sealed class CommandConfig
     /// <summary>
     /// Шаблон аргументов командной строки. Может быть пустым.
     /// Поддерживаемые плейсхолдеры: {CommandText}, {FilePath}, {CommandId}, {TaskFilePath}, {ResultFilePath}.
-    /// Для RevitBIMFusion шаблон пустой: TaskFile передаётся через
-    /// process-scoped environment variable REVITBIMFUSION_TASK_FILE.
+    /// Для RevitBIMFusion шаблон игнорируется: без контрактных CLI-аргументов,
+    /// TaskFile через process-scoped <c>REVITBIMFUSION_TASK_FILE</c>, плюс <c>/language RUS</c>.
     /// </summary>
     public string ArgumentsTemplate { get; set; } = "";
 

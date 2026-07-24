@@ -165,13 +165,14 @@ Defaults — из option-классов. Полный пример — `appsetti
 
 ## BIM-контракт
 
-Worker создаёт `task_{project}_{commandId}.xml` и ждёт `result_{project}_{commandId}.xml` в `TaskDirectory`.
-- Revit: без command/file CLI-аргументов, TaskFile через `REVITBIMFUSION_TASK_FILE`
-- Revit запускается с `/language RUS`
-- Revit-команды: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
-- ResultFile обязателен для Revit; exit-code fallback — только wrapper-командам
+Эталон: [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) (v2026-07-24). XSD — vendored в `Docs/BimContract/` (ресинк вручную из `RevitBIMFusion/Docs`).
 
-XSD-схемы — vendored копия в `Docs/BimContract/` (источник истины — `RevitBIMFusion/Docs`, ресинк вручную). Детали — [AGENTS.md](AGENTS.md).
+Worker создаёт `task_{project}_{commandId}.xml`, ждёт `result_{project}_{commandId}.xml` в `TaskDirectory`.
+- Revit: без контрактных CLI-аргументов; TaskFile path — `REVITBIMFUSION_TASK_FILE`; допускается `/language RUS`
+- `.rvt` только в TaskFile XML, не в process args
+- Revit `commandText`: `PDF`, `DWG`, `NWC`, `IFC`, `DATA`
+- ResultFile обязателен для Revit; exit-code fallback — только wrapper (`CLASHREP`, `AUTORES`)
+- `status=failed` / `cancelled` от плагина → permanent Failed без retry; нет/битый ResultFile → retry policy
 
 ## Логи
 

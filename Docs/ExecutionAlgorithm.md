@@ -52,7 +52,7 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 
 `ProcessStarter.StartAsync`:
 - создаёт TaskFile (`task_{project}_{commandId}.xml`) с XSD-валидацией
-- заполняет `ProcessStartInfo` (Revit: пустые args, TaskFile path в `REVITBIMFUSION_TASK_FILE`)
+- заполняет `ProcessStartInfo` (Revit: без контрактных CLI-аргументов, `/language RUS`, TaskFile path в `REVITBIMFUSION_TASK_FILE`)
 - сериализованный `Process.Start()` через собственный `_launchGate` (`ProcessStarter`, отдельно от `_drainGate` оркестратора)
 
 ## 4. Ожидание и результат
@@ -60,19 +60,19 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 | Условие | Результат |
 |---|---|
 | `status=done` | `Done` |
-| `status=failed` | permanent `Failed` или retry |
+| `status=failed` (plugin) | permanent `Failed`, без retry |
 | `status=cancelled` | `Failed`, без retry |
-| invalid XML | `.bad`, failure |
-| Revit без ResultFile | failure |
+| invalid XML | `.bad`, failure → retry policy |
+| Revit без ResultFile | failure → retry policy |
 | wrapper без ResultFile, exit 0 | `Done` fallback |
-| wrapper без ResultFile, exit ≠ 0 | failure |
-| timeout | process kill, `Failed` |
+| wrapper без ResultFile, exit ≠ 0 | failure → retry/permanent по классификатору |
+| timeout | process kill, `Failed` (без retry) |
 
 stdout/stderr: 64 KiB capture, 4 KiB в лог. Прочитанный ResultFile удаляется. При отрицательном exit code — Revit journal evidence.
 
 ## 5. Retry
 
-Permanent (без retry): `PermanentFailureExitCodes`, invalid input, validation errors, cancellation, non-transient exceptions.
+Permanent (без retry): plugin `status=failed`/`cancelled`, `PermanentFailureExitCodes`, invalid input, validation errors, non-transient exceptions, timeout.
 
 Transient: `delay = RetryDelayBaseSeconds × 2^RetryCount + jitter`. После `MaxRetries` → `Failed`.
 

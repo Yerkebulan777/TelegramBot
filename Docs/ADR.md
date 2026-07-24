@@ -6,7 +6,7 @@
 
 **Контекст:** Worker запускал Revit через `Revit.exe /command "WORKER" "<task.xml>"`. Revit не поддерживает `/command` для `IExternalCommand` — команда трактовалась как открытие файла, вызывая 100% `ACCESS_VIOLATION`.
 
-**Решение:** Заменить CLI-аргументы на process-scoped environment variable `REVITBIMFUSION_TASK_FILE`. Revit запускается без контрактных аргументов, TaskFile path передаётся только через environment.
+**Решение:** Заменить CLI-аргументы на process-scoped environment variable `REVITBIMFUSION_TASK_FILE`. Revit запускается без контрактных аргументов (допускается `/language RUS`), TaskFile path передаётся только через environment.
 
 **Последствия:** (+) Параллельные Revit-процессы не разделяют TaskFile path. (+) Совместимо с документированным Revit API. (-) RevitBIMFusion должен читать переменную в `Application.OnStartup` и подписывать one-shot `Idling`.
 

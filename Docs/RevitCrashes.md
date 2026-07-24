@@ -14,7 +14,7 @@ Revit не поддерживает `/command` для `IExternalCommand`. Ком
 
 ## Исправление
 
-Текущий handoff: Worker создаёт TaskFile с XSD-валидацией → `Revit.exe` без CLI-аргументов → TaskFile path через process-scoped `REVITBIMFUSION_TASK_FILE` → `OnStartup` подписывает one-shot `Idling` → handler выполняет команду и пишет ResultFile.
+Текущий handoff: Worker создаёт TaskFile с XSD-валидацией → `Revit.exe` без контрактных CLI-аргументов (`/language RUS` допустим) → TaskFile path через process-scoped `REVITBIMFUSION_TASK_FILE` → `OnStartup` подписывает one-shot `Idling` → handler выполняет команду и пишет ResultFile.
 
 ## Проверенные гипотезы
 

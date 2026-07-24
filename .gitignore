@@ -96,3 +96,7 @@ appsettings.Local.json
 # Code-signing keys/certs — never commit
 *.pfx
 *.cer
+
+# Local scratch (contract diffs, agent temp)
+.tmp-bim-contract/
+.tmp/

@@ -2,4 +2,5 @@
 <resultFile>
   <status>done</status>
   <outputFiles>C:/Export/building.pdf</outputFiles>
+  <executionTimeMilliseconds>1234</executionTimeMilliseconds>
 </resultFile>

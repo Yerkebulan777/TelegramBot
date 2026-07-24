@@ -35,7 +35,7 @@ public sealed class CommandPreparer(
     /// Используется как CommandPreparer'ом при записи task-файла и ProcessRunner'ом при чтении result-файла,
     /// чтобы оба компонента использовали одну и ту же директорию (настраиваемую через <c>FileSystem:TaskDirectory</c>).
     /// Схема имени — <c>task_{projectName}_{commandId}.xml</c> — 1:1 с эталоном RevitBIMFusion
-    /// (см. BimPluginContract.md §TaskFile Location); AddIn имя файла не парсит, читает путь из environment variable,
+    /// (BimPluginContract.md §TaskFile / §TaskDirectory); AddIn имя файла не парсит, читает путь из environment variable,
     /// так что схема — чисто диагностическая, retry одной команды перезаписывает файл предыдущей попытки.
     /// </summary>
     public (string resultFilePath, string taskFilePath) GetTaskFilePaths(int commandId, string filePath)
@@ -309,12 +309,13 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>
-    /// Создаёт файл задания <c>task_{projectName}_{commandId}.xml</c> для BIM-плагина (контракт
-    /// <c>…\RevitBIMFusion\Docs\BimPluginContract.md</c> §TaskFile Location). Плагин читает этот файл,
-    /// чтобы получить <c>commandText</c>, <c>filePath</c> и <c>resultFilePath</c>. Revit AddIn получает
-    /// путь к TaskFile через process-scoped environment variable, а <c>filePath</c> намеренно НЕ передаётся
-    /// в CLI — плагин открывает .rvt сам с <c>Audit=true</c>/<c>DetachAndPreserveWorksets</c>.
-    /// Поэтому если запись task-файла провалилась — AddIn не сможет корректно выполнить команду.
+    /// Создаёт файл задания <c>task_{projectName}_{commandId}.xml</c> для BIM-плагина
+    /// (<c>RevitBIMFusion/Docs/BimPluginContract.md</c> §TaskFile). Плагин читает
+    /// <c>commandText</c>, <c>filePath</c>, <c>resultFilePath</c>. Revit AddIn получает
+    /// путь к TaskFile через process-scoped <c>REVITBIMFUSION_TASK_FILE</c>; <c>filePath</c>
+    /// намеренно НЕ передаётся в CLI — плагин открывает .rvt сам (Audit / detach).
+    /// Revit стартует без контрактных CLI-аргументов (допускается <c>/language RUS</c>).
+    /// Если запись task-файла провалилась — AddIn не сможет корректно выполнить команду.
     /// </summary>
     /// <returns>
     /// <c>true</c> если task-файл успешно записан, <c>false</c> если запись не удалась (директория
@@ -338,12 +339,19 @@ public sealed class CommandPreparer(
             return false;
         }
 
+        // Контракт: пути в TaskFile всегда абсолютные (BimPluginContract.md §TaskDirectory).
+        var absoluteFilePath = string.IsNullOrWhiteSpace(cmd.FilePath)
+            ? string.Empty
+            : Path.GetFullPath(cmd.FilePath);
+        var absoluteResultFilePath = Path.GetFullPath(resultFilePath);
+
         var task = new TaskFile
         {
             CommandId = cmd.CommandId,
             CommandText = cmd.CommandText,
-            FilePath = cmd.FilePath ?? string.Empty,
-            ResultFilePath = resultFilePath,
+            FilePath = absoluteFilePath,
+            ResultFilePath = absoluteResultFilePath,
+            Options = new TaskFileOptions(),
         };
 
         try

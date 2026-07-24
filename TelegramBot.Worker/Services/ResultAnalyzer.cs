@@ -132,8 +132,9 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         if (result.Status == ResultStatus.Done)
         {
             logger.LogInformation(
-                "Plugin done: id={Id}, corr={CorrelationId}, cmd={Cmd}, status={Status}, out={OutputPath}, ms={ElapsedMs}",
-                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles ?? "<none>", sw.ElapsedMilliseconds);
+                "Plugin done: id={Id}, corr={CorrelationId}, cmd={Cmd}, status={Status}, out={OutputPath}, pluginMs={PluginMs}, ms={ElapsedMs}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles ?? "<none>",
+                result.ExecutionTimeMilliseconds, sw.ElapsedMilliseconds);
 
             return CommandResult.Success();
         }
@@ -142,16 +143,18 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         {
             var cancellationMessage = result.ErrorMessage ?? "Plugin reported cancellation";
             logger.LogInformation(
-                "Plugin cancelled: id={Id}, corr={CorrelationId}, cmd={Cmd}, ms={ElapsedMs}, err={Error}",
-                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, sw.ElapsedMilliseconds, cancellationMessage);
+                "Plugin cancelled: id={Id}, corr={CorrelationId}, cmd={Cmd}, pluginMs={PluginMs}, ms={ElapsedMs}, err={Error}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.ExecutionTimeMilliseconds,
+                sw.ElapsedMilliseconds, cancellationMessage);
 
             return CommandResult.Cancelled(cancellationMessage);
         }
 
         // Failed
         logger.LogWarning(
-            "Plugin fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, status={Status}, ms={ElapsedMs}, err={Error}",
-            cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported failure");
+            "Plugin fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, status={Status}, pluginMs={PluginMs}, ms={ElapsedMs}, err={Error}",
+            cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.ExecutionTimeMilliseconds,
+            sw.ElapsedMilliseconds, result.ErrorMessage ?? "Plugin reported failure");
 
         if (!string.IsNullOrWhiteSpace(result.ErrorDetails))
         {

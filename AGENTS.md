@@ -9,7 +9,8 @@
 | [README.md](README.md) | запуск, команды, конфигурация |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | pipeline, статусы, retry, уведомления, БД |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | историческое расследование Revit |
-| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | эталон TaskFile/ResultFile |
+| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | эталон TaskFile/ResultFile (v2026-07-24); локально — `../RevitBIMFusion/Docs` |
+| `Docs/BimContract/` | vendored XSD (ресинк из эталона вручную) |
 | `TelegramBot.Data/Sql/` | фактическая схема и SQL |
 | option-классы `Config/` | defaults конфигурации |
 
@@ -19,7 +20,7 @@
 |---|---|
 | `TelegramBot.Core/Constants/` | `CommandCodes.cs`, `CallbackPrefixes.cs`, `Statuses.cs`, `CommandPriorities.cs` |
 | `TelegramBot.Core/Config/` | `BotOptions.cs`, `FileSystemOptions.cs`, `RateLimitOptions.cs`, `WorkerOptions.cs`, `CommandConfig.cs` |
-| `TelegramBot.Core/Models/` | `UserSession.cs`, `PendingCommand.cs`, `BotUser.cs`, `UserRole.cs` |
+| `TelegramBot.Core/Models/` | `UserSession.cs`, `PendingCommand.cs`, `BotUser.cs`, `UserRole.cs`, `TaskFile.cs`, `ResultFile.cs` |
 | `TelegramBot.Data/Sql/Queries.*.cs` | SQL-запросы (Schema, Commands, Sessions, NotificationOutbox, TrackedMessages, Users) |
 | `TelegramBot.Server/Services/Application/Handlers/` | 6 `ICallbackHandler`: `AccessRequest`, `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement` |
 | `TelegramBot.Server/Services/Infrastructure/Telegram/` | `TelegramBotHostedService.cs`, `TelegramOutputService.cs`, `KeyboardBuilder.cs`, `CommandNotificationService.cs`, `NotificationSenderService.cs` |
@@ -125,7 +126,7 @@ LISTEN new_tasks → DrainPendingCommands → ClaimPendingCommands → ProcessRu
 
 1. commands/config/behavior → README
 2. pipeline/schema/SQL/status/retry → ExecutionAlgorithm.md
-3. TaskFile/ResultFile/startup → сначала canonical RevitBIMFusion/Docs/BimPluginContract.md
+3. TaskFile/ResultFile/startup → canonical `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-07-24); XSD — `Docs/BimContract/`
 4. архитектура/DI/agent rules → AGENTS.md + CLAUDE.md
 5. исторический incident — не переписывать
 

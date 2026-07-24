@@ -18,9 +18,9 @@ dotnet build TelegramBot.slnx
 - DI services — singleton; один интерфейс — `ICallbackHandler`
 - `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
 - Worker: tracked tasks + SQL partition scheduling
-- Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, CLI args пусты
+- Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, без контрактных CLI-аргументов (`/language RUS` допустим)
 - `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC
-- BIM contract XSD: vendored copy в `Docs/BimContract/` (источник истины — `RevitBIMFusion/Docs`, ресинкать вручную при изменении контракта)
+- BIM contract: эталон `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-07-24); XSD vendored в `Docs/BimContract/`
 
 ## GitNexus
 
