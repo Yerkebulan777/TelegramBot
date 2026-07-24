@@ -165,6 +165,9 @@ jobs:
     - name: Publish Worker (for installer)
       run: dotnet publish TelegramBot.Worker/TelegramBot.Worker.csproj -c Release -o ./Installer/publish/Worker
 
+    - name: Publish GrantLogonRight (for installer)
+      run: dotnet publish Installer/GrantLogonRight/GrantLogonRight.csproj -c Release -o ./Installer/publish/GrantLogonRight
+
     - name: Build installer (Inno Setup, preinstalled on windows-latest)
       shell: pwsh
       run: |
