@@ -23,11 +23,4 @@ public static class Pagination
         return (clampedPage, totalPages);
     }
 
-    /// <summary>
-    /// Возвращает элементы страницы <paramref name="clampedPage"/> (0-based) размера <paramref name="pageSize"/>.
-    /// </summary>
-    public static IEnumerable<T> Page<T>(IEnumerable<T> source, int clampedPage, int pageSize)
-    {
-        return source.Skip(clampedPage * pageSize).Take(pageSize);
-    }
 }

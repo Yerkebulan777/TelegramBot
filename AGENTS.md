@@ -22,7 +22,7 @@
 | `TelegramBot.Core/Config/` | `BotOptions.cs`, `FileSystemOptions.cs`, `RateLimitOptions.cs`, `WorkerOptions.cs`, `CommandConfig.cs` |
 | `TelegramBot.Core/Models/` | `UserSession.cs`, `PendingCommand.cs`, `BotUser.cs`, `UserRole.cs`, `TaskFile.cs`, `ResultFile.cs` |
 | `TelegramBot.Data/Sql/Queries.*.cs` | SQL-запросы (Schema, Commands, Sessions, NotificationOutbox, TrackedMessages, Users) |
-| `TelegramBot.Server/Services/Application/Handlers/` | 6 `ICallbackHandler`: `AccessRequest`, `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement` |
+| `TelegramBot.Server/Services/Application/Handlers/` | 5 реализаций `CallbackHandlerBase`: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement` |
 | `TelegramBot.Server/Services/Infrastructure/Telegram/` | `TelegramBotHostedService.cs`, `TelegramOutputService.cs`, `KeyboardBuilder.cs`, `CommandNotificationService.cs`, `NotificationSenderService.cs` |
 | `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
 | `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
@@ -51,8 +51,8 @@ dotnet format TelegramBot.slnx
 ## Server flow
 
 ```text
-Telegram SDK → Channel<Update> (200) → Parallel.ForEachAsync (max 10) → TelegramUpdateMapper
-→ SessionManager per-user lock → CommandAppService → SlashCommandService / CallbackDispatcher → ICallbackHandler
+Telegram SDK → Channel<Update> (200) → Parallel.ForEachAsync (max 10) → Message/CallbackQuery
+→ SessionManager per-user lock → CommandAppService → SlashCommandService / CallbackDispatcher → CallbackHandlerBase
 ```
 
 - Разные пользователи — параллельно, один пользователь — последовательно
@@ -76,7 +76,7 @@ Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs
 
 ### Server DI
 
-`AddTelegramBotServer` регистрирует: 6 `ICallbackHandler`, `CallbackDispatcher`, `CommandAppService`, `AuthorizationMiddleware`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `TelegramUpdateMapper`, `KeyboardBuilder`, `Channel<NotificationItem>(256)`, `TelegramBotHostedService`, `CommandNotificationService`, `NotificationSenderService`.
+`AddTelegramBotServer` регистрирует: 5 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `AuthorizationMiddleware`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`, `Channel<NotificationItem>(256)`, `TelegramBotHostedService`, `CommandNotificationService`, `NotificationSenderService`.
 
 ## Worker flow
 
@@ -116,7 +116,7 @@ LISTEN new_tasks → DrainPendingCommands → ClaimPendingCommands → ProcessRu
 
 - C# 12+/net10.0, nullable + implicit usings
 - Primary constructors допустимы
-- Concrete class > интерфейс (кроме `ICallbackHandler`)
+- Concrete class > интерфейс
 - `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
 - Constants из `TelegramBot.Core/Constants`
 - Path input: `Path.GetFullPath`, `IsPathWithinRoot`, allowed extensions, reparse-point guard

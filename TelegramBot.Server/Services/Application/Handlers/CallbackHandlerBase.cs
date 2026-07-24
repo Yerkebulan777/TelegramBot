@@ -1,10 +1,9 @@
 using TelegramBot.Core.Config;
-using TelegramBot.Core.Interfaces;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application.Handlers;
 
-public abstract class CallbackHandlerBase(ILogger logger) : ICallbackHandler
+public abstract class CallbackHandlerBase(ILogger logger)
 {
     protected readonly ILogger Logger = logger;
 

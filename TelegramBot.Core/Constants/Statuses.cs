@@ -20,9 +20,4 @@ public static class Statuses
     /// <summary>Команда/сессия мягко удалена.</summary>
     public const string Deleted = "Deleted";
 
-    /// <summary>Статусы, считающиеся финальными (команда больше не может быть изменена).</summary>
-    public static readonly IReadOnlySet<string> FinalStatuses = new HashSet<string> { Done, Failed, Deleted };
-
-    /// <summary>Статусы, в которых команда активна (ожидает или выполняется).</summary>
-    public static readonly IReadOnlySet<string> ActiveStatuses = new HashSet<string> { Pending, Processing };
 }

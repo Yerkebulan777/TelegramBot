@@ -49,12 +49,6 @@ public sealed class FileSystemOptions
             "TaskDirectory"));
     }
 
-    /// <summary>Возвращает полный путь к RVT-директории для раздела.</summary>
-    public string GetRvtPath(string sectionPath)
-    {
-        return Path.Combine(sectionPath, RvtDirectoryName);
-    }
-
     /// <summary>Проверяет, находится ли пользователь на уровне выбора проектов (а не разделов/файлов).</summary>
     public bool IsAtProjectLevel(string currentPath)
     {

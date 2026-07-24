@@ -88,7 +88,7 @@ Server:
 ## 7. Cleanup и shutdown
 
 - **Lease recovery**: каждые `CleanupIntervalSeconds` — expired `processing` → `pending`
-- **Process health monitoring**: каждые `ProcessMonitorIntervalSeconds` — `ProcessHealthHelper` + `DialogDismisser`
+- **Process health monitoring**: каждые `ProcessMonitorIntervalSeconds` — проверка `Process` внутри `CommandExecutionService` + `DialogDismisser`
 - **Session retention**: `SessionCleanupService` — soft-delete сессий старше `CompletedSessionRetentionDays`
 - **Worker shutdown**: остановка циклов → process-tree kill (30s budget) → освобождение ресурсов
 

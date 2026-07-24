@@ -1,12 +1,10 @@
 using Microsoft.Extensions.Options;
-using System.Collections.Frozen;
 using System.Text;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
-using TelegramBot.Core.DTOs;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
@@ -26,23 +24,15 @@ public sealed partial class SlashCommandService(
     IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SlashCommandService> logger)
 {
-    private static readonly FrozenDictionary<string, int> _commandPriorityMap =
-        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["PDF"] = CommandPriorities.Critical,
-            ["DWG"] = CommandPriorities.Critical,
-            ["NWC"] = CommandPriorities.High,
-            ["IFC"] = CommandPriorities.Medium,
-            ["DATA"] = CommandPriorities.Low,
-        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
-
     private readonly FileSystemOptions _options = fileSystemOptions.Value;
     private readonly RateLimitOptions _rateLimitOptions = rateLimitOptions.Value;
 
-    public async Task HandleUserCommandAsync(MessageDto message, UserSession session, CancellationToken cancellationToken = default)
+    public async Task HandleUserCommandAsync(Message message, UserSession session, CancellationToken cancellationToken = default)
     {
-        var userId = message.UserId;
-        var username = message.Username!;
+        var sender = message.From
+            ?? throw new InvalidOperationException("Message.From is null.");
+        var userId = sender.Id;
+        var username = sender.Username ?? sender.FirstName;
         var rawText = message.Text!;
         var command = NormalizeCommandText(rawText);
 
@@ -66,12 +56,11 @@ public sealed partial class SlashCommandService(
             return;
         }
 
-        await HandleSlashCommandAsync(command, message, session, username);
+        await HandleSlashCommandAsync(command, userId, session, username!);
     }
 
-    private async Task HandleSlashCommandAsync(string command, MessageDto message, UserSession session, string username)
+    private async Task HandleSlashCommandAsync(string command, long userId, UserSession session, string username)
     {
-        var userId = message.UserId;
         var isSlashCommand = command.StartsWith('/');
 
         switch (command)
@@ -267,8 +256,7 @@ public sealed partial class SlashCommandService(
                 return;
             }
 
-            var priorities = session.PendingCommand
-                .Select(c => _commandPriorityMap.TryGetValue(c, out var p) ? p : CommandPriorities.Default);
+            var priorities = session.PendingCommand.Select(GetCommandPriority);
 
             var correlationId = Guid.NewGuid().ToString("N");
             var (sessionId, queuedFileCount, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
@@ -483,5 +471,17 @@ public sealed partial class SlashCommandService(
         }
 
         return text.ToLowerInvariant();
+    }
+
+    private static int GetCommandPriority(string command)
+    {
+        return command.ToUpperInvariant() switch
+        {
+            CommandCodes.Pdf or CommandCodes.Dwg => CommandPriorities.Critical,
+            CommandCodes.Nwc => CommandPriorities.High,
+            CommandCodes.Ifc => CommandPriorities.Medium,
+            CommandCodes.Data => CommandPriorities.Low,
+            _ => CommandPriorities.Default
+        };
     }
 }

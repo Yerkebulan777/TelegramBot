@@ -5,7 +5,6 @@ using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
-using TelegramBot.BimLib.Models;
 using TelegramBot.BimLib.Monitor;
 using TelegramBot.Worker.Helpers;
 
@@ -230,9 +229,22 @@ public sealed class CommandExecutionService(
 
             try
             {
-                var health = ProcessHealthHelper.CheckHealth(process, logger, $"Command#{commandId}");
+                var responding = true;
+                var memoryMb = 0L;
+                var duration = TimeSpan.Zero;
+                try
+                {
+                    responding = process.Responding;
+                    memoryMb = process.WorkingSet64 / (1024 * 1024);
+                    duration = DateTime.UtcNow - process.StartTime.ToUniversalTime();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Health check fail: Command#{CommandId} pid={ProcessId}",
+                        commandId, process.Id);
+                }
 
-                if (health.Status == RevitProcessStatus.NotResponding)
+                if (!responding)
                 {
                     var since = _unresponsiveSince.GetOrAdd(commandId, _ => DateTime.UtcNow);
                     var stuckFor = DateTime.UtcNow - since;
@@ -240,7 +252,7 @@ public sealed class CommandExecutionService(
                     {
                         logger.LogWarning(
                             "Not responding: id={Id}, pid={Pid}, stuck={StuckFor}, mem={MemoryMb}MB, dur={Duration}",
-                            commandId, process.Id, stuckFor, health.MemoryMb, health.Duration);
+                            commandId, process.Id, stuckFor, memoryMb, duration);
                     }
                 }
                 else if (_unresponsiveSince.TryRemove(commandId, out var since))

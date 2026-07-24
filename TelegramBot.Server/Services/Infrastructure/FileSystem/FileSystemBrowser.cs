@@ -196,7 +196,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     /// </summary>
     private List<string> GetSectionFiles(string sectionPath)
     {
-        var rvtDir = _options.GetRvtPath(sectionPath);
+        var rvtDir = Path.Combine(sectionPath, _options.RvtDirectoryName);
 
         if (Directory.Exists(rvtDir))
         {

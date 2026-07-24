@@ -56,7 +56,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
                 .ToList()
         };
 
-        foreach (var session in Pagination.Page(sessionsList, clampedPage, SessionsPageSize))
+        foreach (var session in sessionsList.Skip(clampedPage * SessionsPageSize).Take(SessionsPageSize))
         {
             var finished = session.DoneCommands + session.FailedCommands == session.TotalCommands;
             var progressIcon = finished ? "✅" : "🔄";
@@ -164,7 +164,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 
         var (clampedFilePage, totalFilePages) = Pagination.Calculate(visibleCommands.Count, page, SessionsPageSize);
 
-        foreach (var sessionCommand in Pagination.Page(visibleCommands, clampedFilePage, SessionsPageSize))
+        foreach (var sessionCommand in visibleCommands.Skip(clampedFilePage * SessionsPageSize).Take(SessionsPageSize))
         {
             var statusIcon = GetCommandStatusIcon(sessionCommand.Status);
             var fileName = Path.GetFileName(sessionCommand.FileName);

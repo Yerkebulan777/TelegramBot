@@ -3,8 +3,6 @@ using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using TelegramBot.Core.DTOs;
-using TelegramBot.Server.Config;
 using TelegramBot.Server.Services.Application;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -13,7 +11,6 @@ public class TelegramBotHostedService(
     ITelegramBotClient botClient,
     CommandAppService commandAppService,
     ILogger<TelegramBotHostedService> logger,
-    TelegramUpdateMapper inputService,
     SessionManager sessionManager) : BackgroundService
 {
     /// <summary>
@@ -62,7 +59,25 @@ public class TelegramBotHostedService(
         logger.LogInformation("Polling start: concurrency={MaxConcurrency}, capacity={Capacity}",
             MaxConcurrentUpdates, ChannelCapacity);
 
-        await BotCommandsSetup.ConfigureAsync(botClient, logger);
+        BotCommand[] commands =
+        [
+            new() { Command = "export", Description = "Export to different formats" },
+            new() { Command = "automation", Description = "Automation features" },
+            new() { Command = "status", Description = "Check your command queue" },
+            new() { Command = "help", Description = "Show help menu" }
+        ];
+
+        logger.LogInformation("Configuring bot commands: count={Count}", commands.Length);
+        try
+        {
+            await botClient.SetMyCommands(commands, cancellationToken: stoppingToken);
+            logger.LogInformation("Bot commands configured");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Configure bot commands fail");
+            throw;
+        }
 
         var receiverOptions = new ReceiverOptions
         {
@@ -155,48 +170,45 @@ public class TelegramBotHostedService(
     /// </summary>
     private async Task ProcessUpdateAsync(Update update, CancellationToken ct)
     {
-        var dto = inputService.Map(update);
-        logger.LogDebug("Update: id={UpdateId}, type={UpdateType}, dto={DtoType}",
-            update.Id, update.Type, dto?.GetType().Name ?? "null");
-
-        switch (dto)
+        if (update.Message is { Text: not null, From: not null } message)
         {
-            case MessageDto message:
-                using (await sessionManager.AcquireUserLockAsync(message.UserId))
-                {
-                    _ = sessionManager.GetOrCreateSession(message.UserId);
+            logger.LogDebug("Update: id={UpdateId}, type={UpdateType}, input=Message", update.Id, update.Type);
 
-                    if (message.Text == null)
-                    {
-                        logger.LogWarning("Null message text from {Username} ({UserId})", message.Username, message.UserId);
-                        return;
-                    }
+            using (await sessionManager.AcquireUserLockAsync(message.From.Id))
+            {
+                _ = sessionManager.GetOrCreateSession(message.From.Id);
+                await commandAppService.HandleUserCommandAsync(message, ct);
+            }
 
-                    await commandAppService.HandleUserCommandAsync(message, ct);
-                }
-                break;
-            case CallbackQueryDto callback:
-                if (callback.CallbackQueryId == null)
-                {
-                    logger.LogWarning("Null callback id from {Username} ({UserId})", callback.Username, callback.UserId);
-                    return;
-                }
-                using (await sessionManager.AcquireUserLockAsync(callback.UserId))
-                {
-                    _ = sessionManager.GetOrCreateSession(callback.UserId);
-                    try
-                    {
-                        await commandAppService.HandleCallbackAsync(callback, ct);
-                    }
-                    finally
-                    {
-                        // AnswerCallbackQuery обязан сработать даже при исключении handler'а —
-                        // иначе у пользователя остаются «часики» на кнопке до таймаута Telegram (~30 с).
-                        await botClient.AnswerCallbackQuery(callback.CallbackQueryId, cancellationToken: ct);
-                    }
-                }
-                break;
+            return;
         }
+
+        if (update.CallbackQuery is { } callback)
+        {
+            _ = callback.Message
+                ?? throw new InvalidOperationException("CallbackQuery.Message is null.");
+
+            logger.LogDebug("Update: id={UpdateId}, type={UpdateType}, input=CallbackQuery", update.Id, update.Type);
+
+            using (await sessionManager.AcquireUserLockAsync(callback.From.Id))
+            {
+                _ = sessionManager.GetOrCreateSession(callback.From.Id);
+                try
+                {
+                    await commandAppService.HandleCallbackAsync(callback, ct);
+                }
+                finally
+                {
+                    // AnswerCallbackQuery обязан сработать даже при исключении handler'а —
+                    // иначе у пользователя остаются «часики» на кнопке до таймаута Telegram (~30 с).
+                    await botClient.AnswerCallbackQuery(callback.Id, cancellationToken: ct);
+                }
+            }
+
+            return;
+        }
+
+        logger.LogDebug("Update ignored: id={UpdateId}, type={UpdateType}", update.Id, update.Type);
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-using TelegramBot.Core.DTOs;
+using Telegram.Bot.Types;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -17,19 +17,24 @@ public sealed class CommandAppService(
     private const string AnonymousProfileMessage =
         "Ваш профиль анонимен. Укажите имя или @username в настройках Telegram, чтобы пользоваться ботом.";
 
-    public async Task HandleUserCommandAsync(MessageDto message, CancellationToken cancellationToken = default)
+    public async Task HandleUserCommandAsync(Message message, CancellationToken cancellationToken = default)
     {
-        if (!await TryAdmitAsync(message.UserId, message.Username))
+        var sender = message.From
+            ?? throw new InvalidOperationException("Message.From is null.");
+        var userId = sender.Id;
+        var username = sender.Username ?? sender.FirstName;
+
+        if (!await TryAdmitAsync(userId, username))
         {
             return;
         }
 
-        var session = sessionManager.GetOrCreateSession(message.UserId);
+        var session = sessionManager.GetOrCreateSession(userId);
 
         // Track the user's own message so it can be deleted on the next slash command
         session.LastUserMessageId = message.MessageId;
         await messageTrackingService.TrackAsync(
-            message.ChatId == 0 ? message.UserId : message.ChatId,
+            message.Chat.Id,
             message.MessageId,
             session);
 
@@ -39,7 +44,7 @@ public sealed class CommandAppService(
         // for already-initialized sessions.
         if (!session.Initialized && !message.Text!.StartsWith('/'))
         {
-            await NotifyStaleSessionAsync(session, message.UserId, message.Username);
+            await NotifyStaleSessionAsync(session, userId, username);
             return;
         }
         session.Initialized = true;
@@ -47,39 +52,42 @@ public sealed class CommandAppService(
         await slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
     }
 
-    public async Task HandleCallbackAsync(CallbackQueryDto callback, CancellationToken cancellationToken = default)
+    public async Task HandleCallbackAsync(CallbackQuery callback, CancellationToken cancellationToken = default)
     {
-        if (!await TryAdmitAsync(callback.UserId, callback.Username))
+        var userId = callback.From.Id;
+        var username = callback.From.Username ?? callback.From.FirstName;
+
+        if (!await TryAdmitAsync(userId, username))
         {
             return;
         }
 
-        if (callback.MessageText == null || callback.CallbackData == null || callback.CallbackQueryId == null)
+        if (callback.Message?.Text == null || callback.Data == null)
         {
-            logger.LogWarning("Incomplete callback: user={UserId}", callback.UserId);
+            logger.LogWarning("Incomplete callback: user={UserId}", userId);
             return;
         }
 
-        var session = sessionManager.GetOrCreateSession(callback.UserId);
-        var parsed = CallbackDataParser.Parse(callback.CallbackData);
+        var session = sessionManager.GetOrCreateSession(userId);
+        var parsed = CallbackDataParser.Parse(callback.Data);
 
         // Stale-session detection for callbacks. Callbacks depend on session-local state
         // (pending commands, file selection, status filters) that no longer exists after restart,
         // so a fresh session is redirected to /start via a single hint.
         if (!session.Initialized)
         {
-            await NotifyStaleSessionAsync(session, callback.UserId, callback.Username);
+            await NotifyStaleSessionAsync(session, userId, username);
             return;
         }
         session.Initialized = true;
 
         var context = new CallbackContext
         {
-            UserId = callback.UserId,
-            ChatId = callback.ChatId,
-            MessageId = callback.MessageId,
-            Username = callback.Username!, // non-null: TryAdmitAsync rejected blank usernames above
-            CallbackQueryId = callback.CallbackQueryId,
+            UserId = userId,
+            ChatId = callback.Message.Chat.Id,
+            MessageId = callback.Message.MessageId,
+            Username = username!, // non-null: TryAdmitAsync rejected blank usernames above
+            CallbackQueryId = callback.Id,
             ParsedCallback = parsed,
             Session = session
         };
