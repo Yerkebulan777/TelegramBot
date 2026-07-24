@@ -2,24 +2,13 @@
 
 [![CI](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/ci.yml/badge.svg)](https://github.com/Yerkebulan777/TelegramBot/actions/workflows/ci.yml)
 
-Windows-сервис на .NET 10: Telegram-бот принимает задания, PostgreSQL хранит очередь, Worker запускает BIM/AI-исполнители.
-
-## Документация
+Windows-сервис на .NET 10: Telegram-бот принимает задания, PostgreSQL хранит очередь, Worker запускает BIM-исполнители.
 
 | Документ | Назначение |
 |---|---|
-| [AGENTS.md](AGENTS.md) | Архитектура, DI, правила разработки |
+| [AGENTS.md](AGENTS.md) | Архитектура, DI, правила |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | Pipeline, статусы, retry, БД |
-| [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | История `ACCESS_VIOLATION` |
-| [Docs/ADR.md](Docs/ADR.md) | Architecture Decision Log |
-| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Контракт BIM-исполнителей |
-
-## Возможности
-
-- `/export`: `PDF`, `DWG`, `NWC`, `DATA`, `IFC`
-- `/automation`: `CLASHREP` (временный wrapper; целевой — Navisworks AddIn), `AUTORES` — planned в Revit AddIn
-- Навигация `RootPath → проект → разделы → 01_RVT`, фильтры `/status`, soft-delete
-- PostgreSQL `LISTEN/NOTIFY`, partition scheduling, retry, durable notifications
+| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | Контракт TaskFile/ResultFile (v2026-07-24); XSD — `Docs/BimContract/` |
 
 ## Быстрый старт
 
@@ -28,15 +17,13 @@ Windows-сервис на .NET 10: Telegram-бот принимает задан
 ```powershell
 git clone https://github.com/Yerkebulan777/TelegramBot.git
 cd TelegramBot
-docker compose up -d          # PostgreSQL: telegram_bot@localhost:5432
+docker compose up -d          # PostgreSQL @ localhost:5432
 dotnet build TelegramBot.slnx
 ```
 
-### Локальная конфигурация
+`appsettings.Local.json` в `Server/` и `Worker/` (ниже — дефолт docker-compose). Схема БД — при первом запуске Server. Одна строка Postgres у обоих.
 
-Создать `appsettings.Local.json` в **каждом** проекте (`Server/` и `Worker/`). Значения ниже — дефолт docker-compose.
-
-**TelegramBot.Server/**:
+**TelegramBot.Server/**
 
 ```json
 {
@@ -48,7 +35,7 @@ dotnet build TelegramBot.slnx
 }
 ```
 
-**TelegramBot.Worker/**:
+**TelegramBot.Worker/**
 
 ```json
 {
@@ -59,142 +46,43 @@ dotnet build TelegramBot.slnx
 }
 ```
 
-Схема БД создаётся автоматически при первом запуске Server.
-
-### Запуск
-
 ```powershell
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 ```
 
-Server и Worker должны использовать одну и ту же строку подключения.
+## Деплой
 
-## Деплой (production)
+- **Server** — Windows Service; **Worker** — Task Scheduler (`onlogon` + `/it`), не служба (Revit нужен интерактивный desktop). Учётка Worker должна быть залогинена.
+- Инсталлятор: [Installer/TelegramBot.iss](Installer/TelegramBot.iss). Нужен [Inno Setup](https://jrsoftware.org/isdl.php).
 
-Server — Windows Service (`Host.UseWindowsService()`; под SCM — служба, при `dotnet run` — консоль).
-
-**Worker — НЕ служба, а задача Task Scheduler** (триггер "при входе в систему"). Причина: Worker запускает Revit (GUI), а службы работают в изолированной Session 0 без рабочего стола — окна и диалоги Revit, запущенного службой, никто не видит, процесс виснет молча. Задача планировщика с флагом `/it` запускается в интерактивной сессии — Revit отображается нормально.
-
-Плата: машина должна оставаться залогиненной под учёткой Worker'а (на выделенных машинах — авто-логон), иначе Worker не запустится до следующего входа.
-
-### Сборка инсталлятора
-
-Скрипт — [Installer/TelegramBot.iss](Installer/TelegramBot.iss) (Inno Setup, не компилируется в git). Требование: [Inno Setup](https://jrsoftware.org/isdl.php) — компилятор `ISCC.exe` (не входит в .NET SDK).
-
-| Среда | Путь к `ISCC.exe` |
+| Среда | `ISCC.exe` |
 |---|---|
-| Локально (Inno Setup 7, 64-bit) | `C:\Program Files\Inno Setup 7\ISCC.exe` |
-| CI (`windows-latest`, Inno Setup 6) | `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` |
-
-Проверка, что компилятор на месте:
+| Локально (IS 7) | `C:\Program Files\Inno Setup 7\ISCC.exe` |
+| CI (IS 6) | `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` |
 
 ```powershell
-Test-Path "C:\Program Files\Inno Setup 7\ISCC.exe"   # локально → True
-& "C:\Program Files\Inno Setup 7\ISCC.exe" /?        # версия / справка
-```
-
-```powershell
+Test-Path "C:\Program Files\Inno Setup 7\ISCC.exe"
 dotnet build Installer\Installer.build.proj -t:Installer
-# → Installer\Output\TelegramBotSetup.exe (не коммитится, *.exe в .gitignore)
+# → Installer\Output\TelegramBotSetup.exe
 ```
 
-Публикует Server/Worker/GrantLogonRight и вызывает ISCC. `Installer.build.proj` сам ищет путь: сначала IS 7 (`Program Files`), затем IS 6 (`Program Files (x86)`). Явный override:
+Поиск ISCC: IS 7 → IS 6; override `/p:IsccExe=...`. Подпись (иначе Defender может снести setup): `/p:SignThumbprint=... /p:SignToolExe=...`.
 
-```powershell
-dotnet build Installer\Installer.build.proj -t:Installer /p:IsccExe="C:\Program Files\Inno Setup 7\ISCC.exe"
-```
-
-Через GUI — открыть `TelegramBot.iss` в Inno Setup Compiler (`Compil32.exe` рядом с `ISCC.exe`), F9.
-
-**Подпись (опционально):** свежесобранный неподписанный `TelegramBotSetup.exe` Windows Defender может удалить как `Trojan:Win32/Bearfoos.B!ml` (ML-эвристика на непроверенный installer с privileged-действиями). Подписать — передать thumbprint сертификата из `Cert:\CurrentUser\My`:
-
-```powershell
-dotnet build Installer\Installer.build.proj -t:Installer /p:SignThumbprint=<thumbprint> /p:SignToolExe="<путь к signtool.exe>"
-```
-
-Подписывает `Server.exe`/`Worker.exe`/`GrantLogonRight.exe` и финальный `TelegramBotSetup.exe`. `signtool.exe` не входит в .NET SDK — часть Windows SDK или `Microsoft SDKs\ClickOnce\SignTool`. Self-signed сертификат достаточно создать один раз: `New-SelfSignedCertificate -Type CodeSigning -Subject "CN=..." -CertStoreLocation Cert:\CurrentUser\My`.
-
-### Мастер установки
-
-- выбор компонентов — Server / Worker / оба;
-- учётная запись (не `LocalSystem`/`NetworkService` — нужен доступ к сетевой шаре), поле автоподставляет текущего пользователя; пароль — только для Server (`sc.exe`), Worker как интерактивная задача пароль не хранит, но требует, чтобы учётка была залогинена;
-- путь к файловой шаре — буква диска (`B:`) резолвится в UNC (`\\server\share`) в сессии инсталлятора (служба/задача в фоне маппинг дисков не видят);
-- токен бота — только для Server.
-
-Регистрирует Server через `sc.exe create` с авто-рестартом (`sc.exe failure ... restart/...`), Worker — через `schtasks /create /sc onlogon /it`. Патчит `appsettings.Local.json` каждого компонента, выдаёт NTFS-права на папку установки и сетевую шару. Право **"Вход в качестве службы"** выдаётся автоматически через `Installer\GrantLogonRight` (`LsaAddAccountRights`, до `sc.exe create` — сам `sc.exe` это право не назначает). Удаление — стандартный деинсталлятор Inno.
+Мастер: Server/Worker, учётка с доступом к шаре, `B:` → UNC, токен (Server), `GrantLogonRight` до `sc.exe create`.
 
 ### Troubleshooting
 
-**Server не стартует (event ID 7000/7041):** не хватает права "Вход в качестве службы". Проверить/выдать вручную:
+**Server (7000/7041):** нет «Вход в качестве службы» → `GrantLogonRight.exe DOMAIN\user` или secpol; если откатывает после `gpupdate` — доменная GPO.
 
-```powershell
-GrantLogonRight.exe DOMAIN\username    # Installer\publish\GrantLogonRight
-# или secpol.msc → Локальные политики → Назначение прав пользователя → "Вход в качестве службы"
-gpupdate /force
-Start-Service TelegramBotServer
-```
-
-Если право пропадает повторно после `gpupdate` — доменная GPO откатывает его при каждом обновлении; чинить на стороне домена, локальная переустановка не поможет.
-
-**Worker не запускается / Revit "висит":** `schtasks /query /tn TelegramBotWorker /v /fo list` — если задача не запущена, учётка не залогинена. Если Revit запущен, но завис — `Get-Process Revit | Select Id,SI`: `SI=0` означает, что процесс выполнился в Session 0, а не интерактивно (проверить `/it` в определении задачи).
+**Worker / Revit:** учётка залогинена? `Get-Process Revit | Select Id,SI` — `SI=0` значит нет `/it`.
 
 ## Конфигурация
 
-### Server
+Обязательные: `TelegramBot:Token`, `ConnectionStrings:Postgres`, `FileSystem:RootPath` (Server), `FileSystem:TaskDirectory` (Worker). Остальное — defaults в option-классах / `appsettings.json`.
 
-| Параметр | Назначение |
-|---|---|
-| `TelegramBot:Token` | обязателен |
-| `ConnectionStrings:Postgres` | DSN |
-| `FileSystem:RootPath` | обязательный каталог |
-| `FileSystem:RvtDirectoryName` | `01_RVT` |
-| `FileSystem:ProjectDirectoryName` | `01_PROJECT` |
-| `FileSystem:SectionFolderPattern` | regex проектов |
-| `FileSystem:LogDirectory` | `%USERPROFILE%\\...\\Logs` |
-| `RateLimit:MaxRequests` / `WindowSeconds` | `10` / `60` |
-| `RateLimit:MaxFilesPerUserPerDay` | `1000`; `0` отключает |
-
-### Worker
-
-| Параметр | Назначение |
-|---|---|
-| `ConnectionStrings:Postgres` | DSN |
-| `FileSystem:TaskDirectory` | `%USERPROFILE%\\...\\TaskDirectory` |
-| `BimIntegration:Min/MaxSupportedVersion` | `2018` / `2026` |
-| `DialogDismisser:MaxDismissAttempts` | `10`; `0` отключает kill после неудачных попыток |
-| `Worker:ProcessTimeoutMinutes` | `180` |
-| `Worker:MaxRetries` | `5` |
-| `Worker:RetryDelayBaseSeconds` | `60` |
-| `Worker:FallbackPolling/CleanupIntervalSeconds` | `300` |
-| `Worker:ProcessMonitorIntervalSeconds` | `30`; минимум/шаг 30 с |
-| `Worker:UnresponsiveThresholdSeconds` | `60`; минимум/шаг 30 с |
-| `Worker:CompletedSessionRetentionDays` | `30`; `0` отключает |
-| `Worker:MaxConcurrentCommands` | `5` |
-| `Worker:Commands` | маппинг команд |
-
-Defaults — из option-классов. Полный пример — `appsettings.json` в каждом проекте.
-
-## BIM-контракт
-
-Эталон: [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) (v2026-07-24). XSD — vendored в `Docs/BimContract/` (ресинк вручную из `RevitBIMFusion/Docs`).
-
-Worker создаёт `task_{project}_{commandId}.xml`, ждёт `result_{project}_{commandId}.xml` в `TaskDirectory`.
-- Revit: без контрактных CLI-аргументов; TaskFile path — `REVITBIMFUSION_TASK_FILE`; допускается `/language RUS`
-- `.rvt` только в TaskFile XML, не в process args
-- Revit `commandText`: `PDF`, `DWG`, `NWC`, `IFC`, `DATA`
-- ResultFile обязателен для Revit; exit-code fallback — только текущий wrapper `CLASHREP` (`FileConvert.exe`)
-- `status=failed` / `cancelled` от плагина → permanent Failed без retry; нет/битый ResultFile → retry policy
-- Planned вне текущего handoff: `CLASHREP` → Navisworks AddIn (пока оставить FileConvert); `AUTORES` / `BIMDOC` → Revit AddIn (в TelegramBot нет)
-
-## Логи
-
-Serilog: Console + Seq (`http://localhost:5341`) + rolling files (`%USERPROFILE%\\...\\Logs\\Server\\`, `\\Worker\\`, `\\BimLib\\`). Ежедневно + 50 MiB, до 31 файла.
-
-## Проверка
+Логи: Serilog → Console + Seq (`http://localhost:5341`) + `%USERPROFILE%\...\Logs\`.
 
 ```powershell
 dotnet build TelegramBot.slnx && dotnet format TelegramBot.slnx
 ```
-
-Тесты отключены.
