@@ -129,7 +129,10 @@ public sealed class ProcessRunner(
         outputCollector.LogOutput(cmd, outputSubscription.Output, outputSubscription.Error, outputSubscription.OutputTruncated, outputSubscription.ErrorTruncated);
 
         // Определяем результат
-        var resultReadStatus = resultAnalyzer.TryReadResultFile(cmd.CommandId, cmd.FilePath ?? string.Empty, out var result, out var resultReadError);
+        var (resultReadStatus, result, resultReadError) = await resultAnalyzer.TryReadResultFileAsync(
+            cmd.CommandId,
+            cmd.FilePath ?? string.Empty,
+            ct);
         var commandResult = resultAnalyzer.DetermineResult(cmd, resultReadStatus, result, resultReadError, process, sw);
 
         if (commandResult.IsSuccess)

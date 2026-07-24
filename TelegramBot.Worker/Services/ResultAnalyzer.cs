@@ -18,15 +18,16 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
     /// <summary>
     /// Пробует прочитать result-файл и возвращает статус.
     /// </summary>
-    public ResultFileReadStatus TryReadResultFile(int commandId, string filePath, out ResultFile result, out string? errorMessage)
+    public async Task<(ResultFileReadStatus Status, ResultFile? Result, string? ErrorMessage)> TryReadResultFileAsync(
+        int commandId,
+        string filePath,
+        CancellationToken ct)
     {
         var (path, _) = commandPreparer.GetTaskFilePaths(commandId, filePath);
 
         if (!File.Exists(path))
         {
-            result = null!;
-            errorMessage = null;
-            return ResultFileReadStatus.NotFound;
+            return (ResultFileReadStatus.NotFound, null, null);
         }
 
         for (var attempt = 0; attempt <= ResultFileReadRetryCount; attempt++)
@@ -34,48 +35,39 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             try
             {
                 using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
+                var result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
 
                 if (result.Status is ResultStatus.Done or ResultStatus.Failed or ResultStatus.Cancelled)
                 {
                     DeleteResultFile(path);
-                    errorMessage = null;
-                    return ResultFileReadStatus.Valid;
+                    return (ResultFileReadStatus.Valid, result, null);
                 }
 
                 RenameToBadFile(path);
-                result = null!;
-                errorMessage = $"Plugin result file has invalid status: {path}";
-                return ResultFileReadStatus.Invalid;
+                return (ResultFileReadStatus.Invalid, null, $"Plugin result file has invalid status: {path}");
             }
             catch (InvalidOperationException ex)
             {
-                if (RetryRead(attempt))
+                if (await RetryReadAsync(attempt, ct))
                 {
                     continue;
                 }
 
                 RenameToBadFile(path);
-                result = null!;
-                errorMessage = $"Plugin result file contains invalid XML: {path}. {ex.Message}";
-                return ResultFileReadStatus.Invalid;
+                return (ResultFileReadStatus.Invalid, null, $"Plugin result file contains invalid XML: {path}. {ex.Message}");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                if (RetryRead(attempt))
+                if (await RetryReadAsync(attempt, ct))
                 {
                     continue;
                 }
 
-                result = null!;
-                errorMessage = $"Plugin result file cannot be read: {path}. {ex.Message}";
-                return ResultFileReadStatus.Invalid;
+                return (ResultFileReadStatus.Invalid, null, $"Plugin result file cannot be read: {path}. {ex.Message}");
             }
         }
 
-        result = null!;
-        errorMessage = $"Plugin result file cannot be read: {path}";
-        return ResultFileReadStatus.Invalid;
+        return (ResultFileReadStatus.Invalid, null, $"Plugin result file cannot be read: {path}");
     }
 
     /// <summary>
@@ -188,14 +180,14 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         }
     }
 
-    private static bool RetryRead(int attempt)
+    private static async Task<bool> RetryReadAsync(int attempt, CancellationToken ct)
     {
         if (attempt >= ResultFileReadRetryCount)
         {
             return false;
         }
 
-        Thread.Sleep(ResultFileReadRetryDelay);
+        await Task.Delay(ResultFileReadRetryDelay, ct);
         return true;
     }
 
