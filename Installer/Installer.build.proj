@@ -10,13 +10,12 @@
     <IsccExe Condition="'$(IsccExe)' == '' AND Exists('C:\Program Files (x86)\Inno Setup 6\ISCC.exe')">C:\Program Files (x86)\Inno Setup 6\ISCC.exe</IsccExe>
     <SignToolExe Condition="'$(SignToolExe)' == ''">signtool.exe</SignToolExe>
     <TimestampUrl Condition="'$(TimestampUrl)' == ''">http://timestamp.digicert.com</TimestampUrl>
-    <!-- Signing is opt-in, two ways to identify the cert (mutually exclusive):
-         local dev — /p:SignThumbprint=<thumbprint>          (cert already in Cert:\CurrentUser\My)
-         CI        — /p:SignPfxPath=<path> /p:SignPfxPassword=<password>  (portable .pfx, e.g. from a secret)
-         Neither set → build is unsigned, same as before. -->
-    <SignCertArgs Condition="'$(SignPfxPath)' != ''">/f &quot;$(SignPfxPath)&quot; /p $(SignPfxPassword)</SignCertArgs>
-    <SignCertArgs Condition="'$(SignCertArgs)' == '' AND '$(SignThumbprint)' != ''">/sha1 $(SignThumbprint)</SignCertArgs>
-    <SignCommand Condition="'$(SignCertArgs)' != ''">&quot;$(SignToolExe)&quot; sign $(SignCertArgs) /fd SHA256 /tr $(TimestampUrl) /td SHA256</SignCommand>
+    <!-- Signing is opt-in: the certificate must be in Cert:\CurrentUser\My. -->
+    <SignCommand Condition="'$(SignThumbprint)' != ''">&quot;$(SignToolExe)&quot; sign /sha1 $(SignThumbprint) /fd SHA256 /tr $(TimestampUrl) /td SHA256</SignCommand>
+    <!-- $q and $f are expanded by Inno Setup. Keeping quotes out of the nested
+         command avoids cmd.exe corrupting paths that contain spaces. -->
+    <InnoSignCommand Condition="'$(SignThumbprint)' != ''">$q$(SignToolExe)$q sign /sha1 $(SignThumbprint) /fd SHA256 /tr $(TimestampUrl) /td SHA256 $f</InnoSignCommand>
+    <InnoSignArgs Condition="'$(InnoSignCommand)' != ''">/DEnableCodeSigning &quot;/STelegramBotInternalSign=$(InnoSignCommand)&quot;</InnoSignArgs>
   </PropertyGroup>
 
   <Target Name="Installer">
@@ -27,9 +26,8 @@
 
     <Exec Condition="'$(SignCommand)' != ''" Command="$(SignCommand) &quot;$(MSBuildThisFileDirectory)publish\Server\TelegramBot.Server.exe&quot; &quot;$(MSBuildThisFileDirectory)publish\Worker\TelegramBot.Worker.exe&quot; &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight\GrantLogonRight.exe&quot;" />
 
-    <Exec Command="&quot;$(IsccExe)&quot; &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
-
-    <Exec Condition="'$(SignCommand)' != ''" Command="$(SignCommand) &quot;$(MSBuildThisFileDirectory)Output\TelegramBotSetup.exe&quot;" />
+    <!-- Inno signs both Setup and its embedded Uninstall when signing is enabled. -->
+    <Exec Command="&quot;$(IsccExe)&quot; $(InnoSignArgs) &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
   </Target>
 
 </Project>

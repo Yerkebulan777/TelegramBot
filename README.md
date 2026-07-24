@@ -67,7 +67,36 @@ dotnet build Installer\Installer.build.proj -t:Installer
 # → Installer\Output\TelegramBotSetup.exe
 ```
 
-Поиск ISCC: IS 7 → IS 6; override `/p:IsccExe=...`. Подпись (иначе Defender может снести setup): `/p:SignThumbprint=... /p:SignToolExe=...`.
+Поиск ISCC: IS 7 → IS 6; override `/p:IsccExe=...`.
+
+### Внутренняя подпись инсталлятора
+
+На компьютере сборки нужны Inno Setup 7 и Windows SDK с `signtool.exe`.
+
+Один раз на выделенном компьютере сборки:
+
+```powershell
+.\scripts\setup-internal-code-signing.ps1
+```
+
+Сохранить PFX офлайн и никому не передавать. Публичный CER развернуть через GPO в `Computer Configuration → Policies → Windows Settings → Security Settings → Public Key Policies`: импортировать его в `Trusted Root Certification Authorities` и `Trusted Publishers`. Для одного тестового ПК запустить PowerShell от администратора:
+
+```powershell
+$cert = "C:\path\TelegramBot-Internal-Code-Signing-THUMBPRINT.cer"
+Import-Certificate -FilePath $cert -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath $cert -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+Каждая подписанная сборка:
+
+```powershell
+.\scripts\build-signed-installer.ps1
+# → Installer\Output\TelegramBotSetup.exe
+```
+
+Скрипт публикует проекты, подписывает собственные EXE, затем Inno Setup подписывает Setup и Uninstall с SHA-256 и timestamp. Закрытый ключ нужен только компьютеру сборки; корпоративным ПК достаточно один раз получить CER через GPO. Распространять setup лучше с внутреннего UNC-ресурса. Подпись подтверждает издателя, но при отдельном антивирусном false positive файл всё равно нужно отправить Microsoft на анализ.
+
+До истечения сертификата создать следующий командой `.\scripts\setup-internal-code-signing.ps1 -Renew`, сначала развернуть его CER через GPO, затем собирать новые релизы. Старый CER не удалять, пока используются подписанные им версии.
 
 Мастер: Server/Worker, учётка с доступом к шаре, `B:` → UNC, токен (Server), `GrantLogonRight` до `sc.exe create`.
 

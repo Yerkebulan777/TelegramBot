@@ -39,6 +39,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=Output
 OutputBaseFilename={#AppName}Setup
 WizardStyle=modern
+#ifdef EnableCodeSigning
+SignTool=TelegramBotInternalSign
+SignedUninstaller=yes
+#endif
 
 [Types]
 Name: "full"; Description: "Server + Worker (оба)"
