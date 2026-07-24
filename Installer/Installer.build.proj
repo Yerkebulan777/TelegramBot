@@ -5,9 +5,8 @@
 
   <PropertyGroup>
     <RepoRoot>$(MSBuildThisFileDirectory)..\</RepoRoot>
-    <!-- Local default: Inno Setup 7 (64-bit). CI windows-latest still has IS 6 in Program Files (x86). -->
+    <!-- Local default: Inno Setup 7 (64-bit). -->
     <IsccExe Condition="'$(IsccExe)' == '' AND Exists('C:\Program Files\Inno Setup 7\ISCC.exe')">C:\Program Files\Inno Setup 7\ISCC.exe</IsccExe>
-    <IsccExe Condition="'$(IsccExe)' == '' AND Exists('C:\Program Files (x86)\Inno Setup 6\ISCC.exe')">C:\Program Files (x86)\Inno Setup 6\ISCC.exe</IsccExe>
     <SignToolExe Condition="'$(SignToolExe)' == ''">signtool.exe</SignToolExe>
     <TimestampUrl Condition="'$(TimestampUrl)' == ''">http://timestamp.digicert.com</TimestampUrl>
     <!-- Signing is opt-in: the certificate must be in Cert:\CurrentUser\My. -->
@@ -19,7 +18,7 @@
   </PropertyGroup>
 
   <Target Name="Installer">
-    <Error Condition="'$(IsccExe)' == '' OR !Exists('$(IsccExe)')" Text="ISCC.exe not found. Install Inno Setup 7 (C:\Program Files\Inno Setup 7\ISCC.exe) or 6 (C:\Program Files (x86)\Inno Setup 6\ISCC.exe), or pass /p:IsccExe=&lt;path&gt;." />
+    <Error Condition="'$(IsccExe)' == '' OR !Exists('$(IsccExe)')" Text="ISCC.exe not found. Install Inno Setup 7 (C:\Program Files\Inno Setup 7\ISCC.exe), or pass /p:IsccExe=&lt;path&gt;." />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Server\TelegramBot.Server.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Server&quot;" />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Worker\TelegramBot.Worker.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Worker&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)GrantLogonRight\GrantLogonRight.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight&quot;" />
