@@ -76,7 +76,7 @@ Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs
 
 ### Server DI
 
-`AddTelegramBotServer` регистрирует: 5 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `AuthorizationMiddleware`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`, `Channel<NotificationItem>(256)`, `TelegramBotHostedService`, `CommandNotificationService`, `NotificationSenderService`.
+`AddTelegramBotServer` регистрирует: 5 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `AuthorizationMiddleware`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`, `Channel<NotificationItem>(256)`, hosted: `DatabaseInitializerService` (первым, фоновая schema-init с retry — не блокирует старт хоста), `TelegramBotHostedService`, `CommandNotificationService`, `NotificationSenderService`.
 
 ## Worker flow
 

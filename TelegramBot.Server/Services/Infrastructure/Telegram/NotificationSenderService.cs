@@ -31,7 +31,19 @@ public sealed class NotificationSenderService(
 
         try
         {
-            await DrainCompletionOutboxAsync(stoppingToken);
+            // Стартовый drain изолирован: если БД ещё не готова (Postgres в Docker
+            // поднимается позже автозапуска службы), здесь бросит — но основной цикл
+            // всё равно должен жить, иначе до поднятия БД сервис умрёт безвозвратно.
+            // Outbox retry'ется polling'ом (RunOutboxPollingAsync) и в SendNotificationItemAsync.
+            try
+            {
+                await DrainCompletionOutboxAsync(stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Outbox startup drain failed; retrying via polling");
+            }
+
             _ = RunOutboxPollingAsync(stoppingToken);
 
             await foreach (var item in notificationChannel.Reader.ReadAllAsync(stoppingToken))

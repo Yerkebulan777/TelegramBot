@@ -21,7 +21,7 @@ docker compose up -d          # PostgreSQL @ localhost:5432
 dotnet build TelegramBot.slnx
 ```
 
-`appsettings.Local.json` в `Server/` и `Worker/` (ниже — дефолт docker-compose). Схема БД — при первом запуске Server. Одна строка Postgres у обоих.
+`appsettings.Local.json` в `Server/` и `Worker/` (ниже — дефолт docker-compose). Схема БД — инициализируется Server'ом в фоне (`DatabaseInitializerService`, hosted) с retry при недоступности PostgreSQL; не блокирует старт службы. Одна строка Postgres у обоих.
 
 **TelegramBot.Server/**
 
@@ -102,6 +102,8 @@ Import-Certificate -FilePath $cert -CertStoreLocation Cert:\LocalMachine\Trusted
 ### Troubleshooting
 
 **Server (7000/7041):** нет «Вход в качестве службы» → `GrantLogonRight.exe DOMAIN\user` или secpol; если откатывает после `gpupdate` — доменная GPO.
+
+**Server не поднимается после загрузки (7009/7000, timeout 60 c):** Server стартует (`AUTO_START delayed`) раньше, чем Docker поднимет PostgreSQL (Docker Desktop запускается по логону пользователя, не при загрузке). Schema-init идёт в фоне с retry, поэтому старт службы больше не блокируется. Если всё же зависает — проверьте, что служба не зависит от БД синхронно: `DatabaseInitializerService` должен быть `BackgroundService`, а не вызов перед `host.RunAsync()`. Страховка: `sc failureflag TelegramBotServer 1` (в админ-терминале) — тогда restart-actions срабатывают и на non-crash остановки.
 
 **Worker / Revit:** учётка залогинена? `Get-Process Revit | Select Id,SI` — `SI=0` значит нет `/it`.
 
