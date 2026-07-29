@@ -3,7 +3,6 @@ using Serilog;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using TelegramBot.Core.Helpers;
-using TelegramBot.Data;
 using TelegramBot.Server.Extensions;
 
 namespace TelegramBot.Server;
@@ -37,8 +36,6 @@ public static class Program
                 .UseSerilog((context, services, loggerConfiguration) =>
                     SerilogSetup.ConfigureFileLogging(context.Configuration, services, loggerConfiguration, "Server"))
                 .Build();
-
-            await host.Services.GetRequiredService<DatabaseInitializerService>().InitializeDatabaseAsync();
 
             await host.RunAsync();
         }

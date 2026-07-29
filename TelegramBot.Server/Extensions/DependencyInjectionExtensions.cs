@@ -52,7 +52,6 @@ public static class DependencyInjectionExtensions
         _ = services.AddSingleton<SessionDataService>();
         _ = services.AddSingleton<MessageTrackingDataService>();
         _ = services.AddSingleton<NotificationOutboxDataService>();
-        _ = services.AddSingleton<DatabaseInitializerService>();
         _ = services.AddSingleton<FileSystemBrowser>();
 
         _ = services.AddSingleton<ITelegramBotClient>(serviceProvider =>
@@ -72,6 +71,13 @@ public static class DependencyInjectionExtensions
             SingleReader = true,
             SingleWriter = false
         }));
+        // DatabaseInitializerService создаёт схему в фоне с retry. Остальные hosted
+        // сервисы стартуют параллельно (BackgroundService.ExecuteAsync — fire-and-forget),
+        // поэтому каждый из них сам толерантен к временно недоступной БД: CommandNotification
+        // — reconnect-циклом, NotificationSender — изолированным стартовым drain + polling,
+        // TelegramBotHosted — пер-апдейтным catch. Схема создаётся в отдельном сервисе, а не
+        // блокирует старт хоста (раньше это вызывалось синхронно в Program.Main → таймаут SCM).
+        _ = services.AddHostedService<DatabaseInitializerService>();
         _ = services.AddHostedService<TelegramBotHostedService>();
         _ = services.AddHostedService<CommandNotificationService>();
         _ = services.AddHostedService<NotificationSenderService>();

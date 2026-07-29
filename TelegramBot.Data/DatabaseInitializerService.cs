@@ -1,22 +1,68 @@
 using Dapper;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+
 namespace TelegramBot.Data;
 
 /// <summary>
-/// Service for database initialization.
+/// Инициализирует схему PostgreSQL при старте как hosted service.
+///
+/// Запускается в фоне, поэтому НЕ блокирует старт хоста: сервис рапортует SCM
+/// «started» немедленно, а схема создаётся с retry-циклом. Раньше это вызывалось
+/// синхронно в Program.Main до host.RunAsync — пока БД (в Docker) не поднималась
+/// при загрузке машины, инициализация висела дольше 60 c и SCM убивал старт
+/// службы по таймауту (event 7009/7000). Сеть/Postgres у Docker поднимаются
+/// позже, чем эта служба (AUTO_START delayed), поэтому retry обязателен.
 /// </summary>
 public sealed class DatabaseInitializerService(
     IConfiguration configuration,
     ILogger<DatabaseInitializerService> logger)
-    : DataAccessBase(ResolveConnectionString(configuration), logger)
+    : BackgroundService
 {
+    private static readonly TimeSpan[] RetryBackoff =
+        [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15)];
+
     /// <inheritdoc/>
-    public async Task InitializeDatabaseAsync()
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await using var conn = await OpenConnectionWithRetryAsync();
-        await using var tx = await conn.BeginTransactionAsync();
+        var attempt = 0;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await InitializeSchemaAsync(stoppingToken);
+                logger.LogInformation("Database schema initialized");
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                attempt++;
+                var delay = RetryBackoff[(attempt - 1) % RetryBackoff.Length];
+                logger.LogWarning(ex,
+                    "Database schema init attempt {Attempt} failed, retrying in {Delay}s",
+                    attempt, delay.TotalSeconds);
+                try
+                {
+                    await Task.Delay(delay, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private async Task InitializeSchemaAsync(CancellationToken ct)
+    {
+        await using var conn = await CreateOpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
 
         try
         {
@@ -34,39 +80,20 @@ public sealed class DatabaseInitializerService(
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddNotificationOutboxStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled, transaction: tx);
 
-            await tx.CommitAsync();
+            await tx.CommitAsync(ct);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Database schema initialization failed, rolling back");
-            await tx.RollbackAsync();
+            logger.LogError(ex, "Database schema initialization failed, rolling back");
+            await tx.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
 
-    /// <summary>
-    /// Открывает подключение к PostgreSQL с ретраями и экспоненциальной задержкой.
-    /// Сглаживает кратковременную недоступность БД при старте сервера (например, рестарт контейнера).
-    /// </summary>
-    private async Task<NpgsqlConnection> OpenConnectionWithRetryAsync()
+    private async Task<NpgsqlConnection> CreateOpenConnectionAsync(CancellationToken ct)
     {
-        int[] retryDelaysMs = [1000, 2000, 4000, 8000];
-
-        for (var attempt = 0; attempt < retryDelaysMs.Length; attempt++)
-        {
-            try
-            {
-                return await CreateOpenConnectionAsync();
-            }
-            catch (NpgsqlException ex)
-            {
-                Logger.LogWarning(ex,
-                    "Database connection attempt {Attempt}/{MaxAttempts} failed, retrying in {DelayMs}ms",
-                    attempt + 1, retryDelaysMs.Length + 1, retryDelaysMs[attempt]);
-                await Task.Delay(retryDelaysMs[attempt]);
-            }
-        }
-
-        return await CreateOpenConnectionAsync();
+        var conn = new NpgsqlConnection(DataAccessBase.ResolveConnectionString(configuration));
+        await conn.OpenAsync(ct);
+        return conn;
     }
 }
