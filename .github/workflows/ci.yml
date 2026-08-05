@@ -153,6 +153,18 @@ jobs:
     - name: Publish Worker
       run: dotnet publish TelegramBot.Worker/TelegramBot.Worker.csproj -c Release -o ./publish/worker
 
+    - name: Build installer
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: dotnet build Installer\Installer.build.proj -t:Installer
+
+    - name: Upload installer
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: telegram-bot-installer
+        path: Installer/Output/TelegramBotSetup.exe
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:

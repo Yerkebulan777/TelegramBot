@@ -59,6 +59,7 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 | Среда | `ISCC.exe` |
 |---|---|
 | Локально (IS 7) | `C:\Program Files\Inno Setup 7\ISCC.exe` |
+| CI (IS 6) | `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` |
 
 ```powershell
 Test-Path "C:\Program Files\Inno Setup 7\ISCC.exe"
@@ -66,7 +67,7 @@ dotnet build Installer\Installer.build.proj -t:Installer
 # → Installer\Output\TelegramBotSetup.exe
 ```
 
-Поиск ISCC: IS 7; override `/p:IsccExe=...`.
+Поиск ISCC: IS 7 → IS 6; override `/p:IsccExe=...`.
 
 ### Внутренняя подпись инсталлятора
 
