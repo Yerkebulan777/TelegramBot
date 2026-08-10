@@ -243,5 +243,16 @@ internal static partial class SqlQueries
               AND Status = 'Failed'
             ORDER BY ExecutionOrder, CommandId";
 
+        // Done rows reuse Commands.ErrorMessage for ResultFile.warningMessage (success with recoverable issues).
+        // Always filter Status = 'Done' — never treat ErrorMessage alone as failure.
+        internal const string GetWarnedCommandsBySession = @"
+            SELECT FilePath, ErrorMessage
+            FROM Commands
+            WHERE SessionId = @SessionId
+              AND Status = 'Done'
+              AND ErrorMessage IS NOT NULL
+              AND TRIM(ErrorMessage) <> ''
+            ORDER BY ExecutionOrder, CommandId";
+
     }
 }

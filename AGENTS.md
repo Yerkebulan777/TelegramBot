@@ -9,7 +9,7 @@
 | [README.md](README.md) | запуск, команды, конфигурация |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | pipeline, статусы, retry, уведомления, БД |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | историческое расследование Revit |
-| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | эталон TaskFile/ResultFile (v2026-07-24); локально — `../RevitBIMFusion/Docs` |
+| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | эталон TaskFile/ResultFile (v2026-08-10); локально — `../RevitBIMFusion/Docs` |
 | `Docs/BimContract/` | vendored XSD (ресинк из эталона вручную) |
 | `TelegramBot.Data/Sql/` | фактическая схема и SQL |
 | option-классы `Config/` | defaults конфигурации |
@@ -126,7 +126,7 @@ LISTEN new_tasks → DrainPendingCommands → ClaimPendingCommands → ProcessRu
 
 1. commands/config/behavior → README
 2. pipeline/schema/SQL/status/retry → ExecutionAlgorithm.md
-3. TaskFile/ResultFile/startup → canonical `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-07-24); XSD — `Docs/BimContract/`
+3. TaskFile/ResultFile/startup → canonical `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-08-10); XSD — `Docs/BimContract/`
 4. архитектура/DI/agent rules → AGENTS.md + CLAUDE.md
 5. исторический incident — не переписывать
 

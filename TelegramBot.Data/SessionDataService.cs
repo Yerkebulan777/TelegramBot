@@ -171,7 +171,12 @@ public sealed class SessionDataService(
             SqlQueries.Commands.GetFailedCommandsBySession,
             new { SessionId = sessionId });
 
+        var warnedCommands = await conn.QueryAsync<FailedCommandInfo>(
+            SqlQueries.Commands.GetWarnedCommandsBySession,
+            new { SessionId = sessionId });
+
         summary.FailedCommands = failedCommands.ToList();
+        summary.WarnedCommands = warnedCommands.ToList();
         return summary;
     }
 

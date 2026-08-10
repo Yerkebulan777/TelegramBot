@@ -137,7 +137,11 @@ public sealed class ProcessRunner(
 
         if (commandResult.IsSuccess)
         {
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Done);
+            // Done + non-empty Commands.ErrorMessage = plugin warningMessage (not a failure).
+            _ = await commandDataService.UpdateCommandStatusAsync(
+                cmd.CommandId,
+                Statuses.Done,
+                errorMessage: commandResult.WarningMessage);
             await NotifySessionCompletionAsync(cmd);
         }
         else if (commandResult.IsCancelled)

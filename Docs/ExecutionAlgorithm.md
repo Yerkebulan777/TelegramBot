@@ -68,6 +68,7 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 | Условие | Результат |
 |---|---|
 | `status=done` | `Done` |
+| `status=done` + `warningMessage` | `Done`; текст warning пишется в `Commands.ErrorMessage` (это не failure) |
 | `status=failed` (plugin) | permanent `Failed`, без retry |
 | `status=cancelled` | `Failed`, без retry |
 | invalid XML | `.bad`, failure → retry policy |
@@ -77,6 +78,8 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 | timeout | process kill, `Failed` (без retry) |
 
 stdout/stderr: 64 KiB capture, 4 KiB в лог. Прочитанный ResultFile удаляется. При отрицательном exit code — Revit journal evidence.
+
+`Commands.ErrorMessage` при `Status='Failed'` — причина сбоя; при `Status='Done'` — опциональный `ResultFile.warningMessage` (whitespace-only не сохраняется). Выборки warned-команд всегда фильтруют `Status = 'Done'`.
 
 ## 5. Retry
 
@@ -92,6 +95,7 @@ Server:
 - `CommandNotificationService` слушает `session_started` и `command_completed`
 - `NotificationSenderService` drain-ит outbox (при старте, по wake-up, каждые 30 с)
 - advisory lock на sender для Server replicas
+- completion notify: секции «Ошибки» (`Failed`) и «Предупреждения» (`Done` + non-empty `ErrorMessage`)
 
 ## 7. Cleanup и shutdown
 

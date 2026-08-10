@@ -178,20 +178,28 @@ public sealed class NotificationSenderService(
         var summary = new StringBuilder();
 
         _=session.FailedFiles == 0
-            ? summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано")
+            ? session.WarnedCommands.Count == 0
+                ? summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано")
+                : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано (есть предупреждения)")
             : session.DoneFiles == 0
                 ? summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {session.FailedFiles} файлов с ошибками")
                 : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {session.DoneFiles} ✅, {session.FailedFiles} ❌ из {session.TotalFiles}");
 
         if (session.FailedFiles > 0 && session.FailedCommands.Count > 0)
         {
-            AppendFailedCommands(summary, session.FailedCommands);
+            AppendCommandNotes(summary, "Ошибки:", session.FailedCommands);
+        }
+
+        if (session.WarnedCommands.Count > 0)
+        {
+            AppendCommandNotes(summary, "Предупреждения:", session.WarnedCommands);
         }
 
         // Сводка failed-команд для трассировки: дошли ли причины из БД до уведомления.
         var failedWithMsg = session.FailedCommands.Count(c => !string.IsNullOrWhiteSpace(c.ErrorMessage));
-        logger.LogInformation("Notify summary: session={SessionId}, corr={CorrelationId}, done={Done}, failed={Failed}, failedWithMsg={FailedWithMsg}, total={Total}",
-            sessionId, correlationId, session.DoneFiles, session.FailedFiles, failedWithMsg, session.TotalFiles);
+        logger.LogInformation(
+            "Notify summary: session={SessionId}, corr={CorrelationId}, done={Done}, failed={Failed}, failedWithMsg={FailedWithMsg}, warned={Warned}, total={Total}",
+            sessionId, correlationId, session.DoneFiles, session.FailedFiles, failedWithMsg, session.WarnedCommands.Count, session.TotalFiles);
 
         if (logger.IsEnabled(LogLevel.Debug))
         {
@@ -218,11 +226,11 @@ public sealed class NotificationSenderService(
     /// <summary>Жёсткий лимит текста под потолок Telegram (4096) с запасом на маркер обрыва.</summary>
     private const int MaxMessageLength = 4000;
 
-    private static void AppendFailedCommands(StringBuilder summary, List<FailedCommandInfo> failedCommands)
+    private static void AppendCommandNotes(StringBuilder summary, string title, List<FailedCommandInfo> commands)
     {
-        _=summary.Append("\n\nОшибки:\n");
+        _=summary.Append("\n\n").Append(title).Append('\n');
 
-        var shown = Math.Min(failedCommands.Count, MaxFailedFilesInMessage);
+        var shown = Math.Min(commands.Count, MaxFailedFilesInMessage);
         for (var i = 0; i < shown; i++)
         {
             if (i > 0)
@@ -230,18 +238,18 @@ public sealed class NotificationSenderService(
                 _ = summary.AppendLine();
             }
 
-            _ = summary.Append("- ").Append(Path.GetFileName(failedCommands[i].FilePath));
+            _ = summary.Append("- ").Append(Path.GetFileName(commands[i].FilePath));
 
-            var reason = FormatReason(failedCommands[i].ErrorMessage);
+            var reason = FormatReason(commands[i].ErrorMessage);
             if (reason.Length > 0)
             {
                 _ = summary.Append(" — ").Append(reason);
             }
         }
 
-        if (failedCommands.Count > MaxFailedFilesInMessage)
+        if (commands.Count > MaxFailedFilesInMessage)
         {
-            _ = summary.Append("\n…и ещё ").Append(failedCommands.Count - MaxFailedFilesInMessage);
+            _ = summary.Append("\n…и ещё ").Append(commands.Count - MaxFailedFilesInMessage);
         }
     }
 

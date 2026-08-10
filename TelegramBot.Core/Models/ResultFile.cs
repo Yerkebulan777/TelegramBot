@@ -31,7 +31,7 @@ public enum ResultStatus
 /// Для Revit ResultFile обязателен; exit-code fallback — только wrapper-командам.
 /// </summary>
 /// <remarks>
-/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-07-24) и
+/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-08-10) и
 /// <c>Docs/BimContract/ResultFile.schema.xsd</c> (vendored).
 /// </remarks>
 [XmlRoot("resultFile")]
@@ -44,6 +44,10 @@ public sealed class ResultFile
     /// <summary>Короткое сообщение для пользователя при <see cref="ResultStatus.Failed"/>.</summary>
     [XmlElement("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    /// <summary>Предупреждение при <see cref="ResultStatus.Done"/> (экспорт успешен, были восстанавливаемые проблемы).</summary>
+    [XmlElement("warningMessage")]
+    public string? WarningMessage { get; set; }
 
     /// <summary>Stack trace / диагностика при неожиданных исключениях.</summary>
     [XmlElement("errorDetails")]

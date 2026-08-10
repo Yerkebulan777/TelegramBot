@@ -16,6 +16,11 @@
           </xs:simpleType>
         </xs:element>
         <xs:element name="errorMessage" type="xs:string" minOccurs="0" />
+        <xs:element name="warningMessage" type="xs:string" minOccurs="0">
+          <xs:annotation>
+            <xs:documentation>Optional warning when status=done (export succeeded with recoverable issues).</xs:documentation>
+          </xs:annotation>
+        </xs:element>
         <xs:element name="errorDetails" type="xs:string" minOccurs="0" />
         <xs:element name="outputFiles" type="xs:string" minOccurs="0" />
         <xs:element name="executionTimeMilliseconds" type="xs:long" minOccurs="0" />

@@ -128,7 +128,18 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, result.Status, result.OutputFiles ?? "<none>",
                 result.ExecutionTimeMilliseconds, sw.ElapsedMilliseconds);
 
-            return CommandResult.Success();
+            var warningMessage = string.IsNullOrWhiteSpace(result.WarningMessage)
+                ? null
+                : result.WarningMessage;
+
+            if (warningMessage is not null)
+            {
+                logger.LogWarning(
+                    "Plugin warning: id={Id}, corr={CorrelationId}, warn={Warning}",
+                    cmd.CommandId, cmd.CorrelationId, warningMessage);
+            }
+
+            return CommandResult.Success(warningMessage);
         }
 
         if (result.Status == ResultStatus.Cancelled)
@@ -205,9 +216,17 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         public bool IsCancelled { get; }
         public bool IsPluginOrigin { get; private set; }
         public string? ErrorMessage { get; }
+        public string? WarningMessage { get; }
         public int? ExitCode { get; }
 
-        private CommandResult(bool isSuccess, bool isFailure, bool isCancelled, string? errorMessage, int? exitCode, bool isPluginOrigin)
+        private CommandResult(
+            bool isSuccess,
+            bool isFailure,
+            bool isCancelled,
+            string? errorMessage,
+            int? exitCode,
+            bool isPluginOrigin,
+            string? warningMessage = null)
         {
             IsSuccess = isSuccess;
             IsFailure = isFailure;
@@ -215,11 +234,14 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             ErrorMessage = errorMessage;
             ExitCode = exitCode;
             IsPluginOrigin = isPluginOrigin;
+            WarningMessage = warningMessage;
         }
 
-        public static CommandResult Success()
+        public static CommandResult Success(string? warningMessage = null)
         {
-            return new(true, false, false, null, null, false);
+            // Whitespace-only warnings are treated as absent — never persist them as ErrorMessage.
+            warningMessage = string.IsNullOrWhiteSpace(warningMessage) ? null : warningMessage;
+            return new(true, false, false, null, null, false, warningMessage);
         }
 
         public static CommandResult Failure(string errorMessage, int? exitCode, bool isPluginOrigin = false)

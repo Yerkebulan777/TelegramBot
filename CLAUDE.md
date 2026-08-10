@@ -20,7 +20,7 @@ dotnet build TelegramBot.slnx
 - Worker: tracked tasks + SQL partition scheduling
 - Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, без контрактных CLI-аргументов (`/language RUS` допустим)
 - `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC
-- BIM contract: эталон `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-07-24); XSD vendored в `Docs/BimContract/`
+- BIM contract: эталон `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-08-10); XSD vendored в `Docs/BimContract/`
 
 ## GitNexus
 
