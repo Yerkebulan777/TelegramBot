@@ -39,9 +39,16 @@ public sealed class FileSelectionHandler(
         var session = context.Session;
         session.FileSelectionMessageId = context.MessageId;
 
+        var isProjectList = _options.IsAtProjectLevel(session.CurrentPath);
         var newPath = string.IsNullOrEmpty(context.ParsedCallback.Argument)
-            ? Path.GetDirectoryName(session.CurrentPath)
+            ? GetParentSelectionPath(session.CurrentPath)
             : fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
+
+        if (isProjectList && newPath != null)
+        {
+            session.ClearSelectedFiles();
+            newPath = Path.Combine(newPath, _options.ProjectDirectoryName);
+        }
 
         if (!ValidatePathWithinRoot(_options, newPath, "folder navigation", context))
         {
@@ -52,6 +59,15 @@ public sealed class FileSelectionHandler(
         session.CurrentPath = newPath;
 
         await ReRenderSelectionAsync(context, "");
+
+        if (IsFileList(newPath))
+        {
+            await fileActionsKeyboardService.RefreshAsync(context.UserId, session);
+        }
+        else
+        {
+            await fileActionsKeyboardService.HideAsync(context.UserId, session);
+        }
     }
 
     private async Task HandleSelectAllAsync(CallbackContext context, CancellationToken cancellationToken)
@@ -110,5 +126,23 @@ public sealed class FileSelectionHandler(
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, context.Session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
         await outputService.AnswerCallbackAsync(context.CallbackQueryId, ackText);
+    }
+
+    private string? GetParentSelectionPath(string currentPath)
+    {
+        return IsProjectSectionsList(currentPath)
+            ? _options.RootPath
+            : Path.GetDirectoryName(currentPath);
+    }
+
+    private bool IsProjectSectionsList(string path)
+    {
+        return string.Equals(Path.GetFileName(path), _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsFileList(string path)
+    {
+        var parentPath = Path.GetDirectoryName(path);
+        return parentPath != null && IsProjectSectionsList(parentPath);
     }
 }

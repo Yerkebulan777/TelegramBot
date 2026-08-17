@@ -77,14 +77,13 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
     private InlineKeyboardMarkup BuildProjectKeyboard(UserSession session, string path)
     {
-        var selected = session.GetSelectedFiles();
         var folders = GetProjectFolders(path);
         var buttons = new List<List<InlineKeyboardButton>>(folders.Count);
 
         foreach (var dir in folders)
         {
-            var label = $"{(selected.Contains(dir) ? "✅ " : "📁 ")}{Path.GetFileName(dir)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(dir)}")]);
+            var label = $"📁 {Path.GetFileName(dir)}";
+            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.OpenFolder}{CreateSelectionToken(dir)}")]);
         }
 
         return new InlineKeyboardMarkup(buttons);
@@ -94,7 +93,10 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     {
         var selected = session.GetSelectedFiles();
         var folders = GetSectionFolders(path);
-        var buttons = new List<List<InlineKeyboardButton>>(folders.Count);
+        var buttons = new List<List<InlineKeyboardButton>>(folders.Count + 1)
+        {
+            new() { InlineKeyboardButton.WithCallbackData("⬅️ Назад", CallbackPrefixes.OpenFolder) }
+        };
 
         foreach (var dir in folders)
         {

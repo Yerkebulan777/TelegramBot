@@ -36,6 +36,23 @@ public sealed class FileActionsKeyboardService(
     }
 
     /// <summary>
+    /// Скрывает reply-клавиатуру вне списка файлов, сохраняя сообщение для последующей очистки.
+    /// </summary>
+    public async Task HideAsync(long userId, UserSession session)
+    {
+        if (session.LastActionsMessageId.HasValue)
+        {
+            await outputService.DeleteMessageAsync(userId, session.LastActionsMessageId.Value);
+            session.LastActionsMessageId = null;
+        }
+
+        var message = await messageTrackingService.TrackAsync(
+            outputService.RemoveReplyKeyboardAsync(userId, "Выберите папку:"),
+            session);
+        session.LastActionsMessageId = message?.Id;
+    }
+
+    /// <summary>
     /// Отправляет сообщение об ошибке с постоянной «file actions» reply-клавиатурой и трекает его.
     /// Вынесено из дословно дублированных копий в FileNavigationHandler / FileSelectionHandler.
     /// </summary>

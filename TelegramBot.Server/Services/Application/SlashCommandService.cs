@@ -177,7 +177,7 @@ public sealed partial class SlashCommandService(
         var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
         var selectionMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
         session.FileSelectionMessageId = selectionMessage?.Id;
-        await fileActionsKeyboardService.RefreshAsync(userId, session);
+        await fileActionsKeyboardService.HideAsync(userId, session);
     }
 
     private async Task ConfirmFileSelectionAsync(long userId, string username, UserSession session, CancellationToken cancellationToken)
