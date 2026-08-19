@@ -123,7 +123,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     {
         var selected = session.Selection.SelectedFiles;
         var files = GetSectionFiles(path);
-        var buttons = new List<List<InlineKeyboardButton>>(files.Count + 2)
+        var buttons = new List<List<InlineKeyboardButton>>(files.Count + 3)
         {
             new() { InlineKeyboardButton.WithCallbackData("⬅️ Назад", CallbackPrefixes.OpenFolder) }
         };
@@ -135,6 +135,11 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         }
 
         buttons.Add([InlineKeyboardButton.WithCallbackData("Выбрать все", CallbackPrefixes.SelectAllSectionFolders)]);
+        buttons.Add(
+        [
+            InlineKeyboardButton.WithCallbackData(ButtonTexts.Confirm, CallbackPrefixes.ConfirmFileSelection),
+            InlineKeyboardButton.WithCallbackData(ButtonTexts.Cancel, CallbackPrefixes.CancelFileSelection)
+        ]);
 
         return new InlineKeyboardMarkup(buttons);
     }

@@ -26,20 +26,6 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return BuildSelectableCommandsKeyboard(session, CommandCatalog.GetByGroup(group));
     }
 
-    public ReplyKeyboardMarkup GetCommandActionsReplyKeyboard()
-    {
-        return BuildActionsReplyKeyboard(ButtonTexts.Apply, ButtonTexts.Cancel);
-    }
-
-    /// <summary>
-    /// Reply-клавиатура действий при выборе файлов/разделов (Confirm + Cancel).
-    /// Используется и на уровне проекта, и на уровне разделов — набор кнопок идентичен.
-    /// </summary>
-    public ReplyKeyboardMarkup GetFileActionsReplyKeyboard()
-    {
-        return BuildActionsReplyKeyboard(ButtonTexts.Confirm, ButtonTexts.Cancel);
-    }
-
     /// <summary>Строит клавиатуру списка сессий с фильтрами и постраничной навигацией.</summary>
     /// <param name="page">Запрошенная страница (0-based). Клампится в валидный диапазон.</param>
     public InlineKeyboardMarkup GetSessionsListKeyboard(
@@ -234,18 +220,12 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             })
             .ToList();
 
-        return new InlineKeyboardMarkup(buttons);
-    }
-
-    private static ReplyKeyboardMarkup BuildActionsReplyKeyboard(params string[] buttonTexts)
-    {
-        return new ReplyKeyboardMarkup(
+        buttons.Add(
         [
-            buttonTexts.Select(text => new KeyboardButton(text)).ToArray()
-        ])
-        {
-            ResizeKeyboard = true,
-            OneTimeKeyboard = false
-        };
+            InlineKeyboardButton.WithCallbackData(ButtonTexts.Apply, CallbackPrefixes.ApplyCommands),
+            InlineKeyboardButton.WithCallbackData(ButtonTexts.Cancel, CallbackPrefixes.CancelCommandSelection)
+        ]);
+
+        return new InlineKeyboardMarkup(buttons);
     }
 }

@@ -9,7 +9,6 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileNavigationHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
-    FileActionsKeyboardService fileActionsKeyboardService,
     IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -26,13 +25,13 @@ public sealed class FileNavigationHandler(
         var newPath = context.ParsedCallback.Argument;
         if (string.IsNullOrEmpty(newPath))
         {
-            await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: Path not found.", context.Session);
+            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Путь не найден.");
             return;
         }
 
         if (!ValidatePathWithinRoot(_options, newPath, "navigation", context))
         {
-            await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: Недопустимый путь.", context.Session);
+            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
             flow.ResetPathToRoot();
             return;
         }
@@ -42,7 +41,5 @@ public sealed class FileNavigationHandler(
 
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-
-        await fileActionsKeyboardService.RefreshAsync(context.UserId, context.Session);
     }
 }
