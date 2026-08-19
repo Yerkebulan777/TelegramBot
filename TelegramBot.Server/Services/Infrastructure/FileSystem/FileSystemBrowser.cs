@@ -32,6 +32,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     };
 
     private const long _rvtMinFileSizeBytes = 50L * 1024 * 1024;
+    private const int _projectButtonNameLength = 50;
 
     private static readonly Regex _rvtSectionPattern = ValidRvtFilePattern();
     private static readonly Regex _rvtBackupFilePattern = RevitBackupFilePattern();
@@ -89,11 +90,21 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
         foreach (var dir in folders)
         {
-            var label = $"📁 {Path.GetFileName(dir)}";
+            var label = $"📁 {FormatProjectButtonName(Path.GetFileName(dir))}";
             buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.OpenFolder}{CreateSelectionToken(dir)}")]);
         }
 
         return new InlineKeyboardMarkup(buttons);
+    }
+
+    private static string FormatProjectButtonName(string name)
+    {
+        const string suffix = "...";
+        var displayName = name.Length <= _projectButtonNameLength
+            ? name
+            : name[..(_projectButtonNameLength - suffix.Length)] + suffix;
+
+        return displayName.PadRight(_projectButtonNameLength);
     }
 
     private InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
