@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using TelegramBot.Data.Models;
 namespace TelegramBot.Data;
 
 /// <summary>
@@ -58,6 +59,32 @@ public sealed class MessageTrackingDataService(
     }
 
     /// <summary>
+    /// Возвращает устаревшие сообщения, которые ещё можно удалить в Telegram.
+    /// </summary>
+    public async Task<IReadOnlyList<TrackedMessageReference>> GetTrackedMessagesForCleanupAsync(
+        DateTime olderThan,
+        DateTime newerThan,
+        int limit)
+    {
+        return await TryQueryTrackedAsync<TrackedMessageReference>(
+            SqlQueries.TrackedMessages.GetForCleanup,
+            new { OlderThan = olderThan, NewerThan = newerThan, Limit = limit },
+            "Failed to get tracked messages for background cleanup");
+    }
+
+    /// <summary>
+    /// Удаляет tracking-записи, вышедшие за лимит Telegram на удаление сообщений.
+    /// Сами сообщения уже невозможно удалить через Bot API.
+    /// </summary>
+    public async Task<int> DeleteTrackedMessagesOlderThanAsync(DateTime olderThan)
+    {
+        return await TryExecuteTrackedCountAsync(
+            SqlQueries.TrackedMessages.DeleteOlderThan,
+            new { OlderThan = olderThan },
+            "Failed to delete expired tracked messages");
+    }
+
+    /// <summary>
     /// Выполняет SQL без возврата результата в fire-and-forget режиме: ошибки логируются на LogWarning,
     /// но не пробрасываются. Используется для best-effort tracked-message операций.
     /// </summary>
@@ -89,6 +116,20 @@ public sealed class MessageTrackingDataService(
         {
             Logger.LogWarning(ex, failureTemplate, args);
             return [];
+        }
+    }
+
+    private async Task<int> TryExecuteTrackedCountAsync(string sql, object? parameters, string failureTemplate, params object?[] args)
+    {
+        try
+        {
+            await using var conn = await CreateOpenConnectionAsync();
+            return await conn.ExecuteAsync(sql, parameters);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, failureTemplate, args);
+            return 0;
         }
     }
 }

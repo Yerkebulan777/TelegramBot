@@ -102,6 +102,7 @@ Server:
 - **Lease recovery**: каждые `CleanupIntervalSeconds` — expired `processing` → `pending`
 - **Process health monitoring**: каждые `ProcessMonitorIntervalSeconds` — проверка `Process` внутри `CommandExecutionService` + `DialogDismisser`
 - **Session retention**: `SessionCleanupService` — soft-delete сессий старше `CompletedSessionRetentionDays`
+- **Telegram message cleanup**: Server `TrackedMessageCleanupService` каждые `MessageCleanup:IntervalMinutes` удаляет tracking-сообщения старше `RetentionHours`, но младше `MaximumDeletionAgeHours` (по умолчанию 24–47 ч). Неудалённые сообщения остаются для повторной попытки; после окна Telegram запись удаляется только из `TrackedMessages` с Warning.
 - **Worker shutdown**: остановка циклов → process-tree kill (30s budget) → освобождение ресурсов
 
 ## 8. Повторный запуск из /status

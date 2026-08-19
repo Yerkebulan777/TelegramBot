@@ -12,7 +12,7 @@ namespace TelegramBot.Core.Helpers;
 public static class SerilogSetup
 {
     private const long LogFileSizeLimitBytes = 50 * 1024 * 1024;
-    private const int RetainedFileCountLimit = 31;
+    private const int RetainedFileCountLimit = 5;
     private static readonly TimeSpan FlushToDiskInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>Дефолтный базовый путь для логов: %USERPROFILE%\Documents\TelegramBot\Logs.</summary>

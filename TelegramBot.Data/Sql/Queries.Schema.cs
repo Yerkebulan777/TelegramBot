@@ -139,6 +139,7 @@ internal static partial class SqlQueries
                 WHERE Status IN ('pending', 'processing');
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_session ON TrackedMessages(SessionId);
             CREATE INDEX IF NOT EXISTS idx_tracked_messages_chat ON TrackedMessages(ChatId);
+            CREATE INDEX IF NOT EXISTS idx_tracked_messages_created_at ON TrackedMessages(CreatedAt);
             CREATE INDEX IF NOT EXISTS idx_commands_updated_at ON Commands(UpdatedAt DESC);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_outbox_session_completed
                 ON NotificationOutbox(EventType, SessionId)

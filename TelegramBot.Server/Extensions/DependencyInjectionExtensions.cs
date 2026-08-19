@@ -33,6 +33,15 @@ public static class DependencyInjectionExtensions
             .Validate(options => options.MaxFilesPerUserPerDay >= 0, "RateLimit:MaxFilesPerUserPerDay must be greater than or equal to 0")
             .ValidateOnStart();
 
+        _ = services.AddOptions<MessageCleanupOptions>()
+            .Bind(configuration.GetSection(MessageCleanupOptions.SectionName))
+            .Validate(options => options.IntervalMinutes > 0, "MessageCleanup:IntervalMinutes must be greater than 0")
+            .Validate(options => options.RetentionHours > 0, "MessageCleanup:RetentionHours must be greater than 0")
+            .Validate(options => options.MaximumDeletionAgeHours is > 0 and < 48, "MessageCleanup:MaximumDeletionAgeHours must be between 1 and 47")
+            .Validate(options => options.MaximumDeletionAgeHours > options.RetentionHours, "MessageCleanup:MaximumDeletionAgeHours must be greater than RetentionHours")
+            .Validate(options => options.BatchSize > 0, "MessageCleanup:BatchSize must be greater than 0")
+            .ValidateOnStart();
+
         _ = services.AddSingleton<CallbackHandlerBase, FileNavigationHandler>();
         _ = services.AddSingleton<CallbackHandlerBase, FileSelectionHandler>();
         _ = services.AddSingleton<CallbackHandlerBase, CommandToggleHandler>();
@@ -80,6 +89,7 @@ public static class DependencyInjectionExtensions
         _ = services.AddHostedService<TelegramBotHostedService>();
         _ = services.AddHostedService<CommandNotificationService>();
         _ = services.AddHostedService<NotificationSenderService>();
+        _ = services.AddHostedService<TrackedMessageCleanupService>();
 
         return services;
     }

@@ -20,5 +20,17 @@ internal static partial class SqlQueries
             SELECT MessageIdPg FROM TrackedMessages
             WHERE ChatId = @ChatId
             ORDER BY CreatedAt ASC";
+
+        internal const string GetForCleanup = @"
+            SELECT ChatId, MessageIdPg AS MessageId
+            FROM TrackedMessages
+            WHERE CreatedAt <= @OlderThan
+              AND CreatedAt > @NewerThan
+            ORDER BY CreatedAt ASC
+            LIMIT @Limit";
+
+        internal const string DeleteOlderThan = @"
+            DELETE FROM TrackedMessages
+            WHERE CreatedAt <= @OlderThan";
     }
 }
