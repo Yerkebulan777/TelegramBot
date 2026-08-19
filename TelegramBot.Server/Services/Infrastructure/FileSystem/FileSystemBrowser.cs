@@ -111,9 +111,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             prefixLength--;
         }
 
-        var displayName = name[..prefixLength].PadRight(_projectButtonNameLength - suffix.Length) + suffix;
-
-        return displayName;
+        return name[..prefixLength].PadRight(_projectButtonNameLength - suffix.Length) + suffix;
     }
 
     private InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
