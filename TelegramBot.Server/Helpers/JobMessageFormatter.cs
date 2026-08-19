@@ -12,7 +12,7 @@ public static class JobMessageFormatter
         IReadOnlyList<string> commandNames,
         string projectName,
         IEnumerable<string> sectionNames,
-        int fileCount,
+        IReadOnlyList<string> queuedFilePaths,
         IReadOnlyList<(string Command, string FilePath)>? skippedPairs = null)
     {
         var builder = new StringBuilder()
@@ -39,7 +39,12 @@ public static class JobMessageFormatter
 
         _=builder
             .AppendLine()
-            .AppendLine($"📄 *Количество файлов:* `{fileCount}`");
+            .AppendLine("📄 *Файлы*");
+
+        foreach (var filePath in queuedFilePaths)
+        {
+            _=builder.AppendLine($"• {MarkdownHelper.Escape(Path.GetFileName(filePath))}");
+        }
 
         if (skippedPairs is { Count: > 0 })
         {

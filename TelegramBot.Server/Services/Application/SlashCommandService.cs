@@ -269,7 +269,7 @@ public sealed partial class SlashCommandService(
                 return;
             }
 
-            var queuedMessage = JobMessageFormatter.BuildJobQueuedMessage(commandNames, projectName, sectionNames, queuedFileCount, skippedPairs);
+            var queuedMessage = JobMessageFormatter.BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess, skippedPairs);
 
             logger.LogInformation(
                 "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}, skipped={SkippedCount}",
