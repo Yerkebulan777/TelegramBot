@@ -59,6 +59,12 @@ public static class CallbackPrefixes
     /// <summary>Навигация внутрь раздела (список файлов) или назад, без сброса выбора.</summary>
     public const string OpenFolder = "OPENFOLDER:";
 
+    /// <summary>Подтверждение выбранных RVT-файлов.</summary>
+    public const string ConfirmFileSelection = "CONFIRMFILESEL:";
+
+    /// <summary>Отмена выбора RVT-файлов.</summary>
+    public const string CancelFileSelection = "CANCELFILESEL:";
+
     /// <summary>Подтверждение удаления сессии по типу.</summary>
     public const string ConfirmDeleteSessionByType = "CONFIRMDELETESESSIONBYTYPE:";
 

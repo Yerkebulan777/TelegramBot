@@ -9,7 +9,7 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileSelectionHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
-    FileActionsKeyboardService fileActionsKeyboardService,
+    SlashCommandService slashCommandService,
     TelegramBot.Server.Services.Infrastructure.FileSystem.FileSystemBrowser fileBrowser,
     IOptions<FileSystemOptions> options,
     ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
@@ -20,7 +20,9 @@ public sealed class FileSelectionHandler(
     [
         CallbackPrefixes.File,
         CallbackPrefixes.SelectAllSectionFolders,
-        CallbackPrefixes.OpenFolder
+        CallbackPrefixes.OpenFolder,
+        CallbackPrefixes.ConfirmFileSelection,
+        CallbackPrefixes.CancelFileSelection
     ];
 
     public override Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -30,8 +32,23 @@ public sealed class FileSelectionHandler(
             CallbackPrefixes.File => HandleFileToggleAsync(context, cancellationToken),
             CallbackPrefixes.SelectAllSectionFolders => HandleSelectAllAsync(context, cancellationToken),
             CallbackPrefixes.OpenFolder => HandleOpenFolderAsync(context, cancellationToken),
+            CallbackPrefixes.ConfirmFileSelection => HandleConfirmAsync(context, cancellationToken),
+            CallbackPrefixes.CancelFileSelection => HandleCancelAsync(context),
             _ => Task.CompletedTask
         };
+    }
+
+    private async Task HandleConfirmAsync(CallbackContext context, CancellationToken cancellationToken)
+    {
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+        await slashCommandService.ConfirmFileSelectionAsync(
+            context.UserId, context.Username, context.Session, cancellationToken);
+    }
+
+    private async Task HandleCancelAsync(CallbackContext context)
+    {
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+        await slashCommandService.CancelSelectionAsync(context.UserId, context.Session);
     }
 
     private async Task HandleOpenFolderAsync(CallbackContext context, CancellationToken cancellationToken)
@@ -65,14 +82,6 @@ public sealed class FileSelectionHandler(
 
         await ReRenderSelectionAsync(context, "");
 
-        if (flow.CurrentLevel == SelectionFlow.Level.Files)
-        {
-            await fileActionsKeyboardService.RefreshAsync(context.UserId, session);
-        }
-        else
-        {
-            await fileActionsKeyboardService.HideAsync(context.UserId, session);
-        }
     }
 
     private async Task HandleSelectAllAsync(CallbackContext context, CancellationToken cancellationToken)
@@ -102,7 +111,7 @@ public sealed class FileSelectionHandler(
         var filePath = fileBrowser.ResolveSelectionPath(flow.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
-            await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: File not found.", context.Session);
+            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Файл не найден.");
             return;
         }
 

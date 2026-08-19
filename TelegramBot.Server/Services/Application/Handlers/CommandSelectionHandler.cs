@@ -9,7 +9,6 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class CommandSelectionHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
-    FileActionsKeyboardService fileActionsKeyboardService,
     IOptions<FileSystemOptions> options,
     ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
@@ -47,8 +46,6 @@ public sealed class CommandSelectionHandler(
 
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-
-        await fileActionsKeyboardService.RefreshAsync(context.UserId, context.Session);
     }
 
     private async Task HandleCancelCommandSelectionAsync(CallbackContext context, CancellationToken cancellationToken)

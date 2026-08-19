@@ -120,12 +120,6 @@ public class TelegramOutputService(
         await messageTrackingService.DeleteTrackedMessagesByChatAsync(chatId, staleIds);
     }
 
-    public async Task<Message?> SendMessageWithReplyKeyboardAsync(long userId, string message, ReplyKeyboardMarkup keyboard)
-    {
-        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
-                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
-    }
-
     public async Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
     {
         return await ExecuteWithRetryAsync(() => botClient.SendMessage(

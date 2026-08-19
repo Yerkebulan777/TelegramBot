@@ -2,7 +2,6 @@ using Microsoft.Extensions.Options;
 using System.Text;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
-using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
@@ -16,7 +15,6 @@ namespace TelegramBot.Server.Services.Application;
 public sealed partial class SlashCommandService(
     SessionDataService sessionDataService,
     MessageTrackingService messageTrackingService,
-    FileActionsKeyboardService fileActionsKeyboardService,
     TelegramOutputService outputService,
     KeyboardBuilder keyboardBuilder,
     SessionsListRenderer sessionsListRenderer,
@@ -47,12 +45,6 @@ public sealed partial class SlashCommandService(
         {
             session.Reset(_options.RootPath);
             await SendHelpMessageAsync(userId, session);
-            return;
-        }
-
-        if (IsCommandSelectionAction(rawText) &&
-            await HandleCommandSelectionActionsAsync(userId, username, rawText, session, cancellationToken))
-        {
             return;
         }
 
@@ -105,89 +97,13 @@ public sealed partial class SlashCommandService(
         }
     }
 
-    private static bool IsCommandSelectionAction(string messageText)
-    {
-        return messageText is ButtonTexts.Apply or
-            ButtonTexts.Cancel or
-            ButtonTexts.Confirm;
-    }
-
-    private async Task<bool> HandleCommandSelectionActionsAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
-    {
-        var flow = session.Selection;
-
-        switch (messageText)
-        {
-            case ButtonTexts.Apply:
-            case ButtonTexts.Confirm when !flow.IsFileSelectionActive && flow.PendingCommands.Count > 0:
-                await ApplyCommandSelectionAsync(userId, username, session);
-                return true;
-
-            case ButtonTexts.Confirm when flow.IsFileSelectionActive:
-                await ConfirmFileSelectionAsync(userId, username, session, cancellationToken);
-                return true;
-
-            // Stale/duplicate Confirm press: first press already reset session state
-            // (IsFileSelectionActive=false, PendingCommand empty). The press still arrives
-            // as a tracked user text message but matches no action above. Delete it so it
-            // does not leak in the UI, instead of falling through to default (returns false,
-            // no cleanup).
-            case ButtonTexts.Confirm:
-                logger.LogDebug("Stale Confirm from {Username} ({UserId}), cleaning", username, userId);
-                if (session.LastUserMessageId.HasValue)
-                {
-                    try
-                    {
-                        await outputService.DeleteMessageAsync(userId, session.LastUserMessageId.Value);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Delete stale Confirm fail: user={UserId}", userId);
-                    }
-                    session.LastUserMessageId = null;
-                }
-                return true;
-
-            case ButtonTexts.Cancel:
-                logger.LogDebug("{Username} ({UserId}) cancelled selection", username, userId);
-                await CancelSelectionAsync(userId, session);
-                return true;
-
-            default:
-                return false;
-        }
-    }
-
-    private async Task ApplyCommandSelectionAsync(long userId, string username, UserSession session)
-    {
-        if (!session.Selection.ApplyCommands())
-        {
-            logger.LogDebug("{Username} ({UserId}) apply with no cmds", username, userId);
-            await SendWarningAndCleanupAsync(userId, session, "Сначала выберите хотя бы одну команду.");
-            return;
-        }
-
-        logger.LogDebug("Selection confirmed: user={Username} ({UserId}), count={Count}",
-            username, userId, session.Selection.PendingCommands.Count);
-
-        await outputService.ClearChatHistoryAsync(userId, session);
-
-        session.CommandSelectionMessageId = null;
-
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
-        var selectionMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
-        session.FileSelectionMessageId = selectionMessage?.Id;
-        await fileActionsKeyboardService.HideAsync(userId, session);
-    }
-
-    private async Task ConfirmFileSelectionAsync(long userId, string username, UserSession session, CancellationToken cancellationToken)
+    internal async Task ConfirmFileSelectionAsync(long userId, string username, UserSession session, CancellationToken cancellationToken)
     {
         var flow = session.Selection;
 
         if (!session.FileSelectionMessageId.HasValue)
         {
             logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_file_selection_msg", username, userId);
-            await RemoveReplyKeyboardAsync(userId, session, username);
             flow.StopFileSelection();
             await RejectAndWarnAsync(userId, session, "Сообщение выбора файлов не найдено.");
             return;
@@ -206,14 +122,9 @@ public sealed partial class SlashCommandService(
                 logger.LogDebug("{Username} ({UserId}) confirmed project '{Project}', nav to 01_PROJECT",
                     username, userId, Path.GetFileName(Path.GetDirectoryName(flow.CurrentPath)));
                 await RenderSelectionAsync(userId, session);
-                await fileActionsKeyboardService.RefreshAsync(userId, session);
                 await CleanupCurrentViewAsync(userId, session);
                 return;
         }
-
-        // Уровень разделов/файлов: Confirm уже снял активность выбора файлов.
-        // Remove reply keyboard immediately for final confirmation so it doesn't linger in any case.
-        await RemoveReplyKeyboardAsync(userId, session, username);
 
         if (outcome.Kind == SelectionFlow.ConfirmOutcomeKind.BlockedNoFiles)
         {
@@ -280,7 +191,7 @@ public sealed partial class SlashCommandService(
 
             session.Selection.Reset(_options.RootPath);
 
-            _ = await messageTrackingService.TrackAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
+            _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, queuedMessage), session);
         }
         finally
         {
@@ -351,12 +262,8 @@ public sealed partial class SlashCommandService(
 
         var commandKeyboard = keyboardBuilder.GetCommandKeyboard(commandGroup, session);
 
-        var replyKeyboard = keyboardBuilder.GetCommandActionsReplyKeyboard();
-
         var commandSelectionMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
         session.CommandSelectionMessageId = commandSelectionMessage?.Id;
-        var actionsMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithReplyKeyboardAsync(userId, "Подтвердите выбор:", replyKeyboard), session);
-        session.LastActionsMessageId = actionsMessage?.Id;
     }
 
     private async Task SendSafeResponseAsync(long chatId, string message, UserSession session)
@@ -388,7 +295,7 @@ public sealed partial class SlashCommandService(
     /// Полный сброс сессии (как по кнопке "Отмена"): чистит историю чата, сбрасывает состояние
     /// и отправляет либо переданное сообщение, либо стандартную справку.
     /// </summary>
-    private async Task CancelSelectionAsync(long userId, UserSession session, string? message = null)
+    internal async Task CancelSelectionAsync(long userId, UserSession session, string? message = null)
     {
         await outputService.ClearChatHistoryAsync(userId, session);
         session.Reset(_options.RootPath);
@@ -414,23 +321,8 @@ public sealed partial class SlashCommandService(
 
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
     {
-        var warning = session.Selection.IsFileSelectionActive
-            ? await SendWarningWithReplyKeyboardAsync(userId, session, message, keyboardBuilder.GetFileActionsReplyKeyboard())
-            : session.CommandSelectionMessageId.HasValue || session.Selection.PendingCommands.Count > 0
-                ? await SendWarningWithReplyKeyboardAsync(userId, session, message, keyboardBuilder.GetCommandActionsReplyKeyboard())
-                : await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session);
+        var warning = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session);
         await CleanupCurrentViewAsync(userId, session, warning?.Id);
-    }
-
-    private async Task<Message?> SendWarningWithReplyKeyboardAsync(
-        long userId,
-        UserSession session,
-        string message,
-        ReplyKeyboardMarkup replyKeyboard)
-    {
-        return await messageTrackingService.TrackAsync(
-            outputService.SendMessageWithReplyKeyboardAsync(userId, message, replyKeyboard),
-            session);
     }
 
     private async Task CleanupCurrentViewAsync(long userId, UserSession session, int? extraKeepMessageId = null)
@@ -440,25 +332,12 @@ public sealed partial class SlashCommandService(
                 session.CommandSelectionMessageId,
                 session.FileSelectionMessageId,
                 session.StatusMessageId,
-                session.LastActionsMessageId,
                 extraKeepMessageId
             }
             .Where(messageId => messageId.HasValue)
             .Select(messageId => messageId!.Value);
 
         await outputService.ClearChatHistoryAsync(userId, session, keepMessageIds);
-    }
-
-    private async Task RemoveReplyKeyboardAsync(long userId, UserSession session, string username)
-    {
-        try
-        {
-            _ = await messageTrackingService.TrackAsync(outputService.RemoveReplyKeyboardAsync(userId, "Ожидайте обработку задания 🤔"), session);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Remove reply keyboard fail: user={Username} ({UserId})", username, userId);
-        }
     }
 
     private static string NormalizeCommandText(string text)
