@@ -100,11 +100,20 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     private static string FormatProjectButtonName(string name)
     {
         const string suffix = "...";
-        var displayName = name.Length <= _projectButtonNameLength
-            ? name
-            : name[..(_projectButtonNameLength - suffix.Length)] + suffix;
+        if (name.Length <= _projectButtonNameLength)
+        {
+            return name.PadRight(_projectButtonNameLength);
+        }
 
-        return displayName.PadRight(_projectButtonNameLength);
+        var prefixLength = _projectButtonNameLength - suffix.Length;
+        if (char.IsHighSurrogate(name[prefixLength - 1]) && char.IsLowSurrogate(name[prefixLength]))
+        {
+            prefixLength--;
+        }
+
+        var displayName = name[..prefixLength].PadRight(_projectButtonNameLength - suffix.Length) + suffix;
+
+        return displayName;
     }
 
     private InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
