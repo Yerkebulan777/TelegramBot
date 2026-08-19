@@ -20,6 +20,7 @@ public sealed class FileNavigationHandler(
     public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         var session = context.Session;
+        var flow = session.Selection;
         session.FileSelectionMessageId = context.MessageId;
 
         var newPath = context.ParsedCallback.Argument;
@@ -32,13 +33,12 @@ public sealed class FileNavigationHandler(
         if (!ValidatePathWithinRoot(_options, newPath, "navigation", context))
         {
             await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: Недопустимый путь.", context.Session);
-            session.CurrentPath = _options.RootPath;
+            flow.ResetPathToRoot();
             return;
         }
 
-        session.ClearSelectedFiles();
-        session.CurrentPath = newPath;
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, session.CurrentPath);
+        flow.NavigateTo(newPath);
+        await outputService.AnswerCallbackAsync(context.CallbackQueryId, flow.CurrentPath);
 
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);

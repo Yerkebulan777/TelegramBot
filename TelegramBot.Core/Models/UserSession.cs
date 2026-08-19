@@ -8,21 +8,8 @@ public class UserSession
     public long UserId { get; init; }
     public DateTime LastActivity { get; set; } = DateTime.UtcNow;
 
-    public string CurrentPath { get; set; } = Directory.GetCurrentDirectory();
-
-
-    private readonly List<string> _pendingCommand = [];
-    private readonly List<string> _pendingCommandName = [];
-    private readonly HashSet<string> _selectedFiles = new(StringComparer.OrdinalIgnoreCase);
-
-    public IReadOnlyList<string> PendingCommand => _pendingCommand;
-
-    public IReadOnlyList<string> PendingCommandName => _pendingCommandName;
-
-    public IReadOnlySet<string> GetSelectedFiles()
-    {
-        return _selectedFiles;
-    }
+    /// <summary>Состояние и переходы потока выбора задания (команды, файлы, навигация).</summary>
+    public SelectionFlow Selection { get; } = new();
 
     /// <summary>Текущий фильтр в /status: ALL, ACTIVE, DONE, FAILED.</summary>
     public string StatusFilter { get; set; } = "ALL";
@@ -35,7 +22,6 @@ public class UserSession
     public bool Initialized { get; set; }
     public int SessionId { get; set; }
     public int? CommandSelectionMessageId { get; set; }
-    public bool IsFileSelectionActive { get; set; }
     public int? FileSelectionMessageId { get; set; }
     public int? StatusMessageId { get; set; }
     public int? LastActionsMessageId { get; set; }
@@ -43,73 +29,14 @@ public class UserSession
     /// <summary>Message ID of the last user-sent message (slash command or reply keyboard button).</summary>
     public int? LastUserMessageId { get; set; }
 
-    // Command manipulation methods
-    public void AddPendingCommand(string code, string displayName)
-    {
-        _pendingCommand.Add(code);
-        _pendingCommandName.Add(displayName);
-    }
-
-    public bool RemovePendingCommand(string code)
-    {
-        var index = _pendingCommand.IndexOf(code);
-        if (index >= 0)
-        {
-            _pendingCommand.RemoveAt(index);
-            _pendingCommandName.RemoveAt(index);
-            return true;
-        }
-
-        return false;
-    }
-
-    public bool ContainsPendingCommand(string code)
-    {
-        return _pendingCommand.Contains(code);
-    }
-
-    public void ClearPendingCommands()
-    {
-        _pendingCommand.Clear();
-        _pendingCommandName.Clear();
-    }
-
-    // File selection methods
-    public void AddSelectedFiles(IEnumerable<string> filePaths)
-    {
-        foreach (var filePath in filePaths)
-        {
-            _ = _selectedFiles.Add(filePath);
-        }
-    }
-
-    public bool ToggleSelectedFile(string filePath)
-    {
-        if (_selectedFiles.Contains(filePath))
-        {
-            _=_selectedFiles.Remove(filePath);
-            return false;
-        }
-
-        _=_selectedFiles.Add(filePath);
-        return true;
-    }
-
-    public void ClearSelectedFiles()
-    {
-        _selectedFiles.Clear();
-    }
-
     /// <summary>
-    /// Resets the session state for a new command flow.
+    /// Resets the session state for a new command flow. Сброс потока выбора делегируется
+    /// в <see cref="SelectionFlow.Reset"/>.
     /// </summary>
     public void Reset(string rootPath)
     {
-        ClearSelectedFiles();
-        ClearPendingCommands();
-        CurrentPath = rootPath;
+        Selection.Reset(rootPath);
         CommandSelectionMessageId = null;
-        IsFileSelectionActive = false;
         FileSelectionMessageId = null;
         LastActionsMessageId = null;
         StatusMessageId = null;
@@ -117,16 +44,5 @@ public class UserSession
         LastUserMessageId = null;
         StatusFilter = "ALL";
         StatusPage = 0;
-    }
-
-    /// <summary>
-    /// Resets navigation state (path, selected files).
-    /// Does not affect pending commands.
-    /// </summary>
-    public void ResetNavigation(string rootPath)
-    {
-        ClearSelectedFiles();
-        CurrentPath = rootPath;
-        FileSelectionMessageId = null;
     }
 }

@@ -49,19 +49,6 @@ public sealed class FileSystemOptions
             "TaskDirectory"));
     }
 
-    /// <summary>Проверяет, находится ли пользователь на уровне выбора проектов (а не разделов/файлов).</summary>
-    public bool IsAtProjectLevel(string currentPath)
-    {
-        try
-        {
-            return string.Equals(NormalizePath(currentPath), NormalizePath(RootPath), StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     /// <summary>Проверяет, что путь находится внутри корневой директории.</summary>
     public bool IsPathWithinRoot(string path)
     {

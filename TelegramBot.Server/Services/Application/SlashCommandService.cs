@@ -114,14 +114,16 @@ public sealed partial class SlashCommandService(
 
     private async Task<bool> HandleCommandSelectionActionsAsync(long userId, string username, string messageText, UserSession session, CancellationToken cancellationToken)
     {
+        var flow = session.Selection;
+
         switch (messageText)
         {
             case ButtonTexts.Apply:
-            case ButtonTexts.Confirm when !session.IsFileSelectionActive && session.PendingCommand.Count > 0:
+            case ButtonTexts.Confirm when !flow.IsFileSelectionActive && flow.PendingCommands.Count > 0:
                 await ApplyCommandSelectionAsync(userId, username, session);
                 return true;
 
-            case ButtonTexts.Confirm when session.IsFileSelectionActive:
+            case ButtonTexts.Confirm when flow.IsFileSelectionActive:
                 await ConfirmFileSelectionAsync(userId, username, session, cancellationToken);
                 return true;
 
@@ -158,7 +160,7 @@ public sealed partial class SlashCommandService(
 
     private async Task ApplyCommandSelectionAsync(long userId, string username, UserSession session)
     {
-        if (session.PendingCommand.Count == 0)
+        if (!session.Selection.ApplyCommands())
         {
             logger.LogDebug("{Username} ({UserId}) apply with no cmds", username, userId);
             await SendWarningAndCleanupAsync(userId, session, "Сначала выберите хотя бы одну команду.");
@@ -166,13 +168,11 @@ public sealed partial class SlashCommandService(
         }
 
         logger.LogDebug("Selection confirmed: user={Username} ({UserId}), count={Count}",
-            username, userId, session.PendingCommand.Count);
+            username, userId, session.Selection.PendingCommands.Count);
 
         await outputService.ClearChatHistoryAsync(userId, session);
 
         session.CommandSelectionMessageId = null;
-        session.CurrentPath = _options.RootPath;
-        session.IsFileSelectionActive = true;
 
         var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
         var selectionMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithKeyboardAsync(userId, "Выберите папки:", keyboard), session);
@@ -182,55 +182,55 @@ public sealed partial class SlashCommandService(
 
     private async Task ConfirmFileSelectionAsync(long userId, string username, UserSession session, CancellationToken cancellationToken)
     {
+        var flow = session.Selection;
+
         if (!session.FileSelectionMessageId.HasValue)
         {
             logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_file_selection_msg", username, userId);
             await RemoveReplyKeyboardAsync(userId, session, username);
-            session.IsFileSelectionActive = false;
+            flow.StopFileSelection();
             await RejectAndWarnAsync(userId, session, "Сообщение выбора файлов не найдено.");
             return;
         }
 
-        if (_options.IsAtProjectLevel(session.CurrentPath))
+        var outcome = flow.Confirm();
+
+        switch (outcome.Kind)
         {
-            var selectedProject = session.GetSelectedFiles().FirstOrDefault();
-            if (selectedProject == null)
-            {
+            case SelectionFlow.ConfirmOutcomeKind.BlockedNoProject:
                 logger.LogDebug("Project confirm blocked: {Username} ({UserId}), reason=no_project", username, userId);
                 await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите проект.");
                 return;
-            }
 
-            session.CurrentPath = Path.Combine(selectedProject, _options.ProjectDirectoryName);
-
-            session.ClearSelectedFiles();
-
-            logger.LogDebug("{Username} ({UserId}) confirmed project '{Project}', nav to 01_PROJECT", username, userId, Path.GetFileName(selectedProject));
-
-            var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
-            await outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId.Value, keyboard);
-            await fileActionsKeyboardService.RefreshAsync(userId, session);
-            await CleanupCurrentViewAsync(userId, session);
-            return;
+            case SelectionFlow.ConfirmOutcomeKind.Advanced:
+                logger.LogDebug("{Username} ({UserId}) confirmed project '{Project}', nav to 01_PROJECT",
+                    username, userId, Path.GetFileName(Path.GetDirectoryName(flow.CurrentPath)));
+                await RenderSelectionAsync(userId, session);
+                await fileActionsKeyboardService.RefreshAsync(userId, session);
+                await CleanupCurrentViewAsync(userId, session);
+                return;
         }
 
+        // Уровень разделов/файлов: Confirm уже снял активность выбора файлов.
         // Remove reply keyboard immediately for final confirmation so it doesn't linger in any case.
         await RemoveReplyKeyboardAsync(userId, session, username);
-        session.IsFileSelectionActive = false;
 
-        var selectedFiles = session.GetSelectedFiles();
-        if (selectedFiles.Count == 0)
+        if (outcome.Kind == SelectionFlow.ConfirmOutcomeKind.BlockedNoFiles)
         {
             logger.LogDebug("Job blocked: {Username} ({UserId}), reason=no_files", username, userId);
             await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один файл.");
             return;
         }
 
+        var submission = outcome.Submission
+            ?? throw new InvalidOperationException("ReadyToSubmit without submission");
+        var selectedFiles = submission.Files;
+
         logger.LogDebug(
             "Job submit: user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}",
-            username, userId, session.PendingCommand.Count, selectedFiles.Count);
+            username, userId, submission.Commands.Count, selectedFiles.Count);
 
-        var commandNames = session.PendingCommandName;
+        var commandNames = submission.Commands.Select(GetCommandDisplayName).ToArray();
         var projectName = ProjectPathHelper.GetProjectName(selectedFiles.First(), _options.ProjectDirectoryName);
         var sectionNames = selectedFiles
             .Select(file => ProjectPathHelper.GetSectionFolderName(file, _options.ProjectDirectoryName))
@@ -256,11 +256,11 @@ public sealed partial class SlashCommandService(
                 return;
             }
 
-            var priorities = session.PendingCommand.Select(GetCommandPriority);
+            var priorities = submission.Commands.Select(GetCommandPriority);
 
             var correlationId = Guid.NewGuid().ToString("N");
             var (sessionId, queuedFileCount, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
-                session.PendingCommand, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
+                submission.Commands, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
             if (sessionId is null)
             {
                 // Каждая пара (команда, файл) пойман уникальным индексом idx_commands_active_unique — все пары дубли
@@ -273,14 +273,12 @@ public sealed partial class SlashCommandService(
 
             logger.LogInformation(
                 "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}, skipped={SkippedCount}",
-                sessionId, correlationId, username, userId, session.PendingCommand.Count, queuedFileCount, skippedPairs.Count);
+                sessionId, correlationId, username, userId, submission.Commands.Count, queuedFileCount, skippedPairs.Count);
 
             session.SessionId = sessionId.Value;
             await outputService.ClearChatHistoryAsync(userId, session);
 
-            session.ResetNavigation(_options.RootPath);
-            session.ClearPendingCommands();
-            session.IsFileSelectionActive = false;
+            session.Selection.Reset(_options.RootPath);
 
             _ = await messageTrackingService.TrackAsync(outputService.RemoveReplyKeyboardAsync(userId, queuedMessage), session);
         }
@@ -289,6 +287,13 @@ public sealed partial class SlashCommandService(
             await typingCts.CancelAsync();
             try { await typingTask; } catch (OperationCanceledException) { }
         }
+    }
+
+    /// <summary>Перерисовывает selection-клавиатуру из текущего состояния сессии.</summary>
+    private async Task RenderSelectionAsync(long userId, UserSession session)
+    {
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
+        await outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId!.Value, keyboard);
     }
 
     private async Task TypingLoopAsync(long userId, CancellationToken cancellationToken)
@@ -343,7 +348,6 @@ public sealed partial class SlashCommandService(
     private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
     {
         session.Reset(_options.RootPath);
-        session.IsFileSelectionActive = false;
 
         var commandKeyboard = keyboardBuilder.GetCommandKeyboard(commandGroup, session);
 
@@ -404,15 +408,15 @@ public sealed partial class SlashCommandService(
     /// </summary>
     private async Task RejectAndWarnAsync(long userId, UserSession session, string message)
     {
-        session.ClearPendingCommands();
+        session.Selection.ClearCommands();
         await SendWarningAndCleanupAsync(userId, session, message);
     }
 
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
     {
-        var warning = session.IsFileSelectionActive
+        var warning = session.Selection.IsFileSelectionActive
             ? await SendWarningWithReplyKeyboardAsync(userId, session, message, keyboardBuilder.GetFileActionsReplyKeyboard())
-            : session.CommandSelectionMessageId.HasValue || session.PendingCommand.Count > 0
+            : session.CommandSelectionMessageId.HasValue || session.Selection.PendingCommands.Count > 0
                 ? await SendWarningWithReplyKeyboardAsync(userId, session, message, keyboardBuilder.GetCommandActionsReplyKeyboard())
                 : await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session);
         await CleanupCurrentViewAsync(userId, session, warning?.Id);
@@ -483,5 +487,13 @@ public sealed partial class SlashCommandService(
             CommandCodes.Data => CommandPriorities.Low,
             _ => CommandPriorities.Default
         };
+    }
+
+    /// <summary>Название команды по коду из каталога; неизвестный код отображается как есть.</summary>
+    private static string GetCommandDisplayName(string code)
+    {
+        var definition = CommandCatalog.All.FirstOrDefault(
+            c => string.Equals(c.Code, code, StringComparison.OrdinalIgnoreCase));
+        return definition.Name ?? code;
     }
 }

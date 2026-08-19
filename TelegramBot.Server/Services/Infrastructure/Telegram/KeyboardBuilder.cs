@@ -18,7 +18,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 
     public InlineKeyboardMarkup GetSelectionKeyboard(long userId, UserSession session)
     {
-        return fileNavigationService.GetSectionsView(userId, session.CurrentPath);
+        return fileNavigationService.GetSectionsView(userId, session.Selection.CurrentPath);
     }
 
     public InlineKeyboardMarkup GetCommandKeyboard(CommandGroup group, UserSession session)
@@ -225,7 +225,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         var buttons = commandOptions
             .Select(option =>
             {
-                var isSelected = session.PendingCommand.Contains(option.Code);
+                var isSelected = session.Selection.PendingCommands.Contains(option.Code);
                 var text = isSelected ? $"✅ {option.Name}" : option.Name;
                 return new List<InlineKeyboardButton>
                 {

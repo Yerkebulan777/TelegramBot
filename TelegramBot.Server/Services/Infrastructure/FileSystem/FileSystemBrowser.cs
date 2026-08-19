@@ -47,9 +47,12 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     {
         var session = sessions.GetOrCreateSession(userId);
 
-        return IsSectionFileLevel(path)
-            ? BuildFilesKeyboard(session, path)
-            : IsSectionLevel(path) ? BuildSectionKeyboard(session, path) : BuildProjectKeyboard(session, path);
+        return SelectionFlow.GetLevel(path, _options.RootPath, _options.ProjectDirectoryName) switch
+        {
+            SelectionFlow.Level.Files => BuildFilesKeyboard(session, path),
+            SelectionFlow.Level.Sections => BuildSectionKeyboard(session, path),
+            _ => BuildProjectKeyboard(session, path)
+        };
     }
 
     public List<string> GetSelectableFiles(string path)
@@ -69,8 +72,12 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             return callbackArgument;
         }
 
-        var candidates = IsSectionFileLevel(currentPath) ? GetSectionFiles(currentPath)
-            : IsSectionLevel(currentPath) ? GetSectionFolders(currentPath) : GetProjectFolders(currentPath);
+        var candidates = SelectionFlow.GetLevel(currentPath, _options.RootPath, _options.ProjectDirectoryName) switch
+        {
+            SelectionFlow.Level.Files => GetSectionFiles(currentPath),
+            SelectionFlow.Level.Sections => GetSectionFolders(currentPath),
+            _ => GetProjectFolders(currentPath)
+        };
 
         return candidates.FirstOrDefault(c => string.Equals(CreateSelectionToken(c), callbackArgument, StringComparison.OrdinalIgnoreCase));
     }
@@ -91,7 +98,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
     private InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
     {
-        var selected = session.GetSelectedFiles();
+        var selected = session.Selection.SelectedFiles;
         var folders = GetSectionFolders(path);
         var buttons = new List<List<InlineKeyboardButton>>(folders.Count + 1)
         {
@@ -114,7 +121,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     /// </summary>
     private InlineKeyboardMarkup BuildFilesKeyboard(UserSession session, string path)
     {
-        var selected = session.GetSelectedFiles();
+        var selected = session.Selection.SelectedFiles;
         var files = GetSectionFiles(path);
         var buttons = new List<List<InlineKeyboardButton>>(files.Count + 2)
         {
@@ -130,17 +137,6 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         buttons.Add([InlineKeyboardButton.WithCallbackData("Выбрать все", CallbackPrefixes.SelectAllSectionFolders)]);
 
         return new InlineKeyboardMarkup(buttons);
-    }
-
-    private bool IsSectionLevel(string path)
-    {
-        return string.Equals(Path.GetFileName(path), _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private bool IsSectionFileLevel(string path)
-    {
-        var parent = Path.GetDirectoryName(path);
-        return parent != null && IsSectionLevel(parent);
     }
 
     private string CreateSelectionToken(string path)

@@ -37,30 +37,35 @@ public sealed class FileSelectionHandler(
     private async Task HandleOpenFolderAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
+        var flow = session.Selection;
         session.FileSelectionMessageId = context.MessageId;
 
-        var isProjectList = _options.IsAtProjectLevel(session.CurrentPath);
-        var newPath = string.IsNullOrEmpty(context.ParsedCallback.Argument)
-            ? GetParentSelectionPath(session.CurrentPath)
-            : fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
-
-        if (isProjectList && newPath != null)
+        if (string.IsNullOrEmpty(context.ParsedCallback.Argument))
         {
-            session.ClearSelectedFiles();
-            newPath = Path.Combine(newPath, _options.ProjectDirectoryName);
+            // Шаг назад: из 01_PROJECT — на корень, из раздела — в 01_PROJECT.
+            flow.GoBack();
+            if (!ValidatePathWithinRoot(_options, flow.CurrentPath, "folder navigation", context))
+            {
+                await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
+                return;
+            }
         }
-
-        if (!ValidatePathWithinRoot(_options, newPath, "folder navigation", context))
+        else
         {
-            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
-            return;
-        }
+            var newPath = fileBrowser.ResolveSelectionPath(flow.CurrentPath, context.ParsedCallback.Argument);
+            if (newPath == null || !ValidatePathWithinRoot(_options, newPath, "folder navigation", context))
+            {
+                await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
+                return;
+            }
 
-        session.CurrentPath = newPath;
+            // С уровня проектов — одиночный выбор и углубление в 01_PROJECT: внутри перехода.
+            flow.OpenFolder(newPath);
+        }
 
         await ReRenderSelectionAsync(context, "");
 
-        if (IsFileList(newPath))
+        if (flow.CurrentLevel == SelectionFlow.Level.Files)
         {
             await fileActionsKeyboardService.RefreshAsync(context.UserId, session);
         }
@@ -73,48 +78,38 @@ public sealed class FileSelectionHandler(
     private async Task HandleSelectAllAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
+        var flow = session.Selection;
         session.FileSelectionMessageId = context.MessageId;
 
         var path = string.IsNullOrEmpty(context.ParsedCallback.Argument)
-            ? session.CurrentPath
+            ? flow.CurrentPath
             : context.ParsedCallback.Argument;
 
         if (ValidatePathWithinRoot(_options, path, "select-all", context))
         {
-            var filePaths = fileBrowser.GetSelectableFiles(path);
-            session.AddSelectedFiles(filePaths);
+            flow.AddFiles(fileBrowser.GetSelectableFiles(path));
         }
 
         await ReRenderSelectionAsync(context, "Все файлы выбраны");
-
     }
 
     private async Task HandleFileToggleAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         var session = context.Session;
+        var flow = session.Selection;
         session.FileSelectionMessageId = context.MessageId;
 
-        var filePath = fileBrowser.ResolveSelectionPath(session.CurrentPath, context.ParsedCallback.Argument);
+        var filePath = fileBrowser.ResolveSelectionPath(flow.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
             await fileActionsKeyboardService.SendErrorAsync(context.UserId, "⚠ Error: File not found.", context.Session);
             return;
         }
 
-        if (_options.IsAtProjectLevel(session.CurrentPath))
-        {
-            // Одиночный выбор: сбросить предыдущий, выбрать новый
-            session.ClearSelectedFiles();
-            _=session.ToggleSelectedFile(filePath);
-        }
-        else
-        {
-            // Множественный выбор разделов
-            _=session.ToggleSelectedFile(filePath);
-        }
+        // Одиночный выбор на уровне проектов и тоггл на уровнях разделов/файлов — внутри перехода.
+        _ = flow.ToggleFile(filePath);
 
         await ReRenderSelectionAsync(context, "");
-
     }
 
     /// <summary>
@@ -126,23 +121,5 @@ public sealed class FileSelectionHandler(
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, context.Session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
         await outputService.AnswerCallbackAsync(context.CallbackQueryId, ackText);
-    }
-
-    private string? GetParentSelectionPath(string currentPath)
-    {
-        return IsProjectSectionsList(currentPath)
-            ? _options.RootPath
-            : Path.GetDirectoryName(currentPath);
-    }
-
-    private bool IsProjectSectionsList(string path)
-    {
-        return string.Equals(Path.GetFileName(path), _options.ProjectDirectoryName, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private bool IsFileList(string path)
-    {
-        var parentPath = Path.GetDirectoryName(path);
-        return parentPath != null && IsProjectSectionsList(parentPath);
     }
 }

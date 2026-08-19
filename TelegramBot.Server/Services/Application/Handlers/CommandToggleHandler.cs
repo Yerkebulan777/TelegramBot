@@ -19,17 +19,9 @@ public sealed class CommandToggleHandler(
             return;
         }
 
-        if (context.Session.ContainsPendingCommand(command.Code))
-        {
-            _ = context.Session.RemovePendingCommand(command.Code);
-        }
-        else
-        {
-            context.Session.AddPendingCommand(command.Code, command.Name);
-        }
+        _ = context.Session.Selection.ToggleCommand(command.Code);
 
         var keyboard = keyboardBuilder.GetCommandKeyboard(command.Group, context.Session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-
     }
 }

@@ -35,16 +35,14 @@ public sealed class CommandSelectionHandler(
     {
         var session = context.Session;
 
-        if (session.PendingCommand.Count == 0)
+        if (!session.Selection.ApplyCommands())
         {
             return;
         }
 
         Logger.LogDebug("Command selection applied: user={Username} ({UserId}), count={Count}",
-            context.Username, context.UserId, session.PendingCommand.Count);
+            context.Username, context.UserId, session.Selection.PendingCommands.Count);
 
-        session.CurrentPath = _options.RootPath;
-        session.IsFileSelectionActive = true;
         session.FileSelectionMessageId = context.MessageId;
 
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
