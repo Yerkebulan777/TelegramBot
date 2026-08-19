@@ -176,7 +176,6 @@ public class TelegramBotHostedService(
 
             using (await sessionManager.AcquireUserLockAsync(message.From.Id))
             {
-                _ = sessionManager.GetOrCreateSession(message.From.Id);
                 await commandAppService.HandleUserCommandAsync(message, ct);
             }
 
@@ -192,7 +191,6 @@ public class TelegramBotHostedService(
 
             using (await sessionManager.AcquireUserLockAsync(callback.From.Id))
             {
-                _ = sessionManager.GetOrCreateSession(callback.From.Id);
                 try
                 {
                     await commandAppService.HandleCallbackAsync(callback, ct);

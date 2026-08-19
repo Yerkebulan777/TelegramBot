@@ -16,7 +16,7 @@ public sealed class FileSelectionHandler(
 {
     private readonly FileSystemOptions _options = options.Value;
 
-    protected override HashSet<string> SupportedPrefixes { get; } =
+    public override HashSet<string> SupportedPrefixes { get; } =
     [
         CallbackPrefixes.File,
         CallbackPrefixes.SelectAllSectionFolders,

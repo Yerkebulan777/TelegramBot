@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
-using TelegramBot.Data;
 
 namespace TelegramBot.Worker.Services;
 
@@ -12,7 +11,6 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 public sealed class ProcessStarter(
     CommandPreparer commandPreparer,
-    CommandDataService commandDataService,
     ILogger<ProcessStarter> logger)
 {
     private readonly SemaphoreSlim _launchGate = new(1, 1);
@@ -53,14 +51,5 @@ public sealed class ProcessStarter(
         {
             _ = _launchGate.Release();
         }
-    }
-
-    /// <summary>
-    /// Обновляет статус процесса в БД.
-    /// </summary>
-    public async Task UpdateProcessStatusAsync(int commandId, int sessionId, string correlationId, long userId, int processId)
-    {
-        _ = await commandDataService.MarkProcessStartedAndNotifyOnceAsync(
-            commandId, processId, sessionId, correlationId, userId);
     }
 }

@@ -97,7 +97,8 @@ public sealed class ProcessRunner(
     {
         var process = await processStarter.StartAsync(cmd, commandCfg, ct);
         _activeProcesses[cmd.CommandId] = process;
-        await processStarter.UpdateProcessStatusAsync(cmd.CommandId, cmd.SessionId, cmd.CorrelationId, cmd.UserId, process.Id);
+        _ = await commandDataService.MarkProcessStartedAndNotifyOnceAsync(
+            cmd.CommandId, process.Id, cmd.SessionId, cmd.CorrelationId, cmd.UserId);
         return process;
     }
 
@@ -107,7 +108,7 @@ public sealed class ProcessRunner(
     /// </summary>
     private async Task WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
     {
-        using var outputSubscription = outputCollector.SetupProcessOutput(process);
+        using var outputSubscription = new OutputCollector.ProcessOutputCapture(process);
 
         try
         {
@@ -203,7 +204,7 @@ public sealed class ProcessRunner(
             return;
         }
 
-        var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, exitCode, _workerOptions.PermanentFailureExitCodes, ex);
+        var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, ex);
 
         // Лог решения классификатора — развилка retry/Failed: по exitCode, типу исключения или паттерну текста.
         logger.LogInformation("Classify: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}/{Max}, exit={ExitCode}, permanent={IsPermanent}, err={Msg}",

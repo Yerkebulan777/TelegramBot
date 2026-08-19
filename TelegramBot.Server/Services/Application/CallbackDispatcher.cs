@@ -11,7 +11,7 @@ public sealed class CallbackDispatcher(IEnumerable<CallbackHandlerBase> handlers
 {
     private readonly Dictionary<string, CallbackHandlerBase> _handlerMap =
         handlers
-            .SelectMany(handler => handler.GetSupportedPrefixes().Select(prefix => (prefix, handler)))
+            .SelectMany(handler => handler.SupportedPrefixes.Select(prefix => (prefix, handler)))
             .ToDictionary(item => item.prefix, item => item.handler);
 
     /// <summary>

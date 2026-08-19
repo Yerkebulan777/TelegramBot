@@ -24,13 +24,6 @@ public sealed class WorkerOptions
     public int MaxRetries { get; set; } = 5;
 
     /// <summary>
-    /// Коды возврата процесса, которые считаются постоянными ошибками (InvalidFileError).
-    /// При получении такого кода команда помечается как Failed без повторных попыток.
-    /// Пустое множество (по умолчанию) — классификация только по тексту ошибки.
-    /// </summary>
-    public HashSet<int> PermanentFailureExitCodes { get; set; } = [];
-
-    /// <summary>
     /// Базовая задержка перед первой retry в секундах (по умолчанию 60 сек).
     /// Задержка растёт экспоненциально: base * 2^(attempt - 1).
     /// Пример: 60s, 120s, 240s, 480s, 960s.

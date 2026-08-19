@@ -47,10 +47,10 @@ public sealed class CommandDataService(
     }
 
     /// <summary>Обновляет статус команды.</summary>
-    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null, int? progress = null, string? result = null)
+    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null)
     {
         return await TryExecuteAsync(commandId, SqlQueries.Commands.UpdateStatus,
-            new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage, Progress = progress, Result = result },
+            new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage },
             "update status");
     }
 
@@ -92,18 +92,18 @@ public sealed class CommandDataService(
     /// Повторный запуск команды. Блокирует requeue, если файл уже 'processing'
     /// (не плодит дубликат выполнения того же файла).
     /// </summary>
-    public async Task<RequeueOutcome> RequeueCommandAsync(int commandId, long userId, bool isAdmin = false)
+    public async Task<RequeueOutcome> RequeueCommandAsync(int commandId)
     {
         try
         {
             await using var conn = await CreateOpenConnectionAsync();
             var result = await conn.ExecuteScalarAsync<string>(
                 SqlQueries.Commands.Requeue,
-                new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
+                new { CommandId = commandId });
 
             if (result != "Requeued")
             {
-                Logger.LogWarning("Requeue skipped for command {CommandId} by user {UserId}: {Result}", commandId, userId, result);
+                Logger.LogWarning("Requeue skipped for command {CommandId}: {Result}", commandId, result);
             }
 
             return Enum.Parse<RequeueOutcome>(result ?? "NotFound");
@@ -116,17 +116,17 @@ public sealed class CommandDataService(
     }
 
     /// <summary>Мягкое удаление команды.</summary>
-    public async Task<bool> DeleteCommandAsync(int commandId, long userId, bool isAdmin = false)
+    public async Task<bool> DeleteCommandAsync(int commandId)
     {
         try
         {
             await using var conn = await CreateOpenConnectionAsync();
             var affected = await conn.ExecuteAsync(
-                SqlQueries.Commands.SoftDelete, new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
+                SqlQueries.Commands.SoftDelete, new { CommandId = commandId });
 
             if (affected == 0)
             {
-                Logger.LogWarning("Attempt to delete foreign or missing command {CommandId} by user {UserId}", commandId, userId);
+                Logger.LogWarning("Failed to delete command {CommandId}: not found", commandId);
                 return false;
             }
 

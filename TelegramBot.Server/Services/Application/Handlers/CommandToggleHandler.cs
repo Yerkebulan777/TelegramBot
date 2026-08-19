@@ -9,10 +9,8 @@ public sealed class CommandToggleHandler(
     TelegramOutputService outputService,
     ILogger<CommandToggleHandler> logger) : CallbackHandlerBase(logger)
 {
-    public override IEnumerable<string> GetSupportedPrefixes()
-    {
-        return CommandCatalog.All.Select(c => c.Prefix);
-    }
+    public override HashSet<string> SupportedPrefixes =>
+        CommandCatalog.All.Select(c => c.Prefix).ToHashSet();
 
     public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {

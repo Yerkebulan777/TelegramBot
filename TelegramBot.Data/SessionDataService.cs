@@ -190,7 +190,7 @@ public sealed class SessionDataService(
     }
 
     /// <summary>Мягкое удаление сессии.</summary>
-    public async Task<bool> DeleteSessionAsync(int sessionId, long userId, bool isAdmin = false)
+    public async Task<bool> DeleteSessionAsync(int sessionId)
     {
         try
         {
@@ -200,13 +200,13 @@ public sealed class SessionDataService(
             {
                 var affected = await conn.ExecuteAsync(
                     SqlQueries.Sessions.SoftDelete,
-                    new { SessionId = sessionId, UserId = userId, IsAdmin = isAdmin },
+                    new { SessionId = sessionId },
                     tx);
 
                 if (affected == 0)
                 {
                     await tx.RollbackAsync();
-                    Logger.LogWarning("Attempt to delete foreign or missing session {SessionId} by user {UserId}", sessionId, userId);
+                    Logger.LogWarning("Failed to delete session {SessionId}: not found", sessionId);
                     return false;
                 }
 
@@ -248,11 +248,11 @@ public sealed class SessionDataService(
     }
 
     /// <summary>Возвращает SessionId по CommandId.</summary>
-    public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId, bool isAdmin = false)
+    public async Task<int?> GetSessionIdByCommandAsync(int commandId)
     {
         await using var conn = await CreateOpenConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<int?>(
-            SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId, IsAdmin = isAdmin });
+            SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId });
     }
 
     /// <summary>Мягкое удаление неактивных сессий старше cutoff.</summary>

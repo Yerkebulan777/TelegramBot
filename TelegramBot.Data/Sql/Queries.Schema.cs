@@ -10,7 +10,6 @@ internal static partial class SqlQueries
                 UserId BIGINT NOT NULL,
                 Username TEXT,
                 CorrelationId TEXT NOT NULL,
-                PriorityId INTEGER NOT NULL DEFAULT 0,
                 Status TEXT NOT NULL DEFAULT 'pending',
                 ProjectName TEXT,
                 CompletionNotified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -23,7 +22,6 @@ internal static partial class SqlQueries
         internal const string EnsureSessionsColumns = @"
             ALTER TABLE Sessions
             ADD COLUMN IF NOT EXISTS CorrelationId TEXT,
-            ADD COLUMN IF NOT EXISTS PriorityId INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS Status TEXT NOT NULL DEFAULT 'pending',
             ADD COLUMN IF NOT EXISTS ProjectName TEXT,
             ADD COLUMN IF NOT EXISTS CompletionNotified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -49,7 +47,6 @@ internal static partial class SqlQueries
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 StartedAt TIMESTAMPTZ,
                 CompletedAt TIMESTAMPTZ,
-                GUID TEXT,
                 Lease INTEGER,
                 Partition TEXT,
                 Priority INTEGER NOT NULL DEFAULT 5,
@@ -57,8 +54,6 @@ internal static partial class SqlQueries
                 ErrorMessage TEXT,
                 RetryCount INTEGER NOT NULL DEFAULT 0,
                 NextRetryAt TIMESTAMPTZ,
-                Progress INTEGER NOT NULL DEFAULT 0,
-                Result TEXT,
                 UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
 
@@ -71,8 +66,6 @@ internal static partial class SqlQueries
             ADD COLUMN IF NOT EXISTS ErrorMessage TEXT,
             ADD COLUMN IF NOT EXISTS RetryCount INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS NextRetryAt TIMESTAMPTZ,
-            ADD COLUMN IF NOT EXISTS Progress INTEGER NOT NULL DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS Result TEXT,
             ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
             ALTER TABLE Commands

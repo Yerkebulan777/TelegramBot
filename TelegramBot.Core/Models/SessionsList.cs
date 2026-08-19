@@ -4,11 +4,9 @@ namespace TelegramBot.Core.Models;
 public class SessionsList
 {
     public int SessionId { get; set; }
-    public long UserId { get; set; }
     public string Username { get; set; } = string.Empty;
     public string? ProjectName { get; set; }
     public DateTime Date { get; set; }
-    public string Status { get; set; } = string.Empty;
     public int TotalCommands { get; set; }
     public int DoneCommands { get; set; }
     public int FailedCommands { get; set; }

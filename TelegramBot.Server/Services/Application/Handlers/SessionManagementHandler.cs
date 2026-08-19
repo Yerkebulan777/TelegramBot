@@ -16,7 +16,7 @@ public sealed class SessionManagementHandler(
     SessionsListRenderer sessionsListRenderer,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
 {
-    protected override HashSet<string> SupportedPrefixes { get; } =
+    public override HashSet<string> SupportedPrefixes { get; } =
     [
         CallbackPrefixes.SessionDetails,
         CallbackPrefixes.DeleteSession,
@@ -225,7 +225,7 @@ public sealed class SessionManagementHandler(
 
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
-        if (!await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
+        if (!await DeleteSessionAndMessagesAsync(sessionId))
         {
             return;
         }
@@ -245,7 +245,7 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("{Username} delete cmd {CommandId}", context.Username, commandId);
 
         var sessionId = await ResolveSessionByCommandAsync(context, commandId);
-        if (!sessionId.HasValue || !await commandDataService.DeleteCommandAsync(commandId, context.UserId, IsAdmin))
+        if (!sessionId.HasValue || !await commandDataService.DeleteCommandAsync(commandId))
         {
             return;
         }
@@ -298,7 +298,7 @@ public sealed class SessionManagementHandler(
             return;
         }
 
-        var outcome = await commandDataService.RequeueCommandAsync(commandId, context.UserId, IsAdmin);
+        var outcome = await commandDataService.RequeueCommandAsync(commandId);
         if (outcome == RequeueOutcome.NotFound)
         {
             return;
@@ -312,9 +312,9 @@ public sealed class SessionManagementHandler(
 
     // ────────────────────── Shared Helpers ──────────────────────
 
-    private async Task<bool> DeleteSessionAndMessagesAsync(int sessionId, long userId)
+    private async Task<bool> DeleteSessionAndMessagesAsync(int sessionId)
     {
-        if (!await sessionDataService.DeleteSessionAsync(sessionId, userId, IsAdmin))
+        if (!await sessionDataService.DeleteSessionAsync(sessionId))
         {
             return false;
         }
@@ -358,7 +358,7 @@ public sealed class SessionManagementHandler(
     {
         if (!await sessionDataService.CheckCommandsStatusAsync(sessionId))
         {
-            if (await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
+            if (await DeleteSessionAndMessagesAsync(sessionId))
             {
                 await ShowSessionsListAsync(context);
             }
@@ -372,17 +372,13 @@ public sealed class SessionManagementHandler(
     /// <summary>Резолвит SessionId по CommandId с проверкой прав.</summary>
     private async Task<int?> ResolveSessionByCommandAsync(CallbackContext context, int commandId)
     {
-        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId, context.UserId, IsAdmin);
+        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId);
         if (!sessionId.HasValue)
         {
             Logger.LogWarning("{Username} foreign or missing cmd {CommandId}", context.Username, commandId);
         }
         return sessionId;
     }
-
-    // Бот открытый: любой верифицированный (не-аноним) пользователь может управлять любыми сессиями.
-    // Проверка «не аноним» — в CommandAppService. Для SQL-параметра @IsAdmin достаточно true.
-    private static bool IsAdmin => true;
 
     private async Task ShowSessionsListAsync(CallbackContext context)
     {

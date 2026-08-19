@@ -148,17 +148,8 @@ public sealed class RevitVersionDetector(
             }
 
             // Извлекаем только цифры из строки "Format: 2024"
-            var digits = new char[line.Length];
-            var digitCount = 0;
-            foreach (var ch in line)
-            {
-                if (char.IsDigit(ch))
-                {
-                    digits[digitCount++] = ch;
-                }
-            }
-
-            return digitCount > 0 ? new string(digits, 0, digitCount) : null;
+            var digits = line.Where(char.IsDigit).ToArray();
+            return digits.Length > 0 ? new string(digits) : null;
         }
 
         return null;

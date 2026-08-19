@@ -26,11 +26,9 @@ internal static partial class SqlQueries
             )
             SELECT
                 s.SessionId,
-                s.UserId,
                 s.Username,
                 s.ProjectName,
                 s.CreatedAt AS Date,
-                s.Status,
                 COALESCE(stats.DoneCount, 0) + COALESCE(stats.FailedCount, 0) + COALESCE(stats.ActiveCount, 0) AS TotalCommands,
                 COALESCE(stats.DoneCount, 0) AS DoneCommands,
                 COALESCE(stats.FailedCount, 0) AS FailedCommands
@@ -77,20 +75,9 @@ internal static partial class SqlQueries
             WHERE SessionId = @SessionId;";
 
         internal const string GetStatus = @"
-            SELECT
-                s.Status,
-                s.CorrelationId,
-                s.ProjectName,
-                s.CreatedAt,
-                COUNT(CASE WHEN c.Status != 'Deleted' THEN 1 END) AS TotalFiles,
-                COUNT(CASE WHEN c.Status = 'Done'      THEN 1 END) AS DoneFiles,
-                COUNT(CASE WHEN c.Status = 'Failed'    THEN 1 END) AS FailedFiles,
-                COUNT(CASE WHEN c.Status = 'processing' THEN 1 END) AS ProcessingFiles,
-                COUNT(CASE WHEN c.Status = 'pending'    THEN 1 END) AS PendingFiles
+            SELECT s.Status, s.ProjectName, s.CreatedAt
             FROM Sessions s
-            LEFT JOIN Commands c ON c.SessionId = s.SessionId
-            WHERE s.SessionId = @SessionId
-            GROUP BY s.SessionId;";
+            WHERE s.SessionId = @SessionId;";
 
         internal const string GetCompletionSummary = @"
             SELECT
@@ -110,8 +97,7 @@ internal static partial class SqlQueries
 
         internal const string SoftDelete = @"
             UPDATE Sessions SET Status = 'Deleted'
-            WHERE SessionId = @SessionId
-              AND (UserId = @UserId OR @IsAdmin = true);";
+            WHERE SessionId = @SessionId;";
 
         internal const string SoftDeleteInactiveOlderThan = @"
             WITH deleted_sessions AS (

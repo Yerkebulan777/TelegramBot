@@ -38,9 +38,7 @@ internal static partial class SqlQueries
 
         internal const string SoftDelete = @"
             UPDATE Commands SET Status = 'Deleted'
-            WHERE CommandId = @CommandId
-              AND (SessionId IN (SELECT SessionId FROM Sessions WHERE UserId = @UserId)
-                   OR @IsAdmin = true);";
+            WHERE CommandId = @CommandId;";
 
         internal const string SoftDeleteBySession =
             "UPDATE Commands SET Status = 'Deleted' WHERE SessionId = @SessionId;";
@@ -61,7 +59,6 @@ internal static partial class SqlQueries
             WHERE c.CommandId = @CommandId
               AND c.Status != 'Deleted'
               AND s.Status != 'Deleted'
-              AND (s.UserId = @UserId OR @IsAdmin = true)
             LIMIT 1;";
 
         internal const string UpdateStatus = @"
@@ -72,9 +69,7 @@ internal static partial class SqlQueries
                     ELSE CompletedAt 
                 END,
                 ProcessId = @ProcessId,
-                ErrorMessage = @ErrorMessage,
-                Progress = COALESCE(@Progress, Progress),
-                Result = COALESCE(@Result, Result)
+                ErrorMessage = @ErrorMessage
             WHERE CommandId = @CommandId
               AND Status != 'Deleted';";
 
@@ -158,10 +153,8 @@ internal static partial class SqlQueries
             WITH target AS (
                 SELECT c.CommandId, c.Status, c.SessionId
                 FROM Commands c
-                JOIN Sessions s ON s.SessionId = c.SessionId
                 WHERE c.CommandId = @CommandId
                   AND c.Status != 'Deleted'
-                  AND (s.UserId = @UserId OR @IsAdmin = true)
             ),
             requeued AS (
                 UPDATE Commands c

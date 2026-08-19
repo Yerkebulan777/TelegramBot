@@ -7,12 +7,7 @@ public abstract class CallbackHandlerBase(ILogger logger)
 {
     protected readonly ILogger Logger = logger;
 
-    protected virtual HashSet<string> SupportedPrefixes { get; } = [];
-
-    public virtual IEnumerable<string> GetSupportedPrefixes()
-    {
-        return SupportedPrefixes;
-    }
+    public virtual HashSet<string> SupportedPrefixes { get; } = [];
 
     public abstract Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default);
 

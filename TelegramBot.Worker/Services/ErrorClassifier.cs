@@ -51,21 +51,12 @@ public static class ErrorClassifier
     /// Временные ошибки (ProcessCrashError) могут быть повторены.
     /// </summary>
     /// <param name="errorMessage">Текст ошибки.</param>
-    /// <param name="exitCode">Код возврата процесса (если известен).</param>
-    /// <param name="permanentExitCodes">Набор кодов возврата, считающихся постоянными ошибками
-    /// (из <c>WorkerOptions.PermanentFailureExitCodes</c>).</param>
     /// <param name="exception">Исключение (если есть) для дополнительной классификации.</param>
-    public static bool IsPermanentFailure(string errorMessage, int? exitCode = null, IReadOnlySet<int>? permanentExitCodes = null, Exception? exception = null)
+    public static bool IsPermanentFailure(string errorMessage, Exception? exception = null)
     {
         // Проверка по типу исключения: файл не найден, нет доступа и т.п.
         if (exception is FileNotFoundException or DirectoryNotFoundException
             or UnauthorizedAccessException or PathTooLongException)
-        {
-            return true;
-        }
-
-        // Проверка по exit code: если код в списке постоянных — сразу permanent
-        if (exitCode.HasValue && permanentExitCodes?.Contains(exitCode.Value) == true)
         {
             return true;
         }

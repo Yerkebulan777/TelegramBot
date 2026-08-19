@@ -15,7 +15,7 @@ public sealed class CommandSelectionHandler(
 {
     private readonly FileSystemOptions _options = options.Value;
 
-    protected override HashSet<string> SupportedPrefixes { get; } =
+    public override HashSet<string> SupportedPrefixes { get; } =
     [
         CallbackPrefixes.ApplyCommands,
         CallbackPrefixes.CancelCommandSelection

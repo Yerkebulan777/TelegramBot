@@ -102,8 +102,6 @@ public sealed class NotificationSenderService(
                     startedUsername, item.UserId.Value, item.SessionId, item.CorrelationId);
                 return;
             }
-
-            logger.LogWarning("Notification ignored: unknown_shape");
         }
         catch (Exception ex)
         {

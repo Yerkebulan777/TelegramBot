@@ -15,7 +15,7 @@ public sealed class FileNavigationHandler(
 {
     private readonly FileSystemOptions _options = options.Value;
 
-    protected override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.GoToParent];
+    public override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.GoToParent];
 
     public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
