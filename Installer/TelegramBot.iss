@@ -59,6 +59,16 @@ Source: "publish\Server\*"; DestDir: "{app}\Server"; Components: server; Flags: 
 Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: recursesubdirs ignoreversion
 Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server; Flags: recursesubdirs ignoreversion
 
+[Registry]
+; Lets elevated processes (this installer included, on its NEXT run) see the
+; interactive session's mapped drives, so ExpandUNCFileName in
+; ResolveDriveToUNC resolves B:/Z:/any mapped letter natively. Takes effect
+; on next logon only — the HKCU fallback covers the current install, so this
+; is a durable fix, not a prerequisite. Best-effort (noerror): a domain GPO
+; managing the same value wins on its own refresh cycle either way. Not
+; removed on uninstall — it's a shared system setting other apps may rely on.
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; ValueType: dword; ValueName: "EnableLinkedConnections"; ValueData: "1"; Flags: noerror
+
 [Code]
 var
   AccountPage: TInputQueryWizardPage;
@@ -68,24 +78,53 @@ var
 
 { Resolves "B:" (or "B:\", which is what CreateInputDirPage actually hands
   back for a drive root — it normalizes with a trailing backslash) to
-  "\\server\share" using the CURRENT session's drive map. ExpandUNCFileName
-  is a built-in Pascal Script function that does this natively — no manual
-  WNetGetConnection FFI (that was the actual bug: Inno 6 Pascal strings are
-  Unicode, but WNetGetConnectionA is the ANSI entry point, so the buffer
-  marshalling silently failed and every install kept the raw "B:\", which is
-  invisible to a Windows service — see chat).
-  Success is False when Input was a bare drive letter that ExpandUNCFileName
-  couldn't map to a network path (not connected, or a genuinely local disk);
-  the caller must block on that — an unresolved drive letter is invisible to
-  a Windows service and is exactly what caused the Server outage this was
-  written to fix, so this can no longer be a soft warning that lets Next
-  through. An input that's already a UNC path always succeeds untouched. }
+  "\\server\share". Two mechanisms, tried in order:
+  1. ExpandUNCFileName — built-in Pascal Script function using the CURRENT
+     process's drive map (no manual WNetGetConnection FFI — that was the
+     original bug: Inno 6 Pascal strings are Unicode, WNetGetConnectionA is
+     ANSI, buffer marshalling silently failed). Works only when the mapping
+     is visible to THIS process — and a UAC-elevated installer does NOT
+     inherit the interactive session's mappings unless EnableLinkedConnections=1
+     (HKLM ...\Policies\System; written below in [Registry], takes effect on
+     next logon). On a fresh machine this mechanism alone kept failing.
+  2. HKCU\Network\<letter>\RemotePath — where Explorer / "net use" record
+     classic mapped drives. HKCU is the same hive for a consent-elevated
+     user, so the mapping is readable even when invisible to this process
+     (verified on a live box: HKCU\Network\z → RemotePath). This is what
+     makes resolution work on the very first install, no re-login needed.
+     Caveat: GPP (Group Policy Preferences) drive maps don't write this
+     key — for those only mechanism 1 helps, after the re-login.
+  Subpaths resolve too ("Z:\01_PROJECT" → "\\server\share\01_PROJECT") —
+  an unresolved raw drive-letter path would be invisible to the service.
+  Success is False only for a bare drive root that neither mechanism could
+  map to a network path (not connected, GPP-mapped before the re-login, or
+  a genuinely local disk); the caller must block on that — an unresolved
+  drive letter is invisible to a Windows service and is exactly what caused
+  the Server outage this was written to fix, so this can no longer be a
+  soft warning that lets Next through.
+  An input that's already a UNC path always succeeds untouched. }
 function ResolveDriveToUNC(const Input: String; var Success: Boolean): String;
 var
-  DriveSpec: String;
+  Trimmed, DriveSpec, UncPath, SubPath: String;
 begin
-  Result := ExpandUNCFileName(Trim(Input));
-  DriveSpec := Trim(Input);
+  Trimmed := Trim(Input);
+  Result := ExpandUNCFileName(Trimmed);
+
+  { Mechanism 2 fires when the input is a drive-letter path and mechanism 1
+    left the letter unresolved. Registry keys are case-insensitive, so the
+    letter's case doesn't matter. }
+  if (Length(Trimmed) >= 2) and (Trimmed[2] = ':') and
+     (CompareText(Copy(Result, 1, 2), Copy(Trimmed, 1, 2)) = 0) then
+  begin
+    SubPath := '';
+    if (Length(Trimmed) > 3) and (Trimmed[3] = '\') then
+      SubPath := Copy(Trimmed, 3, Length(Trimmed) - 2);
+    if RegQueryStringValue(HKCU, 'Network\' + Trimmed[1], 'RemotePath', UncPath) and
+       (Trim(UncPath) <> '') then
+      Result := Trim(UncPath) + SubPath;
+  end;
+
+  DriveSpec := Trimmed;
   if (Length(DriveSpec) = 3) and (DriveSpec[2] = ':') and (DriveSpec[3] = '\') then
     DriveSpec := Copy(DriveSpec, 1, 2);
   Success := not ((Length(DriveSpec) = 2) and (DriveSpec[2] = ':') and
@@ -126,9 +165,43 @@ begin
     Result := not WizardIsComponentSelected('server');
 end;
 
+{ Best-effort hints for the blocked-path message: UNC paths this user is
+  known to use, so the admin can type one directly instead of hunting for it.
+  Both sources are readable from the elevated process:
+  - HKCU\Network\<letter> — persistent mappings (letter → UNC lines);
+  - MountPoints2 "##server#share" keys — shares the shell has touched,
+    which includes targets of GPP/logon-script mappings whose letter→UNC
+    binding lives only in the interactive session's WNet table and is
+    fundamentally invisible to an elevated process (verified on a live box:
+    nothing in HKCU records B:'s letter binding; the share path itself
+    shows up in MountPoints2).
+  Duplicates between the two sources are suppressed by substring check. }
+function KnownShareHint: String;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Unc, Share: String;
+begin
+  Result := '';
+  if RegGetSubkeyNames(HKCU, 'Network', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+      if RegQueryStringValue(HKCU, 'Network\' + Names[I], 'RemotePath', Unc) and (Trim(Unc) <> '') then
+        Result := Result + #13#10 + '  ' + Uppercase(Names[I]) + ':  →  ' + Trim(Unc);
+  if RegGetSubkeyNames(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+      if Copy(Names[I], 1, 2) = '##' then
+      begin
+        Share := '\\' + Copy(Names[I], 3, Length(Names[I]) - 2);
+        StringChangeEx(Share, '#', '\', True);
+        if Pos(Share, Result) = 0 then
+          Result := Result + #13#10 + '  ' + Share;
+      end;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   ResolveOk: Boolean;
+  Hint: String;
 begin
   Result := True;
   if CurPageID = PathPage.ID then
@@ -142,8 +215,11 @@ begin
     ResolvedPath := ResolveDriveToUNC(PathPage.Values[0], ResolveOk);
     if not ResolveOk then
     begin
+      Hint := KnownShareHint;
+      if Hint <> '' then
+        Hint := #13#10#13#10 + 'Известные сетевые пути этого пользователя:' + Hint;
       MsgBox('Не удалось определить сетевой путь для диска ' + Trim(PathPage.Values[0]) + '. ' +
-        'Проверьте, что диск подключён (net use), либо введите UNC-путь напрямую (\\сервер\шара).',
+        'Проверьте, что диск подключён (net use), либо введите UNC-путь напрямую (\\сервер\шара).' + Hint,
         mbError, MB_OK);
       Result := False;
       exit;
