@@ -59,16 +59,6 @@ Source: "publish\Server\*"; DestDir: "{app}\Server"; Components: server; Flags: 
 Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: recursesubdirs ignoreversion
 Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server; Flags: recursesubdirs ignoreversion
 
-[Registry]
-; Lets elevated processes (this installer included, on its NEXT run) see the
-; interactive session's mapped drives, so ExpandUNCFileName in
-; ResolveDriveToUNC resolves B:/Z:/any mapped letter natively. Takes effect
-; on next logon only — the HKCU fallback covers the current install, so this
-; is a durable fix, not a prerequisite. Best-effort (noerror): a domain GPO
-; managing the same value wins on its own refresh cycle either way. Not
-; removed on uninstall — it's a shared system setting other apps may rely on.
-Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; ValueType: dword; ValueName: "EnableLinkedConnections"; ValueData: "1"; Flags: noerror
-
 [Code]
 var
   AccountPage: TInputQueryWizardPage;
