@@ -75,7 +75,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
         var candidates = SelectionFlow.GetLevel(currentPath, _options.RootPath, _options.ProjectDirectoryName) switch
         {
-            SelectionFlow.Level.Files => GetSectionFiles(currentPath),
+            SelectionFlow.Level.Files => GetFilesLevelCandidates(currentPath),
             SelectionFlow.Level.Sections => GetSectionFolders(currentPath),
             _ => GetProjectFolders(currentPath)
         };
@@ -117,12 +117,13 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     private InlineKeyboardMarkup BuildSectionKeyboard(UserSession session, string path)
     {
         var selected = session.Selection.SelectedFiles;
-        var folders = GetSectionFolders(path);
-        var buttons = new List<List<InlineKeyboardButton>>(folders.Count + 1)
+        var buttons = new List<List<InlineKeyboardButton>>
         {
             new() { InlineKeyboardButton.WithCallbackData("⬅️ Назад", CallbackPrefixes.OpenFolder) }
         };
 
+        // Add only section folders
+        var folders = GetSectionFolders(path);
         foreach (var dir in folders)
         {
             var prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -136,20 +137,36 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
     /// <summary>
     /// Список файлов раздела: та же механика выбора (чекбоксы + "Выбрать все"), что и у списка разделов.
+    /// Если в целевой RVT-директории есть валидные подпапки (без '#' и содержащие файлы .rvt) И файлы верхнего уровня,
+    /// то отображаются кнопки подпапок (📁/✅) и кнопки файлов верхнего уровня (🔵/✅),
+    /// иначе отображаются только файлы верхнего уровня или файлы из подпапки.
     /// </summary>
     private InlineKeyboardMarkup BuildFilesKeyboard(UserSession session, string path)
     {
         var selected = session.Selection.SelectedFiles;
-        var files = GetSectionFiles(path);
-        var buttons = new List<List<InlineKeyboardButton>>(files.Count + 3)
+        var candidates = GetFilesLevelCandidates(path);
+        var buttons = new List<List<InlineKeyboardButton>>(candidates.Count + 3)
         {
             new() { InlineKeyboardButton.WithCallbackData("⬅️ Назад", CallbackPrefixes.OpenFolder) }
         };
 
-        foreach (var file in files)
+        foreach (var candidate in candidates)
         {
-            var label = $"{(selected.Contains(file) ? "✅ " : "🔵")}{Path.GetFileName(file)}";
-            buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(file)}")]);
+            var isDirectory = Directory.Exists(candidate);
+            if (isDirectory)
+            {
+                // It's a subfolder
+                var prefix = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                var hasSelection = selected.Any(file => file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                var label = $"{(hasSelection ? "✅ " : "📁 ")}{Path.GetFileName(candidate)}";
+                buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.OpenFolder}{CreateSelectionToken(candidate)}")]);
+            }
+            else
+            {
+                // It's a file
+                var label = $"{(selected.Contains(candidate) ? "✅ " : "🔵 ")}{Path.GetFileName(candidate)}";
+                buttons.Add([InlineKeyboardButton.WithCallbackData(label, $"{CallbackPrefixes.File}{CreateSelectionToken(candidate)}")]);
+            }
         }
 
         buttons.Add([InlineKeyboardButton.WithCallbackData("Выбрать все", CallbackPrefixes.SelectAllSectionFolders)]);
@@ -184,6 +201,10 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             foreach (var dir in Directory.EnumerateDirectories(path, "*", _enumOptions))
             {
                 var folderName = Path.GetFileName(dir.AsSpan());
+                if (folderName.Contains('#'))
+                {
+                    continue;
+                }
                 var projectDirPath = Path.Combine(dir, _options.ProjectDirectoryName);
                 if (_folderRegex.IsMatch(folderName) && Directory.Exists(projectDirPath))
                 {
@@ -200,7 +221,7 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     {
         if (Directory.Exists(path))
         {
-            return [.. Directory.GetDirectories(path, "*", _enumOptions).Where(dir => ContainsSectionAcronym(Path.GetFileName(dir)))];
+            return [.. Directory.GetDirectories(path, "*", _enumOptions).Where(dir => !Path.GetFileName(dir.AsSpan()).Contains('#') && ContainsSectionAcronym(Path.GetFileName(dir)))];
         }
         else
         {
@@ -209,14 +230,106 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
     }
 
     /// <summary>
+    /// Получает кандидатов на уровне Files: субпапки 01_RVT и файлы верхнего уровня.
+    /// Если мы находимся в подпапке 01_RVT, возвращает файлы из этой подпапки.
+    /// </summary>
+    private List<string> GetFilesLevelCandidates(string currentPath)
+    {
+        var result = new List<string>();
+
+        // Check if currentPath is inside a subfolder of 01_RVT
+        var parent = Path.GetDirectoryName(currentPath);
+        var parentDir = parent != null ? Path.GetFileName(parent) : null;
+
+        if (parent != null && string.Equals(parentDir, _options.RvtDirectoryName, StringComparison.OrdinalIgnoreCase))
+        {
+            // We're inside a subfolder of 01_RVT, return only files from this subfolder
+            result.AddRange(GetSectionFiles(currentPath));
+        }
+        else
+        {
+            // We're at the section level, add valid subfolders and ONLY top-level files
+            var subfolders = GetValidSubfolders(currentPath);
+            result.AddRange(subfolders);
+
+            var rvtDir = Path.Combine(currentPath, _options.RvtDirectoryName);
+            if (Directory.Exists(rvtDir))
+            {
+                var topLevelFiles = RevitFileDeduplicator.Deduplicate(CollectRevitFiles(new DirectoryInfo(rvtDir)));
+                result.AddRange(topLevelFiles);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Получает подпапки в 01_RVT, которые не содержат '#' и имеют .rvt файлы.
+    /// </summary>
+    private List<string> GetValidSubfolders(string sectionPath)
+    {
+        var rvtDir = Path.Combine(sectionPath, _options.RvtDirectoryName);
+
+        if (!Directory.Exists(rvtDir))
+        {
+            return [];
+        }
+
+        try
+        {
+            var root = new DirectoryInfo(rvtDir);
+            return [.. root.EnumerateDirectories("*", _enumOptions)
+                .Where(s => !s.Name.Contains('#') && CollectRevitFiles(s).Count > 0)
+                .Select(s => s.FullName)];
+        }
+        catch (IOException ex)
+        {
+            logger.LogWarning(ex, "Scan RVT subfolders fail: {RvtDir}", rvtDir);
+            return [];
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogWarning(ex, "Access denied: {RvtDir}", rvtDir);
+            return [];
+        }
+    }
+
+
+
+    /// <summary>
     /// Дедуплицированные .rvt-файлы раздела.
     /// Стратегия (максимальная производительность — без глубокого рекурсивного скана):
-    /// 1. Файлы верхнего уровня <c>01_RVT</c>. Если они есть — возвращаются только они.
-    /// 2. Иначе — файлы в прямых субпапках <c>01_RVT</c>. Дальше не углубляемся.
-    /// Единственный try/catch — safety net против race (каталог удалён между Exists и enumerate).
+    /// 1. Если мы находимся в подпапке 01_RVT, берём файлы из неё.
+    /// 2. Иначе (находимся в разделе), берём файлы верхнего уровня 01_RVT.
+    ///    Если они есть — возвращаются они И файлы из всех валидных подпапок (дедуплицированные вместе).
+    /// 3. Если файлов верхнего уровня нет — возвращаются файлы из всех валидных подпапок.
     /// </summary>
     private List<string> GetSectionFiles(string sectionPath)
     {
+        // Check if sectionPath is actually a subfolder inside 01_RVT
+        var parentDir = Path.GetDirectoryName(sectionPath);
+        if (parentDir != null && string.Equals(Path.GetFileName(parentDir), _options.RvtDirectoryName, StringComparison.OrdinalIgnoreCase))
+        {
+            // We're inside a subfolder of 01_RVT, return files from this subfolder
+            try
+            {
+                var subfolderInfo = new DirectoryInfo(sectionPath);
+                var files = CollectRevitFiles(subfolderInfo);
+                return RevitFileDeduplicator.Deduplicate(files);
+            }
+            catch (IOException ex)
+            {
+                logger.LogWarning(ex, "Scan RVT subfolder fail: {SubfolderPath}", sectionPath);
+                return [];
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                logger.LogWarning(ex, "Access denied: {SubfolderPath}", sectionPath);
+                return [];
+            }
+        }
+
+        // Normal case: sectionPath is a section folder containing 01_RVT
         var rvtDir = Path.Combine(sectionPath, _options.RvtDirectoryName);
 
         if (Directory.Exists(rvtDir))
@@ -225,17 +338,13 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
             {
                 var root = new DirectoryInfo(rvtDir);
                 var topLevel = CollectRevitFiles(root);
-                if (topLevel.Count > 0)
-                {
-                    return RevitFileDeduplicator.Deduplicate(topLevel);
-                }
+                var allFiles = new List<string>(topLevel);
 
-                // Top-level пустой — сканируем прямые субпапки, без дальнейшей рекурсии.
-                var nested = root.EnumerateDirectories("*", _enumOptions)
-                    .SelectMany(CollectRevitFiles)
-                    .ToList();
+                // Always add files from all valid subfolders
+                var validSubfolders = GetValidSubfolders(sectionPath);
+                allFiles.AddRange(validSubfolders.SelectMany(s => CollectRevitFiles(new DirectoryInfo(s))));
 
-                return RevitFileDeduplicator.Deduplicate(nested);
+                return RevitFileDeduplicator.Deduplicate(allFiles);
             }
             catch (IOException ex)
             {
@@ -269,6 +378,11 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
 
     private static List<string> CollectRevitFiles(DirectoryInfo dirInfo)
     {
+        if (dirInfo.Name.Contains('#'))
+        {
+            return [];
+        }
+
         var mandatoryOnly = new List<string>(10);
         var sectionMatched = new List<string>(10);
 
@@ -308,3 +422,4 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         return sectionMatched.Count > 0 ? sectionMatched : mandatoryOnly;
     }
 }
+
