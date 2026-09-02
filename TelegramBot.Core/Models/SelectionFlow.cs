@@ -46,12 +46,14 @@ public sealed class SelectionFlow
     private readonly HashSet<string> _selectedFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _pendingCommands = [];
     private readonly string _projectDirectoryName;
+    private readonly string _rvtDirectoryName;
     private string _rootPath;
 
-    public SelectionFlow(string? rootPath = null, string projectDirectoryName = "01_PROJECT")
+    public SelectionFlow(string? rootPath = null, string projectDirectoryName = "01_PROJECT", string rvtDirectoryName = "01_RVT")
     {
         _rootPath = rootPath ?? Directory.GetCurrentDirectory();
         _projectDirectoryName = projectDirectoryName;
+        _rvtDirectoryName = rvtDirectoryName;
         CurrentPath = _rootPath;
     }
 
@@ -84,11 +86,20 @@ public sealed class SelectionFlow
             return Level.Sections;
         }
 
-        var parent = Path.GetDirectoryName(normalized);
-        return parent != null
-            && string.Equals(Path.GetFileName(parent), projectDirectoryName, StringComparison.OrdinalIgnoreCase)
-            ? Level.Files
-            : Level.Project;
+        // Check if current path is inside projectDirectoryName (including deeper subfolders)
+        var current = normalized;
+        while (current != null && current != Normalize(rootPath))
+        {
+            var folderName = Path.GetFileName(current);
+            if (string.Equals(folderName, projectDirectoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Level.Files;
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return Level.Project;
     }
 
     // ────────────────────────── Команды ──────────────────────────
@@ -141,12 +152,26 @@ public sealed class SelectionFlow
         CurrentPath = newPath;
     }
 
-    /// <summary>Шаг назад: с уровня файлов — в папку раздела, иначе — на корень.</summary>
+    /// <summary>Шаг назад: с уровня файлов — в папку раздела (или вверх из подпапки 01_RVT), иначе — на корень.</summary>
     public void GoBack()
     {
-        CurrentPath = CurrentLevel == Level.Files
-            ? Path.GetDirectoryName(CurrentPath) ?? _rootPath
-            : _rootPath;
+        if (CurrentLevel == Level.Files)
+        {
+            var parent = Path.GetDirectoryName(CurrentPath) ?? _rootPath;
+            var parentFileName = Path.GetFileName(parent);
+            
+            // If parent is a RVT folder (like 01_RVT), go up one more level to get the section folder
+            if (string.Equals(parentFileName, _rvtDirectoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                parent = Path.GetDirectoryName(parent) ?? _rootPath;
+            }
+            
+            CurrentPath = parent;
+        }
+        else
+        {
+            CurrentPath = _rootPath;
+        }
     }
 
     /// <summary>Переход по явному пути (GOTOPARENT): выбор файлов сбрасывается.</summary>
