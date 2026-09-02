@@ -56,7 +56,9 @@ public sealed class CommandExecutionService(
             cycle: () => commandDataService.ReleaseExpiredLeasesAsync(_workerOptions.MaxRetries));
 
         _processMonitorTask = StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds),
+            intervalSeconds: _workerOptions.ProcessMonitorIntervalSeconds > 0
+                ? RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds)
+                : 0,
             disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
             cycleName: "process monitor",
             cycle: () => { CheckProcessesHealth(); return Task.CompletedTask; });

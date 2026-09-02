@@ -9,7 +9,7 @@ public sealed class FileSystemOptions
     public const string SectionName = "FileSystem";
 
     /// <summary>Корневая директория для файлового браузера.</summary>
-    public required string RootPath { get; set; }
+    public string RootPath { get; set; } = string.Empty;
 
     /// <summary>Относительный путь к RVT-файлам внутри раздела.</summary>
     public string RvtDirectoryName { get; set; } = "01_RVT";

@@ -44,15 +44,28 @@ public static class Program
                         .Validate(options => options.ProcessTimeoutMinutes > 0, "Worker:ProcessTimeoutMinutes must be greater than 0")
                         .Validate(options => options.MaxRetries >= 0, "Worker:MaxRetries must be greater than or equal to 0")
                         .Validate(options => options.RetryDelayBaseSeconds > 0, "Worker:RetryDelayBaseSeconds must be greater than 0")
-                        .Validate(options => options.FallbackPollingIntervalSeconds > 0, "Worker:FallbackPollingIntervalSeconds must be greater than 0")
+                        .Validate(options => options.FallbackPollingIntervalSeconds >= 0, "Worker:FallbackPollingIntervalSeconds must be greater than or equal to 0")
+                        .Validate(options => options.CleanupIntervalSeconds >= 0, "Worker:CleanupIntervalSeconds must be greater than or equal to 0")
                         .Validate(options => options.ProcessMonitorIntervalSeconds >= 0, "Worker:ProcessMonitorIntervalSeconds must be greater than or equal to 0")
+                        .Validate(options => options.UnresponsiveThresholdSeconds > 0, "Worker:UnresponsiveThresholdSeconds must be greater than 0")
                         .Validate(options => options.MaxConcurrentCommands > 0, "Worker:MaxConcurrentCommands must be greater than 0")
                         .Validate(options => options.Commands.Count > 0, "Worker:Commands must contain at least one command")
                         .Validate(options => options.Commands.All(c => !string.IsNullOrWhiteSpace(c.Value.ExecutablePath)), "Worker:Commands executable paths are required")
                         .ValidateOnStart();
 
-                    _=services.Configure<BimIntegrationOptions>(context.Configuration.GetSection(BimIntegrationOptions.SectionName));
-                    _=services.Configure<DialogDismisserOptions>(context.Configuration.GetSection(DialogDismisserOptions.SectionName));
+                    _=services.AddOptions<BimIntegrationOptions>()
+                        .Bind(context.Configuration.GetSection(BimIntegrationOptions.SectionName))
+                        .Validate(options => options.MinSupportedVersion > 0, "BimIntegration:MinSupportedVersion must be greater than 0")
+                        .Validate(options => options.MaxSupportedVersion >= options.MinSupportedVersion, "BimIntegration:MaxSupportedVersion must be greater than or equal to MinSupportedVersion")
+                        .ValidateOnStart();
+
+                    _=services.AddOptions<DialogDismisserOptions>()
+                        .Bind(context.Configuration.GetSection(DialogDismisserOptions.SectionName))
+                        .Validate(options => options.MaxDismissAttempts >= 0, "DialogDismisser:MaxDismissAttempts must be greater than or equal to 0")
+                        .Validate(options => options.CloseButtonTexts is { Length: > 0 } buttonTexts && buttonTexts.All(text => !string.IsNullOrWhiteSpace(text)), "DialogDismisser:CloseButtonTexts must contain non-empty values")
+                        .Validate(options => options.ExclusionDialogTitles?.All(title => !string.IsNullOrWhiteSpace(title)) ?? false, "DialogDismisser:ExclusionDialogTitles must contain non-empty values")
+                        .ValidateOnStart();
+
                     _=services.Configure<FileSystemOptions>(context.Configuration.GetSection(FileSystemOptions.SectionName));
 
                     // BIM-интеграция (Revit + Navisworks)

@@ -19,7 +19,8 @@ public static class DependencyInjectionExtensions
         _ = services.AddOptions<FileSystemOptions>()
             .Bind(configuration.GetSection(FileSystemOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
-            .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist");
+            .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist")
+            .ValidateOnStart();
 
         _ = services.AddOptions<BotOptions>()
             .Bind(configuration.GetSection(BotOptions.SectionName))

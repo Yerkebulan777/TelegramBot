@@ -110,7 +110,7 @@ Import-Certificate -FilePath $cert -CertStoreLocation Cert:\LocalMachine\Trusted
 
 ## Конфигурация
 
-Обязательные: `TelegramBot:Token`, `ConnectionStrings:Postgres`, `FileSystem:RootPath` (Server), `FileSystem:TaskDirectory` (Worker). Остальное — defaults в option-классах / `appsettings.json`.
+Обязательные: `TelegramBot:Token`, `ConnectionStrings:Postgres`, `FileSystem:RootPath` (Server). `FileSystem:TaskDirectory` у Worker опционален: если он не задан, используется `%USERPROFILE%\Documents\TelegramBot\TaskDirectory`. Остальное — defaults в option-классах / `appsettings.json`.
 
 `MessageCleanup` (Server) удаляет отслеживаемые сообщения старше 24 часов каждые 15 минут. Удаление планируется до 47 часов, потому что Telegram Bot API не удаляет сообщения старше 48 часов. При временном отказе Telegram tracking-запись сохраняется для следующей попытки; записи, вышедшие за это окно, очищаются только из БД с предупреждением в логе.
 
