@@ -362,7 +362,7 @@ public sealed partial class SlashCommandService(
         {
             CommandCodes.Pdf or CommandCodes.Dwg => CommandPriorities.Critical,
             CommandCodes.Nwc => CommandPriorities.High,
-            CommandCodes.Ifc => CommandPriorities.Medium,
+            CommandCodes.Ifc or CommandCodes.Resave => CommandPriorities.Medium,
             CommandCodes.Data => CommandPriorities.Low,
             _ => CommandPriorities.Default
         };

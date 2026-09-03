@@ -28,6 +28,8 @@
   <ItemGroup>
     <EmbeddedResource Include="$(BimContractDirectory)\TaskFile.schema.xsd"
                       LogicalName="TelegramBot.Worker.Schemas.TaskFile.schema.xsd" />
+    <EmbeddedResource Include="$(BimContractDirectory)\ResultFile.schema.xsd"
+                      LogicalName="TelegramBot.Worker.Schemas.ResultFile.schema.xsd" />
   </ItemGroup>
 
 </Project>

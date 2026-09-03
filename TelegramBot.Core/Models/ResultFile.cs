@@ -31,7 +31,7 @@ public enum ResultStatus
 /// Для Revit ResultFile обязателен; exit-code fallback — только wrapper-командам.
 /// </summary>
 /// <remarks>
-/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-08-10) и
+/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-09-03) и
 /// <c>Docs/BimContract/ResultFile.schema.xsd</c> (vendored).
 /// </remarks>
 [XmlRoot("resultFile")]

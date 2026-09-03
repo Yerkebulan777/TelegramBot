@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Xml;
 using System.Xml.Serialization;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Worker.Helpers;
+using TelegramBot.Worker.Schemas;
 
 namespace TelegramBot.Worker.Services;
 
@@ -34,6 +36,20 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         {
             try
             {
+                using (var validationStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var reader = XmlReader.Create(validationStream))
+                {
+                    var validationErrors = ResultFileValidator.Validate(reader);
+                    if (validationErrors.Count > 0)
+                    {
+                        logger.LogWarning(
+                            "Plugin result file violates schema: id={CommandId}, errors={ErrorCount}",
+                            commandId, validationErrors.Count);
+                        RenameToBadFile(path);
+                        return (ResultFileReadStatus.Invalid, null, "Plugin result file violates the BIM contract schema");
+                    }
+                }
+
                 using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 var result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
 
@@ -46,7 +62,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
                 RenameToBadFile(path);
                 return (ResultFileReadStatus.Invalid, null, $"Plugin result file has invalid status: {path}");
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or XmlException)
             {
                 if (await RetryReadAsync(attempt, ct))
                 {
@@ -54,7 +70,8 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
                 }
 
                 RenameToBadFile(path);
-                return (ResultFileReadStatus.Invalid, null, $"Plugin result file contains invalid XML: {path}. {ex.Message}");
+                logger.LogWarning("Plugin result file contains invalid XML: id={CommandId}", commandId);
+                return (ResultFileReadStatus.Invalid, null, "Plugin result file contains invalid XML");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

@@ -305,7 +305,8 @@ public sealed class CommandPreparer(
             or CommandCodes.Dwg
             or CommandCodes.Nwc
             or CommandCodes.Data
-            or CommandCodes.Ifc;
+            or CommandCodes.Ifc
+            or CommandCodes.Resave;
     }
 
     /// <summary>

@@ -8,5 +8,6 @@ public static class CommandCodes
     public const string Nwc = "NWC";
     public const string Data = "DATA";
     public const string Ifc = "IFC";
+    public const string Resave = "RESAVE";
     public const string ClashRep = "CLASHREP";
 }

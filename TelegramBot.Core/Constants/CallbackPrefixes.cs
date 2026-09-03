@@ -29,6 +29,9 @@ public static class CallbackPrefixes
     /// <summary>Выбор файла CLASHREP (сейчас FileConvert.exe; planned — Navisworks AddIn).</summary>
     public const string ClashRep = "CLASHREP:";
 
+    /// <summary>Пересохранение RVT с аудитом и отсоединением от центральной модели.</summary>
+    public const string Resave = "RESAVE:";
+
     /// <summary>Применение выбранных команд.</summary>
     public const string ApplyCommands = "APPLYCOMMANDS:";
 

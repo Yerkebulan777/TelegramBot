@@ -24,6 +24,7 @@ public static class CommandCatalog
         new(CommandCodes.Ifc, "Export to IFC", CallbackPrefixes.Ifc, CommandGroup.Export),
         new(CommandCodes.Data, "Export DATA", CallbackPrefixes.Data, CommandGroup.Export),
         new(CommandCodes.ClashRep, "Clash Report", CallbackPrefixes.ClashRep, CommandGroup.Automation), // FileConvert пока; planned — Navisworks AddIn
+        new(CommandCodes.Resave, "Resave RVT", CallbackPrefixes.Resave, CommandGroup.Automation),
     ];
 
     private static readonly IReadOnlyDictionary<string, CommandDefinition> _byPrefix =
