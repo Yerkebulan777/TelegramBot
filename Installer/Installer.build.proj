@@ -1,57 +1,21 @@
 <Project DefaultTargets="Installer">
 
-  <!-- Not part of TelegramBot.slnx — keeps dotnet build TelegramBot.slnx free of ISCC.
-       Run explicitly: dotnet build Installer\Installer.build.proj -t:Installer -->
+  <!-- Unsigned installer for CI. Keeps `dotnet build TelegramBot.slnx` free of ISCC.
+       Signed builds: scripts\build-signed-installer.ps1 -->
 
   <PropertyGroup>
     <RepoRoot>$(MSBuildThisFileDirectory)..\</RepoRoot>
     <!-- Local: Inno Setup 7 (64-bit). CI windows-latest still ships IS 6 in Program Files (x86). -->
     <IsccExe Condition="'$(IsccExe)' == '' AND Exists('C:\Program Files\Inno Setup 7\ISCC.exe')">C:\Program Files\Inno Setup 7\ISCC.exe</IsccExe>
     <IsccExe Condition="'$(IsccExe)' == '' AND Exists('C:\Program Files (x86)\Inno Setup 6\ISCC.exe')">C:\Program Files (x86)\Inno Setup 6\ISCC.exe</IsccExe>
-    <SignToolExe Condition="'$(SignToolExe)' == '' AND Exists('C:\Program Files (x86)\Microsoft SDKs\ClickOnce\SignTool\signtool.exe')">C:\Program Files (x86)\Microsoft SDKs\ClickOnce\SignTool\signtool.exe</SignToolExe>
-    <SignToolExe Condition="'$(SignToolExe)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft SDKs\ClickOnce\SignTool\signtool.exe')">$(MSBuildProgramFiles32)\Microsoft SDKs\ClickOnce\SignTool\signtool.exe</SignToolExe>
-    <SignToolExe Condition="'$(SignToolExe)' == '' AND Exists('$(ProgramFiles(x86))\Microsoft SDKs\ClickOnce\SignTool\signtool.exe')">$(ProgramFiles(x86))\Microsoft SDKs\ClickOnce\SignTool\signtool.exe</SignToolExe>
-
-    <SignToolExe Condition="'$(SignToolExe)' == ''">signtool.exe</SignToolExe>
-    <TimestampUrl Condition="'$(TimestampUrl)' == ''">http://timestamp.digicert.com</TimestampUrl>
   </PropertyGroup>
 
-  <Target Name="ResolveSigning">
-    <!-- Auto-discover SignThumbprint from Cert:\CurrentUser\My for 'CN=TelegramBot Internal*' using pure .NET X509Store -->
-    <Exec Condition="'$(SignThumbprint)' == ''"
-          Command="powershell -NoProfile -Command &quot;$s = New-Object System.Security.Cryptography.X509Certificates.X509Store('My', 'CurrentUser'); $s.Open('ReadOnly'); $c = $s.Certificates | Where-Object { $_.Subject -like 'CN=TelegramBot Internal*' -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) } | Sort-Object NotAfter -Descending | Select-Object -First 1; if ($c) { $c.Thumbprint }; $s.Close()&quot;"
-          ConsoleToMsBuild="true"
-          StandardOutputImportance="low">
-      <Output TaskParameter="ConsoleOutput" PropertyName="SignThumbprint" />
-    </Exec>
-
-    <PropertyGroup Condition="'$(SignThumbprint)' != ''">
-      <SignCommand>&quot;$(SignToolExe)&quot; sign /sha1 $(SignThumbprint) /fd SHA256 /tr $(TimestampUrl) /td SHA256</SignCommand>
-      <!-- $q and $f are expanded by Inno Setup. Keeping quotes out of the nested
-           command avoids cmd.exe corrupting paths that contain spaces. -->
-      <InnoSignCommand>$q$(SignToolExe)$q sign /sha1 $(SignThumbprint) /fd SHA256 /tr $(TimestampUrl) /td SHA256 $f</InnoSignCommand>
-      <InnoSignArgs>/DEnableCodeSigning &quot;/STelegramBotInternalSign=$(InnoSignCommand)&quot;</InnoSignArgs>
-    </PropertyGroup>
-
-    <Message Condition="'$(SignThumbprint)' != ''" Text="Code signing enabled with certificate thumbprint: $(SignThumbprint)" Importance="high" />
-    <Warning Condition="'$(SignThumbprint)' == ''" Text="Code signing certificate matching 'CN=TelegramBot Internal*' not found in Cert:\CurrentUser\My. Binaries will not be signed. Run scripts\setup-internal-code-signing.ps1 to configure signing." />
-  </Target>
-
-  <Target Name="Installer" DependsOnTargets="ResolveSigning">
+  <Target Name="Installer">
     <Error Condition="'$(IsccExe)' == '' OR !Exists('$(IsccExe)')" Text="ISCC.exe not found. Install Inno Setup 7 (C:\Program Files\Inno Setup 7\ISCC.exe) or 6 (C:\Program Files (x86)\Inno Setup 6\ISCC.exe), or pass /p:IsccExe=&lt;path&gt;." />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Server\TelegramBot.Server.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Server&quot;" />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Worker\TelegramBot.Worker.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Worker&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)GrantLogonRight\GrantLogonRight.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight&quot;" />
-
-    <!-- Sign every published EXE (Server, Worker, GrantLogonRight, …). -->
-    <ItemGroup Condition="'$(SignCommand)' != ''">
-      <PublishedExe Include="$(MSBuildThisFileDirectory)publish\**\*.exe" />
-    </ItemGroup>
-    <Exec Condition="'$(SignCommand)' != '' AND '@(PublishedExe)' != ''"
-          Command="$(SignCommand) @(PublishedExe->'&quot;%(Identity)&quot;', ' ')" />
-
-    <!-- Inno signs both Setup and its embedded Uninstall when signing is enabled. -->
-    <Exec Command="&quot;$(IsccExe)&quot; $(InnoSignArgs) &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
+    <Exec Command="&quot;$(IsccExe)&quot; &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
   </Target>
 
 </Project>
