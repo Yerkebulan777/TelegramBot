@@ -39,6 +39,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=Output
 OutputBaseFilename={#AppName}Setup
 WizardStyle=modern
+SolidCompression=no
+Compression=lzma2/max
 #ifdef EnableCodeSigning
 SignTool=TelegramBotInternalSign
 SignedUninstaller=yes
