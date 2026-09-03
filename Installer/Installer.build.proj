@@ -43,7 +43,12 @@
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Worker\TelegramBot.Worker.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Worker&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)GrantLogonRight\GrantLogonRight.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight&quot;" />
 
-    <Exec Condition="'$(SignCommand)' != ''" Command="$(SignCommand) &quot;$(MSBuildThisFileDirectory)publish\Server\TelegramBot.Server.exe&quot; &quot;$(MSBuildThisFileDirectory)publish\Worker\TelegramBot.Worker.exe&quot; &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight\GrantLogonRight.exe&quot;" />
+    <!-- Sign every published EXE (Server, Worker, GrantLogonRight, …). -->
+    <ItemGroup Condition="'$(SignCommand)' != ''">
+      <PublishedExe Include="$(MSBuildThisFileDirectory)publish\**\*.exe" />
+    </ItemGroup>
+    <Exec Condition="'$(SignCommand)' != '' AND '@(PublishedExe)' != ''"
+          Command="$(SignCommand) @(PublishedExe->'&quot;%(Identity)&quot;', ' ')" />
 
     <!-- Inno signs both Setup and its embedded Uninstall when signing is enabled. -->
     <Exec Command="&quot;$(IsccExe)&quot; $(InnoSignArgs) &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />

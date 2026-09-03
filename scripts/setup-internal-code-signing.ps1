@@ -62,10 +62,20 @@ Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\Root 
 Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
 
 Write-Host ""
-Write-Host "Internal code-signing certificate created." -ForegroundColor Green
+Write-Host "Сертификат создан." -ForegroundColor Green
 Write-Host "Thumbprint : $($certificate.Thumbprint)"
 Write-Host "Expires    : $($certificate.NotAfter)"
-Write-Host "Public CER: $cerPath"
-Write-Host "Backup PFX: $pfxPath"
+Write-Host "Public CER : $cerPath"
+Write-Host "Backup PFX : $pfxPath"
 Write-Host ""
-Write-Warning "Move the PFX to protected offline storage. Never distribute or commit it. Deploy only the CER file."
+Write-Host "Дальше:"
+Write-Host "  1. PFX убрать в офлайн-хранилище. Не коммитить и не раздавать."
+Write-Host "  2. CER раздать на ПК через GPO (Trusted Root + Trusted Publishers)"
+Write-Host "     или локально от администратора:"
+Write-Host ""
+Write-Host "Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\Root"
+Write-Host "Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\TrustedPublisher"
+Write-Host ""
+Write-Host "  3. Сборка и подпись всего одной командой:"
+Write-Host "     .\scripts\build-signed-installer.ps1"
+Write-Warning "Раздавайте только CER. PFX — только на ПК сборки / в сейф."

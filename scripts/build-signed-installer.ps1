@@ -1,85 +1,209 @@
 <#
 .SYNOPSIS
-    Publishes TelegramBot and builds a signed Inno Setup installer.
+    Одним запуском: publish Server/Worker/GrantLogonRight → подпись всех EXE → подписанный Setup.
 .DESCRIPTION
-    Finds the internal certificate in Cert:\CurrentUser\My, signs the three
-    application executables, and asks Inno Setup to sign Setup and Uninstall.
+    Требует заранее созданный сертификат (scripts\setup-internal-code-signing.ps1)
+    и установленные .NET SDK, Inno Setup 7, Windows SDK (signtool.exe).
+
+    Результат: Installer\Output\TelegramBotSetup.exe
 #>
 
+[CmdletBinding()]
+param(
+    [string]$Configuration = "Release",
+    [string]$TimestampUrl = "http://timestamp.digicert.com"
+)
+
 $ErrorActionPreference = "Stop"
-Import-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue
+$ProgressPreference = "SilentlyContinue"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$buildProject = Join-Path $repoRoot "Installer\Installer.build.proj"
-$outputPath = Join-Path $repoRoot "Installer\Output\TelegramBotSetup.exe"
+$installerDir = Join-Path $repoRoot "Installer"
+$publishRoot = Join-Path $installerDir "publish"
+$outputPath = Join-Path $installerDir "Output\TelegramBotSetup.exe"
+$issPath = Join-Path $installerDir "TelegramBot.iss"
 $subjectPattern = "CN=TelegramBot Internal*"
 $codeSigningOid = "1.3.6.1.5.5.7.3.3"
 
-$certificate = Get-ChildItem Cert:\CurrentUser\My |
-    Where-Object {
-        $_.Subject -like $subjectPattern -and
-        $_.HasPrivateKey -and
-        $_.NotAfter -gt (Get-Date) -and
-        $_.EnhancedKeyUsageList.ObjectId -contains $codeSigningOid
-    } |
-    Sort-Object NotAfter -Descending |
-    Select-Object -First 1
-
-if ($null -eq $certificate) {
-    throw "No valid certificate matching '$subjectPattern' with a private key was found in Cert:\CurrentUser\My. Run scripts\setup-internal-code-signing.ps1 first."
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-$signToolCommand = Get-Command signtool.exe -ErrorAction SilentlyContinue
-if ($null -ne $signToolCommand) {
-    $signToolExe = $signToolCommand.Source
-} else {
-    $clickOnceRoot = Join-Path ${env:ProgramFiles(x86)} "Microsoft SDKs\ClickOnce\SignTool"
-    if (Test-Path $clickOnceRoot) {
-        $signToolExe = Get-ChildItem $clickOnceRoot -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName -First 1
+function Find-SignTool {
+    $fromPath = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($null -ne $fromPath) {
+        return $fromPath.Source
     }
-    if ([string]::IsNullOrWhiteSpace($signToolExe)) {
-        $windowsKitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-        if (Test-Path $windowsKitsRoot) {
-            $signToolExe = Get-ChildItem $windowsKitsRoot -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
-                Sort-Object FullName -Descending |
-                Select-Object -ExpandProperty FullName -First 1
+
+    $candidates = @(
+        Join-Path ${env:ProgramFiles(x86)} "Microsoft SDKs\ClickOnce\SignTool\signtool.exe"
+    )
+
+    $kitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+    if (Test-Path $kitsRoot) {
+        $candidates += Get-ChildItem $kitsRoot -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -ExpandProperty FullName
+    }
+
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path $candidate)) {
+            return $candidate
         }
     }
+
+    throw "signtool.exe не найден. Установите Windows SDK или ClickOnce Signing Tools."
 }
 
-if ([string]::IsNullOrWhiteSpace($signToolExe)) {
-    throw "signtool.exe was not found. Install Windows SDK or ClickOnce SDK."
+function Find-Iscc {
+    $candidates = @(
+        "C:\Program Files\Inno Setup 7\ISCC.exe",
+        "C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
+        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        "C:\Program Files\Inno Setup 6\ISCC.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    throw "ISCC.exe не найден. Установите Inno Setup 7: https://jrsoftware.org/isdl.php"
 }
 
-Write-Host "Building with certificate $($certificate.Thumbprint)"
-& dotnet build $buildProject -t:Installer `
-    "-p:SignThumbprint=$($certificate.Thumbprint)" `
-    "-p:SignToolExe=$signToolExe"
+function Get-SigningCertificate {
+    $certificate = Get-ChildItem Cert:\CurrentUser\My |
+        Where-Object {
+            $_.Subject -like $subjectPattern -and
+            $_.HasPrivateKey -and
+            $_.NotAfter -gt (Get-Date) -and
+            $_.EnhancedKeyUsageList.ObjectId -contains $codeSigningOid
+        } |
+        Sort-Object NotAfter -Descending |
+        Select-Object -First 1
+
+    if ($null -eq $certificate) {
+        throw @"
+Сертификат '$subjectPattern' не найден в Cert:\CurrentUser\My.
+Сначала один раз выполните:
+  .\scripts\setup-internal-code-signing.ps1
+"@
+    }
+
+    return $certificate
+}
+
+function Invoke-DotNetPublish {
+    param(
+        [string]$ProjectPath,
+        [string]$OutputDir
+    )
+
+    if (Test-Path $OutputDir) {
+        Remove-Item -Recurse -Force $OutputDir
+    }
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+
+    Write-Host "  publish $([IO.Path]::GetFileName($ProjectPath)) → $OutputDir"
+    & dotnet publish $ProjectPath -c $Configuration -o $OutputDir --nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish failed: $ProjectPath"
+    }
+}
+
+function Invoke-SignFile {
+    param(
+        [string]$SignToolExe,
+        [string]$Thumbprint,
+        [string]$FilePath
+    )
+
+    Write-Host "  sign $FilePath"
+    & $SignToolExe sign /sha1 $Thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $FilePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Подпись не удалась: $FilePath"
+    }
+}
+
+function Assert-Signed {
+    param(
+        [string]$FilePath,
+        [string]$ExpectedThumbprint
+    )
+
+    $signature = Get-AuthenticodeSignature -FilePath $FilePath -ErrorAction Stop
+    $actual = $signature.SignerCertificate.Thumbprint
+
+    if ($null -eq $actual) {
+        throw "Нет подписи: $FilePath (Status=$($signature.Status))"
+    }
+
+    if ($actual -ne $ExpectedThumbprint) {
+        throw "Thumbprint не совпал для $FilePath. Ожидали $ExpectedThumbprint, получили $actual"
+    }
+
+    # Self-signed: Status часто UnknownError, но сертификат уже наш.
+    if ($signature.Status -notin @("Valid", "UnknownError")) {
+        throw "Некорректная подпись: $FilePath (Status=$($signature.Status))"
+    }
+
+    Write-Host "  OK  $FilePath [$($signature.Status)]" -ForegroundColor Green
+}
+
+# --- main ---
+
+Set-Location $repoRoot
+
+Write-Step "Проверка окружения"
+$certificate = Get-SigningCertificate
+$signToolExe = Find-SignTool
+$isccExe = Find-Iscc
+Write-Host "  cert      : $($certificate.Thumbprint) ($($certificate.Subject))"
+Write-Host "  expires   : $($certificate.NotAfter.ToString('yyyy-MM-dd'))"
+Write-Host "  signtool  : $signToolExe"
+Write-Host "  iscc      : $isccExe"
+
+Write-Step "Publish всех проектов"
+$projects = @(
+    @{ Project = Join-Path $repoRoot "TelegramBot.Server\TelegramBot.Server.csproj"; Out = Join-Path $publishRoot "Server" },
+    @{ Project = Join-Path $repoRoot "TelegramBot.Worker\TelegramBot.Worker.csproj"; Out = Join-Path $publishRoot "Worker" },
+    @{ Project = Join-Path $installerDir "GrantLogonRight\GrantLogonRight.csproj"; Out = Join-Path $publishRoot "GrantLogonRight" }
+)
+foreach ($item in $projects) {
+    Invoke-DotNetPublish -ProjectPath $item.Project -OutputDir $item.Out
+}
+
+Write-Step "Подпись всех EXE в Installer\publish"
+$publishedExes = Get-ChildItem -Path $publishRoot -Filter *.exe -Recurse -File |
+    Sort-Object FullName
+if ($publishedExes.Count -eq 0) {
+    throw "В $publishRoot нет ни одного .exe после publish."
+}
+foreach ($exe in $publishedExes) {
+    Invoke-SignFile -SignToolExe $signToolExe -Thumbprint $certificate.Thumbprint -FilePath $exe.FullName
+}
+
+Write-Step "Сборка Setup (Inno Setup подпишет Setup и Uninstall)"
+$signCommand = "`$q$signToolExe`$q sign /sha1 $($certificate.Thumbprint) /fd SHA256 /tr $TimestampUrl /td SHA256 `$f"
+& $isccExe "/DEnableCodeSigning" "/STelegramBotInternalSign=$signCommand" $issPath
 if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+    throw "ISCC failed"
+}
+if (-not (Test-Path $outputPath)) {
+    throw "Setup не создан: $outputPath"
 }
 
-Write-Host "Verifying signature with Get-AuthenticodeSignature..."
-$signature = Get-AuthenticodeSignature -FilePath $outputPath -ErrorAction Stop
-
-if ($signature.Status -eq "Valid") {
-    Write-Host "File is signed with valid signature" -ForegroundColor Green
-    if ($signature.SignerCertificate.Thumbprint -eq $certificate.Thumbprint) {
-        Write-Host "Signer certificate thumbprint matches: $($signature.SignerCertificate.Thumbprint)" -ForegroundColor Green
-    } else {
-        throw "Signer certificate thumbprint mismatch. Expected: $($certificate.Thumbprint), Got: $($signature.SignerCertificate.Thumbprint)"
-    }
-} elseif ($signature.Status -eq "UnknownError") {
-    if ($null -ne $signature.SignerCertificate -and $signature.SignerCertificate.Thumbprint -eq $certificate.Thumbprint) {
-        Write-Host "Signature found with matching thumbprint (self-signed certificate): $($signature.SignerCertificate.Thumbprint)" -ForegroundColor Yellow
-    } else {
-        throw "File signature is invalid or thumbprint does not match. Status: $($signature.Status)"
-    }
-} else {
-    throw "File is not properly signed. Status: $($signature.Status)"
+Write-Step "Проверка подписей"
+foreach ($exe in $publishedExes) {
+    Assert-Signed -FilePath $exe.FullName -ExpectedThumbprint $certificate.Thumbprint
 }
+Assert-Signed -FilePath $outputPath -ExpectedThumbprint $certificate.Thumbprint
 
 Write-Host ""
-Write-Host "Signed installer successfully created: $outputPath" -ForegroundColor Green
+Write-Host "Готово. Подписанный инсталлятор:" -ForegroundColor Green
+Write-Host "  $outputPath"
+Write-Host ""
+Write-Host "Скопируйте файл на внутренний UNC и запустите на целевом ПК от администратора."
