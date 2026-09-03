@@ -59,8 +59,12 @@ dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
 
 ```powershell
 cd C:\path\to\TelegramBot
+dotnet build TelegramBot.slnx -c Release          # инсталлятор соберётся автоматически
+# или напрямую:
 powershell -ExecutionPolicy Bypass -File .\scripts\build-signed-installer.ps1
 ```
+
+Release-сборка (`Directory.Build.targets`, якорь — `TelegramBot.Server`) после Build сама запускает `scripts\build-signed-installer.ps1`. Отключить: `-p:BuildSignedInstaller=false`. Автоматически пропускается на CI (`GITHUB_ACTIONS`/`TF_BUILD`/`ContinuousIntegrationBuild`) и внутри самого скрипта (`TELEGRAMBOT_INSTALLER_BUILD=1` — защита от рекурсии через `dotnet publish`).
 
 Скрипт: сертификат → `dotnet publish` (Server, Worker, GrantLogonRight) → подпись всех `.exe` (DigiCert / Sectigo / GlobalSign; если timestamp недоступен — подпись без него) → Inno Setup (Setup + Uninstall) → проверка подписей.
 
@@ -69,7 +73,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-signed-installer.ps1
 
 Скопируйте Setup на внутренний UNC и на целевом ПК запустите **от администратора**. Мастер: Server/Worker, учётка, `B:` → UNC, токен бота.
 
-CI собирает **неподписанный** Setup: `dotnet build Installer\Installer.build.proj -t:Installer`. Для релиза на рабочие ПК нужна команда выше.
+CI собирает **неподписанный** Setup: `dotnet build Installer\Installer.build.proj -t:Installer`.
 
 ### Один раз: доверить CER на рабочих ПК
 

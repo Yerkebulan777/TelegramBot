@@ -1,0 +1,41 @@
+<Project>
+
+  <!-- Release-сборка автоматически собирает подписанный инсталлятор.
+       Якорь — TelegramBot.Server, чтобы скрипт запускался один раз на сборку решения.
+       Отключение: -p:BuildSignedInstaller=false
+       Пропускается на CI (там CI собирает неподписанный Setup через Installer.build.proj)
+       и внутри самого скрипта (TELEGRAMBOT_INSTALLER_BUILD=1) — иначе рекурсия
+       через dotnet publish. -->
+
+  <PropertyGroup>
+    <BuildSignedInstaller Condition="'$(BuildSignedInstaller)' == '' AND
+                                     '$(MSBuildProjectName)' == 'TelegramBot.Server' AND
+                                     '$(Configuration)' == 'Release' AND
+                                     '$(OS)' == 'Windows_NT' AND
+                                     '$(TELEGRAMBOT_INSTALLER_BUILD)' != '1' AND
+                                     '$(GITHUB_ACTIONS)' != 'true' AND
+                                     '$(TF_BUILD)' != 'true' AND
+                                     '$(ContinuousIntegrationBuild)' != 'true'">true</BuildSignedInstaller>
+  </PropertyGroup>
+
+  <Target Name="BuildSignedInstallerAfterRelease"
+          AfterTargets="Build"
+          Condition="'$(BuildSignedInstaller)' == 'true'">
+
+    <PropertyGroup>
+      <_SignedInstallerScript>$(MSBuildThisFileDirectory)scripts\build-signed-installer.ps1</_SignedInstallerScript>
+      <_PowerShellExe>$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe</_PowerShellExe>
+      <_PowerShellExe Condition="!Exists('$(_PowerShellExe)')">powershell.exe</_PowerShellExe>
+    </PropertyGroup>
+
+    <Error Condition="!Exists('$(_SignedInstallerScript)')"
+           Text="Не найден скрипт подписанной сборки: $(_SignedInstallerScript). Отключить: -p:BuildSignedInstaller=false" />
+
+    <Message Importance="high" Text="Release: сборка подписанного инсталлятора ($(_SignedInstallerScript))" />
+
+    <Exec Command="&quot;$(_PowerShellExe)&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;$(_SignedInstallerScript)&quot; -Configuration $(Configuration)"
+          WorkingDirectory="$(MSBuildThisFileDirectory)"
+          EnvironmentVariables="TELEGRAMBOT_INSTALLER_BUILD=1" />
+  </Target>
+
+</Project>
