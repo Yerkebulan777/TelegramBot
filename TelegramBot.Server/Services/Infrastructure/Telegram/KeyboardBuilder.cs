@@ -16,14 +16,22 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
     public const int SessionsPageSize = 15;
     private const int MaxListButtonTextLength = 64;
 
-    public InlineKeyboardMarkup GetSelectionKeyboard(long userId, UserSession session)
+    public InlineKeyboardMarkup GetSelectionKeyboard(UserSession session)
     {
-        return fileNavigationService.GetSectionsView(userId, session.Selection.CurrentPath);
+        return fileNavigationService.GetSectionsView(session, session.Selection.CurrentPath);
     }
 
     public InlineKeyboardMarkup GetCommandKeyboard(CommandGroup group, UserSession session)
     {
         return BuildSelectableCommandsKeyboard(session, CommandCatalog.GetByGroup(group));
+    }
+
+    public InlineKeyboardMarkup GetRootPathKeyboard()
+    {
+        return new InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton.WithCallbackData("Изменить корневой путь", CallbackPrefixes.RootPath)]
+        ]);
     }
 
     /// <summary>Строит клавиатуру списка сессий с фильтрами и постраничной навигацией.</summary>

@@ -20,9 +20,11 @@ public sealed partial class SlashCommandService(
     SessionsListRenderer sessionsListRenderer,
     IOptions<FileSystemOptions> fileSystemOptions,
     IOptions<RateLimitOptions> rateLimitOptions,
+    RootPathProvider rootPathProvider,
+    UncRootPathValidator uncRootPathValidator,
     ILogger<SlashCommandService> logger)
 {
-    private readonly FileSystemOptions _options = fileSystemOptions.Value;
+    private readonly FileSystemOptions _fileSystemOptions = fileSystemOptions.Value;
     private readonly RateLimitOptions _rateLimitOptions = rateLimitOptions.Value;
 
     public async Task HandleUserCommandAsync(Message message, UserSession session, CancellationToken cancellationToken = default)
@@ -43,8 +45,14 @@ public sealed partial class SlashCommandService(
 
         if (command == "/start")
         {
-            session.Reset(_options.RootPath);
+            session.Reset(await rootPathProvider.GetRootPathAsync(cancellationToken));
             await SendHelpMessageAsync(userId, session);
+            return;
+        }
+
+        if (session.AwaitingRootPath && !command.StartsWith('/'))
+        {
+            await TrySetRootPathAsync(message, session, cancellationToken);
             return;
         }
 
@@ -64,7 +72,7 @@ public sealed partial class SlashCommandService(
 
             case "/status":
                 logger.LogDebug("/status: user={Username} ({UserId})", username, userId);
-                session.Reset(_options.RootPath);
+                session.Reset(await rootPathProvider.GetRootPathAsync());
                 session.StatusFilter = StatusFilters.All;
 
                 var sent = await sessionsListRenderer.SendNewAsync(userId, session.StatusFilter);
@@ -79,7 +87,7 @@ public sealed partial class SlashCommandService(
 
             case "/help":
                 logger.LogDebug("/help: user={Username} ({UserId})", username, userId);
-                session.Reset(_options.RootPath);
+                session.Reset(await rootPathProvider.GetRootPathAsync());
                 await SendHelpMessageAsync(userId, session);
                 break;
 
@@ -142,9 +150,9 @@ public sealed partial class SlashCommandService(
             username, userId, submission.Commands.Count, selectedFiles.Count);
 
         var commandNames = submission.Commands.Select(GetCommandDisplayName).ToArray();
-        var projectName = ProjectPathHelper.GetProjectName(selectedFiles.First(), _options.ProjectDirectoryName);
+        var projectName = ProjectPathHelper.GetProjectName(selectedFiles.First(), _fileSystemOptions.ProjectDirectoryName);
         var sectionNames = selectedFiles
-            .Select(file => ProjectPathHelper.GetSectionFolderName(file, _options.ProjectDirectoryName))
+            .Select(file => ProjectPathHelper.GetSectionFolderName(file, _fileSystemOptions.ProjectDirectoryName))
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -171,7 +179,7 @@ public sealed partial class SlashCommandService(
 
             var correlationId = Guid.NewGuid().ToString("N");
             var (sessionId, queuedFileCount, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
-                submission.Commands, filesToProcess, userId, username, filesToProcess.Count, projectName, priorities, correlationId);
+                submission.Commands, filesToProcess, userId, username, filesToProcess.Count, session.RootPath, projectName, priorities, correlationId);
             if (sessionId is null)
             {
                 // Каждая пара (команда, файл) пойман уникальным индексом idx_commands_active_unique — все пары дубли
@@ -189,7 +197,7 @@ public sealed partial class SlashCommandService(
             session.SessionId = sessionId.Value;
             await outputService.ClearChatHistoryAsync(userId, session);
 
-            session.Selection.Reset(_options.RootPath);
+            session.Selection.Reset(session.RootPath);
 
             _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, queuedMessage), session);
         }
@@ -203,7 +211,7 @@ public sealed partial class SlashCommandService(
     /// <summary>Перерисовывает selection-клавиатуру из текущего состояния сессии.</summary>
     private async Task RenderSelectionAsync(long userId, UserSession session)
     {
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(userId, session);
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(session);
         await outputService.EditMessageReplyMarkupAsync(userId, session.FileSelectionMessageId!.Value, keyboard);
     }
 
@@ -258,7 +266,14 @@ public sealed partial class SlashCommandService(
 
     private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
     {
-        session.Reset(_options.RootPath);
+        var rootPath = await rootPathProvider.GetRootPathAsync();
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            await SendSafeResponseAsync(userId, "⚠️ Корневой UNC-путь не настроен. Откройте /help и задайте его.", session);
+            return;
+        }
+
+        session.Reset(rootPath);
 
         var commandKeyboard = keyboardBuilder.GetCommandKeyboard(commandGroup, session);
 
@@ -280,15 +295,49 @@ public sealed partial class SlashCommandService(
 
     private async Task SendHelpMessageAsync(long userId, UserSession session)
     {
+        var configuredRootPath = await rootPathProvider.GetRootPathAsync();
+        var rootPath = string.IsNullOrWhiteSpace(configuredRootPath) ? "не настроен" : configuredRootPath;
         var helpText = new StringBuilder()
             .AppendLine("Доступные команды:\n")
             .AppendLine("/export — экспорт файлов в PDF, DWG, NWC, IFC")
             .AppendLine("/automation — автоматизация задач связанными с BIM")
             .AppendLine("/status — статус выполнения задач и управление сессиями")
             .AppendLine("/help — справка по командам")
+            .AppendLine()
+            .AppendLine($"Корневой UNC-путь: {rootPath}")
             .ToString();
 
-        _=await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, helpText), session);
+        _=await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithKeyboardAsync(userId, helpText, keyboardBuilder.GetRootPathKeyboard()), session);
+    }
+
+    internal async Task BeginRootPathUpdateAsync(long userId, UserSession session)
+    {
+        await outputService.ClearChatHistoryAsync(userId, session);
+        session.Selection.StopFileSelection();
+        session.AwaitingRootPath = true;
+        _ = await messageTrackingService.TrackAsync(
+            outputService.SendForceReplyAsync(userId, "Отправьте UNC-путь: \\сервер\\шара или \\сервер\\шара\\папка."), session);
+    }
+
+    private async Task TrySetRootPathAsync(Message message, UserSession session, CancellationToken cancellationToken)
+    {
+        var userId = message.From!.Id;
+        if (!uncRootPathValidator.TryValidate(message.Text, out var rootPath, out var error))
+        {
+            await SendSafeResponseAsync(userId, $"⚠️ {error} Попробуйте ещё раз.", session);
+            return;
+        }
+
+        if (!await rootPathProvider.SetRootPathAsync(rootPath, userId, cancellationToken))
+        {
+            await SendSafeResponseAsync(userId, "⚠️ Не удалось сохранить путь в базе данных. Попробуйте ещё раз.", session);
+            return;
+        }
+
+        session.Reset(rootPath);
+        await outputService.ClearChatHistoryAsync(userId, session);
+        await SendHelpMessageAsync(userId, session);
     }
 
     /// <summary>
@@ -298,7 +347,7 @@ public sealed partial class SlashCommandService(
     internal async Task CancelSelectionAsync(long userId, UserSession session, string? message = null)
     {
         await outputService.ClearChatHistoryAsync(userId, session);
-        session.Reset(_options.RootPath);
+        session.Reset(session.RootPath);
 
         if (message is null)
         {

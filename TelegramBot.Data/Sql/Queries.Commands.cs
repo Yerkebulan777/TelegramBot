@@ -5,10 +5,11 @@ internal static partial class SqlQueries
     internal static class Commands
     {
         internal const string InsertBatch = @"
-            INSERT INTO Commands (SessionId, CommandText, FilePath, ExecutionOrder, Priority, Partition)
+            INSERT INTO Commands (SessionId, CommandText, FilePath, RootPath, ExecutionOrder, Priority, Partition)
             SELECT @SessionId,
                    data.CommandText,
                    data.FilePath,
+                   @RootPath,
                    data.ExecutionOrder,
                    data.Priority,
                    'file:' || md5(lower(COALESCE(NULLIF(data.FilePath, ''), data.CommandText)))
@@ -99,7 +100,7 @@ internal static partial class SqlQueries
 
         internal const string ClaimAndReturn = @"
             WITH candidates AS (
-                SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.ExecutionOrder,
+                SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.RootPath, c.ExecutionOrder,
                        s.UserId, s.Username, s.CorrelationId,
                        c.Partition,
                        c.Priority, c.RetryCount, c.CreatedAt
@@ -118,14 +119,14 @@ internal static partial class SqlQueries
             ),
             one_per_partition AS (
                 SELECT DISTINCT ON (Partition)
-                       CommandId, SessionId, CommandText, FilePath, ExecutionOrder,
+                       CommandId, SessionId, CommandText, FilePath, RootPath, ExecutionOrder,
                        UserId, Username, CorrelationId, Partition,
                        Priority, RetryCount, CreatedAt
                 FROM candidates
                 ORDER BY Partition, Priority ASC, CreatedAt ASC, CommandId ASC
             ),
             selected AS (
-                SELECT p.CommandId, p.SessionId, p.CommandText, p.FilePath, p.ExecutionOrder,
+                SELECT p.CommandId, p.SessionId, p.CommandText, p.FilePath, p.RootPath, p.ExecutionOrder,
                        p.UserId, p.Username, p.CorrelationId, p.Partition,
                        p.Priority, p.RetryCount
                 FROM one_per_partition p
@@ -144,7 +145,7 @@ internal static partial class SqlQueries
             WHERE c.CommandId = selected.CommandId
               AND c.Status = 'pending'
             RETURNING selected.CommandId, selected.SessionId, selected.CommandText,
-                      selected.FilePath, selected.ExecutionOrder, selected.UserId, 
+                      selected.FilePath, selected.RootPath, selected.ExecutionOrder, selected.UserId,
                       selected.Username, selected.CorrelationId,
                       selected.Partition,
                       selected.Priority, selected.RetryCount;";

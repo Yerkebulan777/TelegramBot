@@ -25,6 +25,8 @@ public class UserSession
     public int? FileSelectionMessageId { get; set; }
     public int? StatusMessageId { get; set; }
     public int? LastActionsMessageId { get; set; }
+    public string RootPath { get; private set; } = string.Empty;
+    public bool AwaitingRootPath { get; set; }
 
     /// <summary>Message ID of the last user-sent message (slash command or reply keyboard button).</summary>
     public int? LastUserMessageId { get; set; }
@@ -35,6 +37,7 @@ public class UserSession
     /// </summary>
     public void Reset(string rootPath)
     {
+        RootPath = rootPath;
         Selection.Reset(rootPath);
         CommandSelectionMessageId = null;
         FileSelectionMessageId = null;
@@ -44,5 +47,6 @@ public class UserSession
         LastUserMessageId = null;
         StatusFilter = "ALL";
         StatusPage = 0;
+        AwaitingRootPath = false;
     }
 }

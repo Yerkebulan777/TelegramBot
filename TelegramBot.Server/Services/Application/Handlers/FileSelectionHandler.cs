@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -11,11 +9,8 @@ public sealed class FileSelectionHandler(
     TelegramOutputService outputService,
     SlashCommandService slashCommandService,
     TelegramBot.Server.Services.Infrastructure.FileSystem.FileSystemBrowser fileBrowser,
-    IOptions<FileSystemOptions> options,
     ILogger<FileSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly FileSystemOptions _options = options.Value;
-
     public override HashSet<string> SupportedPrefixes { get; } =
     [
         CallbackPrefixes.File,
@@ -61,7 +56,7 @@ public sealed class FileSelectionHandler(
         {
             // Шаг назад: из 01_PROJECT — на корень, из раздела — в 01_PROJECT.
             flow.GoBack();
-            if (!ValidatePathWithinRoot(_options, flow.CurrentPath, "folder navigation", context))
+            if (!ValidatePathWithinRoot(session.RootPath, flow.CurrentPath, "folder navigation", context))
             {
                 await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
                 return;
@@ -69,8 +64,8 @@ public sealed class FileSelectionHandler(
         }
         else
         {
-            var newPath = fileBrowser.ResolveSelectionPath(flow.CurrentPath, context.ParsedCallback.Argument);
-            if (newPath == null || !ValidatePathWithinRoot(_options, newPath, "folder navigation", context))
+            var newPath = fileBrowser.ResolveSelectionPath(session.RootPath, flow.CurrentPath, context.ParsedCallback.Argument);
+            if (newPath == null || !ValidatePathWithinRoot(session.RootPath, newPath, "folder navigation", context))
             {
                 await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
                 return;
@@ -94,7 +89,7 @@ public sealed class FileSelectionHandler(
             ? flow.CurrentPath
             : context.ParsedCallback.Argument;
 
-        if (ValidatePathWithinRoot(_options, path, "select-all", context))
+        if (ValidatePathWithinRoot(session.RootPath, path, "select-all", context))
         {
             flow.AddFiles(fileBrowser.GetSelectableFiles(path));
         }
@@ -108,7 +103,7 @@ public sealed class FileSelectionHandler(
         var flow = session.Selection;
         session.FileSelectionMessageId = context.MessageId;
 
-        var filePath = fileBrowser.ResolveSelectionPath(flow.CurrentPath, context.ParsedCallback.Argument);
+        var filePath = fileBrowser.ResolveSelectionPath(session.RootPath, flow.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
             await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Файл не найден.");
@@ -127,7 +122,7 @@ public sealed class FileSelectionHandler(
     /// </summary>
     private async Task ReRenderSelectionAsync(CallbackContext context, string ackText)
     {
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, context.Session);
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.Session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
         await outputService.AnswerCallbackAsync(context.CallbackQueryId, ackText);
     }

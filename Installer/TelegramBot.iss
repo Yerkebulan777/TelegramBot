@@ -8,11 +8,6 @@
 ;
 ; What this script does that a plain "sc.exe create" walkthrough doesn't:
 ;   - lets the admin pick Server / Worker / both
-;   - resolves a mapped drive letter (e.g. B:) to its UNC path AT INSTALL TIME,
-;     on the admin's own session where the mapping actually exists (see chat:
-;     services can't see per-user drive mappings, so this must happen here,
-;     not at service startup)
-;   - writes that UNC path into each component's appsettings.Local.json
 ;   - registers Server under a dedicated account with auto-restart
 ;   - registers Worker as an interactive Task Scheduler job, NOT a service:
 ;     Worker launches Revit, and Windows services run in Session 0, isolated
@@ -64,64 +59,7 @@ Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server;
 [Code]
 var
   AccountPage: TInputQueryWizardPage;
-  PathPage: TInputDirWizardPage;
   TelegramPage: TInputQueryWizardPage;
-  ResolvedPath: String;
-
-{ Resolves "B:" (or "B:\", which is what CreateInputDirPage actually hands
-  back for a drive root — it normalizes with a trailing backslash) to
-  "\\server\share". Two mechanisms, tried in order:
-  1. ExpandUNCFileName — built-in Pascal Script function using the CURRENT
-     process's drive map (no manual WNetGetConnection FFI — that was the
-     original bug: Inno 6 Pascal strings are Unicode, WNetGetConnectionA is
-     ANSI, buffer marshalling silently failed). Works only when the mapping
-     is visible to THIS process — and a UAC-elevated installer does NOT
-     inherit the interactive session's mappings unless EnableLinkedConnections=1
-     (HKLM ...\Policies\System; written below in [Registry], takes effect on
-     next logon). On a fresh machine this mechanism alone kept failing.
-  2. HKCU\Network\<letter>\RemotePath — where Explorer / "net use" record
-     classic mapped drives. HKCU is the same hive for a consent-elevated
-     user, so the mapping is readable even when invisible to this process
-     (verified on a live box: HKCU\Network\z → RemotePath). This is what
-     makes resolution work on the very first install, no re-login needed.
-     Caveat: GPP (Group Policy Preferences) drive maps don't write this
-     key — for those only mechanism 1 helps, after the re-login.
-  Subpaths resolve too ("Z:\01_PROJECT" → "\\server\share\01_PROJECT") —
-  an unresolved raw drive-letter path would be invisible to the service.
-  Success is False only for a bare drive root that neither mechanism could
-  map to a network path (not connected, GPP-mapped before the re-login, or
-  a genuinely local disk); the caller must block on that — an unresolved
-  drive letter is invisible to a Windows service and is exactly what caused
-  the Server outage this was written to fix, so this can no longer be a
-  soft warning that lets Next through.
-  An input that's already a UNC path always succeeds untouched. }
-function ResolveDriveToUNC(const Input: String; var Success: Boolean): String;
-var
-  Trimmed, DriveSpec, UncPath, SubPath: String;
-begin
-  Trimmed := Trim(Input);
-  Result := ExpandUNCFileName(Trimmed);
-
-  { Mechanism 2 fires when the input is a drive-letter path and mechanism 1
-    left the letter unresolved. Registry keys are case-insensitive, so the
-    letter's case doesn't matter. }
-  if (Length(Trimmed) >= 2) and (Trimmed[2] = ':') and
-     (CompareText(Copy(Result, 1, 2), Copy(Trimmed, 1, 2)) = 0) then
-  begin
-    SubPath := '';
-    if (Length(Trimmed) > 3) and (Trimmed[3] = '\') then
-      SubPath := Copy(Trimmed, 3, Length(Trimmed) - 2);
-    if RegQueryStringValue(HKCU, 'Network\' + Trimmed[1], 'RemotePath', UncPath) and
-       (Trim(UncPath) <> '') then
-      Result := Trim(UncPath) + SubPath;
-  end;
-
-  DriveSpec := Trimmed;
-  if (Length(DriveSpec) = 3) and (DriveSpec[2] = ':') and (DriveSpec[3] = '\') then
-    DriveSpec := Copy(DriveSpec, 1, 2);
-  Success := not ((Length(DriveSpec) = 2) and (DriveSpec[2] = ':') and
-    (CompareText(Copy(Result, 1, 2), DriveSpec) = 0));
-end;
 
 procedure InitializeWizard;
 begin
@@ -136,15 +74,7 @@ begin
   AccountPage.Add('Пароль:', True);
   AccountPage.Values[0] := ExpandConstant('{%USERDOMAIN}\{username}');
 
-  PathPage := CreateInputDirPage(AccountPage.ID,
-    'Путь к файловой шаре', 'Где лежат файлы Revit/проектов?',
-    'Можно ввести букву смонтированного диска (B:) — она будет преобразована в UNC-путь ' +
-    'на основе текущей сессии, либо нажать «Обзор» и выбрать сетевую папку (\\сервер\шара) напрямую.',
-    True, '');
-  PathPage.Add('Путь:');
-  PathPage.Values[0] := 'B:';
-
-  TelegramPage := CreateInputQueryPage(PathPage.ID,
+  TelegramPage := CreateInputQueryPage(AccountPage.ID,
     'Настройки Telegram-бота', 'Только для Server — токен бота.',
     'Токен выдаёт @BotFather.');
   TelegramPage.Add('Bot token:', False);
@@ -157,67 +87,10 @@ begin
     Result := not WizardIsComponentSelected('server');
 end;
 
-{ Best-effort hints for the blocked-path message: UNC paths this user is
-  known to use, so the admin can type one directly instead of hunting for it.
-  Both sources are readable from the elevated process:
-  - HKCU\Network\<letter> — persistent mappings (letter → UNC lines);
-  - MountPoints2 "##server#share" keys — shares the shell has touched,
-    which includes targets of GPP/logon-script mappings whose letter→UNC
-    binding lives only in the interactive session's WNet table and is
-    fundamentally invisible to an elevated process (verified on a live box:
-    nothing in HKCU records B:'s letter binding; the share path itself
-    shows up in MountPoints2).
-  Duplicates between the two sources are suppressed by substring check. }
-function KnownShareHint: String;
-var
-  Names: TArrayOfString;
-  I: Integer;
-  Unc, Share: String;
-begin
-  Result := '';
-  if RegGetSubkeyNames(HKCU, 'Network', Names) then
-    for I := 0 to GetArrayLength(Names) - 1 do
-      if RegQueryStringValue(HKCU, 'Network\' + Names[I], 'RemotePath', Unc) and (Trim(Unc) <> '') then
-        Result := Result + #13#10 + '  ' + Uppercase(Names[I]) + ':  →  ' + Trim(Unc);
-  if RegGetSubkeyNames(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2', Names) then
-    for I := 0 to GetArrayLength(Names) - 1 do
-      if Copy(Names[I], 1, 2) = '##' then
-      begin
-        Share := '\\' + Copy(Names[I], 3, Length(Names[I]) - 2);
-        StringChangeEx(Share, '#', '\', True);
-        if Pos(Share, Result) = 0 then
-          Result := Result + #13#10 + '  ' + Share;
-      end;
-end;
-
 function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  ResolveOk: Boolean;
-  Hint: String;
 begin
   Result := True;
-  if CurPageID = PathPage.ID then
-  begin
-    if Trim(PathPage.Values[0]) = '' then
-    begin
-      MsgBox('Укажите путь к файловой шаре.', mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
-    ResolvedPath := ResolveDriveToUNC(PathPage.Values[0], ResolveOk);
-    if not ResolveOk then
-    begin
-      Hint := KnownShareHint;
-      if Hint <> '' then
-        Hint := #13#10#13#10 + 'Известные сетевые пути этого пользователя:' + Hint;
-      MsgBox('Не удалось определить сетевой путь для диска ' + Trim(PathPage.Values[0]) + '. ' +
-        'Проверьте, что диск подключён (net use), либо введите UNC-путь напрямую (\\сервер\шара).' + Hint,
-        mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
-  end
-  else if CurPageID = AccountPage.ID then
+  if CurPageID = AccountPage.ID then
   begin
     if Trim(AccountPage.Values[0]) = '' then
     begin
@@ -241,56 +114,33 @@ begin
   StringChangeEx(Result, '\', '\\', True);
 end;
 
-{ Server ships appsettings.Local.json with other keys already in it (token,
-  connection string, RootPath) — patch just the matched key's value in place,
-  preserving whatever trailing comma the original line had (JSON syntax
-  breaks if a comma is added/dropped on the wrong line). Worker has no
-  Local.json yet, so it's cheaper to just write a fresh minimal one. }
-procedure PatchJsonKey(const JsonPath, KeyName, NewValue: String; QuoteValue: Boolean);
+{ Точечно обновляет токен, не перезаписывая строку подключения в Local.json. }
+procedure PatchJsonKey(const JsonPath, KeyName, NewValue: String);
 var
   Lines: TArrayOfString;
   I: Integer;
-  Found: Boolean;
-  ValuePart, TrimmedLine, Suffix: String;
+  Suffix, TrimmedLine: String;
 begin
-  if QuoteValue then
-    ValuePart := '"' + JsonEscape(NewValue) + '"'
-  else
-    ValuePart := NewValue;
-  Found := False;
-  if LoadStringsFromFile(JsonPath, Lines) then
+  if not LoadStringsFromFile(JsonPath, Lines) then
   begin
-    for I := 0 to GetArrayLength(Lines) - 1 do
-    begin
-      if Pos('"' + KeyName + '"', Lines[I]) > 0 then
-      begin
-        TrimmedLine := TrimRight(Lines[I]);
-        if (Length(TrimmedLine) > 0) and (TrimmedLine[Length(TrimmedLine)] = ',') then
-          Suffix := ','
-        else
-          Suffix := '';
-        Lines[I] := '    "' + KeyName + '": ' + ValuePart + Suffix;
-        Found := True;
-      end;
-    end;
-    if Found then
-      SaveStringsToFile(JsonPath, Lines, False)
-    else
-      MsgBox('Не найдена строка "' + KeyName + '" в ' + JsonPath + ' — значение не записано, ' +
-        'настройте его вручную.', mbError, MB_OK);
-  end
-  else
     MsgBox('Файл не найден: ' + JsonPath, mbError, MB_OK);
-end;
+    exit;
+  end;
 
-procedure WriteWorkerRootPath(const JsonPath, NewPath: String);
-begin
-  SaveStringToFile(JsonPath,
-    '{' + #13#10 +
-    '  "FileSystem": {' + #13#10 +
-    '    "RootPath": "' + JsonEscape(NewPath) + '"' + #13#10 +
-    '  }' + #13#10 +
-    '}' + #13#10, False);
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    if Pos('"' + KeyName + '"', Lines[I]) > 0 then
+    begin
+      TrimmedLine := TrimRight(Lines[I]);
+      if (Length(TrimmedLine) > 0) and (TrimmedLine[Length(TrimmedLine)] = ',') then
+        Suffix := ','
+      else
+        Suffix := '';
+      Lines[I] := '    "' + KeyName + '": "' + JsonEscape(NewValue) + '"' + Suffix;
+      SaveStringsToFile(JsonPath, Lines, False);
+      exit;
+    end;
+
+  MsgBox('Не найдена строка "' + KeyName + '" в ' + JsonPath + '.', mbError, MB_OK);
 end;
 
 function QuoteArg(const S: String): String;
@@ -441,8 +291,7 @@ begin
 
   if WizardIsComponentSelected('server') then
   begin
-    PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'RootPath', ResolvedPath, True);
-    PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0], True);
+    PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0]);
     GrantServiceLogonRight(Account);
     if RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password) then
       GrantAccess(ExpandConstant('{app}'), Account);
@@ -450,16 +299,9 @@ begin
 
   if WizardIsComponentSelected('worker') then
   begin
-    WriteWorkerRootPath(ExpandConstant('{app}\Worker\appsettings.Local.json'), ResolvedPath);
     if RegisterWorkerTask('{#WorkerSvc}', ExpandConstant('{app}\Worker\{#WorkerExe}'), Account) then
       GrantAccess(ExpandConstant('{app}'), Account);
   end;
-
-  { Grant network share access on the resolved UNC path itself (best-effort —
-    requires rights on the file server, may need a domain admin to do this
-    step separately if the installer's admin isn't also a share admin). }
-  if WizardIsComponentSelected('server') or WizardIsComponentSelected('worker') then
-    GrantAccess(ResolvedPath, Account);
 end;
 
 [UninstallRun]

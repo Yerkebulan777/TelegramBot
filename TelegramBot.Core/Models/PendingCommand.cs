@@ -8,6 +8,7 @@ public class PendingCommand
     public required string CorrelationId { get; set; }
     public required string CommandText { get; set; }
     public string? FilePath { get; set; }
+    public string? RootPath { get; set; }
     public long UserId { get; set; }
     public int RetryCount { get; set; }
 }

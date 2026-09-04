@@ -2,7 +2,9 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Npgsql;
+using TelegramBot.Core.Config;
 
 namespace TelegramBot.Data;
 
@@ -18,6 +20,8 @@ namespace TelegramBot.Data;
 /// </summary>
 public sealed class DatabaseInitializerService(
     IConfiguration configuration,
+    IOptions<FileSystemOptions> fileSystemOptions,
+    UncRootPathValidator uncRootPathValidator,
     ILogger<DatabaseInitializerService> logger)
     : BackgroundService
 {
@@ -61,6 +65,11 @@ public sealed class DatabaseInitializerService(
 
     private async Task InitializeSchemaAsync(CancellationToken ct)
     {
+        var hasLegacyRootPath = uncRootPathValidator.TryValidate(
+            fileSystemOptions.Value.RootPath,
+            out var legacyRootPath,
+            out _);
+
         await using var conn = await CreateOpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
@@ -74,11 +83,17 @@ public sealed class DatabaseInitializerService(
             _ = await conn.ExecuteAsync(SqlQueries.Schema.MakeTrackedMessagesSessionNullable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateNotificationOutboxTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureNotificationOutboxColumns, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateRuntimeSettingsTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddCommandsStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddSessionsStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddNotificationOutboxStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled, transaction: tx);
+
+            if (hasLegacyRootPath)
+            {
+                _ = await conn.ExecuteAsync(SqlQueries.RuntimeSettings.SeedRootPath, new { RootPath = legacyRootPath }, tx);
+            }
 
             await tx.CommitAsync(ct);
         }

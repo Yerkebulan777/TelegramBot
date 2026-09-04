@@ -194,6 +194,15 @@ public class TelegramOutputService(
         }
     }
 
+    public Task<Message?> SendForceReplyAsync(long userId, string message)
+    {
+        return ExecuteWithRetryAsync(() => botClient.SendMessage(
+            chatId: userId,
+            text: message,
+            replyMarkup: new ForceReplyMarkup(),
+            parseMode: ParseMode.Markdown), userId);
+    }
+
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
     {
         try

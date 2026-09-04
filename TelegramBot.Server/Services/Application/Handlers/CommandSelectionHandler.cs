@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -9,11 +7,8 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class CommandSelectionHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
-    IOptions<FileSystemOptions> options,
     ILogger<CommandSelectionHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly FileSystemOptions _options = options.Value;
-
     public override HashSet<string> SupportedPrefixes { get; } =
     [
         CallbackPrefixes.ApplyCommands,
@@ -44,7 +39,7 @@ public sealed class CommandSelectionHandler(
 
         session.FileSelectionMessageId = context.MessageId;
 
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
     }
 
@@ -53,7 +48,7 @@ public sealed class CommandSelectionHandler(
         Logger.LogDebug("User {Username} ({UserId}) cancelled command selection", context.Username, context.UserId);
 
         // Сбрасываем состояние сессии
-        context.Session.Reset(_options.RootPath);
+        context.Session.Reset(context.Session.RootPath);
 
         // Удаляем все отслеживаемые сообщения, ничего не выводим
         await outputService.ClearChatHistoryAsync(context.UserId, context.Session);

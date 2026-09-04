@@ -18,8 +18,6 @@ public static class DependencyInjectionExtensions
     {
         _ = services.AddOptions<FileSystemOptions>()
             .Bind(configuration.GetSection(FileSystemOptions.SectionName))
-            .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "RootPath is required")
-            .Validate(options => Directory.Exists(options.RootPath), "RootPath directory must exist")
             .ValidateOnStart();
 
         _ = services.AddOptions<BotOptions>()
@@ -48,6 +46,7 @@ public static class DependencyInjectionExtensions
         _ = services.AddSingleton<CallbackHandlerBase, CommandToggleHandler>();
         _ = services.AddSingleton<CallbackHandlerBase, SessionManagementHandler>();
         _ = services.AddSingleton<CallbackHandlerBase, CommandSelectionHandler>();
+        _ = services.AddSingleton<CallbackHandlerBase, RootPathHandler>();
         _ = services.AddSingleton<CallbackDispatcher>();
 
         _ = services.AddSingleton<CommandAppService>();
@@ -58,6 +57,9 @@ public static class DependencyInjectionExtensions
         _ = services.AddSingleton<SessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
         _ = services.AddSingleton<CommandDataService>();
+        _ = services.AddSingleton<UncRootPathValidator>();
+        _ = services.AddSingleton<RootPathDataService>();
+        _ = services.AddSingleton<RootPathProvider>();
         _ = services.AddSingleton<SessionDataService>();
         _ = services.AddSingleton<MessageTrackingDataService>();
         _ = services.AddSingleton<NotificationOutboxDataService>();

@@ -131,10 +131,13 @@ public sealed class CommandPreparer(
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(_fileSystemOptions.RootPath) && !_fileSystemOptions.IsPathWithinRoot(fullPath))
+            var rootPath = string.IsNullOrWhiteSpace(cmd.RootPath)
+                ? _fileSystemOptions.RootPath
+                : cmd.RootPath;
+            if (!string.IsNullOrWhiteSpace(rootPath) && !FileSystemOptions.IsPathWithinRoot(rootPath, fullPath))
             {
                 logger.LogWarning("Validation: path outside root '{File}' ({Id}), root='{Root}'",
-                    cmd.FilePath, cmd.CommandId, _fileSystemOptions.RootPath);
+                    cmd.FilePath, cmd.CommandId, rootPath);
                 return false;
             }
         }

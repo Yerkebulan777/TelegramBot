@@ -52,9 +52,15 @@ public sealed class FileSystemOptions
     /// <summary>Проверяет, что путь находится внутри корневой директории.</summary>
     public bool IsPathWithinRoot(string path)
     {
+        return IsPathWithinRoot(RootPath, path);
+    }
+
+    /// <summary>Проверяет, что путь находится внутри указанной корневой директории.</summary>
+    public static bool IsPathWithinRoot(string rootPath, string path)
+    {
         try
         {
-            var root = NormalizePath(RootPath);
+            var root = NormalizePath(rootPath);
             var candidate = NormalizePath(path);
 
             return candidate.Equals(root, StringComparison.OrdinalIgnoreCase)

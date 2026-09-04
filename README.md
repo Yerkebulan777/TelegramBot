@@ -29,8 +29,7 @@ dotnet build TelegramBot.slnx
   "ConnectionStrings": {
     "Postgres": "Host=localhost;Database=telegram_bot;Username=postgres;Password=postgres;Timeout=30;Minimum Pool Size=2;Connection Idle Lifetime=300"
   },
-  "TelegramBot": { "Token": "BOT_TOKEN" },
-  "FileSystem": { "RootPath": "B:\\" }
+  "TelegramBot": { "Token": "BOT_TOKEN" }
 }
 ```
 
@@ -71,7 +70,7 @@ Release-сборка (`Directory.Build.targets`, якорь — `TelegramBot.Ser
 Результат: `Installer\Output\TelegramBotSetup.exe`  
 Публичный CER: `%USERPROFILE%\Documents\TelegramBot-CodeSigning\TelegramBot-Internal-Code-Signing-<THUMBPRINT>.cer`
 
-Скопируйте Setup на внутренний UNC и на целевом ПК запустите **от администратора**. Мастер: Server/Worker, учётка, `B:` → UNC, токен бота.
+Скопируйте Setup на внутренний UNC и на целевом ПК запустите **от администратора**. Мастер: Server/Worker, учётка, токен бота. После запуска Server любой авторизованный пользователь открывает `/help`, нажимает «Изменить корневой путь» и отправляет прямой UNC-путь: `\\сервер\шара` или `\\сервер\шара\папка`. Буквы дисков (`B:\`) и локальные пути не принимаются; учётная запись службы Server должна иметь доступ к указанной шаре.
 
 CI собирает **неподписанный** Setup: `dotnet build Installer\Installer.build.proj -t:Installer`.
 
