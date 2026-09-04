@@ -14,7 +14,9 @@ public sealed class RootPathHandler(
 
     public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "Введите UNC-путь.");
-        await slashCommandService.BeginRootPathUpdateAsync(context.UserId, context.Session);
+        var canConfigure = await slashCommandService.BeginRootPathUpdateAsync(context.UserId, context.Session, cancellationToken);
+        await outputService.AnswerCallbackAsync(
+            context.CallbackQueryId,
+            canConfigure ? "Введите букву диска или UNC-путь." : "Корневой путь может менять только администратор.");
     }
 }

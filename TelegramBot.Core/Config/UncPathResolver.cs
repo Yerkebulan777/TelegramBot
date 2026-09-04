@@ -1,10 +1,12 @@
+using Microsoft.Win32;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace TelegramBot.Core.Config;
 
 /// <summary>
 /// Определяет UNC-путь подключённого сетевого диска: <c>Z:\Проекты</c> → <c>\\сервер\шара\Проекты</c>.
-/// Пользователь видит в проводнике только букву диска — UNC-путь Windows скрывает.
+/// Сначала использует подключение текущей сессии, затем сохранённые подключения загруженных профилей Windows.
 /// </summary>
 public static class UncPathResolver
 {
@@ -28,6 +30,17 @@ public static class UncPathResolver
             return false;
         }
 
+        if (TryResolveCurrentSession(path, out uncPath))
+        {
+            return true;
+        }
+
+        return TryResolveLoadedUserProfiles(path, out uncPath);
+    }
+
+    private static bool TryResolveCurrentSession(string path, out string uncPath)
+    {
+        uncPath = string.Empty;
         var size = 1024;
         var buffer = Marshal.AllocHGlobal(size);
 
@@ -65,6 +78,55 @@ public static class UncPathResolver
                 Marshal.FreeHGlobal(buffer);
             }
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool TryResolveLoadedUserProfiles(string path, out string uncPath)
+    {
+        uncPath = string.Empty;
+
+        var driveRoot = Path.GetPathRoot(path);
+        if (string.IsNullOrWhiteSpace(driveRoot) || driveRoot.Length < 2 || driveRoot[1] != ':')
+        {
+            return false;
+        }
+
+        var driveLetter = char.ToUpperInvariant(driveRoot[0]);
+        var relativePath = path[driveRoot.Length..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            foreach (var sid in Registry.Users.GetSubKeyNames())
+            {
+                using var driveKey = Registry.Users.OpenSubKey($@"{sid}\Network\{driveLetter}");
+                var remotePath = driveKey?.GetValue("RemotePath") as string;
+                if (string.IsNullOrWhiteSpace(remotePath) || !remotePath.StartsWith(@"\\", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var candidate = remotePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.IsNullOrEmpty(relativePath))
+                {
+                    candidate = Path.Combine(candidate, relativePath);
+                }
+
+                candidates.Add(candidate);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+
+        if (candidates.Count != 1)
+        {
+            return false;
+        }
+
+        uncPath = candidates.Single();
+        return true;
     }
 
     [DllImport("mpr.dll", EntryPoint = "WNetGetUniversalNameW", CharSet = CharSet.Unicode, SetLastError = true)]

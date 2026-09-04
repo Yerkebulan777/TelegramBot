@@ -36,6 +36,13 @@ public sealed partial class SlashCommandService(
         var rawText = message.Text!;
         var command = NormalizeCommandText(rawText);
 
+        if (session.AwaitingRootPath && !command.StartsWith('/'))
+        {
+            logger.LogDebug("Root path submitted: user={UserId}", userId);
+            await TrySetRootPathAsync(message, session, cancellationToken);
+            return;
+        }
+
         logger.LogDebug("Cmd: cmd={Command}, user={Username} ({UserId})", command, username, userId);
 
         if (command.StartsWith('/'))
@@ -47,12 +54,6 @@ public sealed partial class SlashCommandService(
         {
             session.Reset(await rootPathProvider.GetRootPathAsync(cancellationToken));
             await SendHelpMessageAsync(userId, session);
-            return;
-        }
-
-        if (session.AwaitingRootPath && !command.StartsWith('/'))
-        {
-            await TrySetRootPathAsync(message, session, cancellationToken);
             return;
         }
 
@@ -296,7 +297,8 @@ public sealed partial class SlashCommandService(
     private async Task SendHelpMessageAsync(long userId, UserSession session)
     {
         var configuredRootPath = await rootPathProvider.GetRootPathAsync();
-        var rootPath = string.IsNullOrWhiteSpace(configuredRootPath) ? "не настроен" : configuredRootPath;
+        var rootPath = string.IsNullOrWhiteSpace(configuredRootPath) ? "не настроен" : "настроен";
+        var canConfigure = await rootPathProvider.CanConfigureRootPathAsync(userId);
         var helpText = new StringBuilder()
             .AppendLine("Доступные команды:\n")
             .AppendLine("/export — экспорт файлов в PDF, DWG, NWC, IFC")
@@ -307,17 +309,27 @@ public sealed partial class SlashCommandService(
             .AppendLine($"Корневой путь: {rootPath}")
             .ToString();
 
-        _=await messageTrackingService.TrackAsync(
-            outputService.SendMessageWithKeyboardAsync(userId, helpText, keyboardBuilder.GetRootPathKeyboard()), session);
+        var response = canConfigure
+            ? outputService.SendMessageWithKeyboardAsync(userId, helpText, keyboardBuilder.GetRootPathKeyboard())
+            : outputService.SendMessageAsync(userId, helpText);
+
+        _ = await messageTrackingService.TrackAsync(response, session);
     }
 
-    internal async Task BeginRootPathUpdateAsync(long userId, UserSession session)
+    internal async Task<bool> BeginRootPathUpdateAsync(long userId, UserSession session, CancellationToken cancellationToken = default)
     {
+        if (!await rootPathProvider.CanConfigureRootPathAsync(userId, cancellationToken))
+        {
+            logger.LogWarning("Rejected root path update attempt: user={UserId}", userId);
+            return false;
+        }
+
         await outputService.ClearChatHistoryAsync(userId, session);
         session.Selection.StopFileSelection();
         session.AwaitingRootPath = true;
         _ = await messageTrackingService.TrackAsync(
-            outputService.SendForceReplyAsync(userId, "Отправьте букву диска с проектами, например Z:\\ (можно и вложенную папку). Сетевой UNC-путь бот определит сам."), session);
+            outputService.SendForceReplyAsync(userId, "Отправьте букву диска с проектами, например Z:\\ (можно и вложенную папку). Бот определит сетевой UNC-путь сам."), session);
+        return true;
     }
 
     private async Task TrySetRootPathAsync(Message message, UserSession session, CancellationToken cancellationToken)
@@ -329,7 +341,15 @@ public sealed partial class SlashCommandService(
             return;
         }
 
-        if (!await rootPathProvider.SetRootPathAsync(rootPath, userId, cancellationToken))
+        var updateResult = await rootPathProvider.SetRootPathAsync(rootPath, userId, cancellationToken);
+        if (updateResult == RootPathUpdateResult.NotAdministrator)
+        {
+            session.AwaitingRootPath = false;
+            await SendSafeResponseAsync(userId, "⚠️ Корневой путь может менять только администратор.", session);
+            return;
+        }
+
+        if (updateResult != RootPathUpdateResult.Updated)
         {
             await SendSafeResponseAsync(userId, "⚠️ Не удалось сохранить путь в базе данных. Попробуйте ещё раз.", session);
             return;

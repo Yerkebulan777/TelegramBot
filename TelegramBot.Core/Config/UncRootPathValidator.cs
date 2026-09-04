@@ -45,7 +45,7 @@ public sealed class UncRootPathValidator
 
         if (!UncPathResolver.TryResolve(fullPath, out var resolvedPath))
         {
-            error = $"{fullPath} — не сетевой диск. Подключите диск к сетевой шаре под учётной записью службы Server или отправьте путь вида \\\\сервер\\шара.";
+            error = "Не удалось однозначно определить сетевую шару для указанного диска. Войдите в Windows на машине Server под нужным профилем или укажите UNC-путь.";
             return false;
         }
 
