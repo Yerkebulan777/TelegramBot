@@ -299,6 +299,11 @@ public sealed partial class SlashCommandService(
         var configuredRootPath = await rootPathProvider.GetRootPathAsync();
         var rootPath = string.IsNullOrWhiteSpace(configuredRootPath) ? "не настроен" : "настроен";
         var canConfigure = await rootPathProvider.CanConfigureRootPathAsync(userId);
+        var pendingChange = canConfigure ? await rootPathProvider.GetPendingRootPathChangeAsync() : null;
+        var activePendingChange = pendingChange is { IsPending: true }
+            && pendingChange.CreatedAtUtc.AddMinutes(30) >= DateTimeOffset.UtcNow
+            ? pendingChange
+            : null;
         var helpText = new StringBuilder()
             .AppendLine("Доступные команды:\n")
             .AppendLine("/export — экспорт файлов в PDF, DWG, NWC, IFC")
@@ -307,10 +312,13 @@ public sealed partial class SlashCommandService(
             .AppendLine("/help — справка по командам")
             .AppendLine()
             .AppendLine($"Корневой путь: {rootPath}")
+            .Append(activePendingChange is null
+                ? string.Empty
+                : "\nОжидает подтверждения заявка на смену рабочей папки.\n")
             .ToString();
 
         var response = canConfigure
-            ? outputService.SendMessageWithKeyboardAsync(userId, helpText, keyboardBuilder.GetRootPathKeyboard())
+            ? outputService.SendMessageWithKeyboardAsync(userId, helpText, keyboardBuilder.GetRootPathKeyboard(activePendingChange?.Id))
             : outputService.SendMessageAsync(userId, helpText);
 
         _ = await messageTrackingService.TrackAsync(response, session);
@@ -330,6 +338,43 @@ public sealed partial class SlashCommandService(
         _ = await messageTrackingService.TrackAsync(
             outputService.SendForceReplyAsync(userId, "Отправьте букву диска с проектами, например Z:\\ (можно и вложенную папку). Бот определит сетевой UNC-путь сам."), session);
         return true;
+    }
+
+    internal async Task<string> DecidePendingRootPathChangeAsync(
+        long userId,
+        string requestId,
+        bool apply,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Guid.TryParse(requestId, out var changeId))
+        {
+            return "⚠️ Некорректная заявка на смену рабочей папки.";
+        }
+
+        var pendingChange = await rootPathProvider.GetPendingRootPathChangeAsync(cancellationToken);
+        if (pendingChange is null || pendingChange.Id != changeId || !pendingChange.IsPending
+            || pendingChange.CreatedAtUtc.AddMinutes(30) < DateTimeOffset.UtcNow)
+        {
+            return "⚠️ Заявка уже обработана или истекла. Подготовьте новую в Windows.";
+        }
+
+        string? verifiedRootPath = null;
+        if (apply && !uncRootPathValidator.TryValidate(pendingChange.UncPath, out verifiedRootPath, out _))
+        {
+            return "⚠️ Server не может проверить доступ к выбранной папке. Рабочий путь не изменён.";
+        }
+
+        var result = await rootPathProvider.DecidePendingRootPathChangeAsync(
+            changeId, userId, verifiedRootPath, pendingChange.UncPath, apply, cancellationToken);
+        return result switch
+        {
+            PendingRootPathChangeDecisionResult.Applied => "✅ Рабочая папка изменена. Новые задачи используют новый путь.",
+            PendingRootPathChangeDecisionResult.Cancelled => "Изменение рабочей папки отменено.",
+            PendingRootPathChangeDecisionResult.NotAdministrator => "⚠️ Рабочую папку может менять только администратор.",
+            PendingRootPathChangeDecisionResult.NotAvailable => "⚠️ Заявка уже обработана или истекла.",
+            PendingRootPathChangeDecisionResult.InvalidPath => "⚠️ Server не может проверить доступ к выбранной папке.",
+            _ => "⚠️ Не удалось обработать заявку. Попробуйте ещё раз."
+        };
     }
 
     private async Task TrySetRootPathAsync(Message message, UserSession session, CancellationToken cancellationToken)

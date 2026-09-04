@@ -12,8 +12,9 @@
 
   <Target Name="Installer">
     <Error Condition="'$(IsccExe)' == '' OR !Exists('$(IsccExe)')" Text="ISCC.exe not found. Install Inno Setup 7 (C:\Program Files\Inno Setup 7\ISCC.exe) or 6 (C:\Program Files (x86)\Inno Setup 6\ISCC.exe), or pass /p:IsccExe=&lt;path&gt;." />
-    <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Server\TelegramBot.Server.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Server&quot;" />
+    <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Server\TelegramBot.Server.csproj&quot; -c Release -p:BuildSignedInstaller=false -o &quot;$(MSBuildThisFileDirectory)publish\Server&quot;" />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Worker\TelegramBot.Worker.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Worker&quot;" />
+    <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.RootPathSetup\TelegramBot.RootPathSetup.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\RootPathSetup&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)GrantLogonRight\GrantLogonRight.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight&quot;" />
     <Exec Command="&quot;$(IsccExe)&quot; &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
   </Target>

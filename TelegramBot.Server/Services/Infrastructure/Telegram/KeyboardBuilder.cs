@@ -26,12 +26,24 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return BuildSelectableCommandsKeyboard(session, CommandCatalog.GetByGroup(group));
     }
 
-    public InlineKeyboardMarkup GetRootPathKeyboard()
+    public InlineKeyboardMarkup GetRootPathKeyboard(Guid? pendingChangeId = null)
     {
-        return new InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton.WithCallbackData("Изменить корневой путь", CallbackPrefixes.RootPath)]
-        ]);
+        var buttons = new List<List<InlineKeyboardButton>>
+        {
+            new() { InlineKeyboardButton.WithCallbackData("Изменить корневой путь", CallbackPrefixes.RootPath) }
+        };
+
+        if (pendingChangeId.HasValue)
+        {
+            buttons.Add(
+            new()
+            {
+                InlineKeyboardButton.WithCallbackData("Применить", $"{CallbackPrefixes.ApplyPendingRootPath}{pendingChangeId}"),
+                InlineKeyboardButton.WithCallbackData("Отменить", $"{CallbackPrefixes.CancelPendingRootPath}{pendingChangeId}")
+            });
+        }
+
+        return new InlineKeyboardMarkup(buttons);
     }
 
     /// <summary>Строит клавиатуру списка сессий с фильтрами и постраничной навигацией.</summary>

@@ -10,10 +10,26 @@ public sealed class RootPathHandler(
     TelegramOutputService outputService,
     ILogger<RootPathHandler> logger) : CallbackHandlerBase(logger)
 {
-    public override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.RootPath];
+    public override HashSet<string> SupportedPrefixes { get; } =
+    [
+        CallbackPrefixes.RootPath,
+        CallbackPrefixes.ApplyPendingRootPath,
+        CallbackPrefixes.CancelPendingRootPath
+    ];
 
     public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
+        if (context.ParsedCallback.Prefix is CallbackPrefixes.ApplyPendingRootPath or CallbackPrefixes.CancelPendingRootPath)
+        {
+            var message = await slashCommandService.DecidePendingRootPathChangeAsync(
+                context.UserId,
+                context.ParsedCallback.Argument,
+                context.ParsedCallback.Prefix == CallbackPrefixes.ApplyPendingRootPath,
+                cancellationToken);
+            await outputService.AnswerCallbackAsync(context.CallbackQueryId, message);
+            return;
+        }
+
         var canConfigure = await slashCommandService.BeginRootPathUpdateAsync(context.UserId, context.Session, cancellationToken);
         await outputService.AnswerCallbackAsync(
             context.CallbackQueryId,

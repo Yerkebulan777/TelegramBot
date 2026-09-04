@@ -21,6 +21,7 @@
 #define AppName "TelegramBot"
 #define ServerExe "TelegramBot.Server.exe"
 #define WorkerExe "TelegramBot.Worker.exe"
+#define RootPathSetupExe "TelegramBot.RootPathSetup.exe"
 #define ServerSvc "TelegramBotServer"
 #define WorkerSvc "TelegramBotWorker"
 
@@ -54,7 +55,11 @@ Name: "worker"; Description: "TelegramBot Worker"; Types: full worker
 [Files]
 Source: "publish\Server\*"; DestDir: "{app}\Server"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: recursesubdirs ignoreversion
+Source: "publish\RootPathSetup\*"; DestDir: "{app}\RootPathSetup"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server; Flags: recursesubdirs ignoreversion
+
+[Icons]
+Name: "{autoprograms}\TelegramBot\Изменить рабочую папку"; Filename: "{app}\RootPathSetup\{#RootPathSetupExe}"; Components: server
 
 [Code]
 var

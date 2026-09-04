@@ -12,10 +12,11 @@ dotnet build TelegramBot.slnx
 
 ## Ключевые invariants
 
-- 4 проекта net10.0: Core ← Data; Server/Worker зависят от Core+Data
+- 5 проектов net10.0: Core ← Data; Server/Worker и RootPathSetup зависят от Core+Data
 - Windows-only; PostgreSQL 18, Dapper/Npgsql
 - Soft-delete (`Status='Deleted'`), кроме `TrackedMessages` (physical DELETE)
 - DI services — singleton; callback handlers регистрируются через `CallbackHandlerBase`
+- `RootPathSetup` — Windows Forms утилита, создающая 30-минутную заявку в БД; активный корень меняет только подтверждение администратора в Telegram
 - `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
 - Worker: tracked tasks + SQL partition scheduling
 - Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, без контрактных CLI-аргументов (`/language RUS` допустим)

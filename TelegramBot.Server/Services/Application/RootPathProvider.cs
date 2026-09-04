@@ -1,4 +1,5 @@
 using TelegramBot.Data;
+using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Services.Application;
 
@@ -69,6 +70,49 @@ public sealed class RootPathProvider(
             _isAdministratorLoaded = true;
             logger.LogInformation("Runtime root path changed: user={UserId}", updatedByUserId);
             return RootPathUpdateResult.Updated;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<PendingRootPathChange?> GetPendingRootPathChangeAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await rootPathDataService.GetPendingRootPathChangeAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to load pending runtime root path change");
+            return null;
+        }
+    }
+
+    public async Task<PendingRootPathChangeDecisionResult> DecidePendingRootPathChangeAsync(
+        Guid changeId,
+        long userId,
+        string? verifiedRootPath,
+        string? expectedUncPath,
+        bool apply,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var result = await rootPathDataService.DecidePendingRootPathChangeAsync(
+                changeId, userId, verifiedRootPath, expectedUncPath, apply, cancellationToken);
+            if (result == PendingRootPathChangeDecisionResult.Applied)
+            {
+                _rootPath = verifiedRootPath!;
+                _isLoaded = true;
+                _administratorUserId = userId;
+                _isAdministratorLoaded = true;
+                logger.LogInformation("Pending runtime root path applied: user={UserId}, request={RequestId}", userId, changeId);
+            }
+
+            return result;
         }
         finally
         {

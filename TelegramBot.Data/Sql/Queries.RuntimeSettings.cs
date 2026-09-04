@@ -34,5 +34,24 @@ internal static partial class SqlQueries
             INSERT INTO RuntimeSettings (SettingKey, SettingValue)
             VALUES ('root_path', @RootPath)
             ON CONFLICT (SettingKey) DO NOTHING;";
+
+        internal const string GetPendingRootPathChange = @"
+            SELECT SettingValue FROM RuntimeSettings
+            WHERE SettingKey = 'pending_root_path_change';";
+
+        internal const string GetPendingRootPathChangeForUpdate = @"
+            SELECT SettingValue FROM RuntimeSettings
+            WHERE SettingKey = 'pending_root_path_change' FOR UPDATE;";
+
+        internal const string UpsertPendingRootPathChange = @"
+            INSERT INTO RuntimeSettings (SettingKey, SettingValue)
+            VALUES ('pending_root_path_change', @Change)
+            ON CONFLICT (SettingKey) DO UPDATE
+            SET SettingValue = EXCLUDED.SettingValue, UpdatedByUserId = NULL, UpdatedAt = NOW();";
+
+        internal const string UpdatePendingRootPathChange = @"
+            UPDATE RuntimeSettings
+            SET SettingValue = @Change, UpdatedByUserId = @UpdatedByUserId, UpdatedAt = NOW()
+            WHERE SettingKey = 'pending_root_path_change';";
     }
 }

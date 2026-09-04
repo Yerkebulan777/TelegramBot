@@ -85,4 +85,10 @@ public static class CallbackPrefixes
 
     /// <summary>Изменение общего корневого UNC-пути.</summary>
     public const string RootPath = "ROOTPATH:";
+
+    /// <summary>Подтверждение заявки, подготовленной локальной утилитой.</summary>
+    public const string ApplyPendingRootPath = "APPLYROOTPATH:";
+
+    /// <summary>Отмена заявки, подготовленной локальной утилитой.</summary>
+    public const string CancelPendingRootPath = "CANCELROOTPATH:";
 }

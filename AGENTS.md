@@ -26,6 +26,7 @@
 | `TelegramBot.Server/Services/Infrastructure/Telegram/` | `TelegramBotHostedService.cs`, `TelegramOutputService.cs`, `KeyboardBuilder.cs`, `CommandNotificationService.cs`, `NotificationSenderService.cs` |
 | `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
 | `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
+| `TelegramBot.RootPathSetup/` | Windows Forms: подготовка подтверждаемой заявки на смену рабочего UNC-пути |
 | `TelegramBot.Worker/Services/` | `CommandExecutionService.cs`, `CommandPreparer.cs`, `ProcessStarter.cs`, `ProcessRunner.cs`, `OutputCollector.cs`, `ResultAnalyzer.cs`, `ErrorClassifier.cs`, `SessionCleanupService.cs` |
 | `TelegramBot.Worker/BimLib/` | `RevitVersionDetector.cs`, `NavisworksPathResolver.cs`, `DialogDismisser.cs` |
 | `TelegramBot.Worker/Program.cs` | Worker DI + startup |
@@ -76,7 +77,7 @@ Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs
 
 ### Server DI
 
-`AddTelegramBotServer` регистрирует: 5 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `AuthorizationMiddleware`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`, `Channel<NotificationItem>(256)`, hosted: `DatabaseInitializerService` (первым, фоновая schema-init с retry — не блокирует старт хоста), `TelegramBotHostedService`, `CommandNotificationService`, `NotificationSenderService`.
+`AddTelegramBotServer` регистрирует: 6 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `AuthorizationMiddleware`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`, `Channel<NotificationItem>(256)`, hosted: `DatabaseInitializerService` (первым, фоновая schema-init с retry — не блокирует старт хоста), `TelegramBotHostedService`, `CommandNotificationService`, `NotificationSenderService`.
 
 ## Worker flow
 
