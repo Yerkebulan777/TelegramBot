@@ -50,11 +50,15 @@ Partition = "file:" + md5(lower(FilePath))
 
 Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim атомарно выбирает `pending`-команды с наступившим `NextRetryAt`, исключая partition с `processing`-командой, используя `FOR UPDATE SKIP LOCKED` и partition advisory xact lock. Сортировка по `Priority`, `CreatedAt`, `CommandId`. Запуск — fire-and-forget `Task` (без ожидания), чтобы долгая команда не блокировала claim остальных.
 
+## Корневой UNC-путь
+
+`RuntimeSettings.root_path` — единый корень для Server. Любой авторизованный пользователь задаёт его из `/help`; принимаются только существующие прямые UNC-пути вида `\\сервер\шара` (или вложенная папка), доступные учётной записи службы Server. При создании команды это значение записывается в `Commands.RootPath`. Смена глобального значения немедленно влияет на новые выборы файлов, но Worker валидирует queued/processing-команду по её неизменяемому снимку.
+
 ## 3. Подготовка и запуск
 
 `CommandPreparer.PrepareAsync`:
 - находит `CommandConfig`
-- валидирует FilePath (RootPath, reparse point, extension, существование)
+- валидирует FilePath (снимок RootPath на момент постановки в очередь, reparse point, extension, существование)
 - резолвит Revit/Navisworks executable через BimLib
 - возвращает копию конфига с resolved path
 

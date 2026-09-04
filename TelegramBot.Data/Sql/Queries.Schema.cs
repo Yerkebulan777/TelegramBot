@@ -66,7 +66,8 @@ internal static partial class SqlQueries
             ADD COLUMN IF NOT EXISTS ErrorMessage TEXT,
             ADD COLUMN IF NOT EXISTS RetryCount INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS NextRetryAt TIMESTAMPTZ,
-            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
+            ADD COLUMN IF NOT EXISTS UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ADD COLUMN IF NOT EXISTS RootPath TEXT;
 
             ALTER TABLE Commands
             ALTER COLUMN Priority SET DEFAULT 5,
@@ -83,6 +84,14 @@ internal static partial class SqlQueries
                 ChatId BIGINT NOT NULL,
                 MessageIdPg INTEGER NOT NULL,
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );";
+
+        internal const string CreateRuntimeSettingsTable = @"
+            CREATE TABLE IF NOT EXISTS RuntimeSettings (
+                SettingKey TEXT PRIMARY KEY,
+                SettingValue TEXT NOT NULL,
+                UpdatedByUserId BIGINT,
+                UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
 
         internal const string CreateNotificationOutboxTable = @"

@@ -82,4 +82,7 @@ public static class CallbackPrefixes
 
     /// <summary>Повторный запуск команды. Аргумент: "commandId:filter".</summary>
     public const string RerunCommand = "RERUNCMD:";
+
+    /// <summary>Изменение общего корневого UNC-пути.</summary>
+    public const string RootPath = "ROOTPATH:";
 }

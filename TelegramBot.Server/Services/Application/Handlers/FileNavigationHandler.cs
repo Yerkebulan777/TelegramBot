@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -9,11 +7,8 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class FileNavigationHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
-    IOptions<FileSystemOptions> options,
     ILogger<FileNavigationHandler> logger) : CallbackHandlerBase(logger)
 {
-    private readonly FileSystemOptions _options = options.Value;
-
     public override HashSet<string> SupportedPrefixes { get; } = [CallbackPrefixes.GoToParent];
 
     public override async Task HandleAsync(CallbackContext context, CancellationToken cancellationToken = default)
@@ -29,7 +24,7 @@ public sealed class FileNavigationHandler(
             return;
         }
 
-        if (!ValidatePathWithinRoot(_options, newPath, "navigation", context))
+        if (!ValidatePathWithinRoot(session.RootPath, newPath, "navigation", context))
         {
             await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
             flow.ResetPathToRoot();
@@ -39,7 +34,7 @@ public sealed class FileNavigationHandler(
         flow.NavigateTo(newPath);
         await outputService.AnswerCallbackAsync(context.CallbackQueryId, flow.CurrentPath);
 
-        var keyboard = keyboardBuilder.GetSelectionKeyboard(context.UserId, session);
+        var keyboard = keyboardBuilder.GetSelectionKeyboard(session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
     }
 }

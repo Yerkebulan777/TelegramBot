@@ -34,9 +34,9 @@ public abstract class CallbackHandlerBase(ILogger logger)
     /// Проверяет, что путь не выходит за пределы корневой директории.
     /// При нарушении логирует предупреждение; реакцию на отказ выбирает вызывающий код.
     /// </summary>
-    protected bool ValidatePathWithinRoot(FileSystemOptions options, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? path, string action, CallbackContext context)
+    protected bool ValidatePathWithinRoot(string rootPath, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? path, string action, CallbackContext context)
     {
-        if (!string.IsNullOrEmpty(path) && options.IsPathWithinRoot(path))
+        if (!string.IsNullOrEmpty(path) && FileSystemOptions.IsPathWithinRoot(rootPath, path))
         {
             return true;
         }

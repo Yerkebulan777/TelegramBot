@@ -12,7 +12,7 @@ using TelegramBot.Server.Services.Application;
 
 namespace TelegramBot.Server.Services.Infrastructure.FileSystem;
 
-public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<FileSystemOptions> options, ILogger<FileSystemBrowser> logger)
+public sealed partial class FileSystemBrowser(IOptions<FileSystemOptions> options, ILogger<FileSystemBrowser> logger)
 {
     private readonly FileSystemOptions _options = options.Value;
     private readonly Regex _folderRegex = new(options.Value.SectionFolderPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -44,11 +44,9 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         AttributesToSkip = FileAttributes.ReparsePoint,
     };
 
-    public InlineKeyboardMarkup GetSectionsView(long userId, string path)
+    public InlineKeyboardMarkup GetSectionsView(UserSession session, string path)
     {
-        var session = sessions.GetOrCreateSession(userId);
-
-        return SelectionFlow.GetLevel(path, _options.RootPath, _options.ProjectDirectoryName) switch
+        return SelectionFlow.GetLevel(path, session.RootPath, _options.ProjectDirectoryName) switch
         {
             SelectionFlow.Level.Files => BuildFilesKeyboard(session, path),
             SelectionFlow.Level.Sections => BuildSectionKeyboard(session, path),
@@ -61,19 +59,19 @@ public sealed partial class FileSystemBrowser(SessionManager sessions, IOptions<
         return GetSectionFiles(path);
     }
 
-    public string? ResolveSelectionPath(string currentPath, string callbackArgument)
+    public string? ResolveSelectionPath(string rootPath, string currentPath, string callbackArgument)
     {
         if (string.IsNullOrWhiteSpace(callbackArgument))
         {
             return null;
         }
 
-        if (_options.IsPathWithinRoot(callbackArgument))
+        if (FileSystemOptions.IsPathWithinRoot(rootPath, callbackArgument))
         {
             return callbackArgument;
         }
 
-        var candidates = SelectionFlow.GetLevel(currentPath, _options.RootPath, _options.ProjectDirectoryName) switch
+        var candidates = SelectionFlow.GetLevel(currentPath, rootPath, _options.ProjectDirectoryName) switch
         {
             SelectionFlow.Level.Files => GetFilesLevelCandidates(currentPath),
             SelectionFlow.Level.Sections => GetSectionFolders(currentPath),

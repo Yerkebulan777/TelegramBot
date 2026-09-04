@@ -29,6 +29,7 @@ public sealed class SessionDataService(
         long userId,
         string username,
         int filesAmount,
+        string rootPath,
         string? projectName = null,
         IEnumerable<int>? commandPriorities = null,
         string? correlationId = null)
@@ -36,9 +37,9 @@ public sealed class SessionDataService(
         var commands = commandText.ToArray();
         var fileList = files.ToArray();
 
-        if (commands.Length == 0 || fileList.Length == 0)
+        if (commands.Length == 0 || fileList.Length == 0 || string.IsNullOrWhiteSpace(rootPath))
         {
-            throw new ArgumentException("Commands and files must not be empty");
+            throw new ArgumentException("Commands, files, and root path must not be empty");
         }
 
         await using var conn = await CreateOpenConnectionAsync();
@@ -82,7 +83,7 @@ public sealed class SessionDataService(
         // ON CONFLICT DO NOTHING отсекает только конфликтующие (команда, файл)-пары —
         // остальные пары из этого же запроса вставляются штатно.
         var insertedRows = (await conn.QueryAsync<InsertedRow>(SqlQueries.Commands.InsertBatch,
-            new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, Orders = orders, Priorities = priorities },
+            new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, RootPath = rootPath, Orders = orders, Priorities = priorities },
             tx)).ToList();
 
         if (insertedRows.Count == 0)
