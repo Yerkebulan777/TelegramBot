@@ -269,7 +269,7 @@ public sealed partial class SlashCommandService(
         var rootPath = await rootPathProvider.GetRootPathAsync();
         if (string.IsNullOrWhiteSpace(rootPath))
         {
-            await SendSafeResponseAsync(userId, "⚠️ Корневой UNC-путь не настроен. Откройте /help и задайте его.", session);
+            await SendSafeResponseAsync(userId, "⚠️ Корневой сетевой путь не настроен. Откройте /help и задайте его.", session);
             return;
         }
 
@@ -304,7 +304,7 @@ public sealed partial class SlashCommandService(
             .AppendLine("/status — статус выполнения задач и управление сессиями")
             .AppendLine("/help — справка по командам")
             .AppendLine()
-            .AppendLine($"Корневой UNC-путь: {rootPath}")
+            .AppendLine($"Корневой путь: {rootPath}")
             .ToString();
 
         _=await messageTrackingService.TrackAsync(
@@ -317,7 +317,7 @@ public sealed partial class SlashCommandService(
         session.Selection.StopFileSelection();
         session.AwaitingRootPath = true;
         _ = await messageTrackingService.TrackAsync(
-            outputService.SendForceReplyAsync(userId, "Отправьте UNC-путь: \\сервер\\шара или \\сервер\\шара\\папка."), session);
+            outputService.SendForceReplyAsync(userId, "Отправьте букву диска с проектами, например Z:\\ (можно и вложенную папку). Сетевой UNC-путь бот определит сам."), session);
     }
 
     private async Task TrySetRootPathAsync(Message message, UserSession session, CancellationToken cancellationToken)

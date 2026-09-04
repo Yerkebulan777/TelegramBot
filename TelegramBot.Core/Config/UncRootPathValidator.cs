@@ -1,6 +1,9 @@
 namespace TelegramBot.Core.Config;
 
-/// <summary>Проверяет доступный Server'у корневой UNC-путь.</summary>
+/// <summary>
+/// Проверяет корневой путь и приводит его к UNC-виду: пользователь отправляет букву
+/// подключённого сетевого диска (<c>Z:\</c>), UNC-путь Server определяет сам.
+/// </summary>
 public sealed class UncRootPathValidator
 {
     public bool TryValidate(string? candidate, out string normalizedPath, out string error)
@@ -10,7 +13,7 @@ public sealed class UncRootPathValidator
 
         if (string.IsNullOrWhiteSpace(candidate))
         {
-            error = "Укажите UNC-путь вида \\сервер\\шара.";
+            error = "Укажите букву сетевого диска, например Z:\\";
             return false;
         }
 
@@ -18,26 +21,21 @@ public sealed class UncRootPathValidator
         if (value.StartsWith(@"\\?\", StringComparison.Ordinal)
             || value.StartsWith(@"\\.\", StringComparison.Ordinal))
         {
-            error = "Расширенные и device-пути не поддерживаются. Используйте \\сервер\\шара.";
+            error = "Расширенные и device-пути не поддерживаются.";
             return false;
         }
 
-        if (!value.StartsWith(@"\\", StringComparison.Ordinal))
+        if (!Path.IsPathRooted(value))
         {
-            error = "Нужен прямой UNC-путь вида \\сервер\\шара. Буквы дисков не поддерживаются.";
+            error = "Нужна буква сетевого диска, например Z:\\";
             return false;
         }
 
-        var parts = value[2..].Split('\\', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
-        {
-            error = "UNC-путь должен содержать сервер и шару: \\сервер\\шара.";
-            return false;
-        }
-
+        string fullPath;
         try
         {
-            normalizedPath = Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // "Z:" без разделителя Windows трактует как текущий каталог диска.
+            fullPath = Path.GetFullPath(value.EndsWith(':') ? value + Path.DirectorySeparatorChar : value);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -45,21 +43,30 @@ public sealed class UncRootPathValidator
             return false;
         }
 
-        if (!normalizedPath.StartsWith(@"\\", StringComparison.Ordinal))
+        if (!UncPathResolver.TryResolve(fullPath, out var resolvedPath))
         {
-            error = "После нормализации путь не является UNC-путём.";
+            error = $"{fullPath} — не сетевой диск. Подключите диск к сетевой шаре под учётной записью службы Server или отправьте путь вида \\\\сервер\\шара.";
+            return false;
+        }
+
+        var uncPath = resolvedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var parts = uncPath[2..].Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+        {
+            error = "Сетевой путь неполный: нужны сервер и общая папка.";
             return false;
         }
 
         try
         {
-            if (!Directory.Exists(normalizedPath))
+            if (!Directory.Exists(uncPath))
             {
                 error = "Папка недоступна для службы Server или не существует.";
                 return false;
             }
 
-            if (File.GetAttributes(normalizedPath).HasFlag(FileAttributes.ReparsePoint))
+            if (File.GetAttributes(uncPath).HasFlag(FileAttributes.ReparsePoint))
             {
                 error = "Корневая папка не может быть reparse-point.";
                 return false;
@@ -71,6 +78,7 @@ public sealed class UncRootPathValidator
             return false;
         }
 
+        normalizedPath = uncPath;
         return true;
     }
 }
