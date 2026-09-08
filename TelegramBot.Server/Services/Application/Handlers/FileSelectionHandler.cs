@@ -28,7 +28,7 @@ public sealed class FileSelectionHandler(
             CallbackPrefixes.SelectAllSectionFolders => HandleSelectAllAsync(context, cancellationToken),
             CallbackPrefixes.OpenFolder => HandleOpenFolderAsync(context, cancellationToken),
             CallbackPrefixes.ConfirmFileSelection => HandleConfirmAsync(context, cancellationToken),
-            CallbackPrefixes.CancelFileSelection => HandleCancelAsync(context),
+            CallbackPrefixes.CancelFileSelection => HandleCancelAsync(context, cancellationToken),
             _ => Task.CompletedTask
         };
     }
@@ -40,10 +40,10 @@ public sealed class FileSelectionHandler(
             context.UserId, context.Username, context.Session, cancellationToken);
     }
 
-    private async Task HandleCancelAsync(CallbackContext context)
+    private async Task HandleCancelAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
-        await slashCommandService.CancelSelectionAsync(context.UserId, context.Session);
+        await slashCommandService.CancelSelectionAsync(context.UserId, context.Session, cancellationToken);
     }
 
     private async Task HandleOpenFolderAsync(CallbackContext context, CancellationToken cancellationToken)

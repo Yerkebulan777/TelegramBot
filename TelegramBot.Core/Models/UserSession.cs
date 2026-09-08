@@ -44,7 +44,7 @@ public class UserSession
         LastActionsMessageId = null;
         StatusMessageId = null;
         SessionId = 0;
-        LastUserMessageId = null;
+        // Cleanup owns LastUserMessageId; resetting the view must preserve failed deletions.
         StatusFilter = "ALL";
         StatusPage = 0;
         AwaitingRootPath = false;

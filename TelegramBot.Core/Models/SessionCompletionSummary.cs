@@ -19,5 +19,7 @@ public sealed class SessionCompletionSummary
 public sealed class FailedCommandInfo
 {
     public string FilePath { get; set; } = string.Empty;
+    public string? RootPath { get; set; }
+    public string CommandText { get; set; } = string.Empty;
     public string? ErrorMessage { get; set; }
 }

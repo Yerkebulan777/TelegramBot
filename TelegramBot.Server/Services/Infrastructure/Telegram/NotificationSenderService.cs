@@ -2,6 +2,7 @@ using System.Text;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot.Types;
+using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
@@ -236,13 +237,11 @@ public sealed class NotificationSenderService(
                 _ = summary.AppendLine();
             }
 
-            _ = summary.Append("- ").Append(Path.GetFileName(commands[i].FilePath));
-
-            var reason = FormatReason(commands[i].ErrorMessage);
-            if (reason.Length > 0)
-            {
-                _ = summary.Append(" — ").Append(reason);
-            }
+            var command = commands[i];
+            var filePath = FormatFilePath(command);
+            _ = summary.Append("- ").Append(filePath)
+                .Append(" [").Append(command.CommandText).Append(']')
+                .Append("\n  Причина: ").Append(FormatReason(command, filePath));
         }
 
         if (commands.Count > MaxFailedFilesInMessage)
@@ -252,12 +251,37 @@ public sealed class NotificationSenderService(
     }
 
     /// <summary>Оставляет первую строку причины (без стека) и обрезает до <see cref="MaxReasonLength"/>.</summary>
-    private static string FormatReason(string? errorMessage)
+    private static string FormatReason(FailedCommandInfo command, string filePath)
     {
+        var errorMessage = command.ErrorMessage;
         if (string.IsNullOrWhiteSpace(errorMessage))
         {
-            return string.Empty;
+            return "Исполнитель не сообщил причину. Обратитесь к администратору с этим заданием.";
         }
+
+        // Сокращаем пути до обрезки текста, чтобы длинный UNC-путь не скрывал причину.
+        if (!string.IsNullOrWhiteSpace(command.FilePath))
+        {
+            errorMessage = errorMessage.Replace(command.FilePath, filePath, StringComparison.OrdinalIgnoreCase)
+                .Replace(command.FilePath.Replace('\\', '/'), filePath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(command.RootPath))
+        {
+            var root = command.RootPath.TrimEnd('\\', '/');
+            errorMessage = errorMessage.Replace(root + "\\", "", StringComparison.OrdinalIgnoreCase)
+                .Replace(root.Replace('\\', '/') + "/", "", StringComparison.OrdinalIgnoreCase);
+        }
+
+        errorMessage = errorMessage.Trim()
+            .Replace("File validation failed for path:", "Файл не прошёл проверку пути, доступности или формата:", StringComparison.OrdinalIgnoreCase)
+            .Replace("Process timed out after", "Превышено время выполнения:", StringComparison.OrdinalIgnoreCase)
+            .Replace("Process exited with code", "Программа завершилась с ошибкой. Код:", StringComparison.OrdinalIgnoreCase)
+            .Replace("Revit exited without writing the required ResultFile", "Revit завершился без отчёта о результате. Успешное выполнение не подтверждено.", StringComparison.OrdinalIgnoreCase)
+            .Replace("Invalid plugin result file", "Не удалось прочитать результат: плагин создал некорректный файл отчёта.", StringComparison.OrdinalIgnoreCase)
+            .Replace("Plugin reported failure", "Плагин сообщил об ошибке выполнения.", StringComparison.OrdinalIgnoreCase)
+            .Replace("Plugin reported cancellation", "Плагин сообщил об отмене выполнения.", StringComparison.OrdinalIgnoreCase)
+            .Replace("Unknown command type:", "Неизвестная команда:", StringComparison.OrdinalIgnoreCase);
 
         // Стек/детали обычно идут с переноса — пользователю нужна только первая строка (суть ошибки).
         var firstLine = errorMessage.AsSpan();
@@ -270,6 +294,18 @@ public sealed class NotificationSenderService(
         return firstLine.Length > MaxReasonLength
             ? $"{firstLine[..MaxReasonLength]}…"
             : firstLine.ToString();
+    }
+
+    private static string FormatFilePath(FailedCommandInfo command)
+    {
+        if (!string.IsNullOrWhiteSpace(command.RootPath)
+            && FileSystemOptions.IsPathWithinRoot(command.RootPath, command.FilePath))
+        {
+            return Path.GetRelativePath(Path.GetFullPath(command.RootPath), Path.GetFullPath(command.FilePath));
+        }
+
+        // Старые задания могут не иметь сохранённого корня.
+        return Path.GetFileName(command.FilePath);
     }
 
     /// <summary>Гарантирует, что сообщение не превысит лимит Telegram — иначе SendAsync выбросит исключение.</summary>

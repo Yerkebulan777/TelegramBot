@@ -24,10 +24,8 @@ public sealed class CommandAppService(
         var userId = sender.Id;
         var username = sender.Username ?? sender.FirstName;
 
-        if (!await TryAdmitAsync(userId, username))
-        {
-            return;
-        }
+        // Decide admission before tracking performs any database I/O.
+        var admitted = await TryAdmitAsync(userId, username);
 
         var session = sessionManager.GetOrCreateSession(userId);
 
@@ -37,6 +35,11 @@ public sealed class CommandAppService(
             message.Chat.Id,
             message.MessageId,
             session);
+
+        if (!admitted)
+        {
+            return;
+        }
 
         // Stale-session detection: a fresh session (after restart, idle timeout, or first run)
         // is not yet initialized. A slash command initializes it; any other text gets a single
@@ -98,10 +101,15 @@ public sealed class CommandAppService(
     /// <summary>Общие входные гейты для сообщений и коллбэков: rate limit, затем анонимность.</summary>
     private async Task<bool> TryAdmitAsync(long userId, string? username)
     {
-        if (!rateLimiter.IsAllowed(userId))
+        if (!rateLimiter.IsAllowed(userId, out var shouldNotify))
         {
-            _ = await outputService.SendMessageAsync(userId,
-                "⚠️ Слишком много запросов. Пожалуйста, подождите немного.");
+            if (shouldNotify)
+            {
+                _ = await messageTrackingService.TrackAsync(
+                    outputService.SendMessageAsync(userId,
+                        "⚠️ Слишком много запросов. Пожалуйста, подождите немного."),
+                    sessionManager.GetOrCreateSession(userId));
+            }
             return false;
         }
 
@@ -118,7 +126,9 @@ public sealed class CommandAppService(
     private async Task RejectAnonymousAsync(long userId)
     {
         logger.LogWarning("Anonymous user rejected: {UserId}", userId);
-        _ = await outputService.SendMessageAsync(userId, AnonymousProfileMessage);
+        _ = await messageTrackingService.TrackAsync(
+            outputService.SendMessageAsync(userId, AnonymousProfileMessage),
+            sessionManager.GetOrCreateSession(userId));
     }
 
     /// <summary>

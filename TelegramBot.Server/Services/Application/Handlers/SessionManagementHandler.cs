@@ -10,7 +10,6 @@ namespace TelegramBot.Server.Services.Application.Handlers;
 public sealed class SessionManagementHandler(
     SessionDataService sessionDataService,
     CommandDataService commandDataService,
-    MessageTrackingDataService messageTrackingDataService,
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
     SessionsListRenderer sessionsListRenderer,
@@ -319,7 +318,7 @@ public sealed class SessionManagementHandler(
             return false;
         }
 
-        await messageTrackingDataService.DeleteTrackedMessagesBySessionAsync(sessionId);
+        // Keep tracking until Telegram confirms deletion; soft-delete does not delete chat messages.
         return true;
     }
 

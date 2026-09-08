@@ -63,8 +63,9 @@ public sealed class TrackedMessageCleanupService(
                 return;
             }
 
-            await telegramOutputService.CleanupTrackedMessagesAsync(trackedMessages, stoppingToken);
-            logger.LogInformation("Tracked message cleanup completed: count={Count}", trackedMessages.Count);
+            var deletedCount = await telegramOutputService.CleanupTrackedMessagesAsync(trackedMessages, stoppingToken);
+            logger.LogDebug("Tracked message cleanup cycle finished: selectedCount={SelectedCount}, deletedCount={DeletedCount}",
+                trackedMessages.Count, deletedCount);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

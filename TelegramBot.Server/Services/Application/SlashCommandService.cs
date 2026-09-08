@@ -47,7 +47,7 @@ public sealed partial class SlashCommandService(
 
         if (command.StartsWith('/'))
         {
-            await outputService.ClearChatHistoryAsync(userId, session);
+            await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
         }
 
         if (command == "/start")
@@ -114,7 +114,7 @@ public sealed partial class SlashCommandService(
         {
             logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_file_selection_msg", username, userId);
             flow.StopFileSelection();
-            await RejectAndWarnAsync(userId, session, "Сообщение выбора файлов не найдено.");
+            await RejectAndWarnAsync(userId, session, "Сообщение выбора файлов не найдено.", cancellationToken);
             return;
         }
 
@@ -124,21 +124,21 @@ public sealed partial class SlashCommandService(
         {
             case SelectionFlow.ConfirmOutcomeKind.BlockedNoProject:
                 logger.LogDebug("Project confirm blocked: {Username} ({UserId}), reason=no_project", username, userId);
-                await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите проект.");
+                await SendWarningAndCleanupAsync(userId, session, "⚠️ Сначала выберите проект.", cancellationToken);
                 return;
 
             case SelectionFlow.ConfirmOutcomeKind.Advanced:
                 logger.LogDebug("{Username} ({UserId}) confirmed project '{Project}', nav to 01_PROJECT",
                     username, userId, Path.GetFileName(Path.GetDirectoryName(flow.CurrentPath)));
                 await RenderSelectionAsync(userId, session);
-                await CleanupCurrentViewAsync(userId, session);
+                await CleanupCurrentViewAsync(userId, session, cancellationToken);
                 return;
         }
 
         if (outcome.Kind == SelectionFlow.ConfirmOutcomeKind.BlockedNoFiles)
         {
             logger.LogDebug("Job blocked: {Username} ({UserId}), reason=no_files", username, userId);
-            await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один файл.");
+            await RejectAndWarnAsync(userId, session, "⚠️ Сначала выберите хотя бы один файл.", cancellationToken);
             return;
         }
 
@@ -167,11 +167,11 @@ public sealed partial class SlashCommandService(
             if (filesToProcess.Count == 0)
             {
                 logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_files_found", username, userId);
-                await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» не найдены на диске.");
+                await RejectAndWarnAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» не найдены на диске.", cancellationToken);
                 return;
             }
 
-            if (!await CheckDailyFileLimitAsync(userId, username, session, filesToProcess.Count))
+            if (!await CheckDailyFileLimitAsync(userId, username, session, filesToProcess.Count, cancellationToken))
             {
                 return;
             }
@@ -185,7 +185,7 @@ public sealed partial class SlashCommandService(
             {
                 // Каждая пара (команда, файл) пойман уникальным индексом idx_commands_active_unique — все пары дубли
                 logger.LogWarning("Job blocked: {Username} ({UserId}), reason=all_dup_cmds", username, userId);
-                await CancelSelectionAsync(userId, session, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
+                await CancelSelectionAsync(userId, session, cancellationToken, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
                 return;
             }
 
@@ -196,7 +196,7 @@ public sealed partial class SlashCommandService(
                 sessionId, correlationId, username, userId, submission.Commands.Count, queuedFileCount, skippedPairs.Count);
 
             session.SessionId = sessionId.Value;
-            await outputService.ClearChatHistoryAsync(userId, session);
+            await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
 
             session.Selection.Reset(session.RootPath);
 
@@ -237,7 +237,7 @@ public sealed partial class SlashCommandService(
         }
     }
 
-    private async Task<bool> CheckDailyFileLimitAsync(long userId, string username, UserSession session, int newFileCount)
+    private async Task<bool> CheckDailyFileLimitAsync(long userId, string username, UserSession session, int newFileCount, CancellationToken cancellationToken)
     {
         if (_rateLimitOptions.MaxFilesPerUserPerDay <= 0)
         {
@@ -261,7 +261,7 @@ public sealed partial class SlashCommandService(
             ? $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. Уже в очереди за 24 часа: {queuedToday}. Можно добавить ещё {remaining}."
             : $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. За последние 24 часа лимит уже исчерпан.";
 
-        await RejectAndWarnAsync(userId, session, message);
+        await RejectAndWarnAsync(userId, session, message, cancellationToken);
         return false;
     }
 
@@ -332,7 +332,7 @@ public sealed partial class SlashCommandService(
             return false;
         }
 
-        await outputService.ClearChatHistoryAsync(userId, session);
+        await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
         session.Selection.StopFileSelection();
         session.AwaitingRootPath = true;
         _ = await messageTrackingService.TrackAsync(
@@ -401,7 +401,7 @@ public sealed partial class SlashCommandService(
         }
 
         session.Reset(rootPath);
-        await outputService.ClearChatHistoryAsync(userId, session);
+        await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
         await SendHelpMessageAsync(userId, session);
     }
 
@@ -409,9 +409,9 @@ public sealed partial class SlashCommandService(
     /// Полный сброс сессии (как по кнопке "Отмена"): чистит историю чата, сбрасывает состояние
     /// и отправляет либо переданное сообщение, либо стандартную справку.
     /// </summary>
-    internal async Task CancelSelectionAsync(long userId, UserSession session, string? message = null)
+    internal async Task CancelSelectionAsync(long userId, UserSession session, CancellationToken cancellationToken, string? message = null)
     {
-        await outputService.ClearChatHistoryAsync(userId, session);
+        await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
         session.Reset(session.RootPath);
 
         if (message is null)
@@ -427,19 +427,19 @@ public sealed partial class SlashCommandService(
     /// <summary>
     /// Сбрасывает pending-команды (поскольку дальнейшее выполнение не предполагается) и отправляет warning.
     /// </summary>
-    private async Task RejectAndWarnAsync(long userId, UserSession session, string message)
+    private async Task RejectAndWarnAsync(long userId, UserSession session, string message, CancellationToken cancellationToken)
     {
         session.Selection.ClearCommands();
-        await SendWarningAndCleanupAsync(userId, session, message);
+        await SendWarningAndCleanupAsync(userId, session, message, cancellationToken);
     }
 
-    private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message)
+    private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message, CancellationToken cancellationToken)
     {
         var warning = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session);
-        await CleanupCurrentViewAsync(userId, session, warning?.Id);
+        await CleanupCurrentViewAsync(userId, session, cancellationToken, warning?.Id);
     }
 
-    private async Task CleanupCurrentViewAsync(long userId, UserSession session, int? extraKeepMessageId = null)
+    private async Task CleanupCurrentViewAsync(long userId, UserSession session, CancellationToken cancellationToken, int? extraKeepMessageId = null)
     {
         var keepMessageIds = new[]
             {
@@ -451,7 +451,7 @@ public sealed partial class SlashCommandService(
             .Where(messageId => messageId.HasValue)
             .Select(messageId => messageId!.Value);
 
-        await outputService.ClearChatHistoryAsync(userId, session, keepMessageIds);
+        await outputService.ClearChatHistoryAsync(userId, session, cancellationToken, keepMessageIds);
     }
 
     private static string NormalizeCommandText(string text)

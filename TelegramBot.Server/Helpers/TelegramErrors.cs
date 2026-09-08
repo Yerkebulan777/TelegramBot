@@ -9,6 +9,12 @@ namespace TelegramBot.Server.Helpers;
 /// </summary>
 public static class TelegramErrors
 {
+    public static bool IsMessageToDeleteMissing(ApiRequestException ex) =>
+        ex.ErrorCode == 400 && ex.Message.Contains("message to delete not found", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsMessageDeletionRefused(ApiRequestException ex) =>
+        ex.ErrorCode == 400 && ex.Message.Contains("message can't be deleted", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsMessageNotModified(ApiRequestException ex)
     {
         return ex.ErrorCode == 400

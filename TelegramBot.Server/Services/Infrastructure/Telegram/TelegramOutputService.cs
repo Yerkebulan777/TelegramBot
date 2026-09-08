@@ -32,26 +32,19 @@ public class TelegramOutputService(
         }, userId);
     }
 
-    public async Task DeleteMessageAsync(long chatId, int messageId)
-    {
-        if (await TryDeleteMessageAsync(chatId, messageId))
-        {
-            await messageTrackingService.DeleteTrackedMessagesByChatAsync(chatId, [messageId]);
-        }
-    }
-
-    private async Task<bool> TryDeleteMessageAsync(long chatId, int messageId)
+    private async Task<bool> TryDeleteMessageAsync(long chatId, int messageId, CancellationToken cancellationToken)
     {
         try
         {
-            await botClient.DeleteMessage(chatId, messageId);
+            await ExecuteDeletionWithRetryAsync(
+                () => botClient.DeleteMessage(chatId, messageId, cancellationToken), cancellationToken);
             return true;
         }
-        catch (ApiRequestException ex) when (ex.Message.Contains("message to delete not found", StringComparison.OrdinalIgnoreCase))
+        catch (ApiRequestException ex) when (TelegramErrors.IsMessageToDeleteMissing(ex))
         {
             return true;
         }
-        catch (ApiRequestException ex) when (ex.Message.Contains("message can't be deleted", StringComparison.OrdinalIgnoreCase))
+        catch (ApiRequestException ex) when (TelegramErrors.IsMessageDeletionRefused(ex))
         {
             logger.LogWarning(
                 "Telegram refused deletion: chat={ChatId}, message={MessageId}, error={Error}",
@@ -62,72 +55,111 @@ public class TelegramOutputService(
         }
     }
 
-    private async Task<IReadOnlyList<int>> DeleteMessagesAsync(
+    private async Task<HashSet<int>> DeleteMessagesAsync(
         long chatId,
         IEnumerable<int> messageIds,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        var ids = messageIds.Distinct().ToArray();
-        if (ids.Length == 0)
+        var deletedIds = new HashSet<int>();
+        foreach (var chunk in messageIds.Distinct().Chunk(100))
         {
-            return [];
-        }
-
-        var deletedIds = new List<int>(ids.Length);
-        foreach (var chunk in ids.Chunk(100))
-        {
-            try
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await DeleteBatchAsync(chatId, chunk, cancellationToken);
+            await messageTrackingService.DeleteTrackedMessagesByChatAsync(chatId, result.DeletedIds);
+            deletedIds.UnionWith(result.DeletedIds);
+            // Persist partial progress before propagating cancellation.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.Deferred)
             {
-                await botClient.DeleteMessages(chatId, chunk, cancellationToken);
-                deletedIds.AddRange(chunk);
-            }
-            catch (ApiRequestException ex)
-            {
-                logger.LogWarning(
-                    ex,
-                    "Batch delete fail: {ChatId}, fallback single for {Count}",
-                    chatId,
-                    chunk.Length);
-
-                foreach (var messageId in chunk)
-                {
-                    if (await TryDeleteMessageAsync(chatId, messageId))
-                    {
-                        deletedIds.Add(messageId);
-                    }
-                }
+                break;
             }
         }
-
         return deletedIds;
     }
 
-    public async Task ClearChatHistoryAsync(long chatId, UserSession session, IEnumerable<int>? exceptMessageIds = null)
+    private sealed record DeletionBatchResult(IReadOnlyList<int> DeletedIds, bool Deferred);
+
+    private async Task<DeletionBatchResult> DeleteBatchAsync(long chatId, int[] messageIds, CancellationToken cancellationToken)
     {
-        // Delete the user's own last message (slash command or reply keyboard button press)
-        if (session.LastUserMessageId.HasValue)
+        var deletedIds = new List<int>(messageIds.Length);
+        try
         {
-            await DeleteMessageAsync(chatId, session.LastUserMessageId.Value);
-            session.LastUserMessageId = null;
+            await ExecuteDeletionWithRetryAsync(
+                () => botClient.DeleteMessages(chatId, messageIds, cancellationToken), cancellationToken);
+            return new(messageIds, false);
+        }
+        catch (ApiRequestException ex) when (TelegramErrors.IsMessageDeletionRefused(ex) || TelegramErrors.IsMessageToDeleteMissing(ex))
+        {
+            // Only message-specific errors justify trying individual messages.
+        }
+        catch (Exception ex) when (ex is ApiRequestException or HttpRequestException or OperationCanceledException)
+        {
+            LogDeferredDeletion(ex, chatId, messageIds.Length, cancellationToken);
+            return new(deletedIds, true);
         }
 
-        await CleanupTrackedMessagesInternalAsync(chatId, session, exceptMessageIds ?? [], CancellationToken.None);
+        try
+        {
+            foreach (var messageId in messageIds)
+            {
+                if (await TryDeleteMessageAsync(chatId, messageId, cancellationToken))
+                {
+                    deletedIds.Add(messageId);
+                }
+            }
+            return new(deletedIds, false);
+        }
+        catch (Exception ex) when (ex is ApiRequestException or HttpRequestException or OperationCanceledException)
+        {
+            LogDeferredDeletion(ex, chatId, messageIds.Length - deletedIds.Count, cancellationToken);
+            return new(deletedIds, true);
+        }
     }
 
-    private async Task CleanupTrackedMessagesInternalAsync(
-        long chatId,
-        UserSession session,
-        IEnumerable<int> keepMessageIds,
-        CancellationToken cancellationToken)
+    private void LogDeferredDeletion(Exception exception, long chatId, int count, CancellationToken cancellationToken)
     {
-        var trackedMessageIds = await messageTrackingService.GetTrackedMessagesByChatAsync(chatId);
-        if (trackedMessageIds.Count == 0)
+        if (!cancellationToken.IsCancellationRequested)
         {
-            return;
+            logger.LogWarning(exception, "Message deletion deferred: chat={ChatId}, count={Count}", chatId, count);
         }
+    }
 
-        var keepIds = keepMessageIds.ToHashSet();
-        var staleIds = trackedMessageIds
+    private static async Task ExecuteDeletionWithRetryAsync(Func<Task> action, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await action();
+                return;
+            }
+            catch (ApiRequestException ex) when (attempt < MaxRetries && (ex.ErrorCode == 429 || ex.ErrorCode >= 500))
+            {
+                var delay = ex.ErrorCode == 429
+                    ? Math.Max(1, ex.Parameters?.RetryAfter ?? 5)
+                    : 1 << attempt;
+                await Task.Delay(TimeSpan.FromSeconds(delay), cancellationToken);
+            }
+            catch (Exception ex) when (attempt < MaxRetries && !cancellationToken.IsCancellationRequested &&
+                ex is HttpRequestException or OperationCanceledException)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1 << attempt), cancellationToken);
+            }
+        }
+    }
+
+    public async Task ClearChatHistoryAsync(
+        long chatId, UserSession session, CancellationToken cancellationToken, IEnumerable<int>? exceptMessageIds = null)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var trackedMessageIds = await messageTrackingService.GetTrackedMessagesByChatAsync(chatId);
+        var keepIds = (exceptMessageIds ?? []).ToHashSet();
+        var lastMessageId = session.LastUserMessageId;
+        var candidates = lastMessageId is { } id
+            ? trackedMessageIds.Append(id)
+            : trackedMessageIds;
+        var staleIds = candidates
             .Where(messageId => !keepIds.Contains(messageId))
             .ToArray();
 
@@ -137,24 +169,29 @@ public class TelegramOutputService(
         }
 
         var deletedIds = await DeleteMessagesAsync(chatId, staleIds, cancellationToken);
-        await messageTrackingService.DeleteTrackedMessagesByChatAsync(chatId, deletedIds);
+        if (lastMessageId is { } lastId && deletedIds.Contains(lastId))
+        {
+            session.LastUserMessageId = null;
+        }
     }
 
     /// <summary>
     /// Удаляет заданные устаревшие сообщения и освобождает только успешно удалённые tracking-записи.
     /// </summary>
-    public async Task CleanupTrackedMessagesAsync(
+    public async Task<int> CleanupTrackedMessagesAsync(
         IEnumerable<TrackedMessageReference> trackedMessages,
         CancellationToken cancellationToken)
     {
+        var deletedCount = 0;
         foreach (var chatMessages in trackedMessages.GroupBy(message => message.ChatId))
         {
             var deletedIds = await DeleteMessagesAsync(
                 chatMessages.Key,
                 chatMessages.Select(message => message.MessageId),
                 cancellationToken);
-            await messageTrackingService.DeleteTrackedMessagesByChatAsync(chatMessages.Key, deletedIds);
+            deletedCount += deletedIds.Count;
         }
+        return deletedCount;
     }
 
     public async Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)

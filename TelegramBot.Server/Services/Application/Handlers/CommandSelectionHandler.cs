@@ -51,6 +51,6 @@ public sealed class CommandSelectionHandler(
         context.Session.Reset(context.Session.RootPath);
 
         // Удаляем все отслеживаемые сообщения, ничего не выводим
-        await outputService.ClearChatHistoryAsync(context.UserId, context.Session);
+        await outputService.ClearChatHistoryAsync(context.UserId, context.Session, cancellationToken);
     }
 }

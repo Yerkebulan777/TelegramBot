@@ -231,7 +231,7 @@ internal static partial class SqlQueries
               AND Status IN ('pending', 'processing')";
 
         internal const string GetFailedCommandsBySession = @"
-            SELECT FilePath, ErrorMessage
+            SELECT FilePath, RootPath, CommandText, ErrorMessage
             FROM Commands
             WHERE SessionId = @SessionId
               AND Status = 'Failed'
@@ -240,7 +240,7 @@ internal static partial class SqlQueries
         // Done rows reuse Commands.ErrorMessage for ResultFile.warningMessage (success with recoverable issues).
         // Always filter Status = 'Done' — never treat ErrorMessage alone as failure.
         internal const string GetWarnedCommandsBySession = @"
-            SELECT FilePath, ErrorMessage
+            SELECT FilePath, RootPath, CommandText, ErrorMessage
             FROM Commands
             WHERE SessionId = @SessionId
               AND Status = 'Done'

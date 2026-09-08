@@ -109,6 +109,10 @@ Server:
 - **Process health monitoring**: каждые `ProcessMonitorIntervalSeconds` — проверка `Process` внутри `CommandExecutionService` + `DialogDismisser`
 - **Session retention**: `SessionCleanupService` — soft-delete сессий старше `CompletedSessionRetentionDays`
 - **Telegram message cleanup**: Server `TrackedMessageCleanupService` каждые `MessageCleanup:IntervalMinutes` удаляет tracking-сообщения старше `RetentionHours`, но младше `MaximumDeletionAgeHours` (по умолчанию 24–47 ч). Неудалённые сообщения остаются для повторной попытки; после окна Telegram запись удаляется только из `TrackedMessages` с Warning.
+  - Решение rate-limit принимается до первого I/O в `CommandAppService`; входящие сообщения регистрируются после проверки, включая отклонённые. Ответы гейтов также отслеживаются; лимитер атомарно разрешает не более одного предупреждения пользователю за `WindowSeconds`. Soft-delete сессии сохраняет tracking для интерактивной/фоновой очистки.
+  - Интерактивная и фоновая очистка используют общий механизм: distinct ID, пакеты до 100, максимум две повторные попытки для 429/5xx/сетевых сбоев; 429 учитывает `RetryAfter`, остальные — exponential backoff. Одиночный fallback применяется только к ошибкам конкретных сообщений (400), а не к лимитам и недоступности чата.
+  - Tracking удаляется после каждого пакета только для подтверждённых удалений (включая уже отсутствующие сообщения). Частичный успех сохраняется даже при ошибке/отмене fallback. Сбой одного чата не прерывает обработку остальных; исключения `exceptMessageIds` действуют и для последнего входящего сообщения.
+  - Обработка пакета возвращает подтверждённые ID и признак отложенной работы; сохранение tracking выполняется отдельно. Фоновый цикл логирует число выбранных и подтверждённо удалённых сообщений. `LastUserMessageId` очищается только после подтверждённого удаления, а не при `UserSession.Reset`. Токен отмены передаётся из обработчиков во все вызовы очистки, Telegram-запросы и задержки retry; при отмене сначала сохраняется частичный результат пакета.
 - **Worker shutdown**: остановка циклов → process-tree kill (30s budget) → освобождение ресурсов
 
 ## 8. Повторный запуск из /status
@@ -144,3 +148,7 @@ Session advisory locks для: lease cleanup, outbox sender, partition claim, du
 4. `IsRevitCommand` если Revit AddIn
 5. canonical BIM contract/XSD/plugin если меняется boundary
 6. README, AGENTS и этот документ
+
+## Представление причин в итоговом уведомлении
+
+Запросы `GetFailedCommandsBySession` и `GetWarnedCommandsBySession` возвращают `FilePath`, `RootPath`, `CommandText` и `ErrorMessage`. Server использует сохранённый `Commands.RootPath` для относительного пути в уведомлении и сокращает путь входного файла в причине перед ограничением её длины. Без корня используется имя файла. Перевод типовых причин применяется только при отображении; исходный `ErrorMessage` в БД и классификация retry не изменяются.
