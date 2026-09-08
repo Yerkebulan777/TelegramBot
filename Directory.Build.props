@@ -1,6 +1,8 @@
 <Project>
   <PropertyGroup>
     <WarningsAsErrors>VSTHRD002;VSTHRD003;VSTHRD100;VSTHRD101;VSTHRD102;VSTHRD103;VSTHRD104;VSTHRD200</WarningsAsErrors>
+    <!-- Qodana runs on Linux but also evaluates the Windows-only installer projects. -->
+    <EnableWindowsTargeting Condition="'$(OS)' != 'Windows_NT'">true</EnableWindowsTargeting>
   </PropertyGroup>
 
   <ItemGroup>
