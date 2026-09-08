@@ -159,13 +159,13 @@ public sealed class SelectionFlow
         {
             var parent = Path.GetDirectoryName(CurrentPath) ?? _rootPath;
             var parentFileName = Path.GetFileName(parent);
-            
+
             // If parent is a RVT folder (like 01_RVT), go up one more level to get the section folder
             if (string.Equals(parentFileName, _rvtDirectoryName, StringComparison.OrdinalIgnoreCase))
             {
                 parent = Path.GetDirectoryName(parent) ?? _rootPath;
             }
-            
+
             CurrentPath = parent;
         }
         else

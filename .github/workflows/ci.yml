@@ -147,6 +147,9 @@ jobs:
     - name: Build
       run: dotnet build TelegramBot.slnx --no-restore --configuration Release
 
+    - name: Verify code formatting
+      run: dotnet format TelegramBot.slnx --verify-no-changes --no-restore
+
     - name: Publish Server
       run: dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release -o ./publish/server
 
@@ -170,49 +173,3 @@ jobs:
       with:
         name: telegram-bot-build
         path: ./publish
-
-  # ──────────────────────────────────────────────
-  # Qodana Code Quality (Community for .NET, ReSharper-based, Docker-only)
-  # QODANA_TOKEN опционален — нужен только для загрузки отчётов в Qodana Cloud
-  # Чтобы добавить Cloud: создать secret QODANA_TOKEN и раскомментировать env ниже
-  # ──────────────────────────────────────────────
-  qodana:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      checks: write
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}  # анализировать реальный коммит PR, не merge-коммит
-        fetch-depth: 0  # полная история нужна для инкрементального анализа PR
-
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '10.0.x'
-
-    - name: Restore dependencies for Qodana
-      run: dotnet restore TelegramBot.slnx
-
-    - name: Cache Qodana
-      uses: actions/cache@v4
-      with:
-        path: ~/.qodana/cache
-        key: qodana-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-        restore-keys: |
-          qodana-${{ runner.os }}-${{ github.ref }}-
-          qodana-${{ runner.os }}-
-
-    - name: Qodana Scan
-      uses: JetBrains/qodana-action@v2026.1
-      with:
-        pr-mode: false
-        cache-dir: ~/.qodana/cache
-        args: |
-          --linter qodana-cdnet
-          --solution TelegramBot.slnx
-      # env:
-      #   QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}  # раскомментировать для Qodana Cloud
