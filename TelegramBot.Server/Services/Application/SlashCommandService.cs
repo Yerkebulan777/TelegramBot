@@ -185,11 +185,15 @@ public sealed partial class SlashCommandService(
             {
                 // Каждая пара (команда, файл) пойман уникальным индексом idx_commands_active_unique — все пары дубли
                 logger.LogWarning("Job blocked: {Username} ({UserId}), reason=all_dup_cmds", username, userId);
-                await CancelSelectionAsync(userId, session, cancellationToken, $"⚠️ Выбранные файлы проекта «{projectName}» уже находятся в очереди выполнения.");
+                await CancelSelectionAsync(userId, session, cancellationToken, JobMessageFormatter.BuildConflictsMessage(skippedPairs));
                 return;
             }
 
-            var queuedMessage = JobMessageFormatter.BuildJobQueuedMessage(commandNames, projectName, sectionNames, filesToProcess, skippedPairs);
+            var skipped = skippedPairs.Select(p => (p.Command, p.FilePath)).ToHashSet();
+            var queuedFiles = filesToProcess
+                .Where(file => submission.Commands.Any(command => !skipped.Contains((command, file))))
+                .ToArray();
+            var queuedMessage = JobMessageFormatter.BuildJobQueuedMessage(commandNames, projectName, sectionNames, queuedFiles, skippedPairs);
 
             logger.LogInformation(
                 "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}, skipped={SkippedCount}",

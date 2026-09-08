@@ -49,9 +49,38 @@ public sealed class CommandDataService(
     /// <summary>Обновляет статус команды.</summary>
     public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null)
     {
-        return await TryExecuteAsync(commandId, SqlQueries.Commands.UpdateStatus,
-            new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage },
-            "update status");
+        const int maxAttempts = 4;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await using var conn = new NpgsqlConnection(ResolveConnectionString(configuration));
+                await conn.OpenAsync(timeout.Token);
+                var affected = await conn.ExecuteAsync(new CommandDefinition(
+                    SqlQueries.Commands.UpdateStatus,
+                    new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage },
+                    cancellationToken: timeout.Token));
+                if (affected == 0)
+                {
+                    Logger.LogWarning("Command status not written: id={CommandId}, status={Status}, row removed or deleted",
+                        commandId, status);
+                }
+                return affected > 0;
+            }
+            catch (Exception ex) when (attempt < maxAttempts &&
+                (ex is NpgsqlException { IsTransient: true } or TimeoutException or OperationCanceledException))
+            {
+                var delaySeconds = 1 << attempt;
+                Logger.LogWarning(ex, "Command status write retry: id={CommandId}, status={Status}, attempt={Attempt}, delay={DelaySeconds}s",
+                    commandId, status, attempt, delaySeconds);
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+            }
+            catch (Exception ex)
+            {
+                throw new CommandPersistenceException(commandId, ex);
+            }
+        }
     }
 
     /// <summary>Записывает PID запущенного процесса и один раз уведомляет Server о старте сессии.</summary>
@@ -81,11 +110,18 @@ public sealed class CommandDataService(
     /// <summary>Планирует повторную попытку.</summary>
     public async Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage)
     {
-        await using var conn = await CreateOpenConnectionAsync();
-        var retryCount = await conn.QuerySingleAsync<int>(
-            SqlQueries.Commands.ScheduleRetry,
-            new { CommandId = commandId, NextRetryAt = nextRetryAt, ErrorMessage = errorMessage });
-        return retryCount;
+        try
+        {
+            await using var conn = await CreateOpenConnectionAsync();
+            return await conn.QuerySingleAsync<int>(
+                SqlQueries.Commands.ScheduleRetry,
+                new { CommandId = commandId, NextRetryAt = nextRetryAt, ErrorMessage = errorMessage });
+        }
+        catch (Exception ex)
+        {
+            // Retrying an uncertain write could increment RetryCount twice.
+            throw new CommandPersistenceException(commandId, ex);
+        }
     }
 
     /// <summary>
@@ -152,22 +188,6 @@ public sealed class CommandDataService(
         {
             Logger.LogError(e, "Failed to delete commands of type {CommandType} in session {SessionId}", commandType, sessionId);
             return 0;
-        }
-    }
-
-    /// <summary>Выполняет SQL-команду с обработкой ошибок и возвратом признака успеха.</summary>
-    private async Task<bool> TryExecuteAsync(int commandId, string sql, object parameters, string operation)
-    {
-        try
-        {
-            await using var conn = await CreateOpenConnectionAsync();
-            var affected = await conn.ExecuteAsync(sql, parameters);
-            return affected > 0;
-        }
-        catch (Exception e)
-        {
-            Logger.LogError(e, "Failed to {Operation} for command {CommandId}", operation, commandId);
-            return false;
         }
     }
 

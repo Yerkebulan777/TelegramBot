@@ -20,7 +20,13 @@ public sealed class ProcessStarter(
     /// </summary>
     public async Task<Process> StartAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
-        var (_, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        var (resultFilePath, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        if (File.Exists(resultFilePath))
+        {
+            // Retain previous evidence, but never consume it as the result of this attempt.
+            File.Move(resultFilePath, resultFilePath + ".previous", overwrite: true);
+            logger.LogWarning("Previous result retained before new attempt: id={CommandId}", cmd.CommandId);
+        }
         if (!commandPreparer.CreateTaskFile(cmd))
         {
             throw new IOException(

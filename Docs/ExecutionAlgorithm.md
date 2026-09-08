@@ -5,8 +5,8 @@ Semantics pipeline Server → PostgreSQL → Worker → Telegram. Точный S
 ## Общий поток
 
 ```text
-Telegram update → Server → Sessions + Commands (1 транзакция) → NOTIFY new_tasks
-→ Worker claim → process + TaskFile/ResultFile → Done/retry/Failed → NotificationOutbox → Server отправляет итог
+Telegram update → Server → Sessions + Commands (1 транзакция)
+→ Worker polling → claim → process + TaskFile/ResultFile → Done/retry/Failed → NotificationOutbox → Server отправляет итог
 ```
 
 ## 0. Старт Server и инициализация схемы
@@ -21,14 +21,16 @@ Hosted-сервисы стартуют параллельно (fire-and-forget `
 
 `SlashCommandService` проверяет команды и разделы, сканирует `01_RVT`, дедуплицирует, проверяет дневной лимит и дубликаты.
 
-В одной DB-транзакции под user-level `pg_advisory_xact_lock`:
-- повторная проверка дубликатов (TOCTOU)
-- INSERT в `Sessions` + Cartesian product команд×файлов в `Commands`
-- `pg_notify('new_tasks', correlationId)`
+В одной DB-транзакции создаётся `Sessions` и Cartesian product команд×файлов в `Commands`.
+`ON CONFLICT (CommandText, FilePath) WHERE Status IN ('pending', 'processing') DO NOTHING`
+пропускает только уже активные пары, глобально по всем пользователям. Остальные операции добавляются.
+Если все пары пропущены, транзакция откатывается. При частичном добавлении `FilesAmount` учитывает
+только файлы с добавленными операциями.
 
-При дубликатах под lock — откат.
-
-DB-level backstop: `idx_commands_active_unique` — уникальный partial-индекс на `(CommandText, FilePath) WHERE Status IN ('pending', 'processing')`, глобально по всем сессиям/юзерам. Advisory lock сериализует только одного юзера — гонку между **разными** юзерами на идентичный (команда, файл) ловит только этот индекс. При его срабатывании `INSERT` кидает `PostgresException` (`23505`), `SessionDataService` ловит, откатывает транзакцию, возвращает `null` — тот же путь, что и dup-под-lock.
+Для пропусков Server читает снимок прежней активной команды: `CommandId`, `SessionId`, `Status`,
+`CreatedAt`. Сообщение показывает до восьми подробностей и общее количество пропущенных операций.
+Если конфликтующая команда завершилась между INSERT и чтением, сообщение сообщает об изменении
+её статуса. Уведомление `new_tasks` больше не отправляется: Worker читает очередь самостоятельно.
 
 ### Priority
 
@@ -40,15 +42,29 @@ DB-level backstop: `idx_commands_active_unique` — уникальный partial
 Partition = "file:" + md5(lower(FilePath))
 ```
 
-Одна команда на partition за раз. Файлы одного проекта — последовательно, разных — параллельно.
+Одна команда на partition за раз. Операции одного файла — последовательно, разных файлов — параллельно.
 
 ## 2. Claim очереди
 
-`CommandExecutionService` слушает `new_tasks` и владеет только соединением/reconnect-backoff. Сам claim/launch делегирует `CommandOrchestrator`.
+`CommandExecutionService` выполняет один цикл: очистка истёкших lease (на старте и по
+`CleanupIntervalSeconds`) → `CommandOrchestrator.TriggerDrainAsync` → пауза. При ошибке обращения
+к БД цикл пишет предупреждение и повторяет попытку после паузы, с новым подключением.
 
-`CommandOrchestrator.TriggerDrainAsync` триггерится двумя независимыми путями из `CommandExecutionService`: NOTIFY (мгновенно) и отдельный периодический цикл `StartPeriodicBackgroundTaskAsync` (safety-net, интервал `FallbackPollingIntervalSeconds`, тот же generic-хелпер, что и для lease cleanup/health-monitor) — оба ведут к одному и тому же drain. `_drainGate` (внутри оркестратора) не допускает параллельные drain-циклы.
+Интервал — `Worker:FallbackPollingIntervalSeconds`, по умолчанию 10 секунд. Старое имя ключа
+сохранено для совместимости; значение 0 также означает 10 секунд. Существующие положительные
+переопределения сохраняют своё значение. `LISTEN/NOTIFY`, таймеры отдельных retry и запуск drain
+из continuation завершённой команды удалены. Мониторинг процессов работает независимо.
 
-Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim атомарно выбирает `pending`-команды с наступившим `NextRetryAt`, исключая partition с `processing`-командой, используя `FOR UPDATE SKIP LOCKED` и partition advisory xact lock. Сортировка по `Priority`, `CreatedAt`, `CommandId`. Запуск — fire-and-forget `Task` (без ожидания), чтобы долгая команда не блокировала claim остальных.
+Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim атомарно выбирает
+`pending` с наступившим `NextRetryAt`, исключая partition с `processing`, используя
+`FOR UPDATE SKIP LOCKED` и partition advisory xact lock. Сортировка по `Priority`, `CreatedAt`,
+`CommandId`. Незавершённые tasks учитываются до окончания обработки, включая запись результата.
+Новые команды и retries подбираются очередным циклом при наличии слотов.
+
+Аварийная lease остаётся `ProcessTimeoutMinutes + 5` минут с момента claim (185 минут по
+умолчанию). Перезапуск Worker не снимает неистёкшие lease: по одной записи БД нельзя безопасно
+решить, что прежний процесс уже остановлен. Эта схема не гарантирует exactly-once экспорт при
+аварии между выполнением внешней операции и фиксацией результата.
 
 ## Корневой UNC-путь
 
@@ -83,13 +99,25 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 | wrapper без ResultFile, exit ≠ 0 | failure → retry/permanent по классификатору |
 | timeout | process kill, `Failed` (без retry) |
 
-stdout/stderr: 64 KiB capture, 4 KiB в лог. Прочитанный ResultFile удаляется. При отрицательном exit code — Revit journal evidence.
+stdout/stderr: 64 KiB capture, 4 KiB в лог. Валидный ResultFile удаляется вместе с TaskFile после успешной обработки результата. При ошибке записи в БД или остановке Worker файлы сохраняются; перед новой попыткой прежний ResultFile переносится в `.previous` (одна последняя копия), чтобы не принять его за новый результат. При отрицательном exit code — Revit journal evidence.
 
 `Commands.ErrorMessage` при `Status='Failed'` — причина сбоя; при `Status='Done'` — опциональный `ResultFile.warningMessage` (whitespace-only не сохраняется). Выборки warned-команд всегда фильтруют `Status = 'Done'`.
 
+### Ошибка сохранения результата
+
+Финальный статус записывается с четырьмя попытками при временной ошибке БД: до 10 секунд
+на подключение и запрос каждой попытки, паузы 2, 4 и 8 секунд. Нетранзиентная ошибка не повторяется.
+После исчерпания попыток выбрасывается `CommandPersistenceException`; она не классифицируется
+как ошибка Revit и не вызывает немедленный повтор экспорта. Результат сохраняется для диагностики,
+а запись БД остаётся для существующего lease recovery. Это ограниченные повторы, не durable outbox
+результатов. Нулевая затронутая строка (например, soft-delete) отдельно записывается в лог.
+
+Ошибка `ScheduleRetryAsync` также отделена от BIM-ошибок. Неоднозначный результат SQL не
+повторяется автоматически, поскольку счётчик попыток мог уже увеличиться.
+
 ## 5. Retry
 
-Permanent (без retry): plugin `status=failed`/`cancelled`, `PermanentFailureExitCodes`, invalid input, validation errors, non-transient exceptions, timeout. Исключение: Revit-команда с plugin `status=failed`, когда `errorDetails` содержит `Autodesk.Revit.Exceptions.InternalException` и `UIApplication.OpenAndActivateDocument`, при `RetryCount = 0` повторяется один раз через 10 с. `ProcessRunner` сразу освобождает execution-slot, а `CommandOrchestrator` ставит явный delayed-drain на момент `NextRetryAt`. Второй такой сбой становится `Failed`.
+Permanent (без retry): plugin `status=failed`/`cancelled`, `PermanentFailureExitCodes`, invalid input, validation errors, non-transient exceptions, timeout. Исключение: Revit-команда с plugin `status=failed`, когда `errorDetails` содержит `Autodesk.Revit.Exceptions.InternalException` и `UIApplication.OpenAndActivateDocument`, при `RetryCount = 0` повторяется один раз через 10 с. `ProcessRunner` завершает текущую попытку; следующий polling-цикл подбирает retry не раньше `NextRetryAt`, когда есть свободный слот. Второй такой сбой становится `Failed`.
 
 Transient: `delay = RetryDelayBaseSeconds × 2^RetryCount + jitter`. После `MaxRetries` → `Failed`.
 
@@ -121,7 +149,7 @@ Server:
 
 `CommandDataService.RequeueCommandAsync` (SQL `Requeue`, `Queries.Commands.cs`):
 - если `Status == 'processing'` — no-op, возвращает `RequeueOutcome.Processing`, юзер видит toast «⏳ Уже выполняется» (блок дубликата выполнения того же CommandId)
-- иначе — сброс той же строки в `pending` (`Lease`/`ProcessId`/`ErrorMessage`/`NextRetryAt`/`CompletedAt` в NULL, `RetryCount` не трогается — это ручной rerun, не авто-retry), `pg_notify('new_tasks', commandId)` для мгновенного подхвата, `RequeueOutcome.Requeued`, toast «🔁 Перезапущено»
+- иначе — сброс той же строки в `pending` (`Lease`/`ProcessId`/`ErrorMessage`/`NextRetryAt`/`CompletedAt` в NULL, `RetryCount` не трогается — это ручной rerun, не авто-retry), подхват очередным polling-циклом, `RequeueOutcome.Requeued`, toast «🔁 Перезапущено»
 - если строка не найдена/чужая/удалена — `RequeueOutcome.NotFound`, тихо игнорируется
 
 Если файл физически ещё выполняется старым процессом в момент rerun — этот процесс осиротевает; его финальный `UpdateStatus` может перезаписать заново queued/processing строку тем же `CommandId`. Разруливается на уровне БД по `CommandId`, отдельный kill старого процесса не делается.
@@ -134,7 +162,6 @@ Server:
 
 | Канал | Назначение |
 |---|---|
-| `new_tasks` | разбудить Worker |
 | `session_started` | уведомление «задание запущено» |
 | `command_completed` | разбудить outbox sender |
 

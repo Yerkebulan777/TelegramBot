@@ -82,11 +82,11 @@ Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs
 ## Worker flow
 
 ```text
-LISTEN new_tasks → DrainPendingCommands → ClaimPendingCommands → ProcessRunner.RunAsync
+Polling (10s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsync → ClaimPendingCommands → ProcessRunner.RunAsync
 → CommandPreparer.PrepareAsync → ProcessStarter.StartAsync → OutputCollector + ResultAnalyzer → Done/retry/Failed
 ```
 
-Ограничение: tracked running tasks + SQL partition scheduling (одна команда на Partition за раз).
+Ограничение: tracked running tasks + SQL partition scheduling (одна команда на Partition за раз). Единственный polling-цикл подбирает новые команды и retry по NextRetryAt. CommandPersistenceException не классифицировать как BIM-ошибку; ResultFile сохранять при сбое записи результата.
 
 ### Worker DI
 

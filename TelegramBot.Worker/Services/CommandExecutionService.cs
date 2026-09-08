@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Options;
-using Npgsql;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using TelegramBot.Core.Config;
-using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.BimLib.Monitor;
 using TelegramBot.Worker.Helpers;
@@ -11,80 +9,74 @@ using TelegramBot.Worker.Helpers;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
-/// Background service: слушает PostgreSQL LISTEN/NOTIFY и триггерит <see cref="CommandOrchestrator"/>.
-/// Сам claim/launch не делает — владеет только соединением, reconnect-backoff, cleanup и health-мониторингом.
+/// Единственный цикл очереди PostgreSQL; выполнение делегирует <see cref="CommandOrchestrator"/>.
+/// Очистка lease предшествует claim; мониторинг процессов работает независимо.
 /// </summary>
 public sealed class CommandExecutionService(
     CommandDataService commandDataService,
     CommandOrchestrator orchestrator,
     ProcessRunner processRunner,
     IOptions<WorkerOptions> workerOptions,
-    IConfiguration configuration,
     ILogger<CommandExecutionService> logger,
     DialogDismisser dialogDismisser) : BackgroundService
 {
-    private const string ListenChannel = "new_tasks";
     private const int ShutdownBudgetSeconds = 30;
     private const int TaskWaitTimeoutSeconds = 15;
 
     private readonly ConcurrentDictionary<int, DateTime> _unresponsiveSince = new();
 
-    private readonly string _connectionString = DataAccessBase.ResolveConnectionString(configuration);
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
     private CancellationTokenSource? _shutdownCts;
-    private Task? _cleanupTask;
     private Task? _processMonitorTask;
-    private Task? _drainTimerTask;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}", _workerOptions.MaxConcurrentCommands);
-
+        var pollSeconds = _workerOptions.FallbackPollingIntervalSeconds > 0
+            ? _workerOptions.FallbackPollingIntervalSeconds : 10;
+        logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}, poll={PollSeconds}s",
+            _workerOptions.MaxConcurrentCommands, pollSeconds);
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-
-        _drainTimerTask = StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: _workerOptions.FallbackPollingIntervalSeconds,
-            disabledMessage: interval => $"Drain safety-net disabled: interval={interval}s",
-            cycleName: "drain safety-net",
-            cycle: () => orchestrator.TriggerDrainAsync(_shutdownCts!.Token));
-
-        _cleanupTask = StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: _workerOptions.CleanupIntervalSeconds,
-            disabledMessage: interval => $"Cleanup disabled: interval={interval}s",
-            cycleName: "lease cleanup",
-            cycle: () => commandDataService.ReleaseExpiredLeasesAsync(_workerOptions.MaxRetries));
-
         _processMonitorTask = StartPeriodicBackgroundTaskAsync(
             intervalSeconds: _workerOptions.ProcessMonitorIntervalSeconds > 0
-                ? RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds)
-                : 0,
+                ? RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds) : 0,
             disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
             cycleName: "process monitor",
             cycle: () => { CheckProcessesHealth(); return Task.CompletedTask; });
 
+        var nextCleanup = DateTime.MinValue;
         try
         {
-            var reconnectDelayMs = 5_000;
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    await RunListenerLoopAsync(stoppingToken);
-                    reconnectDelayMs = 5_000;
+                    if (DateTime.UtcNow >= nextCleanup)
+                    {
+                        await commandDataService.ReleaseExpiredLeasesAsync(_workerOptions.MaxRetries);
+                        nextCleanup = _workerOptions.CleanupIntervalSeconds > 0
+                            ? DateTime.UtcNow.AddSeconds(_workerOptions.CleanupIntervalSeconds)
+                            : DateTime.MaxValue;
+                    }
+
+                    await orchestrator.TriggerDrainAsync(stoppingToken);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     break;
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Listener lost: retry={Delay}ms", reconnectDelayMs);
-                    try { await Task.Delay(reconnectDelayMs, stoppingToken); }
-                    catch (OperationCanceledException) { break; }
-                    reconnectDelayMs = Math.Min((int)(reconnectDelayMs * 1.5), 60_000);
+                    logger.LogWarning(ex, "Queue poll failed: retry in {PollSeconds}s", pollSeconds);
                 }
+
+                // A delay after each attempt also bounds retries when PostgreSQL is unavailable.
+                await Task.Delay(TimeSpan.FromSeconds(pollSeconds), stoppingToken);
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal host shutdown.
         }
         finally
         {
@@ -92,77 +84,6 @@ public sealed class CommandExecutionService(
         }
 
         logger.LogInformation("Worker stop");
-    }
-
-    private async Task RunListenerLoopAsync(CancellationToken stoppingToken)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(stoppingToken);
-
-        await using var cmd = new NpgsqlCommand($"LISTEN {ListenChannel};", conn);
-        _ = await cmd.ExecuteNonQueryAsync(stoppingToken);
-
-        logger.LogInformation("Listen {Channel}", ListenChannel);
-
-        await commandDataService.ReleaseExpiredLeasesAsync(_workerOptions.MaxRetries);
-        await orchestrator.TriggerDrainAsync(stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            // Таймаут тут — только liveness-check соединения; периодический drain уже покрыт
-            // отдельным "drain safety-net" циклом (StartPeriodicBackgroundTaskAsync), дублировать не нужно.
-            var fallbackTimeoutSec = _workerOptions.FallbackPollingIntervalSeconds;
-            var notificationReceived = await WaitForNotificationAsync(conn, TimeSpan.FromSeconds(fallbackTimeoutSec), stoppingToken);
-
-            if (notificationReceived)
-            {
-                logger.LogDebug("NOTIFY {Channel}", ListenChannel);
-                await orchestrator.TriggerDrainAsync(stoppingToken);
-            }
-        }
-    }
-
-    private async Task<bool> WaitForNotificationAsync(NpgsqlConnection conn, TimeSpan timeout, CancellationToken ct)
-    {
-        // Используем overload WaitAsync(TimeSpan, CancellationToken) — устраняет per-call
-        // аллокацию CancellationTokenSource (CreateLinkedTokenSource + CancelAfter),
-        // т.к. фреймворк сам обрабатывает таймаут внутри WaitAsync.
-        var notificationReceived = false;
-
-        void OnNotification(object? sender, NpgsqlNotificationEventArgs e)
-        {
-            if (e.Channel == ListenChannel)
-            {
-                notificationReceived = true;
-            }
-        }
-
-        conn.Notification += OnNotification;
-
-        try
-        {
-            _=await conn.WaitAsync(timeout, ct);
-            return notificationReceived;
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            // Таймаут истёк до получения уведомления — fallback polling сработает.
-            return false;
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown — пробрасываем наверх.
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Error waiting for notification");
-            return false;
-        }
-        finally
-        {
-            conn.Notification -= OnNotification;
-        }
     }
 
     /// <summary>
@@ -313,8 +234,6 @@ public sealed class CommandExecutionService(
 
         int Remaining() => Math.Max(1, ShutdownBudgetSeconds - (int)(DateTime.UtcNow - shutdownStartedAt).TotalSeconds);
 #pragma warning disable VSTHRD003
-        await WaitForTasksAsync(_drainTimerTask, "Drain safety-net", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
-        await WaitForTasksAsync(_cleanupTask, "Cleanup task", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
         await WaitForTasksAsync(_processMonitorTask, "Process monitor", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
         await WaitForTasksAsync(null, "Running tasks", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 #pragma warning restore VSTHRD003
