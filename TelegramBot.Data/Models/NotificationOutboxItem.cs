@@ -3,9 +3,6 @@ namespace TelegramBot.Data.Models;
 public sealed class NotificationOutboxItem
 {
     public long OutboxId { get; set; }
-
-    public required string EventType { get; set; }
-
     public int SessionId { get; set; }
 
     public required string CorrelationId { get; set; }

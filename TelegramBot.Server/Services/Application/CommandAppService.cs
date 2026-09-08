@@ -87,7 +87,6 @@ public sealed class CommandAppService(
         var context = new CallbackContext
         {
             UserId = userId,
-            ChatId = callback.Message.Chat.Id,
             MessageId = callback.Message.MessageId,
             Username = username!, // non-null: TryAdmitAsync rejected blank usernames above
             CallbackQueryId = callback.Id,

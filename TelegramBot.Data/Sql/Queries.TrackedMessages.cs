@@ -8,10 +8,6 @@ internal static partial class SqlQueries
             INSERT INTO TrackedMessages (SessionId, ChatId, MessageIdPg)
             VALUES (@SessionId, @ChatId, @MessageIdPg)";
 
-        internal const string DeleteBySession = @"
-            DELETE FROM TrackedMessages
-            WHERE SessionId = @SessionId";
-
         internal const string DeleteByChatAndMessages = @"
             DELETE FROM TrackedMessages
             WHERE ChatId = @ChatId AND MessageIdPg = ANY(@MessageIds)";

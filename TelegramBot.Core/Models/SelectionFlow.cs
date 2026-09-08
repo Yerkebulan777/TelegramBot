@@ -60,9 +60,6 @@ public sealed class SelectionFlow
     /// <summary>Текущая папка навигации.</summary>
     public string CurrentPath { get; private set; }
 
-    /// <summary>Идёт ли выбор файлов (после применения команд).</summary>
-    public bool IsFileSelectionActive { get; private set; }
-
     /// <summary>Коды выбранных команд в порядке выбора.</summary>
     public IReadOnlyList<string> PendingCommands => _pendingCommands;
 
@@ -131,7 +128,6 @@ public sealed class SelectionFlow
         }
 
         CurrentPath = _rootPath;
-        IsFileSelectionActive = true;
         return true;
     }
 
@@ -243,8 +239,6 @@ public sealed class SelectionFlow
             return new ConfirmOutcome(ConfirmOutcomeKind.Advanced);
         }
 
-        IsFileSelectionActive = false;
-
         if (_selectedFiles.Count == 0)
         {
             return new ConfirmOutcome(ConfirmOutcomeKind.BlockedNoFiles);
@@ -255,15 +249,9 @@ public sealed class SelectionFlow
             new JobSubmission(_pendingCommands.ToArray(), _selectedFiles.ToArray()));
     }
 
-    /// <summary>Завершает выбор файлов (например, сообщение выбора не найдено).</summary>
-    public void StopFileSelection()
-    {
-        IsFileSelectionActive = false;
-    }
-
     // ────────────────────────── Сброс ──────────────────────────
 
-    /// <summary>Полный сброс потока выбора: команды, файлы, путь, активность.</summary>
+    /// <summary>Полный сброс потока выбора: команды, файлы и путь.</summary>
     public void Reset(string? rootPath = null)
     {
         if (rootPath != null)
@@ -274,7 +262,6 @@ public sealed class SelectionFlow
         _pendingCommands.Clear();
         _selectedFiles.Clear();
         CurrentPath = _rootPath;
-        IsFileSelectionActive = false;
     }
 
     private static string Normalize(string path)

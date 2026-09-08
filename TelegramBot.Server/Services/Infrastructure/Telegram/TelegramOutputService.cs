@@ -252,22 +252,6 @@ public class TelegramOutputService(
         }
     }
 
-    public async Task EditMessageReplyTextAsync(long userId, int messageId, string message)
-    {
-        try
-        {
-            _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
-        }
-        catch (ApiRequestException ex) when (TelegramErrors.IsMessageNotModified(ex))
-        {
-            logger.LogDebug("Reply text unchanged: {UserId} msg={MessageId}", userId, messageId);
-        }
-        catch (ApiRequestException ex)
-        {
-            logger.LogWarning(ex, "Edit reply text fail: {UserId} msg={MessageId}", userId, messageId);
-        }
-    }
-
     public async Task EditMessageReplyMarkupAsync(long userId, int messageId, InlineKeyboardMarkup keyboard)
     {
         try

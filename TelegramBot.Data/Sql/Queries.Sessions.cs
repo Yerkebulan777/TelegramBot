@@ -83,8 +83,6 @@ internal static partial class SqlQueries
             SELECT
                 s.UserId,
                 s.Username,
-                s.SessionId,
-                s.CorrelationId,
                 s.ProjectName,
                 COUNT(CASE WHEN c.Status != 'Deleted' THEN 1 END)::int AS TotalFiles,
                 COUNT(CASE WHEN c.Status = 'Done' THEN 1 END)::int AS DoneFiles,

@@ -26,9 +26,9 @@ internal static partial class SqlQueries
                     UpdatedAt = NOW()
                 FROM candidates c
                 WHERE n.OutboxId = c.OutboxId
-                RETURNING n.OutboxId, n.EventType, n.SessionId, n.CorrelationId, n.Attempts
+                RETURNING n.OutboxId, n.SessionId, n.CorrelationId, n.Attempts
             )
-            SELECT OutboxId, EventType, SessionId, CorrelationId, Attempts
+            SELECT OutboxId, SessionId, CorrelationId, Attempts
             FROM claimed
             ORDER BY OutboxId;";
 

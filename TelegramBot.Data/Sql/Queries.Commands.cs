@@ -31,8 +31,7 @@ internal static partial class SqlQueries
             RETURNING CommandText, FilePath";
 
         internal const string GetBySession = @"
-            SELECT c.ExecutionOrder AS ExecOrder, c.CommandText AS Command,
-                   c.FilePath AS FileName, c.Status, c.CreatedAt AS Date, c.CommandId
+            SELECT c.CommandText AS Command, c.FilePath AS FileName, c.Status, c.CommandId
             FROM Commands c
             JOIN Sessions s ON s.SessionId = c.SessionId
             WHERE c.SessionId = @SessionId

@@ -48,11 +48,6 @@ public sealed class RootPathProvider(
         return !administratorUserId.HasValue || administratorUserId.Value == userId;
     }
 
-    public async Task<bool> HasRootPathAdministratorAsync(CancellationToken cancellationToken = default)
-    {
-        return (await GetRootPathAdministratorUserIdAsync(cancellationToken)).HasValue;
-    }
-
     public async Task<RootPathUpdateResult> SetRootPathAsync(string rootPath, long updatedByUserId, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);

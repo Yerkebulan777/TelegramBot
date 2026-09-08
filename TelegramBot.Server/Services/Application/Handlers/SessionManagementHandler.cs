@@ -123,7 +123,7 @@ public sealed class SessionManagementHandler(
             session.SessionId = sessionId;
 
             var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
-            var keyboard = keyboardBuilder.GetSessionStatusKeyboard(sessionStatus, sessionId);
+            var keyboard = keyboardBuilder.GetSessionStatusKeyboard(sessionId);
             await outputService.EditMessageTextWithKeyboardAsync(
                 context.UserId, context.MessageId, SessionsListRenderer.BuildStatusReply(sessionStatus), keyboard);
             session.StatusMessageId = context.MessageId;

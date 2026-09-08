@@ -113,7 +113,6 @@ public sealed partial class SlashCommandService(
         if (!session.FileSelectionMessageId.HasValue)
         {
             logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_file_selection_msg", username, userId);
-            flow.StopFileSelection();
             await RejectAndWarnAsync(userId, session, "Сообщение выбора файлов не найдено.", cancellationToken);
             return;
         }
@@ -337,7 +336,6 @@ public sealed partial class SlashCommandService(
         }
 
         await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
-        session.Selection.StopFileSelection();
         session.AwaitingRootPath = true;
         _ = await messageTrackingService.TrackAsync(
             outputService.SendForceReplyAsync(userId, "Отправьте букву диска с проектами, например Z:\\ (можно и вложенную папку). Бот определит сетевой UNC-путь сам."), session);

@@ -107,18 +107,15 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
             : title;
     }
 
-    public InlineKeyboardMarkup GetSessionStatusKeyboard(SessionStatus sessionStatus, int sessionId)
-    {
-        var buttons = new List<List<InlineKeyboardButton>>
+    public InlineKeyboardMarkup GetSessionStatusKeyboard(int sessionId) =>
+        new(new List<List<InlineKeyboardButton>>
         {
             new()
             {
                 InlineKeyboardButton.WithCallbackData("📋 Команды", $"{CallbackPrefixes.SessionDetails}{sessionId}"),
                 InlineKeyboardButton.WithCallbackData("🗑 Удалить", $"{CallbackPrefixes.DeleteSession}{sessionId}")
             }
-        };
-        return new InlineKeyboardMarkup(buttons);
-    }
+        });
 
     public InlineKeyboardMarkup GetSessionCommandsKeyboard(
         List<SessionCommands> sessionCommands, int sessionId, string selectedFilter, int page = 0)

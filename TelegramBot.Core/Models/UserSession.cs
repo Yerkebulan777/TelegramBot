@@ -24,7 +24,6 @@ public class UserSession
     public int? CommandSelectionMessageId { get; set; }
     public int? FileSelectionMessageId { get; set; }
     public int? StatusMessageId { get; set; }
-    public int? LastActionsMessageId { get; set; }
     public string RootPath { get; private set; } = string.Empty;
     public bool AwaitingRootPath { get; set; }
 
@@ -41,7 +40,6 @@ public class UserSession
         Selection.Reset(rootPath);
         CommandSelectionMessageId = null;
         FileSelectionMessageId = null;
-        LastActionsMessageId = null;
         StatusMessageId = null;
         SessionId = 0;
         // Cleanup owns LastUserMessageId; resetting the view must preserve failed deletions.
