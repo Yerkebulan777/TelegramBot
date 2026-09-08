@@ -123,12 +123,38 @@ public sealed class CommandOrchestrator(
     {
         try
         {
-            await processRunner.RunAsync(cmd, ct);
+            DateTime? retryReadyAt = await processRunner.RunAsync(cmd, ct);
+            if (retryReadyAt is not null)
+            {
+                _ = TriggerDrainAtAsync(retryReadyAt.Value, ct);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Exec error: id={CommandId}, corr={CorrelationId}",
                 cmd.CommandId, cmd.CorrelationId);
+        }
+    }
+
+    private async Task TriggerDrainAtAsync(DateTime readyAt, CancellationToken ct)
+    {
+        try
+        {
+            TimeSpan delay = readyAt - DateTime.UtcNow;
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, ct);
+            }
+
+            await TriggerDrainAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // штатное завершение
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Delayed drain error: readyAt={ReadyAt:O}", readyAt);
         }
     }
 

@@ -192,8 +192,9 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         return CommandResult.Failure(
             result.ErrorMessage ?? "Plugin reported failure",
             exitCode: null,
-            isPluginOrigin: true,
-            isRetryableRevitOpenFailure: isRetryableRevitOpenFailure);
+            failureDisposition: isRetryableRevitOpenFailure
+                ? CommandResult.FailureDisposition.RetryRevitOpenOnce
+                : CommandResult.FailureDisposition.PermanentPlugin);
     }
 
     private static bool IsRetryableRevitOpenFailure(PendingCommand cmd, string? errorDetails)
@@ -250,8 +251,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         public bool IsSuccess { get; }
         public bool IsFailure { get; }
         public bool IsCancelled { get; }
-        public bool IsPluginOrigin { get; private set; }
-        public bool IsRetryableRevitOpenFailure { get; }
+        public FailureDisposition Disposition { get; }
         public string? ErrorMessage { get; }
         public string? WarningMessage { get; }
         public int? ExitCode { get; }
@@ -262,8 +262,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             bool isCancelled,
             string? errorMessage,
             int? exitCode,
-            bool isPluginOrigin,
-            bool isRetryableRevitOpenFailure = false,
+            FailureDisposition disposition,
             string? warningMessage = null)
         {
             IsSuccess = isSuccess;
@@ -271,8 +270,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             IsCancelled = isCancelled;
             ErrorMessage = errorMessage;
             ExitCode = exitCode;
-            IsPluginOrigin = isPluginOrigin;
-            IsRetryableRevitOpenFailure = isRetryableRevitOpenFailure;
+            Disposition = disposition;
             WarningMessage = warningMessage;
         }
 
@@ -280,21 +278,27 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         {
             // Whitespace-only warnings are treated as absent — never persist them as ErrorMessage.
             warningMessage = string.IsNullOrWhiteSpace(warningMessage) ? null : warningMessage;
-            return new(true, false, false, null, null, false, warningMessage: warningMessage);
+            return new(true, false, false, null, null, FailureDisposition.Classify, warningMessage: warningMessage);
         }
 
         public static CommandResult Failure(
             string errorMessage,
             int? exitCode,
-            bool isPluginOrigin = false,
-            bool isRetryableRevitOpenFailure = false)
+            FailureDisposition failureDisposition = FailureDisposition.Classify)
         {
-            return new(false, true, false, errorMessage, exitCode, isPluginOrigin, isRetryableRevitOpenFailure);
+            return new(false, true, false, errorMessage, exitCode, failureDisposition);
         }
 
         public static CommandResult Cancelled(string errorMessage)
         {
-            return new(false, false, true, errorMessage, null, false);
+            return new(false, false, true, errorMessage, null, FailureDisposition.Classify);
+        }
+
+        public enum FailureDisposition
+        {
+            Classify,
+            PermanentPlugin,
+            RetryRevitOpenOnce,
         }
     }
 }
