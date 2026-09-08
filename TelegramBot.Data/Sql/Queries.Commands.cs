@@ -4,6 +4,14 @@ internal static partial class SqlQueries
 {
     internal static class Commands
     {
+        internal const string GetActiveConflicts = @"
+            SELECT c.CommandText AS Command, c.FilePath, c.CommandId, c.SessionId, c.Status, c.CreatedAt
+            FROM Commands c
+            JOIN unnest(@CommandTexts::text[], @FilePaths::text[]) AS requested(CommandText, FilePath)
+              ON c.CommandText = requested.CommandText AND c.FilePath = requested.FilePath
+            WHERE c.Status IN ('pending', 'processing')
+              AND c.SessionId != @SessionId;";
+
         internal const string InsertBatch = @"
             INSERT INTO Commands (SessionId, CommandText, FilePath, RootPath, ExecutionOrder, Priority, Partition)
             SELECT @SessionId,
@@ -65,9 +73,9 @@ internal static partial class SqlQueries
         internal const string UpdateStatus = @"
             UPDATE Commands
             SET Status = @Status,
-                CompletedAt = CASE 
-                    WHEN @Status IN ('Done', 'Failed') THEN NOW() 
-                    ELSE CompletedAt 
+                CompletedAt = CASE
+                    WHEN @Status IN ('Done', 'Failed') THEN NOW()
+                    ELSE CompletedAt
                 END,
                 ProcessId = @ProcessId,
                 ErrorMessage = @ErrorMessage
@@ -138,7 +146,7 @@ internal static partial class SqlQueries
                 FOR UPDATE OF lockc SKIP LOCKED
             )
             UPDATE Commands c
-            SET Status = 'processing', 
+            SET Status = 'processing',
                 Lease = @LeaseExpiry,
                 StartedAt = NOW()
             FROM selected
@@ -180,9 +188,6 @@ internal static partial class SqlQueries
                 FROM requeued r
                 WHERE s.SessionId = r.SessionId
                 RETURNING s.SessionId
-            ),
-            notified AS (
-                SELECT pg_notify('new_tasks', @CommandId::text) FROM requeued
             )
             SELECT CASE
                 WHEN EXISTS (SELECT 1 FROM requeued) THEN 'Requeued'

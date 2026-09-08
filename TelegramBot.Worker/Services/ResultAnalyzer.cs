@@ -55,7 +55,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
 
                 if (result.Status is ResultStatus.Done or ResultStatus.Failed or ResultStatus.Cancelled)
                 {
-                    DeleteResultFile(path);
+                    // ProcessRunner removes the file after the outcome is persisted.
                     return (ResultFileReadStatus.Valid, result, null);
                 }
 
@@ -213,18 +213,6 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             logger.LogWarning(ex, "Rename to .bad fail: {Path}", path);
-        }
-    }
-
-    private void DeleteResultFile(string path)
-    {
-        try
-        {
-            File.Delete(path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(ex, "Delete result file fail: {Path}", path);
         }
     }
 

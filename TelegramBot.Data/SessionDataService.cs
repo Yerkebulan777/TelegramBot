@@ -23,7 +23,7 @@ public sealed class SessionDataService(
     /// (напр. если DWG для файла уже в очереди, а PDF для того же файла — нет, PDF всё равно queued).
     /// SessionId = null, если дубликатами оказались все пары (очередь пополнить нечем).
     /// </summary>
-    public async Task<(int? SessionId, int QueuedFileCount, IReadOnlyList<(string Command, string FilePath)> SkippedPairs)> CreateSessionWithCommandsAsync(
+    public async Task<(int? SessionId, int QueuedFileCount, IReadOnlyList<CommandConflict> SkippedPairs)> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
         long userId,
@@ -34,8 +34,8 @@ public sealed class SessionDataService(
         IEnumerable<int>? commandPriorities = null,
         string? correlationId = null)
     {
-        var commands = commandText.ToArray();
-        var fileList = files.ToArray();
+        var commands = commandText.Distinct(StringComparer.Ordinal).ToArray();
+        var fileList = files.Distinct(StringComparer.Ordinal).ToArray();
 
         if (commands.Length == 0 || fileList.Length == 0 || string.IsNullOrWhiteSpace(rootPath))
         {
@@ -86,15 +86,27 @@ public sealed class SessionDataService(
             new { SessionId = sessionId, CommandTexts = commandTexts, FilePaths = filePaths, RootPath = rootPath, Orders = orders, Priorities = priorities },
             tx)).ToList();
 
+        var insertedPairs = insertedRows.Select(r => (r.CommandText, r.FilePath)).ToHashSet();
+        var skipped = allPairs.Where(p => !insertedPairs.Contains(p)).ToArray();
+        var conflicts = skipped.Length == 0
+            ? new Dictionary<(string, string), CommandConflict>()
+            : (await conn.QueryAsync<CommandConflict>(SqlQueries.Commands.GetActiveConflicts,
+                new
+                {
+                    SessionId = sessionId,
+                    CommandTexts = skipped.Select(p => p.Command).ToArray(),
+                    FilePaths = skipped.Select(p => p.FilePath).ToArray()
+                }, tx)).ToDictionary(c => (c.Command, c.FilePath));
+        // A conflicting command can finish between INSERT and this SELECT.
+        var skippedPairs = skipped.Select(p => conflicts.GetValueOrDefault(p)
+            ?? new CommandConflict { Command = p.Command, FilePath = p.FilePath }).ToArray();
+
         if (insertedRows.Count == 0)
         {
             await tx.RollbackAsync();
             Logger.LogWarning("Session rejected: all (command, file) pairs already active for user {UserId}", userId);
-            return (null, 0, allPairs);
+            return (null, 0, skippedPairs);
         }
-
-        var insertedPairs = insertedRows.Select(r => (r.CommandText, r.FilePath)).ToHashSet();
-        var skippedPairs = allPairs.Where(p => !insertedPairs.Contains(p)).ToArray();
 
         var queuedFileCount = insertedRows.Select(r => r.FilePath).Distinct().Count();
         if (skippedPairs.Length > 0)
@@ -103,9 +115,6 @@ public sealed class SessionDataService(
                 new { SessionId = sessionId, FilesAmount = queuedFileCount },
                 tx);
         }
-
-        // Отправляем уведомление Worker о новых задачах
-        _ = await conn.ExecuteAsync("SELECT pg_notify('new_tasks', @Payload)", new { Payload = correlationId }, tx);
 
         await tx.CommitAsync();
         Logger.LogInformation("Session created: session={SessionId}, correlationId={CorrelationId}, skipped={SkippedCount}", sessionId, correlationId, skippedPairs.Length);

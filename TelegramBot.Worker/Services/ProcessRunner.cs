@@ -37,8 +37,7 @@ public sealed class ProcessRunner(
     /// <summary>
     /// Полный цикл выполнения одной команды: подготовка → запуск → ожидание → retry/fail.
     /// </summary>
-    /// <returns>Момент для delayed-drain после специального Revit retry; иначе <see langword="null"/>.</returns>
-    public async Task<DateTime?> RunAsync(PendingCommand cmd, CancellationToken ct)
+    public async Task RunAsync(PendingCommand cmd, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
         Process? process = null;
@@ -47,45 +46,58 @@ public sealed class ProcessRunner(
         timeoutCts.CancelAfter(TimeSpan.FromMinutes(_workerOptions.ProcessTimeoutMinutes));
         var timeoutToken = timeoutCts.Token;
 
+        var preserveEvidence = false;
         try
         {
-            // Шаг 1: подготовка (валидация + BIM-резолвинг)
-            var commandCfg = await commandPreparer.PrepareAsync(cmd, timeoutToken);
-            if (commandCfg == null)
+            try
             {
-                // PrepareAsync уже записал Failed в БД
-                await NotifySessionCompletionAsync(cmd);
-                return null;
+                // Шаг 1: подготовка (валидация + BIM-резолвинг)
+                var commandCfg = await commandPreparer.PrepareAsync(cmd, timeoutToken);
+                if (commandCfg == null)
+                {
+                    // PrepareAsync уже записал Failed в БД
+                    await NotifySessionCompletionAsync(cmd);
+                    return;
+                }
+
+                // Шаг 2: запуск процесса
+                process = await StartProcessAsync(cmd, commandCfg, timeoutToken);
+
+                // Шаг 3: ожидание и обработка ResultFile/exit code + stdout/stderr
+                await WaitAndHandleResultAsync(cmd, process, sw, timeoutToken);
             }
-
-            // Шаг 2: запуск процесса
-            process = await StartProcessAsync(cmd, commandCfg, timeoutToken);
-
-            // Шаг 3: ожидание и обработка ResultFile/exit code + stdout/stderr
-            return await WaitAndHandleResultAsync(cmd, process, sw, timeoutToken);
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // Timeout — не shutdown
+                await HandleTimeoutAsync(cmd, process, sw);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown — НЕ удаляем из _activeProcesses и НЕ диспозим процесс:
+                // LogActiveProcessesOnShutdownAsync должен видеть все активные процессы до остановки.
+                throw;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is not CommandPersistenceException)
+            {
+                // Для исключения при запуске процесса передаём exitCode = null — классификация по типу исключения
+                await HandleFailureAsync(cmd, ex.Message, sw, ex: ex);
+                return;
+            }
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (CommandPersistenceException)
         {
-            // Timeout — не shutdown
-            await HandleTimeoutAsync(cmd, process, sw);
-            return null;
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown — НЕ удаляем из _activeProcesses и НЕ диспозим процесс:
-            // LogActiveProcessesOnShutdownAsync должен видеть все активные процессы до остановки.
+            // Keep result evidence and do not convert a database outage into a process retry.
+            preserveEvidence = true;
             throw;
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            // Для исключения при запуске процесса передаём exitCode = null — классификация по типу исключения
-            await HandleFailureAsync(cmd, ex.Message, sw, ex: ex);
-            return null;
         }
         finally
         {
             // Очищаем temp-файлы этой попытки
-            commandPreparer.CleanupTempFiles(cmd.CommandId, cmd.FilePath ?? string.Empty);
+            if (!preserveEvidence && !ct.IsCancellationRequested)
+            {
+                commandPreparer.CleanupTempFiles(cmd.CommandId, cmd.FilePath ?? string.Empty);
+            }
 
             // На shutdown не удаляем процесс из tracking'а — пусть LogActiveProcessesOnShutdownAsync его увидит.
             if (!ct.IsCancellationRequested)
@@ -110,7 +122,7 @@ public sealed class ProcessRunner(
     /// Использует потоковую обработку для предотвращения переполнения памяти.
     /// После выхода процесса пробует прочитать result-файл от плагина.
     /// </summary>
-    private async Task<DateTime?> WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
+    private async Task WaitAndHandleResultAsync(PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
     {
         using var outputSubscription = new OutputCollector.ProcessOutputCapture(process);
 
@@ -148,21 +160,21 @@ public sealed class ProcessRunner(
                 Statuses.Done,
                 errorMessage: commandResult.WarningMessage);
             await NotifySessionCompletionAsync(cmd);
-            return null;
+            return;
         }
         else if (commandResult.IsCancelled)
         {
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
             await NotifySessionCompletionAsync(cmd);
-            return null;
+            return;
         }
         else if (commandResult.IsFailure)
         {
-            return await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode,
+            await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode,
                 failureDisposition: commandResult.Disposition);
         }
 
-        return null;
+        return;
     }
 
     /// <summary>
@@ -198,7 +210,7 @@ public sealed class ProcessRunner(
     /// <summary>
     /// Планирует retry (для ProcessCrashError) или помечает команду как Failed (для InvalidFileError).
     /// </summary>
-    private async Task<DateTime?> HandleFailureAsync(
+    private async Task HandleFailureAsync(
         PendingCommand cmd,
         string errorMessage,
         Stopwatch sw,
@@ -218,7 +230,7 @@ public sealed class ProcessRunner(
                     "Revit open retry scheduled: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, retryAt={Next:O}, ms={ElapsedMs}, err={Msg}",
                     cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, nextRetryAt, sw.ElapsedMilliseconds, errorMessage);
                 await NotifySessionCompletionAsync(cmd);
-                return nextRetryAt;
+                return;
             }
 
             const string retryFailureSuffix = " Автоматическая повторная попытка открытия модели также завершилась неудачей.";
@@ -228,7 +240,7 @@ public sealed class ProcessRunner(
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, sw.ElapsedMilliseconds, finalErrorMessage);
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: finalErrorMessage);
             await NotifySessionCompletionAsync(cmd);
-            return null;
+            return;
         }
 
         if (failureDisposition == ResultAnalyzer.CommandResult.FailureDisposition.PermanentPlugin)
@@ -238,7 +250,7 @@ public sealed class ProcessRunner(
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, sw.ElapsedMilliseconds, errorMessage);
             _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
             await NotifySessionCompletionAsync(cmd);
-            return null;
+            return;
         }
 
         var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, ex);
@@ -253,7 +265,7 @@ public sealed class ProcessRunner(
             logger.LogError(ex, "Permanent fail: cmd={Cmd}, id={Id}, corr={CorrelationId}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await NotifySessionCompletionAsync(cmd);
-            return null;
+            return;
         }
         else if (cmd.RetryCount < _workerOptions.MaxRetries)
         {
@@ -265,7 +277,7 @@ public sealed class ProcessRunner(
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await NotifySessionCompletionAsync(cmd);
-            return null;
+            return;
         }
         else
         {
@@ -273,7 +285,7 @@ public sealed class ProcessRunner(
             logger.LogError(ex, "Fail after retries: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
             await NotifySessionCompletionAsync(cmd);
-            return null;
+            return;
         }
     }
 
@@ -305,4 +317,3 @@ public sealed class ProcessRunner(
         }
     }
 }
-

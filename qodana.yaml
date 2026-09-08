@@ -11,6 +11,11 @@ project: TelegramBot
 dotnet:
   solution: TelegramBot.slnx
 
+# Qodana Community for .NET runs in Linux Docker. Restore inside that container
+# so its MSBuild process has project.assets.json for every project.
+bootstrap: |
+  dotnet restore TelegramBot.slnx
+
 # Inspection profile
 profile:
   name: qodana.recommended

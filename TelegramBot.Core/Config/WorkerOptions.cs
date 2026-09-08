@@ -31,10 +31,10 @@ public sealed class WorkerOptions
     public int RetryDelayBaseSeconds { get; set; } = 60;
 
     /// <summary>
-    /// Интервал fallback-поллинга новых задач в секундах (по умолчанию 300 = 5 минут).
-    /// Используется только при потере соединения с LISTEN/NOTIFY.
+    /// Интервал единственного цикла очереди в секундах (по умолчанию 10).
+    /// Старое имя ключа сохранено для совместимости конфигурации. Ноль использует 10 секунд.
     /// </summary>
-    public int FallbackPollingIntervalSeconds { get; set; } = 300;
+    public int FallbackPollingIntervalSeconds { get; set; } = 10;
 
     /// <summary>
     /// Интервал фоновой очистки истёкших lease в секундах (по умолчанию 300 = 5 минут).

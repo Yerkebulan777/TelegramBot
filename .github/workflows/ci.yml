@@ -189,6 +189,14 @@ jobs:
         ref: ${{ github.event.pull_request.head.sha }}  # анализировать реальный коммит PR, не merge-коммит
         fetch-depth: 0  # полная история нужна для инкрементального анализа PR
 
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore dependencies for Qodana
+      run: dotnet restore TelegramBot.slnx
+
     - name: Cache Qodana
       uses: actions/cache@v4
       with:

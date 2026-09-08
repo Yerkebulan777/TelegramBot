@@ -6,11 +6,8 @@ using TelegramBot.Data;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
-/// Владеет циклом claim → async-launch. Триггерится извне (NOTIFY, initial connect, или
-/// периодический safety-net — см. <see cref="CommandExecutionService"/>, который переиспользует
-/// свой общий <c>StartPeriodicBackgroundTaskAsync</c> вместо отдельного таймера здесь).
-/// Single-flight через семафор; launch не блокирует следующий claim (fire-and-forget Task),
-/// что устраняет head-of-line blocking от долгих (до 3ч) Revit-задач.
+/// Забирает доступные команды по запросу единственного polling-цикла Worker.
+/// SQL обеспечивает одну команду на файл; tracked tasks ограничивают параллельность.
 /// </summary>
 public sealed class CommandOrchestrator(
     CommandDataService commandDataService,
@@ -37,7 +34,7 @@ public sealed class CommandOrchestrator(
         lock (_runningTasksLock) return [.. _runningTasks];
     }
 
-    /// <summary>Внешний триггер (NOTIFY / initial connect / periodic safety-net) — drain.</summary>
+    /// <summary>Забрать доступные команды; вызывается только циклом очереди.</summary>
     public async Task TriggerDrainAsync(CancellationToken ct)
     {
         if (!await _drainGate.WaitAsync(0, ct))
@@ -77,27 +74,8 @@ public sealed class CommandOrchestrator(
                     {
                         _ = _runningTasks.Add(task);
                     }
-
-                    // Используем CancellationToken.None, чтобы ContinueWith выполнялся
-                    // всегда — даже при отмене ct (shutdown).
-                    _ = task.ContinueWith(completed =>
-                    {
-                        lock (_runningTasksLock)
-                        {
-                            _ = _runningTasks.Remove(completed);
-                        }
-
-                        if (!ct.IsCancellationRequested)
-                        {
-                            _ = SafeTriggerDrainAsync(ct);
-                        }
-                    }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 }
             }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "Drain error");
         }
         finally
         {
@@ -105,56 +83,20 @@ public sealed class CommandOrchestrator(
         }
     }
 
-    // Fire-and-forget обёртка: TriggerDrainAsync может кинуть OperationCanceledException
-    // ещё до входа в свой try (WaitAsync(0, ct)) — без обёртки это unobserved exception.
-    private async Task SafeTriggerDrainAsync(CancellationToken ct)
-    {
-        try
-        {
-            await TriggerDrainAsync(ct);
-        }
-        catch (OperationCanceledException)
-        {
-            // штатное завершение (shutdown)
-        }
-    }
-
     private async Task ProcessCommandAsync(PendingCommand cmd, CancellationToken ct)
     {
         try
         {
-            DateTime? retryReadyAt = await processRunner.RunAsync(cmd, ct);
-            if (retryReadyAt is not null)
-            {
-                _ = TriggerDrainAtAsync(retryReadyAt.Value, ct);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "Exec error: id={CommandId}, corr={CorrelationId}",
-                cmd.CommandId, cmd.CorrelationId);
-        }
-    }
-
-    private async Task TriggerDrainAtAsync(DateTime readyAt, CancellationToken ct)
-    {
-        try
-        {
-            TimeSpan delay = readyAt - DateTime.UtcNow;
-            if (delay > TimeSpan.Zero)
-            {
-                await Task.Delay(delay, ct);
-            }
-
-            await TriggerDrainAsync(ct);
+            await processRunner.RunAsync(cmd, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // штатное завершение
+            // Normal host shutdown.
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Delayed drain error: readyAt={ReadyAt:O}", readyAt);
+            logger.LogError(ex, "Exec error: id={CommandId}, corr={CorrelationId}",
+                cmd.CommandId, cmd.CorrelationId);
         }
     }
 
