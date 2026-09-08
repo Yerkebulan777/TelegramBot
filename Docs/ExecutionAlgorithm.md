@@ -75,7 +75,7 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 |---|---|
 | `status=done` | `Done` |
 | `status=done` + `warningMessage` | `Done`; текст warning пишется в `Commands.ErrorMessage` (это не failure) |
-| `status=failed` (plugin) | permanent `Failed`, без retry |
+| `status=failed` (plugin) | permanent `Failed`, без retry; исключение: Revit `InternalException` при `OpenAndActivateDocument` в `errorDetails` → один retry через 10 с |
 | `status=cancelled` | `Failed`, без retry |
 | invalid XML | `.bad`, failure → retry policy |
 | Revit без ResultFile | failure → retry policy |
@@ -89,7 +89,7 @@ stdout/stderr: 64 KiB capture, 4 KiB в лог. Прочитанный ResultFil
 
 ## 5. Retry
 
-Permanent (без retry): plugin `status=failed`/`cancelled`, `PermanentFailureExitCodes`, invalid input, validation errors, non-transient exceptions, timeout.
+Permanent (без retry): plugin `status=failed`/`cancelled`, `PermanentFailureExitCodes`, invalid input, validation errors, non-transient exceptions, timeout. Исключение: Revit-команда с plugin `status=failed`, когда `errorDetails` содержит `Autodesk.Revit.Exceptions.InternalException` и `UIApplication.OpenAndActivateDocument`, при `RetryCount = 0` повторяется один раз через 10 с. Worker ожидает эти 10 с до завершения текущей задачи, поэтому её обычная task-continuation запускает drain, когда `NextRetryAt` уже наступил. Второй такой сбой становится `Failed`.
 
 Transient: `delay = RetryDelayBaseSeconds × 2^RetryCount + jitter`. После `MaxRetries` → `Failed`.
 

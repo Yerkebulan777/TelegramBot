@@ -29,6 +29,7 @@ public sealed class ProcessRunner(
     // Трекинг активных процессов для health-мониторинга и graceful shutdown
     private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
     private const int PerProcessKillTimeoutSeconds = 10;
+    private const int RevitOpenRetryDelaySeconds = 10;
 
     /// <summary>Снимок активных процессов для health-мониторинга.</summary>
     public IEnumerable<KeyValuePair<int, Process>> ActiveProcesses => _activeProcesses;
@@ -153,7 +154,8 @@ public sealed class ProcessRunner(
         else if (commandResult.IsFailure)
         {
             await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode,
-                isPluginOrigin: commandResult.IsPluginOrigin);
+                isPluginOrigin: commandResult.IsPluginOrigin,
+                isRetryableRevitOpenFailure: commandResult.IsRetryableRevitOpenFailure);
         }
     }
 
@@ -190,9 +192,41 @@ public sealed class ProcessRunner(
     /// <summary>
     /// Планирует retry (для ProcessCrashError) или помечает команду как Failed (для InvalidFileError).
     /// </summary>
-    private async Task HandleFailureAsync(PendingCommand cmd, string errorMessage, Stopwatch sw, int? exitCode = null, Exception? ex = null, bool isPluginOrigin = false)
+    private async Task HandleFailureAsync(
+        PendingCommand cmd,
+        string errorMessage,
+        Stopwatch sw,
+        int? exitCode = null,
+        Exception? ex = null,
+        bool isPluginOrigin = false,
+        bool isRetryableRevitOpenFailure = false)
     {
         sw.Stop();
+
+        if (isRetryableRevitOpenFailure)
+        {
+            if (cmd.RetryCount == 0)
+            {
+                TimeSpan retryDelay = TimeSpan.FromSeconds(RevitOpenRetryDelaySeconds);
+                DateTime nextRetryAt = DateTime.UtcNow.Add(retryDelay);
+                int newRetryCount = await commandDataService.ScheduleRetryAsync(cmd.CommandId, nextRetryAt, errorMessage);
+                logger.LogWarning(
+                    "Revit open retry scheduled: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, retryAt={Next:O}, ms={ElapsedMs}, err={Msg}",
+                    cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, nextRetryAt, sw.ElapsedMilliseconds, errorMessage);
+                await Task.Delay(retryDelay);
+                await NotifySessionCompletionAsync(cmd);
+                return;
+            }
+
+            const string retryFailureSuffix = " Автоматическая повторная попытка открытия модели также завершилась неудачей.";
+            string finalErrorMessage = errorMessage + retryFailureSuffix;
+            logger.LogError(
+                "Revit open retry exhausted: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, ms={ElapsedMs}, err={Msg}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, sw.ElapsedMilliseconds, finalErrorMessage);
+            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: finalErrorMessage);
+            await NotifySessionCompletionAsync(cmd);
+            return;
+        }
 
         if (isPluginOrigin)
         {

@@ -181,7 +181,26 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             logger.LogDebug("Plugin errDetails: id={Id}: {Details}", cmd.CommandId, result.ErrorDetails);
         }
 
-        return CommandResult.Failure(result.ErrorMessage ?? "Plugin reported failure", null, isPluginOrigin: true);
+        bool isRetryableRevitOpenFailure = IsRetryableRevitOpenFailure(cmd, result.ErrorDetails);
+        if (isRetryableRevitOpenFailure)
+        {
+            logger.LogWarning(
+                "Revit open failure is retryable: id={Id}, corr={CorrelationId}, cmd={Cmd}, attempt={Attempt}",
+                cmd.CommandId, cmd.CorrelationId, cmd.CommandText, cmd.RetryCount + 1);
+        }
+
+        return CommandResult.Failure(
+            result.ErrorMessage ?? "Plugin reported failure",
+            exitCode: null,
+            isPluginOrigin: true,
+            isRetryableRevitOpenFailure: isRetryableRevitOpenFailure);
+    }
+
+    private static bool IsRetryableRevitOpenFailure(PendingCommand cmd, string? errorDetails)
+    {
+        return CommandPreparer.IsRevitCommand(cmd.CommandText)
+            && errorDetails?.Contains("Autodesk.Revit.Exceptions.InternalException", StringComparison.OrdinalIgnoreCase) == true
+            && errorDetails.Contains("UIApplication.OpenAndActivateDocument", StringComparison.OrdinalIgnoreCase);
     }
 
     private void RenameToBadFile(string path)
@@ -232,6 +251,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         public bool IsFailure { get; }
         public bool IsCancelled { get; }
         public bool IsPluginOrigin { get; private set; }
+        public bool IsRetryableRevitOpenFailure { get; }
         public string? ErrorMessage { get; }
         public string? WarningMessage { get; }
         public int? ExitCode { get; }
@@ -243,6 +263,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             string? errorMessage,
             int? exitCode,
             bool isPluginOrigin,
+            bool isRetryableRevitOpenFailure = false,
             string? warningMessage = null)
         {
             IsSuccess = isSuccess;
@@ -251,6 +272,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
             ErrorMessage = errorMessage;
             ExitCode = exitCode;
             IsPluginOrigin = isPluginOrigin;
+            IsRetryableRevitOpenFailure = isRetryableRevitOpenFailure;
             WarningMessage = warningMessage;
         }
 
@@ -258,12 +280,16 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         {
             // Whitespace-only warnings are treated as absent — never persist them as ErrorMessage.
             warningMessage = string.IsNullOrWhiteSpace(warningMessage) ? null : warningMessage;
-            return new(true, false, false, null, null, false, warningMessage);
+            return new(true, false, false, null, null, false, warningMessage: warningMessage);
         }
 
-        public static CommandResult Failure(string errorMessage, int? exitCode, bool isPluginOrigin = false)
+        public static CommandResult Failure(
+            string errorMessage,
+            int? exitCode,
+            bool isPluginOrigin = false,
+            bool isRetryableRevitOpenFailure = false)
         {
-            return new(false, true, false, errorMessage, exitCode, isPluginOrigin);
+            return new(false, true, false, errorMessage, exitCode, isPluginOrigin, isRetryableRevitOpenFailure);
         }
 
         public static CommandResult Cancelled(string errorMessage)
