@@ -12,10 +12,10 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
 {
     private const int MaxOutputChars = 64 * 1024; // 64KB лимит
 
-/// <summary>
-/// Логирует вывод процесса с информацией о truncation.
-/// </summary>
-public void LogOutput(PendingCommand cmd, StringBuilder outputBuilder, StringBuilder errorBuilder, bool outputTruncated, bool errorTruncated)
+    /// <summary>
+    /// Логирует вывод процесса с информацией о truncation.
+    /// </summary>
+    public void LogOutput(PendingCommand cmd, StringBuilder outputBuilder, StringBuilder errorBuilder, bool outputTruncated, bool errorTruncated)
     {
         if (outputBuilder.Length > 0 && logger.IsEnabled(LogLevel.Debug))
         {
