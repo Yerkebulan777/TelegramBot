@@ -29,6 +29,8 @@ public sealed class CommandPreparer(
     private static readonly XmlSerializer TaskFileSerializer = new(typeof(TaskFile));
     private static readonly XmlSerializerNamespaces EmptyXmlNamespaces = new([XmlQualifiedName.Empty]);
     private const string RevitRussianLanguageArguments = "/language RUS";
+    private const string RevitVersionDetectionError =
+        "Не удалось определить версию Revit для файла. Проверьте целостность файла или обратитесь к администратору.";
 
     /// <summary>
     /// Возвращает пути к task-файлу и result-файлу для указанной команды.
@@ -193,7 +195,7 @@ public sealed class CommandPreparer(
     {
         if (IsRevitCommand(commandText))
         {
-            return ResolveRevitPath(cmd, commandText, ct) ?? (configuredPath, null);
+            return ResolveRevitPath(cmd, commandText, ct);
         }
 
         if (commandText is CommandCodes.ClashRep)
@@ -205,7 +207,7 @@ public sealed class CommandPreparer(
     }
 
     /// <summary>Резолвит путь к Revit.exe через BimLib.</summary>
-    private (string? resolvedPath, string? errorMessage)? ResolveRevitPath(
+    private (string? resolvedPath, string? errorMessage) ResolveRevitPath(
         PendingCommand cmd, string commandText, CancellationToken ct)
     {
         try
@@ -218,19 +220,25 @@ public sealed class CommandPreparer(
                 return (version.ExecutablePath, null);
             }
 
-            if (version != null && version.ExecutablePath == null)
+            if (version != null)
             {
                 var msg = $"Revit {version.Year} не установлен на сервере. Пожалуйста, установите Revit {version.Year} или обратитесь к администратору.";
                 logger.LogWarning("Resolve fail: {Cmd}: {Msg}", commandText, msg);
                 return (null, msg);
             }
+
+            logger.LogWarning("Resolve fail: {Cmd}: {Msg}", commandText, RevitVersionDetectionError);
+            return (null, RevitVersionDetectionError);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "BimLib detect fail for {Cmd}, fallback", commandText);
+            logger.LogWarning(ex, "BimLib detect fail for {Cmd}", commandText);
+            return (null, RevitVersionDetectionError);
         }
-
-        return null;
     }
 
     /// <summary>Резолвит путь к Navisworks/FileConvert.exe через BimLib.</summary>
