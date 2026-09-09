@@ -19,6 +19,7 @@ public sealed class ProcessRunner(
     ProcessStarter processStarter,
     OutputCollector outputCollector,
     ResultAnalyzer resultAnalyzer,
+    RevitTemporaryDirectoryCleaner temporaryDirectoryCleaner,
     CommandDataService commandDataService,
     SessionDataService sessionDataService,
     IOptions<WorkerOptions> workerOptions,
@@ -150,31 +151,41 @@ public sealed class ProcessRunner(
             cmd.CommandId,
             cmd.FilePath ?? string.Empty,
             ct);
-        var commandResult = resultAnalyzer.DetermineResult(cmd, resultReadStatus, result, resultReadError, process, sw);
 
-        if (commandResult.IsSuccess)
+        try
         {
-            // Done + non-empty Commands.ErrorMessage = plugin warningMessage (not a failure).
-            _ = await commandDataService.UpdateCommandStatusAsync(
-                cmd.CommandId,
-                Statuses.Done,
-                errorMessage: commandResult.WarningMessage);
-            await NotifySessionCompletionAsync(cmd);
+            var commandResult = resultAnalyzer.DetermineResult(cmd, resultReadStatus, result, resultReadError, process, sw);
+            if (commandResult.IsSuccess)
+            {
+                // Done + non-empty Commands.ErrorMessage = plugin warningMessage (not a failure).
+                _ = await commandDataService.UpdateCommandStatusAsync(
+                    cmd.CommandId,
+                    Statuses.Done,
+                    errorMessage: commandResult.WarningMessage);
+                await NotifySessionCompletionAsync(cmd);
+                return;
+            }
+            else if (commandResult.IsCancelled)
+            {
+                _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
+                await NotifySessionCompletionAsync(cmd);
+                return;
+            }
+            else if (commandResult.IsFailure)
+            {
+                await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode,
+                    failureDisposition: commandResult.Disposition);
+            }
+
             return;
         }
-        else if (commandResult.IsCancelled)
+        finally
         {
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
-            await NotifySessionCompletionAsync(cmd);
-            return;
+            temporaryDirectoryCleaner.Schedule(
+                result?.TemporaryDirectoryPath,
+                cmd.FilePath,
+                cmd.CommandId);
         }
-        else if (commandResult.IsFailure)
-        {
-            await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode,
-                failureDisposition: commandResult.Disposition);
-        }
-
-        return;
     }
 
     /// <summary>

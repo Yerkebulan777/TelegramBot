@@ -7,7 +7,7 @@ namespace TelegramBot.Core.Models;
 /// перед запуском процесса. Revit AddIn получает путь через <c>REVITBIMFUSION_TASK_FILE</c>.
 /// </summary>
 /// <remarks>
-/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-09-03) и
+/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-09-09) и
 /// <c>Docs/BimContract/TaskFile.schema.xsd</c> (vendored).
 /// </remarks>
 [XmlRoot("taskFile")]

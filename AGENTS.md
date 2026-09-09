@@ -9,7 +9,7 @@
 | [README.md](README.md) | запуск, команды, конфигурация |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | pipeline, статусы, retry, уведомления, БД |
 | [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | историческое расследование Revit |
-| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | эталон TaskFile/ResultFile (v2026-09-03); локально — `../RevitBIMFusion/Docs` |
+| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | эталон TaskFile/ResultFile (v2026-09-09); локально — `../RevitBIMFusion/Docs` |
 | `Docs/BimContract/` | vendored XSD (ресинк из эталона вручную) |
 | `TelegramBot.Data/Sql/` | фактическая схема и SQL |
 | option-классы `Config/` | defaults конфигурации |
@@ -27,7 +27,7 @@
 | `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
 | `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
 | `TelegramBot.RootPathSetup/` | Windows Forms: подготовка подтверждаемой заявки на смену рабочего UNC-пути |
-| `TelegramBot.Worker/Services/` | `CommandExecutionService.cs`, `CommandPreparer.cs`, `ProcessStarter.cs`, `ProcessRunner.cs`, `OutputCollector.cs`, `ResultAnalyzer.cs`, `ErrorClassifier.cs`, `SessionCleanupService.cs` |
+| `TelegramBot.Worker/Services/` | `CommandExecutionService.cs`, `CommandPreparer.cs`, `ProcessStarter.cs`, `ProcessRunner.cs`, `OutputCollector.cs`, `ResultAnalyzer.cs`, `RevitTemporaryDirectoryCleaner.cs`, `ErrorClassifier.cs`, `SessionCleanupService.cs` |
 | `TelegramBot.Worker/BimLib/` | `RevitVersionDetector.cs`, `NavisworksPathResolver.cs`, `DialogDismisser.cs` |
 | `TelegramBot.Worker/Program.cs` | Worker DI + startup |
 
@@ -90,7 +90,7 @@ Polling (10s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsy
 
 ### Worker DI
 
-`Program.cs` регистрирует: `CommandDataService`, `SessionDataService`, `WorkerOptions`, `FileSystemOptions`, `BimIntegrationOptions`, `DialogDismisserOptions`, `RevitVersionDetector`, `NavisworksPathResolver`, `RevitPathResolver`, `DialogDismisser`, `CommandPreparer`, `ProcessStarter`, `OutputCollector`, `ResultAnalyzer`, `ProcessRunner`, `CommandExecutionService`, `SessionCleanupService`.
+`Program.cs` регистрирует: `CommandDataService`, `SessionDataService`, `WorkerOptions`, `FileSystemOptions`, `BimIntegrationOptions`, `DialogDismisserOptions`, `RevitVersionDetector`, `NavisworksPathResolver`, `RevitPathResolver`, `DialogDismisser`, `CommandPreparer`, `ProcessStarter`, `OutputCollector`, `ResultAnalyzer`, `RevitTemporaryDirectoryCleaner`, `ProcessRunner`, `CommandExecutionService`, `SessionCleanupService`.
 
 ## BIM-контракт
 
@@ -127,7 +127,7 @@ Polling (10s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsy
 
 1. commands/config/behavior → README
 2. pipeline/schema/SQL/status/retry → ExecutionAlgorithm.md
-3. TaskFile/ResultFile/startup → canonical `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-09-03); XSD — `Docs/BimContract/`
+3. TaskFile/ResultFile/startup → canonical `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-09-09); XSD — `Docs/BimContract/`
 4. архитектура/DI/agent rules → AGENTS.md + CLAUDE.md
 5. исторический incident — не переписывать
 

@@ -2,5 +2,6 @@
 <resultFile>
   <status>done</status>
   <outputFiles>C:/Export/building.pdf</outputFiles>
+  <temporaryDirectoryPath>C:/Users/worker/AppData/Local/Temp/RBF-0123456789abcdef0123456789abcdef</temporaryDirectoryPath>
   <executionTimeMilliseconds>1234</executionTimeMilliseconds>
 </resultFile>

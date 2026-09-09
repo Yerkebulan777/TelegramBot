@@ -31,7 +31,7 @@ public enum ResultStatus
 /// Для Revit ResultFile обязателен; exit-code fallback — только wrapper-командам.
 /// </summary>
 /// <remarks>
-/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-09-03) и
+/// Эталон: <c>RevitBIMFusion/Docs/BimPluginContract.md</c> (v2026-09-09) и
 /// <c>Docs/BimContract/ResultFile.schema.xsd</c> (vendored).
 /// </remarks>
 [XmlRoot("resultFile")]
@@ -58,6 +58,13 @@ public sealed class ResultFile
     /// </summary>
     [XmlElement("outputFiles")]
     public string? OutputFiles { get; set; }
+
+    /// <summary>
+    /// Уникальная временная директория экспорта, которую Worker удаляет после завершения Revit.
+    /// Отсутствует при fresh-skip, RESAVE и ошибке до выделения директории.
+    /// </summary>
+    [XmlElement("temporaryDirectoryPath")]
+    public string? TemporaryDirectoryPath { get; set; }
 
     /// <summary>Время выполнения в мс (все статусы). Пишет AddIn; опционально по XSD.</summary>
     [XmlElement("executionTimeMilliseconds")]

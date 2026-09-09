@@ -123,7 +123,7 @@ Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedP
 
 ## BIM-контракт
 
-Эталон TaskFile / ResultFile: [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) (v2026-09-03). Локально — `../RevitBIMFusion/Docs`. Vendored XSD — `Docs/BimContract/` (ресинк из эталона вручную). Локальную копию контракта в этот репозиторий не класть.
+Эталон TaskFile / ResultFile: [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) (v2026-09-09). Локально — `../RevitBIMFusion/Docs`. Vendored XSD — `Docs/BimContract/` (ресинк из эталона вручную). Локальную копию контракта в этот репозиторий не класть.
 
 ## Очередь и восстановление Worker
 
