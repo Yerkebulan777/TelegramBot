@@ -125,83 +125,37 @@ public sealed class RevitVersionDetector(
     }
 
     /// <summary>
-    /// Читает поток BasicFileInfo из OLE-файла через OpenMcdf и извлекает
-    /// строку с номером версии из поля "Format:".
-    /// Возвращает только цифры (год), например "2024".
+    /// Читает поток BasicFileInfo из OLE-файла через OpenMcdf и извлекает год
+    /// из поля "Format:". Текст может начинаться с чётного или нечётного байта,
+    /// поэтому проверяются оба возможных выравнивания UTF-16 LE.
     /// </summary>
     private string? GetRevitVersionText(string filePath)
-    {
-        var infoText = GetBasicFileInfoText(filePath);
-        if (infoText == null)
-        {
-            return null;
-        }
-
-        using var reader = new StringReader(infoText);
-        string? line;
-        while ((line = reader.ReadLine()) != null)
-        {
-            line = line.Trim();
-            if (!line.StartsWith("Format:", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            // Извлекаем только цифры из строки "Format: 2024"
-            var digits = line.Where(char.IsDigit).ToArray();
-            return digits.Length > 0 ? new string(digits) : null;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Открывает .rvt-файл как OLE Compound File через OpenMcdf,
-    /// читает поток "BasicFileInfo" и преобразует его в читаемый текст.
-    /// Между маркерами данные в Unicode (UTF-16 LE).
-    /// Исключения от OpenMcdf пробрасываются наружу — outer catch в DetectVersion
-    /// логирует их как Warning с контекстом вызова.
-    /// </summary>
-    private static string? GetBasicFileInfoText(string filePath)
     {
         using var root = RootStorage.OpenRead(filePath);
         using var stream = root.OpenStream("BasicFileInfo");
 
         var streamData = new byte[stream.Length];
-        _ = stream.Read(streamData, 0, (int)stream.Length);
+        stream.ReadExactly(streamData);
 
-        // Конвертируем в ASCII для поиска маркеров
-        var asciiString = Encoding.ASCII.GetString(streamData);
-
-        // Пробуем маркеры: \r\n, затем \x04\r\x00\n\x00 как fallback
-        var markers = new[] { "\r\n", "\x04\r\x00\n\x00" };
-
-        foreach (var marker in markers)
+        for (var offset = 0; offset < 2 && offset < streamData.Length; offset++)
         {
-            var first = asciiString.IndexOf(marker, StringComparison.Ordinal);
-            if (first < 0)
+            var infoText = Encoding.Unicode.GetString(streamData, offset, streamData.Length - offset);
+            using var reader = new StringReader(infoText);
+
+            while (reader.ReadLine() is { } line)
             {
-                continue;
+                line = line.Trim();
+                if (!line.StartsWith("Format:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var digits = line.Where(char.IsDigit).ToArray();
+                if (digits.Length > 0)
+                {
+                    return new string(digits);
+                }
             }
-
-            var second = asciiString.IndexOf(marker, first + marker.Length, StringComparison.Ordinal);
-            if (second < 0)
-            {
-                continue;
-            }
-
-            // Текст находится между двумя маркерами, сразу после первого маркера
-            var startIndex = first + marker.Length;
-            var length = second - startIndex;
-
-            if (length <= 0)
-            {
-                continue;
-            }
-
-            // Текст между маркерами — Unicode (UTF-16 LE)
-            var textBytes = streamData.Skip(startIndex).Take(length).ToArray();
-            return Encoding.Unicode.GetString(textBytes);
         }
 
         return null;
