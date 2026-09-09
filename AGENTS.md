@@ -86,7 +86,7 @@ Polling (1s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsyn
 → CommandPreparer.PrepareAsync → ProcessStarter.StartAsync → OutputCollector + ResultAnalyzer → Done/retry/Failed
 ```
 
-Ограничение: tracked running tasks + SQL partition scheduling (одна команда на Partition за раз). Единственный polling-цикл подбирает новые команды и retry по NextRetryAt. Все Worker используют PostgreSQL `RevitLaunchGate`: только между глобальными запусками Revit выдерживается не менее 30 секунд; не-Revit команды не задерживаются. CommandPersistenceException не классифицировать как BIM-ошибку; ResultFile сохранять при сбое записи результата.
+Ограничение: tracked running tasks + SQL partition scheduling (одна команда на Partition за раз). Единственный polling-цикл подбирает новые команды и retry по NextRetryAt. Все Worker используют PostgreSQL `RevitLaunchGate`: только между глобальными запусками Revit выдерживается не менее 15 секунд; не-Revit команды не задерживаются. CommandPersistenceException не классифицировать как BIM-ошибку; ResultFile сохранять при сбое записи результата.
 
 ### Worker DI
 

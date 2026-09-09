@@ -84,7 +84,7 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 - создаёт TaskFile (`task_{project}_{commandId}.xml`) с XSD-валидацией
 - заполняет `ProcessStartInfo` (Revit: без контрактных CLI-аргументов, `/language RUS`, TaskFile path в `REVITBIMFUSION_TASK_FILE`)
 - только для Revit передаёт запуск в `RevitLaunchGate`: session advisory lock PostgreSQL сериализует все Worker, а singleton-строка `RevitLaunchState` хранит время последнего запуска
-- под advisory lock ожидает остаток глобального интервала и вызывает `Process.Start()`; между запусками Revit проходит не менее 30 секунд, транзакция на время ожидания не удерживается
+- под advisory lock ожидает остаток глобального интервала и вызывает `Process.Start()`; между запусками Revit проходит не менее 15 секунд, транзакция на время ожидания не удерживается
 - не-Revit процессы запускаются сразу и глобальную паузу не используют
 
 Команда уже имеет статус `processing`, пока готовится и ожидает Revit launch gate.

@@ -7,7 +7,7 @@ namespace TelegramBot.Worker.Services;
 
 /// <summary>
 /// Сериализует запуск Revit между всеми Worker через PostgreSQL и выдерживает
-/// не менее 30 секунд между успешными вызовами Process.Start().
+/// не менее 15 секунд между успешными вызовами Process.Start().
 /// </summary>
 public sealed class RevitLaunchGate(
     IConfiguration configuration,
@@ -39,7 +39,7 @@ public sealed class RevitLaunchGate(
             // Предварительная запись сохраняет cooldown, даже если Worker упадёт во время Process.Start().
             await SetLastLaunchAtAsync(connection, ct);
             _ = process.Start();
-            // После успешного запуска отсчитываем 30 секунд от фактического старта процесса.
+            // После успешного запуска отсчитываем 15 секунд от фактического старта процесса.
             try
             {
                 await SetLastLaunchAtAsync(connection, CancellationToken.None);
@@ -73,7 +73,7 @@ public sealed class RevitLaunchGate(
     private static async Task<TimeSpan> GetRemainingDelayAsync(NpgsqlConnection connection, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand(
-            "SELECT GREATEST(INTERVAL '0 seconds', LastLaunchAt + INTERVAL '30 seconds' - clock_timestamp()) " +
+            "SELECT GREATEST(INTERVAL '0 seconds', LastLaunchAt + INTERVAL '15 seconds' - clock_timestamp()) " +
             "FROM RevitLaunchState WHERE Singleton = TRUE;", connection);
         var value = await command.ExecuteScalarAsync(ct);
         return value is TimeSpan delay ? delay : TimeSpan.Zero;

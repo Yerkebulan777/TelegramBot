@@ -18,7 +18,7 @@ dotnet build TelegramBot.slnx
 - DI services — singleton; callback handlers регистрируются через `CallbackHandlerBase`
 - `RootPathSetup` — Windows Forms утилита, создающая 30-минутную заявку в БД; активный корень меняет только подтверждение администратора в Telegram
 - `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
-- Worker: один polling-цикл (1s) + tracked tasks + SQL partition scheduling; retry по NextRetryAt. Только запуск Revit проходит через глобальный PostgreSQL gate с интервалом не менее 30s. Ошибка записи результата — CommandPersistenceException, без немедленного перезапуска BIM.
+- Worker: один polling-цикл (1s) + tracked tasks + SQL partition scheduling; retry по NextRetryAt. Только запуск Revit проходит через глобальный PostgreSQL gate с интервалом не менее 15s. Ошибка записи результата — CommandPersistenceException, без немедленного перезапуска BIM.
 - Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, без контрактных CLI-аргументов (`/language RUS` допустим)
 - `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC
 - BIM contract: эталон `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-08-10); XSD vendored в `Docs/BimContract/`
