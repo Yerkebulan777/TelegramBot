@@ -33,7 +33,7 @@ public sealed class CommandExecutionService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var pollSeconds = _workerOptions.FallbackPollingIntervalSeconds > 0
-            ? _workerOptions.FallbackPollingIntervalSeconds : 10;
+            ? _workerOptions.FallbackPollingIntervalSeconds : 1;
         logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}, poll={PollSeconds}s",
             _workerOptions.MaxConcurrentCommands, pollSeconds);
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);

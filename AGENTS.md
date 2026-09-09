@@ -82,15 +82,15 @@ Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs
 ## Worker flow
 
 ```text
-Polling (10s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsync → ClaimPendingCommands → ProcessRunner.RunAsync
+Polling (1s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsync → ClaimPendingCommands → ProcessRunner.RunAsync
 → CommandPreparer.PrepareAsync → ProcessStarter.StartAsync → OutputCollector + ResultAnalyzer → Done/retry/Failed
 ```
 
-Ограничение: tracked running tasks + SQL partition scheduling (одна команда на Partition за раз). Единственный polling-цикл подбирает новые команды и retry по NextRetryAt. CommandPersistenceException не классифицировать как BIM-ошибку; ResultFile сохранять при сбое записи результата.
+Ограничение: tracked running tasks + SQL partition scheduling (одна команда на Partition за раз). Единственный polling-цикл подбирает новые команды и retry по NextRetryAt. Все Worker используют PostgreSQL `RevitLaunchGate`: только между глобальными запусками Revit выдерживается не менее 30 секунд; не-Revit команды не задерживаются. CommandPersistenceException не классифицировать как BIM-ошибку; ResultFile сохранять при сбое записи результата.
 
 ### Worker DI
 
-`Program.cs` регистрирует: `CommandDataService`, `SessionDataService`, `WorkerOptions`, `FileSystemOptions`, `BimIntegrationOptions`, `DialogDismisserOptions`, `RevitVersionDetector`, `NavisworksPathResolver`, `RevitPathResolver`, `DialogDismisser`, `CommandPreparer`, `ProcessStarter`, `OutputCollector`, `ResultAnalyzer`, `RevitTemporaryDirectoryCleaner`, `ProcessRunner`, `CommandExecutionService`, `SessionCleanupService`.
+`Program.cs` регистрирует: `CommandDataService`, `SessionDataService`, `WorkerOptions`, `FileSystemOptions`, `BimIntegrationOptions`, `DialogDismisserOptions`, `RevitVersionDetector`, `NavisworksPathResolver`, `RevitPathResolver`, `DialogDismisser`, `CommandPreparer`, `RevitLaunchGate`, `ProcessStarter`, `OutputCollector`, `ResultAnalyzer`, `RevitTemporaryDirectoryCleaner`, `ProcessRunner`, `CommandExecutionService`, `SessionCleanupService`.
 
 ## BIM-контракт
 
@@ -134,7 +134,7 @@ Polling (10s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsy
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1224 symbols, 3064 relationships, 98 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1302 symbols, 3290 relationships, 104 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

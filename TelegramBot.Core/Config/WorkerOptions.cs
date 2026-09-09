@@ -31,10 +31,10 @@ public sealed class WorkerOptions
     public int RetryDelayBaseSeconds { get; set; } = 60;
 
     /// <summary>
-    /// Интервал единственного цикла очереди в секундах (по умолчанию 10).
-    /// Старое имя ключа сохранено для совместимости конфигурации. Ноль использует 10 секунд.
+    /// Интервал единственного цикла очереди в секундах (по умолчанию 1).
+    /// Старое имя ключа сохранено для совместимости конфигурации. Ноль использует 1 секунду.
     /// </summary>
-    public int FallbackPollingIntervalSeconds { get; set; } = 10;
+    public int FallbackPollingIntervalSeconds { get; set; } = 1;
 
     /// <summary>
     /// Интервал фоновой очистки истёкших lease в секундах (по умолчанию 300 = 5 минут).

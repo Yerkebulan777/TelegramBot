@@ -18,7 +18,7 @@ dotnet build TelegramBot.slnx
 - DI services — singleton; callback handlers регистрируются через `CallbackHandlerBase`
 - `RootPathSetup` — Windows Forms утилита, создающая 30-минутную заявку в БД; активный корень меняет только подтверждение администратора в Telegram
 - `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
-- Worker: один polling-цикл (10s) + tracked tasks + SQL partition scheduling; retry по NextRetryAt. Ошибка записи результата — CommandPersistenceException, без немедленного перезапуска BIM.
+- Worker: один polling-цикл (1s) + tracked tasks + SQL partition scheduling; retry по NextRetryAt. Только запуск Revit проходит через глобальный PostgreSQL gate с интервалом не менее 30s. Ошибка записи результата — CommandPersistenceException, без немедленного перезапуска BIM.
 - Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, без контрактных CLI-аргументов (`/language RUS` допустим)
 - `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC
 - BIM contract: эталон `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-08-10); XSD vendored в `Docs/BimContract/`
@@ -31,7 +31,7 @@ dotnet build TelegramBot.slnx
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TelegramBot** (1224 symbols, 3064 relationships, 98 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TelegramBot** (1302 symbols, 3290 relationships, 104 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

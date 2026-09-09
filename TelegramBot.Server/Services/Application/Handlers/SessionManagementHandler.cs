@@ -280,33 +280,65 @@ public sealed class SessionManagementHandler(
 
     // ────────────────────── Rerun ──────────────────────
 
-    /// <summary>Повторный запуск файла; блокируется, если файл сейчас 'processing'.</summary>
+    /// <summary>Создаёт новое задание из снимка завершённой команды.</summary>
     private async Task HandleRerunCommandAsync(CallbackContext context)
     {
-        if (!TryParseCompoundId(context, out var commandId, out var filter))
+        if (!TryParseCompoundId(context, out var commandId, out _))
         {
             return;
         }
 
-        filter = string.IsNullOrEmpty(filter) ? "ALL" : filter;
-        Logger.LogInformation("{Username} rerun cmd {CommandId}", context.Username, commandId);
+        Logger.LogInformation("{Username} rerun source cmd {CommandId}", context.Username, commandId);
 
-        var sessionId = await ResolveSessionByCommandAsync(context, commandId);
-        if (!sessionId.HasValue)
+        try
         {
-            return;
-        }
+            var source = await commandDataService.GetCommandRerunSnapshotAsync(commandId, context.UserId);
+            if (source == null)
+            {
+                await outputService.AnswerCallbackAsync(
+                    context.CallbackQueryId,
+                    "⚠️ Команда уже активна или недоступна");
+                return;
+            }
 
-        var outcome = await commandDataService.RequeueCommandAsync(commandId);
-        if (outcome == RequeueOutcome.NotFound)
+            var correlationId = Guid.NewGuid().ToString("N");
+            var (sessionId, _, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
+                [source.CommandText],
+                [source.FilePath],
+                context.UserId,
+                context.Username,
+                filesAmount: 1,
+                rootPath: source.RootPath,
+                projectName: source.ProjectName,
+                commandPriorities: [source.Priority],
+                correlationId: correlationId);
+
+            if (!sessionId.HasValue)
+            {
+                Logger.LogInformation(
+                    "Rerun skipped: source={SourceCommandId}, activeConflicts={ConflictCount}",
+                    source.SourceCommandId,
+                    skippedPairs.Count);
+                await outputService.AnswerCallbackAsync(
+                    context.CallbackQueryId,
+                    "⏳ Уже поставлено или выполняется");
+                return;
+            }
+
+            Logger.LogInformation(
+                "Rerun queued: source={SourceCommandId}, session={SessionId}, corr={CorrelationId}",
+                source.SourceCommandId,
+                sessionId.Value,
+                correlationId);
+            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "🔁 Новое задание создано");
+            context.Session.SessionId = sessionId.Value;
+            await RenderCommandsViewAsync(context, sessionId.Value, "ALL");
+        }
+        catch (Exception ex)
         {
-            return;
+            Logger.LogError(ex, "Rerun submission failed: source={SourceCommandId}", commandId);
+            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠️ Не удалось создать задание");
         }
-
-        var toast = outcome == RequeueOutcome.Processing ? "⏳ Уже выполняется" : "🔁 Перезапущено";
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, toast);
-        context.Session.SessionId = sessionId.Value;
-        await RenderCommandsViewAsync(context, sessionId.Value, filter);
     }
 
     // ────────────────────── Shared Helpers ──────────────────────

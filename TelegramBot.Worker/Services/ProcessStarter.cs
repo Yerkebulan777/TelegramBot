@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
@@ -11,10 +10,9 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 public sealed class ProcessStarter(
     CommandPreparer commandPreparer,
+    RevitLaunchGate revitLaunchGate,
     ILogger<ProcessStarter> logger)
 {
-    private readonly SemaphoreSlim _launchGate = new(1, 1);
-
     /// <summary>
     /// Запускает процесс и возвращает его экземпляр.
     /// </summary>
@@ -37,10 +35,16 @@ public sealed class ProcessStarter(
         var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        await _launchGate.WaitAsync(ct);
         try
         {
-            _ = process.Start();
+            if (CommandPreparer.IsRevitCommand(cmd.CommandText))
+            {
+                await revitLaunchGate.StartAsync(process, cmd.CommandId, ct);
+            }
+            else
+            {
+                _ = process.Start();
+            }
 
             logger.LogInformation(
                 "Process started: cmd={Cmd}, id={Id}, corr={CorrelationId}, pid={Pid}, attempt={Attempt}",
@@ -48,14 +52,10 @@ public sealed class ProcessStarter(
 
             return process;
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        catch
         {
             process.Dispose();
             throw;
-        }
-        finally
-        {
-            _ = _launchGate.Release();
         }
     }
 }

@@ -69,6 +69,23 @@ internal static partial class SqlQueries
               AND s.Status != 'Deleted'
             LIMIT 1;";
 
+        internal const string GetRerunSnapshot = @"
+            SELECT c.CommandId AS SourceCommandId,
+                   c.CommandText,
+                   c.FilePath,
+                   c.RootPath,
+                   c.Priority,
+                   s.ProjectName
+            FROM Commands c
+            JOIN Sessions s ON s.SessionId = c.SessionId
+            WHERE c.CommandId = @CommandId
+              AND c.Status IN ('Done', 'Failed')
+              AND c.FilePath IS NOT NULL
+              AND c.RootPath IS NOT NULL
+              AND s.UserId = @UserId
+              AND s.Status != 'Deleted'
+            LIMIT 1;";
+
         internal const string UpdateStatus = @"
             UPDATE Commands
             SET Status = @Status,
@@ -156,43 +173,6 @@ internal static partial class SqlQueries
                       selected.Username, selected.CorrelationId,
                       selected.Partition,
                       selected.Priority, selected.RetryCount;";
-
-        internal const string Requeue = @"
-            WITH target AS (
-                SELECT c.CommandId, c.Status, c.SessionId
-                FROM Commands c
-                WHERE c.CommandId = @CommandId
-                  AND c.Status != 'Deleted'
-            ),
-            requeued AS (
-                UPDATE Commands c
-                SET Status = 'pending',
-                    Lease = NULL,
-                    StartedAt = NULL,
-                    CompletedAt = NULL,
-                    ProcessId = NULL,
-                    ErrorMessage = NULL,
-                    NextRetryAt = NULL
-                FROM target t
-                WHERE c.CommandId = t.CommandId
-                  AND t.Status != 'processing'
-                RETURNING c.CommandId, c.SessionId
-            ),
-            -- Сбрасываем CompletionNotified сессии: иначе повторный запуск останется «уже уведомлённым»,
-            -- и NotifySessionCompletedOnceAsync вернёт 0 — пользователь не узнает о результате requeue.
-            session_reset AS (
-                UPDATE Sessions s
-                SET CompletionNotified = FALSE,
-                    UpdatedAt = NOW()
-                FROM requeued r
-                WHERE s.SessionId = r.SessionId
-                RETURNING s.SessionId
-            )
-            SELECT CASE
-                WHEN EXISTS (SELECT 1 FROM requeued) THEN 'Requeued'
-                WHEN EXISTS (SELECT 1 FROM target) THEN 'Processing'
-                ELSE 'NotFound'
-            END;";
 
         internal const string ScheduleRetry = @"
             UPDATE Commands

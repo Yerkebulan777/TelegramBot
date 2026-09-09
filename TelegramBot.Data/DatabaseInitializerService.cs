@@ -84,6 +84,8 @@ public sealed class DatabaseInitializerService(
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateNotificationOutboxTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.EnsureNotificationOutboxColumns, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateRuntimeSettingsTable, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateRevitLaunchStateTable, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Schema.SeedRevitLaunchState, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddCommandsStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddSessionsStatusCheck, transaction: tx);

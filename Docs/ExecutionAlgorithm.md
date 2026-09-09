@@ -50,8 +50,8 @@ Partition = "file:" + md5(lower(FilePath))
 `CleanupIntervalSeconds`) → `CommandOrchestrator.TriggerDrainAsync` → пауза. При ошибке обращения
 к БД цикл пишет предупреждение и повторяет попытку после паузы, с новым подключением.
 
-Интервал — `Worker:FallbackPollingIntervalSeconds`, по умолчанию 10 секунд. Старое имя ключа
-сохранено для совместимости; значение 0 также означает 10 секунд. Существующие положительные
+Интервал — `Worker:FallbackPollingIntervalSeconds`, по умолчанию 1 секунда. Старое имя ключа
+сохранено для совместимости; значение 0 также означает 1 секунду. Существующие положительные
 переопределения сохраняют своё значение. `LISTEN/NOTIFY`, таймеры отдельных retry и запуск drain
 из continuation завершённой команды удалены. Мониторинг процессов работает независимо.
 
@@ -83,7 +83,11 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 `ProcessStarter.StartAsync`:
 - создаёт TaskFile (`task_{project}_{commandId}.xml`) с XSD-валидацией
 - заполняет `ProcessStartInfo` (Revit: без контрактных CLI-аргументов, `/language RUS`, TaskFile path в `REVITBIMFUSION_TASK_FILE`)
-- сериализованный `Process.Start()` через собственный `_launchGate` (`ProcessStarter`, отдельно от `_drainGate` оркестратора)
+- только для Revit передаёт запуск в `RevitLaunchGate`: session advisory lock PostgreSQL сериализует все Worker, а singleton-строка `RevitLaunchState` хранит время последнего запуска
+- под advisory lock ожидает остаток глобального интервала и вызывает `Process.Start()`; между запусками Revit проходит не менее 30 секунд, транзакция на время ожидания не удерживается
+- не-Revit процессы запускаются сразу и глобальную паузу не используют
+
+Команда уже имеет статус `processing`, пока готовится и ожидает Revit launch gate.
 
 ## 4. Ожидание и результат
 
@@ -145,14 +149,14 @@ Server:
 
 ## 8. Повторный запуск из /status
 
-Кнопка с именем файла в `/status` (для `processing`/`Done`/`Failed`, не `pending`) шлёт `RERUNCMD:{commandId}:{filter}` → `SessionManagementHandler.HandleRerunCommandAsync`.
+Кнопка с именем файла в `/status` для `Done`/`Failed` шлёт `RERUNCMD:{commandId}:{filter}` → `SessionManagementHandler.HandleRerunCommandAsync`.
 
-`CommandDataService.RequeueCommandAsync` (SQL `Requeue`, `Queries.Commands.cs`):
-- если `Status == 'processing'` — no-op, возвращает `RequeueOutcome.Processing`, юзер видит toast «⏳ Уже выполняется» (блок дубликата выполнения того же CommandId)
-- иначе — сброс той же строки в `pending` (`Lease`/`ProcessId`/`ErrorMessage`/`NextRetryAt`/`CompletedAt` в NULL, `RetryCount` не трогается — это ручной rerun, не авто-retry), подхват очередным polling-циклом, `RequeueOutcome.Requeued`, toast «🔁 Перезапущено»
-- если строка не найдена/чужая/удалена — `RequeueOutcome.NotFound`, тихо игнорируется
-
-Если файл физически ещё выполняется старым процессом в момент rerun — этот процесс осиротевает; его финальный `UpdateStatus` может перезаписать заново queued/processing строку тем же `CommandId`. Разруливается на уровне БД по `CommandId`, отдельный kill старого процесса не делается.
+Server читает принадлежащий пользователю завершённый command как снимок и вызывает обычный
+`CreateSessionWithCommandsAsync`. Поэтому ручной повтор всегда создаёт новые `SessionId`, `CommandId`,
+`CorrelationId` и `RetryCount = 0`; исходная строка `Done`/`Failed` остаётся историей. Частичный
+уникальный индекс не допускает повтор, если та же операция уже `pending`/`processing`; пользователь
+видит «Уже поставлено или выполняется». Новый command подхватывается тем же polling-циклом, что и
+обычное задание. Автоматический retry, в отличие от ручного, продолжает использовать ту же строку.
 
 ## Статусы
 
@@ -165,7 +169,8 @@ Server:
 | `session_started` | уведомление «задание запущено» |
 | `command_completed` | разбудить outbox sender |
 
-Session advisory locks для: lease cleanup, outbox sender, partition claim, duplicate check. Точные ID — в `Queries.Commands.cs` и `Queries.NotificationOutbox.cs`.
+Session/advisory locks используются для lease cleanup, outbox sender, partition claim, duplicate
+check и глобального Revit launch gate. Worker scheduling при этом остаётся обычным polling PostgreSQL.
 
 ## Добавление команды
 

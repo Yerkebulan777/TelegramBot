@@ -77,6 +77,7 @@ public static class Program
                     _=services.AddSingleton<DialogDismisser>();
 
                     _=services.AddSingleton<CommandPreparer>();
+                    _=services.AddSingleton<RevitLaunchGate>();
                     _=services.AddSingleton<ProcessStarter>();
                     _=services.AddSingleton<OutputCollector>();
                     _=services.AddSingleton<ResultAnalyzer>();

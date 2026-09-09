@@ -94,6 +94,17 @@ internal static partial class SqlQueries
                 UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
 
+        internal const string CreateRevitLaunchStateTable = @"
+            CREATE TABLE IF NOT EXISTS RevitLaunchState (
+                Singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (Singleton),
+                LastLaunchAt TIMESTAMPTZ
+            );";
+
+        internal const string SeedRevitLaunchState = @"
+            INSERT INTO RevitLaunchState (Singleton)
+            VALUES (TRUE)
+            ON CONFLICT (Singleton) DO NOTHING;";
+
         internal const string CreateNotificationOutboxTable = @"
             CREATE TABLE IF NOT EXISTS NotificationOutbox (
                 OutboxId BIGSERIAL PRIMARY KEY,
