@@ -16,6 +16,7 @@
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.Worker\TelegramBot.Worker.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\Worker&quot;" />
     <Exec Command="dotnet publish &quot;$(RepoRoot)TelegramBot.RootPathSetup\TelegramBot.RootPathSetup.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\RootPathSetup&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)GrantLogonRight\GrantLogonRight.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\GrantLogonRight&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)PostgresConnectionCheck\PostgresConnectionCheck.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)publish\PostgresConnectionCheck&quot;" />
     <Exec Command="&quot;$(IsccExe)&quot; &quot;$(MSBuildThisFileDirectory)TelegramBot.iss&quot;" />
   </Target>
 

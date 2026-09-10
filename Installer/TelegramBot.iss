@@ -57,6 +57,7 @@ Source: "publish\Server\*"; DestDir: "{app}\Server"; Components: server; Flags: 
 Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: recursesubdirs ignoreversion
 Source: "publish\RootPathSetup\*"; DestDir: "{app}\RootPathSetup"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server; Flags: recursesubdirs ignoreversion
+Source: "publish\PostgresConnectionCheck\*"; DestDir: "{app}\Tools\PostgresConnectionCheck"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{autoprograms}\TelegramBot\Изменить рабочую папку"; Filename: "{app}\RootPathSetup\{#RootPathSetupExe}"; Components: server
@@ -119,7 +120,8 @@ begin
   StringChangeEx(Result, '\', '\\', True);
 end;
 
-{ Точечно обновляет токен, не перезаписывая строку подключения в Local.json. }
+{ На чистой установке создаёт Local.json с токеном. При повторной
+  установке точечно обновляет токен, не перезаписывая остальные настройки. }
 procedure PatchJsonKey(const JsonPath, KeyName, NewValue: String);
 var
   Lines: TArrayOfString;
@@ -128,7 +130,13 @@ var
 begin
   if not LoadStringsFromFile(JsonPath, Lines) then
   begin
-    MsgBox('Файл не найден: ' + JsonPath, mbError, MB_OK);
+    if not SaveStringToFile(JsonPath,
+      '{' + #13#10 +
+      '  "TelegramBot": {' + #13#10 +
+      '    "' + KeyName + '": "' + JsonEscape(NewValue) + '"' + #13#10 +
+      '  }' + #13#10 +
+      '}' + #13#10, False) then
+      MsgBox('Не удалось создать файл: ' + JsonPath, mbError, MB_OK);
     exit;
   end;
 
@@ -255,6 +263,15 @@ begin
     'Не удалось сразу запустить задачу Worker (запустится при следующем входе)');
 end;
 
+procedure CheckPostgresConnection(const ComponentName, ApplicationDirectory: String);
+begin
+  if not RunAdminCommand(
+    '{app}\Tools\PostgresConnectionCheck\PostgresConnectionCheck.exe',
+    QuoteArg(ApplicationDirectory),
+    'Не удалось подключиться к PostgreSQL с настройками ' + ComponentName) then
+    RaiseException('Установка остановлена: PostgreSQL недоступен для ' + ComponentName + '.');
+end;
+
 { Reinstall-over-existing support: sc.exe create fails if the service already
   exists, and a running Server/Worker exe keeps its own file locked so [Files]
   can't overwrite it. Tear down the previous registration first — same
@@ -297,6 +314,7 @@ begin
   if WizardIsComponentSelected('server') then
   begin
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0]);
+    CheckPostgresConnection('TelegramBot Server', ExpandConstant('{app}\Server'));
     GrantServiceLogonRight(Account);
     if RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password) then
       GrantAccess(ExpandConstant('{app}'), Account);
@@ -304,9 +322,15 @@ begin
 
   if WizardIsComponentSelected('worker') then
   begin
+    CheckPostgresConnection('TelegramBot Worker', ExpandConstant('{app}\Worker'));
     if RegisterWorkerTask('{#WorkerSvc}', ExpandConstant('{app}\Worker\{#WorkerExe}'), Account) then
       GrantAccess(ExpandConstant('{app}'), Account);
   end;
+end;
+
+function NeedRestart(): Boolean;
+begin
+  Result := True;
 end;
 
 [UninstallRun]
@@ -317,7 +341,7 @@ Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""{#WorkerSvc}"" /f"; F
 
 [UninstallDelete]
 ; [Files] tracks only what was shipped in publish\ — appsettings.Local.json for
-; Worker (and any runtime logs) are written directly by CurStepChanged/the app
+; Server (and any runtime logs) are written directly by CurStepChanged/the app
 ; itself, so Inno's uninstaller doesn't know about them and leaves the folder
 ; non-empty. Delete the whole tree explicitly instead.
 Type: filesandordirs; Name: "{app}"

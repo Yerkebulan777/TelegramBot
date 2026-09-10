@@ -68,7 +68,8 @@ $projects = @(
     @{ Project = Join-Path $repoRoot "TelegramBot.Server\TelegramBot.Server.csproj"; Out = Join-Path $publishRoot "Server" },
     @{ Project = Join-Path $repoRoot "TelegramBot.Worker\TelegramBot.Worker.csproj"; Out = Join-Path $publishRoot "Worker" },
     @{ Project = Join-Path $repoRoot "TelegramBot.RootPathSetup\TelegramBot.RootPathSetup.csproj"; Out = Join-Path $publishRoot "RootPathSetup" },
-    @{ Project = Join-Path $installerDir "GrantLogonRight\GrantLogonRight.csproj"; Out = Join-Path $publishRoot "GrantLogonRight" }
+    @{ Project = Join-Path $installerDir "GrantLogonRight\GrantLogonRight.csproj"; Out = Join-Path $publishRoot "GrantLogonRight" },
+    @{ Project = Join-Path $installerDir "PostgresConnectionCheck\PostgresConnectionCheck.csproj"; Out = Join-Path $publishRoot "PostgresConnectionCheck" }
 )
 foreach ($item in $projects) {
     Invoke-DotNetPublish -ProjectPath $item.Project -OutputDir $item.Out
