@@ -256,7 +256,9 @@ public sealed class SelectionFlow
     {
         if (rootPath != null)
         {
-            _rootPath = Normalize(rootPath);
+            _rootPath = string.IsNullOrWhiteSpace(rootPath)
+                ? string.Empty
+                : Normalize(rootPath);
         }
 
         _pendingCommands.Clear();
