@@ -45,7 +45,7 @@ public sealed class UncRootPathValidator
 
         if (!UncPathResolver.TryResolve(fullPath, out var resolvedPath))
         {
-            error = "Не удалось однозначно определить сетевую шару для указанного диска. Войдите в Windows на машине Server под нужным профилем или укажите UNC-путь.";
+            error = "Не удалось однозначно определить сетевую шару для указанного диска. Войдите в Windows на машине Server под нужным профилем или укажите UNC-путь. Узнать UNC-путь можно в PowerShell командой net use Z: — замените Z: на букву своего диска.";
             return false;
         }
 
