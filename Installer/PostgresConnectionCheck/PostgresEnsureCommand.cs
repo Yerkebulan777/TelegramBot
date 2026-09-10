@@ -72,10 +72,11 @@ internal static class PostgresEnsureCommand
             connectionString = await PostgresCluster.EnsureAppDatabaseAsync(cancellationToken);
         }
 
+        await ApplicationSettings.PingAsync(connectionString, cancellationToken);
+
         foreach (string directory in pending)
         {
             await ApplicationSettings.WriteConnectionStringAsync(directory, connectionString, cancellationToken);
-            await ApplicationSettings.PingAsync(connectionString, cancellationToken);
         }
 
         await Console.Out.WriteLineAsync("PostgreSQL is ready for TelegramBot.");
