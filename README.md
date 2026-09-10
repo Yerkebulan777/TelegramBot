@@ -23,7 +23,7 @@ docker compose up -d
 dotnet build TelegramBot.slnx
 ```
 
-Пароль в `.env` должен совпадать со строкой `ConnectionStrings:Postgres`. Для локальной разработки `.env.example` использует `postgres` / `postgres`, как и `appsettings.json`. `docker-compose.yml` слушает только `127.0.0.1:5432` и не поднимается без `POSTGRES_PASSWORD`. Docker Desktop должен стартовать вместе с Windows, иначе после перезагрузки контейнер не вернётся сам.
+Для локальной разработки пароль в `.env` должен совпадать со строкой `ConnectionStrings:Postgres`. `.env.example` использует `postgres` / `postgres`, как и `appsettings.json`. Установщик на целевой машине генерирует `%ProgramData%\TelegramBot\PostgreSQL\.env` сам и пишет ту же строку подключения в `appsettings.Local.json`. `docker-compose.yml` слушает только `127.0.0.1:5432` и не поднимается без `POSTGRES_PASSWORD`. Docker Desktop должен стартовать вместе с Windows, иначе после перезагрузки контейнер не вернётся сам.
 
 Секреты и локальные пути — в `appsettings.Local.json` у Server и Worker (файл в `.gitignore`). Одна строка Postgres у обоих; схема БД поднимается Server'ом в фоне (`DatabaseInitializerService`) и не блокирует старт.
 

@@ -35,6 +35,23 @@ internal static class PostgresEnsureCommand
         List<string> pending = [];
         foreach (string directory in targets)
         {
+            string? localConnection = ApplicationSettings.TryGetLocalConnectionString(directory);
+            if (localConnection is not null)
+            {
+                try
+                {
+                    await ApplicationSettings.PingAsync(localConnection, cancellationToken);
+                    connectionString ??= localConnection;
+                    continue;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    await Console.Error.WriteLineAsync(
+                        $"Configured PostgreSQL settings for {directory} are not reachable: {ex.Message}");
+                    return 1;
+                }
+            }
+
             string? existing = await ApplicationSettings.TryGetWorkingConnectionAsync(directory, cancellationToken);
             if (existing is null)
             {

@@ -55,6 +55,18 @@ internal static class ApplicationSettings
         }
     }
 
+    internal static string? TryGetLocalConnectionString(string applicationDirectory)
+    {
+        string path = Path.Combine(applicationDirectory, "appsettings.Local.json");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        JsonObject root = ReadOrCreateObject(path);
+        return root["ConnectionStrings"]?["Postgres"]?.GetValue<string>();
+    }
+
     internal static async Task PingAsync(string connectionString, CancellationToken cancellationToken)
     {
         await using var connection = new NpgsqlConnection(connectionString);

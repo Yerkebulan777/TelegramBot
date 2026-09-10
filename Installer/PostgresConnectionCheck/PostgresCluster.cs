@@ -6,13 +6,14 @@ namespace TelegramBot.Installer;
 
 /// <summary>
 /// Поднимает PostgreSQL 18 в уже запущенном Docker Desktop и возвращает
-/// строку подключения к <c>telegram_bot</c>. Каталог Compose всегда
-/// <c>%ProgramData%\TelegramBot\PostgreSQL</c>. Нет Docker — нет базы.
+/// строку подключения к PostgreSQL из <c>%ProgramData%\TelegramBot\PostgreSQL\.env</c>
+/// (или к стандартным <c>telegram_bot/postgres</c>, если файл ещё не создан).
+/// Каталог Compose всегда <c>%ProgramData%\TelegramBot\PostgreSQL</c>. Нет Docker — нет базы.
 /// </summary>
 internal static class PostgresCluster
 {
-    private const string DatabaseName = "telegram_bot";
-    private const string UserName = "postgres";
+    private const string DefaultDatabaseName = "telegram_bot";
+    private const string DefaultUserName = "postgres";
 
     private static readonly string ComposeDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
@@ -29,8 +30,8 @@ internal static class PostgresCluster
         }
 
         string dockerExe = await RequireRunningDockerAsync(cancellationToken);
-        string password = await EnsurePasswordAsync(cancellationToken);
-        string connectionString = AppConnectionString(password);
+        PostgresSettings settings = await EnsureSettingsAsync(cancellationToken);
+        string connectionString = AppConnectionString(settings.DatabaseName, settings.UserName, settings.Password);
 
         await Console.Out.WriteLineAsync("Starting PostgreSQL 18 in Docker Desktop.");
         await RunDockerAsync(
@@ -91,31 +92,49 @@ internal static class PostgresCluster
             "Не найден docker.exe. Установите Docker Desktop, запустите его и повторите Setup.");
     }
 
-    private static async Task<string> EnsurePasswordAsync(CancellationToken cancellationToken)
+    private static async Task<PostgresSettings> EnsureSettingsAsync(CancellationToken cancellationToken)
     {
         string envPath = Path.Combine(ComposeDirectory, ".env");
         if (File.Exists(envPath))
         {
+            string? databaseName = null;
+            string? userName = null;
+            string? password = null;
             foreach (string line in File.ReadLines(envPath))
             {
-                const string prefix = "POSTGRES_PASSWORD=";
                 string trimmed = line.Trim();
-                if (trimmed.StartsWith(prefix, StringComparison.Ordinal) && trimmed.Length > prefix.Length)
+                if (trimmed.StartsWith("POSTGRES_DB=", StringComparison.Ordinal) && trimmed.Length > "POSTGRES_DB=".Length)
+                {
+                    databaseName = trimmed["POSTGRES_DB=".Length..];
+                }
+                else if (trimmed.StartsWith("POSTGRES_USER=", StringComparison.Ordinal) && trimmed.Length > "POSTGRES_USER=".Length)
+                {
+                    userName = trimmed["POSTGRES_USER=".Length..];
+                }
+                else if (trimmed.StartsWith("POSTGRES_PASSWORD=", StringComparison.Ordinal) && trimmed.Length > "POSTGRES_PASSWORD=".Length)
                 {
                     await Console.Out.WriteLineAsync($"Reusing PostgreSQL credentials from {envPath}.");
-                    return trimmed[prefix.Length..];
+                    password = trimmed["POSTGRES_PASSWORD=".Length..];
                 }
+            }
+
+            if (!string.IsNullOrWhiteSpace(password))
+            {
+                return new PostgresSettings(
+                    string.IsNullOrWhiteSpace(databaseName) ? DefaultDatabaseName : databaseName,
+                    string.IsNullOrWhiteSpace(userName) ? DefaultUserName : userName,
+                    password);
             }
         }
 
-        string password = "Tb" + Convert.ToHexString(RandomNumberGenerator.GetBytes(24)) + "9x!";
+        string generatedPassword = "Tb" + Convert.ToHexString(RandomNumberGenerator.GetBytes(24)) + "9x!";
         string contents =
-            $"POSTGRES_DB={DatabaseName}{Environment.NewLine}" +
-            $"POSTGRES_USER={UserName}{Environment.NewLine}" +
-            $"POSTGRES_PASSWORD={password}{Environment.NewLine}";
+            $"POSTGRES_DB={DefaultDatabaseName}{Environment.NewLine}" +
+            $"POSTGRES_USER={DefaultUserName}{Environment.NewLine}" +
+            $"POSTGRES_PASSWORD={generatedPassword}{Environment.NewLine}";
         await File.WriteAllTextAsync(envPath, contents, cancellationToken);
         await Console.Out.WriteLineAsync($"Wrote PostgreSQL credentials to {envPath}.");
-        return password;
+        return new PostgresSettings(DefaultDatabaseName, DefaultUserName, generatedPassword);
     }
 
     private static async Task RunDockerAsync(
@@ -157,15 +176,17 @@ internal static class PostgresCluster
                 : $"docker exited with code {process.ExitCode}:{Environment.NewLine}{output}");
     }
 
-    private static string AppConnectionString(string password)
+    private static string AppConnectionString(string databaseName, string userName, string password)
         => new NpgsqlConnectionStringBuilder
         {
             Host = "localhost",
-            Database = DatabaseName,
-            Username = UserName,
+            Database = databaseName,
+            Username = userName,
             Password = password,
             Timeout = 30,
             MinPoolSize = 2,
             ConnectionIdleLifetime = 300,
         }.ConnectionString;
+
+    private sealed record PostgresSettings(string DatabaseName, string UserName, string Password);
 }
