@@ -158,11 +158,14 @@ function Find-SignTool {
 }
 
 function Find-Iscc {
+    $userPrograms = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Programs"
     foreach ($candidate in @(
             "C:\Program Files\Inno Setup 7\ISCC.exe",
             "C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
             "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-            "C:\Program Files\Inno Setup 6\ISCC.exe"
+            "C:\Program Files\Inno Setup 6\ISCC.exe",
+            (Join-Path $userPrograms "Inno Setup 7\ISCC.exe"),
+            (Join-Path $userPrograms "Inno Setup 6\ISCC.exe")
         )) {
         if (Test-Path $candidate) {
             return $candidate
