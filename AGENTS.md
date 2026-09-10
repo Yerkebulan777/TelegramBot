@@ -27,6 +27,7 @@
 | `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
 | `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
 | `TelegramBot.RootPathSetup/` | Windows Forms: подготовка подтверждаемой заявки на смену рабочего UNC-пути |
+| `Installer/PostgresConnectionCheck/` | CLI установщика: `check` и `ensure` PostgreSQL 18 в Docker Desktop (`docker compose`, `.env`, `appsettings.Local.json`) |
 | `TelegramBot.Worker/Services/` | `CommandExecutionService.cs`, `CommandPreparer.cs`, `ProcessStarter.cs`, `ProcessRunner.cs`, `OutputCollector.cs`, `ResultAnalyzer.cs`, `RevitTemporaryDirectoryCleaner.cs`, `ErrorClassifier.cs`, `SessionCleanupService.cs` |
 | `TelegramBot.Worker/BimLib/` | `RevitVersionDetector.cs`, `NavisworksPathResolver.cs`, `DialogDismisser.cs` |
 | `TelegramBot.Worker/Program.cs` | Worker DI + startup |

@@ -1,47 +1,74 @@
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Npgsql;
+using TelegramBot.Installer;
 
-if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
+if (args.Length == 0 || string.IsNullOrWhiteSpace(args[0]))
 {
-    Console.Error.WriteLine("Usage: PostgresConnectionCheck <application-directory>");
+    PrintUsage();
     return 2;
 }
 
-string applicationDirectory = Path.GetFullPath(args[0]);
-
 try
 {
-    string environmentName = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
-        ?? Environments.Production;
-
-    IConfigurationRoot configuration = new ConfigurationBuilder()
-        .SetBasePath(applicationDirectory)
-        .AddJsonFile("appsettings.json", optional: false)
-        .AddJsonFile($"appsettings.{environmentName}.json", optional: true)
-        .AddJsonFile("appsettings.Local.json", optional: true)
-        .AddEnvironmentVariables()
-        .Build();
-
-    string connectionString = configuration.GetConnectionString("Postgres")
-        ?? throw new InvalidOperationException(
-            "ConnectionStrings:Postgres is not configured in the application settings.");
-
-    await using var connection = new NpgsqlConnection(connectionString);
-    await connection.OpenAsync();
-
-    await using var command = new NpgsqlCommand("SELECT 1", connection);
-    object? result = await command.ExecuteScalarAsync();
-    if (!Equals(result, 1))
+    if (string.Equals(args[0], "check", StringComparison.OrdinalIgnoreCase))
     {
-        throw new InvalidOperationException("PostgreSQL returned an unexpected health-check result.");
+        if (args.Length != 2 || string.IsNullOrWhiteSpace(args[1]))
+        {
+            PrintUsage();
+            return 2;
+        }
+
+        await ApplicationSettings.PingDirectoryAsync(Path.GetFullPath(args[1]), CancellationToken.None);
+        await Console.Out.WriteLineAsync("PostgreSQL connection check succeeded.");
+        return 0;
     }
 
-    Console.WriteLine("PostgreSQL connection check succeeded.");
-    return 0;
+    if (string.Equals(args[0], "ensure", StringComparison.OrdinalIgnoreCase))
+    {
+        return await PostgresEnsureCommand.RunAsync(ParseEnsureArguments(args));
+    }
+
+    PrintUsage();
+    return 2;
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine(ex.Message);
+    await Console.Error.WriteLineAsync(ex.Message);
     return 1;
+}
+
+static PostgresEnsureArguments ParseEnsureArguments(string[] arguments)
+{
+    string? serverDirectory = null;
+    string? workerDirectory = null;
+
+    for (var i = 1; i < arguments.Length; i++)
+    {
+        string key = arguments[i];
+        if (++i >= arguments.Length || string.IsNullOrWhiteSpace(arguments[i]) || arguments[i].StartsWith('-'))
+        {
+            throw new InvalidOperationException("Expected argument: " + key + " <directory>");
+        }
+
+        string value = arguments[i];
+        if (string.Equals(key, "--server", StringComparison.OrdinalIgnoreCase))
+        {
+            serverDirectory = value;
+        }
+        else if (string.Equals(key, "--worker", StringComparison.OrdinalIgnoreCase))
+        {
+            workerDirectory = value;
+        }
+        else
+        {
+            throw new InvalidOperationException("Unknown ensure argument: " + key);
+        }
+    }
+
+    return new PostgresEnsureArguments(serverDirectory, workerDirectory);
+}
+
+static void PrintUsage()
+{
+    Console.Error.WriteLine("Usage:");
+    Console.Error.WriteLine("  PostgresConnectionCheck check <application-directory>");
+    Console.Error.WriteLine("  PostgresConnectionCheck ensure [--server <dir>] [--worker <dir>]");
 }

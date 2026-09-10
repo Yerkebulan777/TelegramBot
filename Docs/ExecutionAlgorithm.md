@@ -13,6 +13,8 @@ Telegram update → Server → Sessions + Commands (1 транзакция)
 
 `DatabaseInitializerService` — hosted service (`BackgroundService`), зарегистрирован первым среди hosted-сервисов в `AddTelegramBotServer`. Создаёт схему (таблицы, индексы, constraints, legacy soft-delete) в одной транзакции с rollback при ошибке.
 
+Кластер и база появляются раньше, на установке: helper `PostgresConnectionCheck ensure` при выборе Server поднимает PostgreSQL 18 в уже запущенном Docker Desktop (`docker compose up -d` в `%ProgramData%\TelegramBot\PostgreSQL`) и пишет строку подключения в `appsettings.Local.json`. Нативный PostgreSQL установщик не ставит. Схему таблиц по-прежнему создаёт только Server.
+
 Ключевое: **инициализация не блокирует старт хоста**. Раньше вызывалась синхронно в `Program.Main` до `host.RunAsync()` — пока PostgreSQL (в Docker) не поднимался при загрузке машины, инициализация висела > 60 c и SCM убивал старт службы по таймауту (event 7009/7000). Теперь схема создаётся в `ExecuteAsync` с retry (2 → 5 → 15 c, бесконечно до успеха), а хост рапортует SCM «started» немедленно.
 
 Hosted-сервисы стартуют параллельно (fire-and-forget `ExecuteAsync`), поэтому каждый сам толерантен к временно недоступной БД: `CommandNotificationService` — reconnect-циклом, `NotificationSenderService` — изолированным стартовым drain + polling (outbox retry'ется), `TelegramBotHostedService` — пер-апдейтным catch. Стартовое окно без схемы не теряет данные: update'ы буферизуются каналом, outbox и LISTEN переподключаются.
