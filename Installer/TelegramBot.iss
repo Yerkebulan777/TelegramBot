@@ -58,6 +58,7 @@ Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: 
 Source: "publish\RootPathSetup\*"; DestDir: "{app}\RootPathSetup"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\PostgresConnectionCheck\*"; DestDir: "{app}\Tools\PostgresConnectionCheck"; Flags: recursesubdirs ignoreversion
+Source: "..\docker-compose.yml"; DestDir: "{commonappdata}\TelegramBot\PostgreSQL"; Components: server; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\TelegramBot\Изменить рабочую папку"; Filename: "{app}\RootPathSetup\{#RootPathSetupExe}"; Components: server
@@ -263,13 +264,26 @@ begin
     'Не удалось сразу запустить задачу Worker (запустится при следующем входе)');
 end;
 
-procedure CheckPostgresConnection(const ComponentName, ApplicationDirectory: String);
+{ If Server is selected and localhost:5432 is empty, the helper starts
+  PostgreSQL 18 in the already running Docker Desktop (`docker compose up -d --wait`)
+  under {commonappdata}\TelegramBot\PostgreSQL and patches ConnectionStrings
+  in appsettings.Local.json. Docker Desktop must already be installed and
+  running. Worker-only never starts a second cluster. }
+procedure EnsurePostgres;
+var
+  Args: String;
 begin
+  WizardForm.StatusLabel.Caption := 'Настройка PostgreSQL в Docker Desktop...';
+  Args := 'ensure';
+  if WizardIsComponentSelected('server') then
+    Args := Args + ' --server ' + QuoteArg(ExpandConstant('{app}\Server'));
+  if WizardIsComponentSelected('worker') then
+    Args := Args + ' --worker ' + QuoteArg(ExpandConstant('{app}\Worker'));
   if not RunAdminCommand(
     '{app}\Tools\PostgresConnectionCheck\PostgresConnectionCheck.exe',
-    QuoteArg(ApplicationDirectory),
-    'Не удалось подключиться к PostgreSQL с настройками ' + ComponentName) then
-    RaiseException('Установка остановлена: PostgreSQL недоступен для ' + ComponentName + '.');
+    Args,
+    'Не удалось настроить PostgreSQL в Docker Desktop') then
+    RaiseException('Установка остановлена: PostgreSQL не настроен. Запустите Docker Desktop и повторите Setup.');
 end;
 
 { Reinstall-over-existing support: sc.exe create fails if the service already
@@ -312,9 +326,13 @@ begin
   Password := AccountPage.Values[1];
 
   if WizardIsComponentSelected('server') then
-  begin
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0]);
-    CheckPostgresConnection('TelegramBot Server', ExpandConstant('{app}\Server'));
+
+  if WizardIsComponentSelected('server') or WizardIsComponentSelected('worker') then
+    EnsurePostgres;
+
+  if WizardIsComponentSelected('server') then
+  begin
     GrantServiceLogonRight(Account);
     if RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password) then
       GrantAccess(ExpandConstant('{app}'), Account);
@@ -322,7 +340,6 @@ begin
 
   if WizardIsComponentSelected('worker') then
   begin
-    CheckPostgresConnection('TelegramBot Worker', ExpandConstant('{app}\Worker'));
     if RegisterWorkerTask('{#WorkerSvc}', ExpandConstant('{app}\Worker\{#WorkerExe}'), Account) then
       GrantAccess(ExpandConstant('{app}'), Account);
   end;
