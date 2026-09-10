@@ -264,11 +264,11 @@ begin
     'Не удалось сразу запустить задачу Worker (запустится при следующем входе)');
 end;
 
-{ If Server is selected and localhost:5432 is empty, the helper starts
-  PostgreSQL 18 in the already running Docker Desktop (`docker compose up -d --wait`)
-  under {commonappdata}\TelegramBot\PostgreSQL and patches ConnectionStrings
-  in appsettings.Local.json. Docker Desktop must already be installed and
-  running. Worker-only never starts a second cluster. }
+// If Server is selected and localhost:5432 is empty, the helper starts
+// PostgreSQL 18 in the already running Docker Desktop (`docker compose up -d --wait`)
+// under {commonappdata}\TelegramBot\PostgreSQL and patches ConnectionStrings
+// in appsettings.Local.json. Docker Desktop must already be installed and
+// running. Worker-only never starts a second cluster.
 procedure EnsurePostgres;
 var
   Args: String;
