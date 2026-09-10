@@ -14,7 +14,7 @@ internal static class PostgresEnsureCommand
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(45));
         CancellationToken cancellationToken = timeout.Token;
 
-        List<string> targets = [];
+        HashSet<string> targets = new(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(arguments.ServerDirectory))
         {
             targets.Add(Path.GetFullPath(arguments.ServerDirectory));

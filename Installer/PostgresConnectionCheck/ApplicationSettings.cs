@@ -17,7 +17,10 @@ internal static class ApplicationSettings
 
     internal static string ResolveConnectionString(string applicationDirectory)
     {
-        string environmentName = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
+        string environmentName =
+            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? "Production";
         IConfigurationRoot configuration = new ConfigurationBuilder()
             .SetBasePath(applicationDirectory)
             .AddJsonFile("appsettings.json", optional: false)
