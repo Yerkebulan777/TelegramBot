@@ -23,7 +23,7 @@
 | `TelegramBot.Core/Models/` | `UserSession.cs`, `PendingCommand.cs`, `BotUser.cs`, `UserRole.cs`, `TaskFile.cs`, `ResultFile.cs` |
 | `TelegramBot.Data/Sql/Queries.*.cs` | SQL-запросы (Schema, Commands, Sessions, NotificationOutbox, TrackedMessages, Users) |
 | `TelegramBot.Server/Services/Application/Handlers/` | 5 реализаций `CallbackHandlerBase`: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement` |
-| `TelegramBot.Server/Services/Infrastructure/Telegram/` | `TelegramBotHostedService.cs`, `TelegramOutputService.cs`, `KeyboardBuilder.cs`, `CommandNotificationService.cs`, `NotificationSenderService.cs` |
+| `TelegramBot.Server/Services/Infrastructure/Telegram/` | `TelegramBotHostedService.cs`, `TelegramOutputService.cs`, `KeyboardBuilder.cs`, `NotificationSenderService.cs`, `TrackedMessageCleanupService.cs` |
 | `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
 | `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
 | `TelegramBot.RootPathSetup/` | Windows Forms: подготовка подтверждаемой заявки на смену рабочего UNC-пути |
@@ -78,7 +78,11 @@ Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs
 
 ### Server DI
 
-`AddTelegramBotServer` регистрирует: 6 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `AuthorizationMiddleware`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`, `Channel<NotificationItem>(256)`, hosted: `DatabaseInitializerService` (первым, фоновая schema-init с retry — не блокирует старт хоста), `TelegramBotHostedService`, `CommandNotificationService`, `NotificationSenderService`.
+`AddTelegramBotServer` регистрирует: 6 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`; hosted: `DatabaseInitializerService` (первым, фоновая schema-init с retry — не блокирует старт хоста), `TelegramBotHostedService`, `NotificationSenderService`, `TrackedMessageCleanupService`.
+
+Уведомления старта/завершения — durable outbox, один polling sender (3s), без LISTEN/NOTIFY и очереди уведомлений в памяти. Lease failure и обычное завершение создают итоговое событие под одним session completion lock; sender восстанавливает пропущенные события. Подтверждение доставки и tracking — одна транзакция. Для сообщений сохраняются Kind/DeleteAfter/NextDeleteAttemptAt; интерактивная очистка защищает completion, удаление повторяется отдельным циклом. Детали — `Docs/ExecutionAlgorithm.md`.
+
+`CompletionMessageFormatter` — чистое формирование итогового текста; `NotificationSenderService` — доставка. Результат удаления пакета сохраняется атомарно через `SaveDeletionProgressAsync`. Открытие обычных соединений data services — через `DataAccessBase.CreateOpenConnectionAsync` с токеном отмены.
 
 ## Worker flow
 

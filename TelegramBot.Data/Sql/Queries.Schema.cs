@@ -125,6 +125,27 @@ internal static partial class SqlQueries
             ALTER TABLE TrackedMessages
             ALTER COLUMN SessionId DROP NOT NULL;";
 
+        internal const string EnsureTrackedMessageLifecycle = @"
+            ALTER TABLE TrackedMessages
+                ADD COLUMN IF NOT EXISTS Kind TEXT NOT NULL DEFAULT 'completion',
+                ADD COLUMN IF NOT EXISTS DeleteAfter TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS NextDeleteAttemptAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+            -- Legacy rows have no reliable message kind. Protect them until normal retention
+            -- rather than accidentally deleting a fresh completion on the first interaction.
+            ALTER TABLE TrackedMessages ALTER COLUMN Kind SET DEFAULT 'interface';
+
+            DELETE FROM TrackedMessages duplicate
+            USING TrackedMessages original
+            WHERE duplicate.ChatId = original.ChatId
+              AND duplicate.MessageIdPg = original.MessageIdPg
+              AND duplicate.MessageId > original.MessageId;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_messages_identity
+                ON TrackedMessages(ChatId, MessageIdPg);
+            CREATE INDEX IF NOT EXISTS idx_tracked_messages_due
+                ON TrackedMessages(NextDeleteAttemptAt, DeleteAfter);";
+
         internal const string EnsureNotificationOutboxColumns = @"
             ALTER TABLE NotificationOutbox
             ADD COLUMN IF NOT EXISTS EventType TEXT,
@@ -164,6 +185,9 @@ internal static partial class SqlQueries
             CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_outbox_session_completed
                 ON NotificationOutbox(EventType, SessionId)
                 WHERE EventType = 'session_completed';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_outbox_session_started
+                ON NotificationOutbox(EventType, SessionId)
+                WHERE EventType = 'session_started';
             CREATE INDEX IF NOT EXISTS idx_notification_outbox_pending
                 ON NotificationOutbox(Status, NextAttemptAt, CreatedAt, OutboxId)
                 WHERE Status IN ('pending', 'processing');";

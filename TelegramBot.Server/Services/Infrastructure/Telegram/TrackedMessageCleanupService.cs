@@ -45,7 +45,7 @@ public sealed class TrackedMessageCleanupService(
         {
             var now = DateTime.UtcNow;
             var expiredCount = await messageTrackingDataService.DeleteTrackedMessagesOlderThanAsync(
-                now.AddHours(-_options.MaximumDeletionAgeHours));
+                now.AddHours(-_options.MaximumDeletionAgeHours), stoppingToken);
             if (expiredCount > 0)
             {
                 logger.LogWarning(
@@ -57,7 +57,7 @@ public sealed class TrackedMessageCleanupService(
             var trackedMessages = await messageTrackingDataService.GetTrackedMessagesForCleanupAsync(
                 now.AddHours(-_options.RetentionHours),
                 now.AddHours(-_options.MaximumDeletionAgeHours),
-                _options.BatchSize);
+                _options.BatchSize, stoppingToken);
             if (trackedMessages.Count == 0)
             {
                 return;

@@ -2,6 +2,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using TelegramBot.Core.Constants;
 using TelegramBot.Data.Models;
 
 namespace TelegramBot.Data;
@@ -12,69 +13,98 @@ public sealed class NotificationOutboxDataService(
     : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     public const string SessionCompletedEvent = "session_completed";
-
-    /// <summary>
-    /// Потолок попыток отправки outbox-уведомления. При превышении элемент переходит в статус
-    /// 'failed' (dead-letter) — защищает от вечного ретрая перманентно неотправляемого уведомления
-    /// (пользователь заблокировал бота, чат удалён). Эвристический потолок: типичная transient-ошибка
-    /// (429, сетевая) укладывается в десяток попыток с задержкой до 5 минут.
-    /// </summary>
-    public const int MaxSendAttempts = 50;
+    public const string SessionStartedEvent = "session_started";
 
     // namespace: telegram_bot_outbox_sender — mutual exclusion между репликами Server.
     // Не конфликтует с 1_234_567 (lease cleanup) и 1_234_568 (partition claim).
     private const int SenderAdvisoryLockId = 1_234_569;
 
-    public async Task<IReadOnlyList<NotificationOutboxItem>> ClaimPendingAsync(
-        string eventType,
-        int limit,
-        TimeSpan leaseDuration)
+    public async Task<NotificationOutboxItem?> ClaimPendingAsync(
+        SenderLockHolder lockHolder,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
     {
         // Одиночный CTE-стейтмент атомарен сам по себе — explicit-транзакция не нужна (в отличие от
         // Commands.ClaimAndReturn, где транзакция удерживает pg_try_advisory_xact_lock до commit).
-        await using var conn = await CreateOpenConnectionAsync();
-        var items = await conn.QueryAsync<NotificationOutboxItem>(
+        return await lockHolder.Connection.QuerySingleOrDefaultAsync<NotificationOutboxItem>(new CommandDefinition(
             SqlQueries.NotificationOutbox.ClaimPending,
             new
             {
-                EventType = eventType,
-                Limit = limit,
                 LeaseSeconds = (int)leaseDuration.TotalSeconds
-            });
-
-        return items.ToList().AsReadOnly();
+            }, cancellationToken: cancellationToken));
     }
 
-    public async Task MarkSentAsync(long outboxId)
+    public async Task MarkSentAsync(NotificationOutboxItem item, long chatId, int messageId,
+        DateTime sentAt, DateTime deleteAfter, CancellationToken cancellationToken)
     {
-        await using var conn = await CreateOpenConnectionAsync();
-        var affected = await conn.ExecuteAsync(
+        await using var conn = await CreateOpenConnectionAsync(cancellationToken);
+        await using var tx = await conn.BeginTransactionAsync(cancellationToken);
+        _ = await conn.ExecuteAsync(new CommandDefinition(SqlQueries.NotificationOutbox.TrackDeliveredMessage,
+            new
+            {
+                item.SessionId, ChatId = chatId, MessageId = messageId, SentAt = sentAt, DeleteAfter = deleteAfter,
+                Kind = item.EventType == SessionCompletedEvent ? TrackedMessageKinds.Completion : TrackedMessageKinds.JobStatus
+            }, tx, cancellationToken: cancellationToken));
+        if (item.EventType == SessionCompletedEvent)
+        {
+            _ = await conn.ExecuteAsync(new CommandDefinition(SqlQueries.NotificationOutbox.ExpireJobMessages,
+                new { item.SessionId, JobStatusKind = TrackedMessageKinds.JobStatus }, tx, cancellationToken: cancellationToken));
+        }
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
             SqlQueries.NotificationOutbox.MarkSent,
-            new { OutboxId = outboxId });
+            new { item.OutboxId }, tx, cancellationToken: cancellationToken));
 
         if (affected == 0)
         {
-            Logger.LogWarning("Outbox item was not marked sent: outboxId={OutboxId}", outboxId);
+            throw new InvalidOperationException($"Outbox item {item.OutboxId} cannot be acknowledged in its current state.");
         }
+        await tx.CommitAsync(cancellationToken);
     }
 
-    public async Task MarkFailedAsync(long outboxId, int attempts, Exception exception)
+    public async Task MarkFailedAsync(long outboxId, int retryDelaySeconds, bool permanent,
+        Exception exception, CancellationToken cancellationToken)
     {
-        var retryDelaySeconds = Math.Min(300, Math.Max(5, attempts * 10));
         var error = exception.Message.Length <= 2000
             ? exception.Message
             : exception.Message[..2000];
 
-        await using var conn = await CreateOpenConnectionAsync();
-        _ = await conn.ExecuteAsync(
+        await using var conn = await CreateOpenConnectionAsync(cancellationToken);
+        _ = await conn.ExecuteAsync(new CommandDefinition(
             SqlQueries.NotificationOutbox.MarkFailed,
             new
             {
                 OutboxId = outboxId,
                 RetryDelaySeconds = retryDelaySeconds,
                 LastError = error,
-                MaxAttempts = MaxSendAttempts
-            });
+                Permanent = permanent
+            }, cancellationToken: cancellationToken));
+    }
+
+    public async Task ReconcileAsync(SenderLockHolder lockHolder, CancellationToken cancellationToken)
+    {
+        var conn = lockHolder.Connection;
+        var sessions = await conn.QueryAsync<(int SessionId, string CorrelationId)>(new CommandDefinition(
+            SqlQueries.NotificationOutbox.GetMissingCompletions, cancellationToken: cancellationToken));
+        var recovered = 0;
+        foreach (var (sessionId, correlationId) in sessions)
+        {
+            await using var tx = await conn.BeginTransactionAsync(cancellationToken);
+            _ = await conn.ExecuteAsync(new CommandDefinition(SqlQueries.Commands.AcquireSessionCompletionLock,
+                new { SessionId = sessionId }, tx, cancellationToken: cancellationToken));
+            recovered += await conn.ExecuteScalarAsync<int>(new CommandDefinition(SqlQueries.Sessions.NotifyCompletionOnce,
+                new { SessionId = sessionId, CorrelationId = correlationId }, tx, cancellationToken: cancellationToken));
+            await tx.CommitAsync(cancellationToken);
+        }
+        if (recovered > 0)
+        {
+            Logger.LogInformation("Recovered missing completion notifications: count={Count}", recovered);
+        }
+    }
+
+    public async Task SuppressObsoleteAsync(SenderLockHolder lockHolder, CancellationToken cancellationToken)
+    {
+        _ = await lockHolder.Connection.ExecuteAsync(new CommandDefinition(
+            SqlQueries.NotificationOutbox.SuppressObsolete, cancellationToken: cancellationToken));
     }
 
     /// <summary>
@@ -83,15 +113,15 @@ public sealed class NotificationOutboxDataService(
     /// до dispose. При неудаче (другая реплика владеет) возвращает <c>null</c>.
     /// Используется <c>NotificationSenderService</c> для drain-цикла outbox.
     /// </summary>
-    public async Task<SenderLockHolder?> TryAcquireSenderLockAsync()
+    public async Task<SenderLockHolder?> TryAcquireSenderLockAsync(CancellationToken cancellationToken = default)
     {
         NpgsqlConnection? conn = null;
         try
         {
-            conn = await CreateOpenConnectionAsync();
-            var locked = await conn.QuerySingleAsync<bool>(
+            conn = await CreateOpenConnectionAsync(cancellationToken);
+            var locked = await conn.QuerySingleAsync<bool>(new CommandDefinition(
                 SqlQueries.NotificationOutbox.TryAcquireSenderLock,
-                new { LockId = SenderAdvisoryLockId });
+                new { LockId = SenderAdvisoryLockId }, cancellationToken: cancellationToken));
 
             if (!locked)
             {
@@ -128,6 +158,7 @@ public sealed class SenderLockHolder : IAsyncDisposable
     private readonly NpgsqlConnection _connection;
     private readonly int _lockId;
     private readonly ILogger _logger;
+    internal NpgsqlConnection Connection => _connection;
 
     internal SenderLockHolder(NpgsqlConnection connection, int lockId, ILogger logger)
     {

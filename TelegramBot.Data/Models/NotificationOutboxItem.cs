@@ -4,6 +4,8 @@ public sealed class NotificationOutboxItem
 {
     public long OutboxId { get; set; }
     public int SessionId { get; set; }
+    public required string EventType { get; set; }
+    public long UserId { get; set; }
 
     public required string CorrelationId { get; set; }
 

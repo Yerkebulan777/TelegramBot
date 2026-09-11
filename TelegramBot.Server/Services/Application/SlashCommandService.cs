@@ -203,7 +203,8 @@ public sealed partial class SlashCommandService(
 
             session.Selection.Reset(session.RootPath);
 
-            _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, queuedMessage), session);
+            _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, queuedMessage), session,
+                TrackedMessageKinds.JobStatus);
         }
         finally
         {
@@ -289,7 +290,8 @@ public sealed partial class SlashCommandService(
     {
         try
         {
-            _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(chatId, message), session);
+            _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(chatId, message), session,
+                TrackedMessageKinds.Temporary);
         }
         catch (ApiRequestException ex)
         {
@@ -437,7 +439,8 @@ public sealed partial class SlashCommandService(
 
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message, CancellationToken cancellationToken)
     {
-        var warning = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session);
+        var warning = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session,
+            TrackedMessageKinds.Temporary);
         await CleanupCurrentViewAsync(userId, session, cancellationToken, warning?.Id);
     }
 

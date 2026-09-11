@@ -17,7 +17,7 @@ Telegram update → Server → Sessions + Commands (1 транзакция)
 
 Ключевое: **инициализация не блокирует старт хоста**. Раньше вызывалась синхронно в `Program.Main` до `host.RunAsync()` — пока PostgreSQL (в Docker) не поднимался при загрузке машины, инициализация висела > 60 c и SCM убивал старт службы по таймауту (event 7009/7000). Теперь схема создаётся в `ExecuteAsync` с retry (2 → 5 → 15 c, бесконечно до успеха), а хост рапортует SCM «started» немедленно.
 
-Hosted-сервисы стартуют параллельно (fire-and-forget `ExecuteAsync`), поэтому каждый сам толерантен к временно недоступной БД: `CommandNotificationService` — reconnect-циклом, `NotificationSenderService` — изолированным стартовым drain + polling (outbox retry'ется), `TelegramBotHostedService` — пер-апдейтным catch. Стартовое окно без схемы не теряет данные: update'ы буферизуются каналом, outbox и LISTEN переподключаются.
+Hosted-сервисы стартуют параллельно. NotificationSenderService и TrackedMessageCleanupService перехватывают ошибки внутри своих циклов и повторяют работу после восстановления БД/схемы; TelegramBotHostedService обрабатывает ошибки отдельных updates. Уведомления хранятся в PostgreSQL; очередь входящих updates остаётся в памяти.
 
 ## 1. Создание задания
 
@@ -114,7 +114,7 @@ stdout/stderr: 64 KiB capture, 4 KiB в лог. Валидный ResultFile уд
 Финальный статус записывается с четырьмя попытками при временной ошибке БД: до 10 секунд
 на подключение и запрос каждой попытки, паузы 2, 4 и 8 секунд. В одной транзакции сначала берётся
 session advisory xact lock, затем записывается terminal-статус, проверяется число активных команд и,
-если это последняя команда, создаётся outbox-событие и `pg_notify`. Нетранзиентная ошибка не повторяется.
+если это последняя команда, создаётся outbox-событие. Нетранзиентная ошибка не повторяется.
 После исчерпания попыток выбрасывается `CommandPersistenceException`; она не классифицируется
 как ошибка Revit и не вызывает немедленный повтор экспорта. Результат сохраняется для диагностики,
 а запись БД остаётся для существующего lease recovery. Это ограниченные повторы, не durable outbox
@@ -129,27 +129,28 @@ Permanent (без retry): plugin `status=failed`/`cancelled`, `PermanentFailureE
 
 Transient: `delay = RetryDelayBaseSeconds × 2^RetryCount + jitter`. После `MaxRetries` → `Failed`.
 
-## 6. Завершение сессии
+## 6. Завершение сессии и доставка
 
-После terminal transition команды под session advisory xact lock проверяется `pending`/`processing` в сессии. Если нет — в той же транзакции: `CompletionNotified = TRUE`, INSERT в `NotificationOutbox`, `pg_notify('command_completed')`.
+Обычный terminal transition и аварийный `Failed` при исчерпании lease retry используют один session advisory xact lock (1234570, SessionId). Под ним записывается статус команды; когда активных команд больше нет и есть Done/Failed, в той же транзакции выставляется CompletionNotified и создаётся единственная запись `session_completed` в NotificationOutbox. Флаг означает постановку в очередь, а не подтверждение Telegram. Уникальный индекс и проверка отсутствия outbox защищают от повторного события, включая восстановление старых сессий с уже выставленным флагом.
 
-Server:
-- `CommandNotificationService` слушает `session_started` и `command_completed`
-- `NotificationSenderService` drain-ит outbox (при старте, по wake-up, каждые 30 с)
-- advisory lock на sender для Server replicas
-- completion notify: секции «Ошибки» (`Failed`) и «Предупреждения» (`Done` + non-empty `ErrorMessage`)
+Запись PID и первого `session_started` также атомарна. LISTEN/NOTIFY и Channel<NotificationItem> удалены. NotificationSenderService владеет одним ожидаемым polling-циклом (3 секунды). Ошибка прерывает только текущую итерацию; сбой БД при старте не завершает сервис.
+
+- На каждый drain берётся session-level sender advisory lock; claim выполняется на соединении, удерживающем lock. За цикл отправляется до 20 событий, claim по одному, lease 5 минут.
+- Раз в минуту под session completion locks восстанавливаются до 100 завершённых сессий без outbox. Перед claim удалённые сессии и устаревшие сообщения старта помечаются failed с причиной superseded.
+- Одна попытка Telegram с таймаутом 30 секунд. 429 учитывает retry_after и ожидает его под общей sender-блокировкой, приостанавливая уведомления всех реплик до освобождения блокировки; временные ошибки переносятся через NextAttemptAt (до 300 секунд, без потолка числа повторов); постоянные 400/403 переходят в failed.
+- Telegram вернул Message: tracking (ChatId, MessageId, SessionId, Kind, CreatedAt, DeleteAfter) и outbox sent сохраняются одной транзакцией. При временной ошибке подтверждения повторяется только запись в БД. При потере ответа Telegram или аварии до commit возможен дубль после восстановления — общей транзакции Telegram/PostgreSQL нет.
+- CompletionMessageFormatter формирует текст из готовой SessionCompletionSummary без I/O: секции ошибок Failed и предупреждений Done с непустым ErrorMessage. Sender отвечает за доставку; логи различают принятие Telegram и сохранённое подтверждение.
 
 ## 7. Cleanup и shutdown
 
-- **Lease recovery**: каждые `CleanupIntervalSeconds` — expired `processing` → `pending`
-- **Process health monitoring**: каждые `ProcessMonitorIntervalSeconds` — проверка `Process` внутри `CommandExecutionService` + `DialogDismisser`
-- **Session retention**: `SessionCleanupService` — soft-delete сессий старше `CompletedSessionRetentionDays`
-- **Telegram message cleanup**: Server `TrackedMessageCleanupService` каждые `MessageCleanup:IntervalMinutes` удаляет tracking-сообщения старше `RetentionHours`, но младше `MaximumDeletionAgeHours` (по умолчанию 24–47 ч). Неудалённые сообщения остаются для повторной попытки; после окна Telegram запись удаляется только из `TrackedMessages` с Warning.
-  - Решение rate-limit принимается до первого I/O в `CommandAppService`; входящие сообщения регистрируются после проверки, включая отклонённые. Ответы гейтов также отслеживаются; лимитер атомарно разрешает не более одного предупреждения пользователю за `WindowSeconds`. Soft-delete сессии сохраняет tracking для интерактивной/фоновой очистки.
-  - Интерактивная и фоновая очистка используют общий механизм: distinct ID, пакеты до 100, максимум две повторные попытки для 429/5xx/сетевых сбоев; 429 учитывает `RetryAfter`, остальные — exponential backoff. Одиночный fallback применяется только к ошибкам конкретных сообщений (400), а не к лимитам и недоступности чата.
-  - Tracking удаляется после каждого пакета только для подтверждённых удалений (включая уже отсутствующие сообщения). Частичный успех сохраняется даже при ошибке/отмене fallback. Сбой одного чата не прерывает обработку остальных; исключения `exceptMessageIds` действуют и для последнего входящего сообщения.
-  - Обработка пакета возвращает подтверждённые ID и признак отложенной работы; сохранение tracking выполняется отдельно. Фоновый цикл логирует число выбранных и подтверждённо удалённых сообщений. `LastUserMessageId` очищается только после подтверждённого удаления, а не при `UserSession.Reset`. Токен отмены передаётся из обработчиков во все вызовы очистки, Telegram-запросы и задержки retry; при отмене сначала сохраняется частичный результат пакета.
-- **Worker shutdown**: остановка циклов → process-tree kill (30s budget) → освобождение ресурсов
+- **Lease recovery**: каждые CleanupIntervalSeconds — expired processing → pending либо Failed с атомарным итоговым событием при исчерпании retry.
+- **Process health monitoring**: каждые ProcessMonitorIntervalSeconds — проверка Process внутри CommandExecutionService + DialogDismisser.
+- **Session retention**: soft-delete завершённых сессий старше CompletedSessionRetentionDays откладывается, пока есть pending/processing итоговое уведомление.
+- **Telegram cleanup**: Kind различает interface, temporary, completion и job_status. Интерактивные действия сохраняют DeleteAfter=NOW для устаревшего интерфейса, защищая completion и exceptMessageIds. Входящие сообщения используют дату Telegram. Временные предупреждения и старт хранятся TemporaryRetentionMinutes (5 минут), результаты — RetentionHours (24 часа).
+- **Повтор удаления**: отдельный цикл каждые IntervalMinutes (1 минута) выбирает до BatchSize (500) due-записей с учётом NextDeleteAttemptAt. Неудачные ID откладываются минимум на минуту, 429 — с учётом retry_after; порядок по фактическому сроку попытки не позволяет постоянно сбойным сообщениям вытеснять остальные. Telegram получает пакеты до 100; одиночный fallback только при ошибке конкретного сообщения.
+- **Учёт**: уникальный (ChatId, MessageIdPg), идемпотентный insert; дата сообщения и срок удаления передаются явно из слоя приложения. Ошибки БД после ограниченного retry пробрасываются. Подтверждённые/уже отсутствующие ID удаляются из tracking, а остальные откладываются одним атомарным SQL-запросом. Частичный прогресс записывается с отдельным бюджетом 5 секунд до передачи отмены вызывающему коду. Просроченные за MaximumDeletionAgeHours (47 часов) записи удаляются только из БД с Warning.
+- **Миграция**: добавление полей идемпотентно; дубликаты tracking объединяются по ID. Старые записи без достоверного Kind консервативно защищаются до RetentionHours; новые получают фактический тип.
+- **Worker shutdown**: остановка циклов → process-tree kill (30s budget) → освобождение ресурсов. Cancellation передаётся в Telegram и операции очереди/очистки.
 
 ## 8. Повторный запуск из /status
 
@@ -166,15 +167,9 @@ Server читает принадлежащий пользователю заве
 
 `pending` → `processing` → `Done` / `Failed`. `Deleted` — скрыта пользователем/retention. `Cancelled` мигрирован в `Deleted`.
 
-## PostgreSQL channels и locks
+## PostgreSQL locks
 
-| Канал | Назначение |
-|---|---|
-| `session_started` | уведомление «задание запущено» |
-| `command_completed` | разбудить outbox sender |
-
-Session/advisory locks используются для lease cleanup, outbox sender, partition claim, duplicate
-check и глобального Revit launch gate. Worker scheduling при этом остаётся обычным polling PostgreSQL.
+Session/advisory locks используются для lease cleanup, outbox sender, terminal completion, partition claim, duplicate check и глобального Revit launch gate. Worker и sender используют polling PostgreSQL; уведомительные каналы не требуются.
 
 ## Добавление команды
 

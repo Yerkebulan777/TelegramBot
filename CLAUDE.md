@@ -16,6 +16,8 @@ dotnet build TelegramBot.slnx
 - Windows-only; PostgreSQL 18, Dapper/Npgsql
 - Soft-delete (`Status='Deleted'`), кроме `TrackedMessages` (physical DELETE)
 - DI services — singleton; callback handlers регистрируются через `CallbackHandlerBase`
+- Server notifications: один polling sender для durable outbox старта/завершения; отдельный cleanup по DeleteAfter/NextDeleteAttemptAt. Completion защищён от интерактивной очистки. Подтверждение доставки и tracking записываются атомарно; детали — Docs/ExecutionAlgorithm.md.
+- CompletionMessageFormatter формирует итог без I/O; SaveDeletionProgressAsync атомарно сохраняет успешные удаления и отложенные попытки. Общая фабрика соединений — DataAccessBase.CreateOpenConnectionAsync.
 - `RootPathSetup` — Windows Forms утилита, создающая 30-минутную заявку в БД; активный корень меняет только подтверждение администратора в Telegram
 - `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
 - Worker: один polling-цикл (1s) + tracked tasks + SQL partition scheduling; retry по NextRetryAt. Только запуск Revit проходит через глобальный PostgreSQL gate с интервалом не менее 15s. Ошибка записи результата — CommandPersistenceException, без немедленного перезапуска BIM.
