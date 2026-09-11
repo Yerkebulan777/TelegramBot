@@ -20,7 +20,7 @@
 |---|---|
 | `TelegramBot.Core/` | константы, модели, options, traits |
 | `TelegramBot.Data/` | Dapper/Npgsql, SQL |
-| `TelegramBot.Server/` | Telegram UI, callbacks, outbox, cleanup |
+| `TelegramBot.Server/` | Telegram UI, callbacks, outbox, cleanup, иконка статуса в трее |
 | `TelegramBot.Worker/` | очередь, процессы, BimLib |
 | `TelegramBot.RootPathSetup/` | WinForms: заявка на смену UNC (30 мин) |
 | `Installer/PostgresConnectionCheck/` | `check` / `ensure` PostgreSQL 18 в Docker |
@@ -38,7 +38,7 @@ dotnet format TelegramBot.slnx
 
 ## Архитектура
 
-- 5 проектов net10.0, Windows-only. DI services — singleton; hosted — владеет host.
+- 5 проектов net10.0, Windows-only (Server и RootPathSetup — `net10.0-windows`). DI services — singleton; hosted — владеет host.
 - BimLib встроен в Worker.
 
 ### Server
@@ -57,7 +57,7 @@ Handlers: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`
 | Export | `PDF`, `DWG`, `NWC`, `DATA`, `IFC` |
 | Automation | `CLASHREP` (FileConvert; planned Navisworks AddIn), `RESAVE`, `MERGEDWG` (AutoCAD + AutoBIMFusion) |
 
-`FileSystemBrowser`: RootPath → `01_PROJECT` → `01_RVT` (`.rvt` > 50 MiB). Hosted: `DatabaseInitializerService` (фон, не блокирует старт), `TelegramBotHostedService`, `NotificationSenderService` (outbox 3 с), `TrackedMessageCleanupService`.
+`FileSystemBrowser`: RootPath → `01_PROJECT` → `01_RVT` (`.rvt` > 50 MiB). Hosted: `ServerTrayHostedService` (иконка в трее), `ServerHealthCheckService` (БД+Telegram, 15 с), `DatabaseInitializerService` (фон, не блокирует старт), `TelegramBotHostedService`, `NotificationSenderService` (outbox 3 с), `TrackedMessageCleanupService`.
 
 ### Worker
 

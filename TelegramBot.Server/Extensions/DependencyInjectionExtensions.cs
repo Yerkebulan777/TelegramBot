@@ -6,6 +6,7 @@ using TelegramBot.Data;
 using TelegramBot.Server.Services.Application;
 using TelegramBot.Server.Services.Application.Handlers;
 using TelegramBot.Server.Services.Infrastructure.FileSystem;
+using TelegramBot.Server.Services.Infrastructure.Status;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Extensions;
@@ -76,6 +77,10 @@ public static class DependencyInjectionExtensions
 
         _ = services.AddSingleton<TelegramOutputService>();
         _ = services.AddSingleton<KeyboardBuilder>();
+        _ = services.AddSingleton<ServerHealthMonitor>();
+        _ = services.AddSingleton<ServerHealthCheckService>();
+        _ = services.AddHostedService<ServerTrayHostedService>();
+        _ = services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<ServerHealthCheckService>());
         _ = services.AddHostedService<DatabaseInitializerService>();
         _ = services.AddHostedService<TelegramBotHostedService>();
         _ = services.AddHostedService<NotificationSenderService>();

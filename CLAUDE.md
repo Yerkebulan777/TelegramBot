@@ -12,7 +12,7 @@ dotnet build TelegramBot.slnx
 
 ## Invariants
 
-- 5 проектов net10.0: Core ← Data; Server/Worker/RootPathSetup → Core+Data
+- 5 проектов net10.0: Core ← Data; Server/Worker/RootPathSetup → Core+Data. Server и RootPathSetup — `net10.0-windows`.
 - Windows-only; PostgreSQL 18; Dapper/Npgsql; soft-delete (`Deleted`), кроме `TrackedMessages`
 - DI — singleton; handlers через `CallbackHandlerBase` (6 шт., включая `RootPath`)
 - Outbox уведомлений — polling 3 с; cleanup по `DeleteAfter`/`NextDeleteAttemptAt`; completion защищён; ack+tracking атомарно

@@ -66,3 +66,9 @@ Server — long-polling Telegram, не HTTP API → `Host.CreateDefaultBuilder`.
 Windows Service логинится отдельным network logon к DC (без cached credentials). На доменном ПК с повреждённым secure channel интерактивный вход ещё работает, а SCM пишет 7038 и оставляет службу Stopped после reboot. То же при GPO, который затирает `SeServiceLogonRight`, и при смене пароля учётки после Setup.
 
 Решение: Server регистрируется так же, как Worker — logon-trigger, `InteractiveToken`, рабочий каталог рядом с exe. Пароль в SCM не хранится. Нужна залогиненная учётка (автологон на выделенном ПК). Leftover-службу старых Setup удаляет.
+
+## ADR-013: Индикатор состояния Server в трее
+
+**Статус:** действует (2026-09-11)
+
+Server работает в интерактивной сессии (ADR-012), без окна. Чтобы было видно, что процесс жив и доступны PostgreSQL и Telegram, `TelegramBot.Server` — `WinExe` с `NotifyIcon`. Цвет: серый / зелёный / жёлтый / красный. Проверки — `SELECT 1` и `getMe` каждые 15 с. Меню: статус, повторная проверка, папка логов. Без пункта «Выход» — задачу останавливает планировщик.

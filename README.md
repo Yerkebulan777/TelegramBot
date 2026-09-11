@@ -9,7 +9,7 @@ Windows .NET 10: Telegram-бот ставит задания в PostgreSQL, Work
 | **Server** | Task Scheduler (`onlogon`, интерактивная сессия) |
 | **Worker** | Task Scheduler (`onlogon`, интерактивная сессия); нужна залогиненная учётка (Revit — видимый desktop) |
 
-Оба стартуют после входа (на выделенном ПК — автологон). Почему не Windows Service — [ADR-012](Docs/ADR.md).
+Оба стартуют после входа (на выделенном ПК — автологон). Почему не Windows Service — [ADR-012](Docs/ADR.md). Server после старта показывает иконку в трее: серая — ещё проверяет, зелёная — БД и Telegram доступны, жёлтая — одно из двух недоступно, красная — оба недоступны. Подсказка при наведении и меню по правой кнопке.
 
 Детали pipeline: [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md). Правила для агентов: [AGENTS.md](AGENTS.md).
 
@@ -93,6 +93,7 @@ Get-Process TelegramBot.Server -ErrorAction SilentlyContinue
 | Задача есть, процесса нет, никто не залогинен | Logon-trigger ждёт интерактивный вход | Включить автологон под учёткой задачи |
 | Старая служба `TelegramBotServer` в SCM, события **7038** | leftover Windows Service с прошлых Setup; вход службы не умеет cached credentials и падает, если повреждён secure channel (`Test-ComputerSecureChannel` = False) | Удалить службу (`sc.exe delete TelegramBotServer`) и поставить актуальный Setup — задача планировщика этот вход не использует |
 | Процесс стартовал и сразу вышел | нет `appsettings.Local.json` / токена / Postgres | Логи `%USERPROFILE%\Documents\TelegramBot\Logs\Server`; Docker Desktop и контейнер `postgres_telegram` |
+| Иконки в трее нет | процесс не запущен или сессия не интерактивная | `Get-Process TelegramBot.Server`; задача должна быть `InteractiveToken`. Жёлтая/красная иконка — БД или Telegram недоступны; меню → «Открыть логи» |
 
 ## Поведение (кратко)
 

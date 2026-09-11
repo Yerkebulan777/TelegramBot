@@ -47,18 +47,11 @@ public class TelegramBotHostedService(
     /// при shutdown и буферизованные обновления (до 200) были бы потеряны.
     /// </summary>
     private CancellationTokenSource? _processingCts;
+    private static readonly TimeSpan[] CommandSetupRetryBackoff =
+        [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15)];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Независимый CTS: см. комментарий к полю _processingCts
-        _processingCts = new CancellationTokenSource();
-        var processingToken = _processingCts.Token;
-
-        var processingTask = ProcessUpdatesAsync(processingToken);
-
-        logger.LogInformation("Polling start: concurrency={MaxConcurrency}, capacity={Capacity}",
-            MaxConcurrentUpdates, ChannelCapacity);
-
         BotCommand[] commands =
         [
             new() { Command = "export", Description = "Export to different formats" },
@@ -68,16 +61,18 @@ public class TelegramBotHostedService(
         ];
 
         logger.LogInformation("Configuring bot commands: count={Count}", commands.Length);
-        try
+        if (!await TryConfigureBotCommandsAsync(commands, stoppingToken))
         {
-            await botClient.SetMyCommands(commands, cancellationToken: stoppingToken);
-            logger.LogInformation("Bot commands configured");
+            return;
         }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Configure bot commands fail");
-            throw;
-        }
+
+        // Независимый CTS: см. комментарий к полю _processingCts
+        _processingCts = new CancellationTokenSource();
+        var processingToken = _processingCts.Token;
+        var processingTask = ProcessUpdatesAsync(processingToken);
+
+        logger.LogInformation("Polling start: concurrency={MaxConcurrency}, capacity={Capacity}",
+            MaxConcurrentUpdates, ChannelCapacity);
 
         var receiverOptions = new ReceiverOptions
         {
@@ -121,6 +116,56 @@ public class TelegramBotHostedService(
         _processingCts.Dispose();
 
         logger.LogInformation("Polling stopped");
+    }
+
+    /// <summary>
+    /// Регистрирует меню бота. Пока Telegram недоступен — retry, чтобы хост
+    /// (и иконка в трее) остались живы, а не упали вместе с polling.
+    /// </summary>
+    private async Task<bool> TryConfigureBotCommandsAsync(BotCommand[] commands, CancellationToken stoppingToken)
+    {
+        var attempt = 0;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await botClient.SetMyCommands(commands, cancellationToken: stoppingToken);
+                logger.LogInformation("Bot commands configured");
+                return true;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                attempt++;
+                var delayIndex = Math.Min(attempt, CommandSetupRetryBackoff.Length) - 1;
+                var delay = CommandSetupRetryBackoff[delayIndex];
+                if (attempt == 1)
+                {
+                    logger.LogWarning(ex,
+                        "Configure bot commands attempt {Attempt} failed, retrying in {Delay}s",
+                        attempt, delay.TotalSeconds);
+                }
+                else if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(ex,
+                        "Configure bot commands attempt {Attempt} failed, retrying in {Delay}s",
+                        attempt, delay.TotalSeconds);
+                }
+                try
+                {
+                    await Task.Delay(delay, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

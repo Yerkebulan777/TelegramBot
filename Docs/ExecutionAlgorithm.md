@@ -12,6 +12,8 @@ Telegram → Session + Commands (1 tx)
 
 `DatabaseInitializerService` создаёт схему в фоне с retry (не блокирует старт процесса). Кластер/БД на установке — `PostgresConnectionCheck ensure` + Docker Desktop. Hosted-сервисы стартуют параллельно; outbox и cleanup переживают временную недоступность БД.
 
+Иконка в трее (`ServerTrayHostedService`): процесс жив. Раз в 15 с `ServerHealthCheckService` проверяет PostgreSQL (`SELECT 1`) и Telegram (`getMe`). Серый — ещё проверка, зелёный — оба ок, жёлтый — одно недоступно, красный — оба. `SetMyCommands` при старте тоже retry, чтобы недоступный Telegram не ронял хост.
+
 ## 1. Создание задания
 
 `SlashCommandService`: сканирование `01_RVT`, лимиты, дедуп. В одной транзакции — `Sessions` + Cartesian product команд×файлов.
