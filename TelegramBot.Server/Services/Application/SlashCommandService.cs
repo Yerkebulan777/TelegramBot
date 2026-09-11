@@ -474,14 +474,7 @@ public sealed partial class SlashCommandService(
 
     private static int GetCommandPriority(string command)
     {
-        return command.ToUpperInvariant() switch
-        {
-            CommandCodes.Pdf or CommandCodes.Dwg => CommandPriorities.Critical,
-            CommandCodes.Nwc => CommandPriorities.High,
-            CommandCodes.Ifc or CommandCodes.Resave => CommandPriorities.Medium,
-            CommandCodes.Data => CommandPriorities.Low,
-            _ => CommandPriorities.Default
-        };
+        return CommandTraits.GetPriority(command);
     }
 
     /// <summary>Название команды по коду из каталога; неизвестный код отображается как есть.</summary>

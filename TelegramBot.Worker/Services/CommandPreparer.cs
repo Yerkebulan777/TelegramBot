@@ -1,14 +1,10 @@
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text;
-using System.Xml;
-using System.Xml.Serialization;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
-using TelegramBot.Data;
 using TelegramBot.BimLib.Services;
-using TelegramBot.Worker.Schemas;
 namespace TelegramBot.Worker.Services;
 
 /// <summary>
@@ -18,74 +14,36 @@ namespace TelegramBot.Worker.Services;
 public sealed class CommandPreparer(
     IOptions<WorkerOptions> workerOptions,
     IOptions<FileSystemOptions> fileSystemOptions,
-    CommandDataService commandDataService,
+    CommandTaskFileStore taskFileStore,
     RevitVersionDetector versionDetector,
     NavisworksPathResolver navisworksPathResolver,
     ILogger<CommandPreparer> logger)
 {
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
     private readonly FileSystemOptions _fileSystemOptions = fileSystemOptions.Value;
-    private readonly string _taskDirectory = fileSystemOptions.Value.GetEffectiveTaskDirectory();
-    private static readonly XmlSerializer TaskFileSerializer = new(typeof(TaskFile));
-    private static readonly XmlSerializerNamespaces EmptyXmlNamespaces = new([XmlQualifiedName.Empty]);
     private const string RevitRussianLanguageArguments = "/language RUS";
     private const string RevitVersionDetectionError =
         "Не удалось определить версию Revit для файла. Проверьте целостность файла или обратитесь к администратору.";
 
     /// <summary>
-    /// Возвращает пути к task-файлу и result-файлу для указанной команды.
-    /// Используется как CommandPreparer'ом при записи task-файла и ProcessRunner'ом при чтении result-файла,
-    /// чтобы оба компонента использовали одну и ту же директорию (настраиваемую через <c>FileSystem:TaskDirectory</c>).
-    /// Схема имени — <c>task_{projectName}_{commandId}.xml</c> — 1:1 с эталоном RevitBIMFusion
-    /// (BimPluginContract.md §TaskFile / §TaskDirectory); AddIn имя файла не парсит, читает путь из environment variable,
-    /// так что схема — чисто диагностическая, retry одной команды перезаписывает файл предыдущей попытки.
-    /// </summary>
-    public (string resultFilePath, string taskFilePath) GetTaskFilePaths(int commandId, string filePath)
-    {
-        var projectName = GetProjectName(filePath);
-        var resultFilePath = Path.Combine(_taskDirectory, $"result_{projectName}_{commandId}.xml");
-        var taskFilePath = Path.Combine(_taskDirectory, $"task_{projectName}_{commandId}.xml");
-        return (resultFilePath, taskFilePath);
-    }
-
-    private static string GetProjectName(string filePath)
-    {
-        var name = Path.GetFileNameWithoutExtension(filePath);
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "unknown";
-        }
-
-        foreach (var invalidChar in Path.GetInvalidFileNameChars())
-        {
-            name = name.Replace(invalidChar, '_');
-        }
-
-        return name;
-    }
-
-    /// <summary>
     /// Проверяет команду: тип, файл, BIM-исполняемый файл.
-    /// Если подготовка не удалась — записывает Failed в БД и возвращает null.
+    /// Если подготовка не удалась — возвращает причину. Запись терминального статуса остаётся
+    /// обязанностью ProcessRunner, чтобы она была атомарна с session-completed уведомлением.
     /// </summary>
-    public async Task<CommandConfig?> PrepareAsync(PendingCommand cmd, CancellationToken ct)
+    public Task<CommandPreparationResult> PrepareAsync(PendingCommand cmd, CancellationToken ct)
     {
         if (!_workerOptions.Commands.TryGetValue(cmd.CommandText, out var commandCfg))
         {
             logger.LogWarning("Cmd fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, reason=unknown",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
-                errorMessage: $"Unknown command type: {cmd.CommandText}");
-            return null;
+            return Task.FromResult(CommandPreparationResult.Failed($"Unknown command type: {cmd.CommandText}"));
         }
 
         if (!ValidateFilePath(cmd, commandCfg))
         {
             logger.LogWarning("Cmd fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, reason=invalid_file",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
-                errorMessage: $"File validation failed for path: {cmd.FilePath}");
-            return null;
+            return Task.FromResult(CommandPreparationResult.Failed($"File validation failed for path: {cmd.FilePath}"));
         }
 
         var (resolvedPath, resolutionError) = ResolveExecutablePath(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
@@ -93,9 +51,8 @@ public sealed class CommandPreparer(
         {
             logger.LogWarning("Cmd fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, reason=exe_not_found, err={Error}",
                 cmd.CommandId, cmd.CorrelationId, cmd.CommandText, resolutionError);
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
-                errorMessage: resolutionError);
-            return null;
+            return Task.FromResult(CommandPreparationResult.Failed(
+                resolutionError ?? "Executable path could not be resolved."));
         }
 
         // Создаём копию CommandConfig — НЕ мутируем shared-объект из IOptions!
@@ -110,7 +67,7 @@ public sealed class CommandPreparer(
                 : null,
             WorkingDirectory = commandCfg.WorkingDirectory,
         };
-        return resultCfg;
+        return Task.FromResult(CommandPreparationResult.Ready(resultCfg));
     }
 
     /// <summary>Валидация FilePath: существование файла, расширение, path traversal.</summary>
@@ -193,7 +150,7 @@ public sealed class CommandPreparer(
     private (string? resolvedPath, string? errorMessage) ResolveExecutablePath(
         PendingCommand cmd, string configuredPath, string commandText, CancellationToken ct)
     {
-        if (IsRevitCommand(commandText))
+        if (CommandTraits.RequiresRevit(commandText))
         {
             return ResolveRevitPath(cmd, commandText, ct);
         }
@@ -268,9 +225,9 @@ public sealed class CommandPreparer(
     /// <summary>Создаёт ProcessStartInfo из конфигурации команды.</summary>
     public ProcessStartInfo CreateProcessStartInfo(PendingCommand cmd, CommandConfig cfg)
     {
-        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        var (resultFilePath, taskFilePath) = taskFileStore.GetPaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
 
-        var isRevitCommand = IsRevitCommand(cmd.CommandText);
+        var isRevitCommand = CommandTraits.RequiresRevit(cmd.CommandText);
         var args = isRevitCommand
             ? RevitRussianLanguageArguments
             : cfg.ArgumentsTemplate
@@ -310,149 +267,4 @@ public sealed class CommandPreparer(
         return startInfo;
     }
 
-    public static bool IsRevitCommand(string commandText)
-    {
-        return commandText is CommandCodes.Pdf
-            or CommandCodes.Dwg
-            or CommandCodes.Nwc
-            or CommandCodes.Data
-            or CommandCodes.Ifc
-            or CommandCodes.Resave;
-    }
-
-    /// <summary>
-    /// Создаёт файл задания <c>task_{projectName}_{commandId}.xml</c> для BIM-плагина
-    /// (<c>RevitBIMFusion/Docs/BimPluginContract.md</c> §TaskFile). Плагин читает
-    /// <c>commandText</c>, <c>filePath</c>, <c>resultFilePath</c>. Revit AddIn получает
-    /// путь к TaskFile через process-scoped <c>REVITBIMFUSION_TASK_FILE</c>; <c>filePath</c>
-    /// намеренно НЕ передаётся в CLI — плагин открывает .rvt сам (Audit / detach).
-    /// Revit стартует без контрактных CLI-аргументов (допускается <c>/language RUS</c>).
-    /// Если запись task-файла провалилась — AddIn не сможет корректно выполнить команду.
-    /// </summary>
-    /// <returns>
-    /// <c>true</c> если task-файл успешно записан, <c>false</c> если запись не удалась (директория
-    /// не создана, .tmp не записан, или rename не прошёл). В последнем случае вызывающая сторона
-    /// может решить — стартовать процесс всё равно или прервать выполнение.
-    /// </returns>
-    public bool CreateTaskFile(PendingCommand cmd)
-    {
-        var (resultFilePath, taskFilePath) = GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
-
-        try
-        {
-            // Гарантируем, что директория существует.
-            _=Directory.CreateDirectory(_taskDirectory);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
-        {
-            logger.LogError(ex,
-                "Create task dir fail: dir='{Dir}', id={Id}, corr={CorrelationId}, cmd={Cmd}",
-                _taskDirectory, cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
-            return false;
-        }
-
-        // Контракт: пути в TaskFile всегда абсолютные (BimPluginContract.md §TaskDirectory).
-        var absoluteFilePath = string.IsNullOrWhiteSpace(cmd.FilePath)
-            ? string.Empty
-            : Path.GetFullPath(cmd.FilePath);
-        var absoluteResultFilePath = Path.GetFullPath(resultFilePath);
-
-        var task = new TaskFile
-        {
-            CommandId = cmd.CommandId,
-            CommandText = cmd.CommandText,
-            FilePath = absoluteFilePath,
-            ResultFilePath = absoluteResultFilePath,
-            Options = new TaskFileOptions(),
-        };
-
-        try
-        {
-            // Atomic write: пишем во временный файл, затем переименовываем
-            var tmpPath = taskFilePath + ".tmp";
-            var settings = new XmlWriterSettings
-            {
-                Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                Indent = true,
-            };
-
-            using (var writer = XmlWriter.Create(tmpPath, settings))
-            {
-                TaskFileSerializer.Serialize(writer, task, EmptyXmlNamespaces);
-            }
-
-            // Runtime-валидация по XSD перед atomic Move: ловит drift между C#-моделью TaskFile
-            // и XML-контрактом (…\RevitBIMFusion\Docs\TaskFile.schema.xsd) до того, как файл
-            // попадёт к плагину. При ошибке — abort (команда упадёт на старте, а не в плагине).
-            List<string>? validationErrors = null;
-            using (var reader = XmlReader.Create(tmpPath))
-            {
-                validationErrors = TaskFileValidator.Validate(reader);
-            }
-
-            if (validationErrors.Count > 0)
-            {
-                try { File.Delete(tmpPath); }
-                catch (Exception delEx) when (delEx is IOException or UnauthorizedAccessException)
-                {
-                    logger.LogWarning(delEx, "Delete invalid tmp fail: '{TmpPath}'", tmpPath);
-                }
-
-                logger.LogError(
-                    "Task XSD validation fail: id={Id}, corr={CorrelationId}, cmd={Cmd}, err={Errors}",
-                    cmd.CommandId, cmd.CorrelationId, cmd.CommandText, string.Join("; ", validationErrors));
-                return false;
-            }
-
-            File.Move(tmpPath, taskFilePath, overwrite: true);
-
-            logger.LogDebug(
-                "Task file: cmdId={CommandId}, task={TaskFilePath}, result={ResultFilePath}",
-                cmd.CommandId, taskFilePath, resultFilePath);
-
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
-        {
-            // Запись task-файла не удалась. AddIn не получит filePath (контракт запрещает
-            // передачу .rvt-пути в CLI args), поэтому команда почти наверняка упадёт. Логируем громко
-            // с correlationId, чтобы в случае end-to-end проблем можно было быстро найти эту запись.
-            logger.LogError(ex,
-                "Create task file fail: '{TaskFilePath}', id={Id}, corr={CorrelationId}, cmd={Cmd}",
-                taskFilePath, cmd.CommandId, cmd.CorrelationId, cmd.CommandText);
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Очищает временные файлы task и result для указанной команды.
-    /// </summary>
-    public void CleanupTempFiles(int commandId, string filePath)
-    {
-        try
-        {
-            var (resultFilePath, taskFilePath) = GetTaskFilePaths(commandId, filePath);
-            var deletedCount = 0;
-
-            if (File.Exists(taskFilePath))
-            {
-                File.Delete(taskFilePath);
-                deletedCount++;
-            }
-
-            if (File.Exists(resultFilePath))
-            {
-                File.Delete(resultFilePath);
-                deletedCount++;
-            }
-
-            logger.LogDebug("Temp cleanup: cmdId={CommandId}, deleted={DeletedCount}",
-                commandId, deletedCount);
-        }
-        catch (Exception ex)
-        {
-            // Best effort — не должны падать из-за ошибки очистки
-            logger.LogDebug(ex, "Temp cleanup fail: cmdId={CommandId}", commandId);
-        }
-    }
 }

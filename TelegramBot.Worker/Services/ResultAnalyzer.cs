@@ -11,7 +11,7 @@ namespace TelegramBot.Worker.Services;
 /// <summary>
 /// Анализирует результат выполнения команды: ResultFile от плагина или exit code.
 /// </summary>
-public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<ResultAnalyzer> logger)
+public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<ResultAnalyzer> logger)
 {
     private static readonly XmlSerializer ResultFileSerializer = new(typeof(ResultFile));
     private const int ResultFileReadRetryCount = 50;
@@ -25,7 +25,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         string filePath,
         CancellationToken ct)
     {
-        var (path, _) = commandPreparer.GetTaskFilePaths(commandId, filePath);
+        var (path, _) = taskFileStore.GetPaths(commandId, filePath);
 
         if (!File.Exists(path))
         {
@@ -109,7 +109,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
         }
 
         // Fallback по exit code
-        if (process.ExitCode == 0 && !CommandPreparer.IsRevitCommand(cmd.CommandText))
+        if (process.ExitCode == 0 && !CommandTraits.RequiresRevit(cmd.CommandText))
         {
             logger.LogWarning(
                 "Exit=0 no result file: id={Id}, corr={CorrelationId}, cmd={Cmd}, ms={ElapsedMs}",
@@ -199,7 +199,7 @@ public sealed class ResultAnalyzer(CommandPreparer commandPreparer, ILogger<Resu
 
     private static bool IsRetryableRevitOpenFailure(PendingCommand cmd, string? errorDetails)
     {
-        return CommandPreparer.IsRevitCommand(cmd.CommandText)
+        return CommandTraits.RequiresRevit(cmd.CommandText)
             && errorDetails?.Contains("Autodesk.Revit.Exceptions.InternalException", StringComparison.OrdinalIgnoreCase) == true
             && errorDetails.Contains("UIApplication.OpenAndActivateDocument", StringComparison.OrdinalIgnoreCase);
     }

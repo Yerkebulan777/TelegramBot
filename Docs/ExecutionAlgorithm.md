@@ -86,7 +86,7 @@ Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim ато
 - создаёт TaskFile (`task_{project}_{commandId}.xml`) с XSD-валидацией
 - заполняет `ProcessStartInfo` (Revit: без контрактных CLI-аргументов, `/language RUS`, TaskFile path в `REVITBIMFUSION_TASK_FILE`)
 - только для Revit передаёт запуск в `RevitLaunchGate`: session advisory lock PostgreSQL сериализует все Worker, а singleton-строка `RevitLaunchState` хранит время последнего запуска
-- под advisory lock ожидает остаток глобального интервала и вызывает `Process.Start()`; между запусками Revit проходит не менее 15 секунд, транзакция на время ожидания не удерживается
+- под advisory lock ожидает остаток глобального интервала и вызывает `Process.Start()`; для lock acquisition отключён стандартный 30-секундный command timeout Npgsql, но ожидание отменяется общим token команды. Между запусками Revit проходит не менее 15 секунд, транзакция на время ожидания не удерживается
 - не-Revit процессы запускаются сразу и глобальную паузу не используют
 
 Команда уже имеет статус `processing`, пока готовится и ожидает Revit launch gate.
@@ -112,7 +112,9 @@ stdout/stderr: 64 KiB capture, 4 KiB в лог. Валидный ResultFile уд
 ### Ошибка сохранения результата
 
 Финальный статус записывается с четырьмя попытками при временной ошибке БД: до 10 секунд
-на подключение и запрос каждой попытки, паузы 2, 4 и 8 секунд. Нетранзиентная ошибка не повторяется.
+на подключение и запрос каждой попытки, паузы 2, 4 и 8 секунд. В одной транзакции сначала берётся
+session advisory xact lock, затем записывается terminal-статус, проверяется число активных команд и,
+если это последняя команда, создаётся outbox-событие и `pg_notify`. Нетранзиентная ошибка не повторяется.
 После исчерпания попыток выбрасывается `CommandPersistenceException`; она не классифицируется
 как ошибка Revit и не вызывает немедленный повтор экспорта. Результат сохраняется для диагностики,
 а запись БД остаётся для существующего lease recovery. Это ограниченные повторы, не durable outbox
@@ -129,7 +131,7 @@ Transient: `delay = RetryDelayBaseSeconds × 2^RetryCount + jitter`. После 
 
 ## 6. Завершение сессии
 
-После terminal transition команды — проверка `pending`/`processing` в сессии. Если нет — один SQL: `CompletionNotified = TRUE`, INSERT в `NotificationOutbox`, `pg_notify('command_completed')`.
+После terminal transition команды под session advisory xact lock проверяется `pending`/`processing` в сессии. Если нет — в той же транзакции: `CompletionNotified = TRUE`, INSERT в `NotificationOutbox`, `pg_notify('command_completed')`.
 
 Server:
 - `CommandNotificationService` слушает `session_started` и `command_completed`
@@ -179,7 +181,7 @@ check и глобального Revit launch gate. Worker scheduling при эт
 1. `CommandCodes` + `CallbackPrefixes` + `CommandCatalog`
 2. priority map в `SlashCommandService`
 3. `Worker:Commands` config
-4. `IsRevitCommand` если Revit AddIn
+4. `CommandTraits.RequiresRevit` если Revit AddIn
 5. canonical BIM contract/XSD/plugin если меняется boundary
 6. README, AGENTS и этот документ
 

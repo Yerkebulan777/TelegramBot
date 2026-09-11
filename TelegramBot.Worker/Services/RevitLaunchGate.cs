@@ -24,7 +24,7 @@ public sealed class RevitLaunchGate(
         try
         {
             await connection.OpenAsync(ct);
-            await ExecuteAsync(connection, "SELECT pg_advisory_lock($1);", ct);
+            await AcquireLockAsync(connection, ct);
             lockAcquired = true;
 
             var remaining = await GetRemainingDelayAsync(connection, ct);
@@ -52,7 +52,10 @@ public sealed class RevitLaunchGate(
         }
         catch (NpgsqlException ex)
         {
-            throw new CommandPersistenceException(commandId, ex);
+            // Waiting for another Worker is an expected part of the gate.  A database/connectivity
+            // failure here means Revit was not started, so it must go through ProcessRunner's retry
+            // policy rather than leaving the claimed command in processing until its lease expires.
+            throw new RevitLaunchException(commandId, ex);
         }
         finally
         {
@@ -60,7 +63,7 @@ public sealed class RevitLaunchGate(
             {
                 try
                 {
-                    await ExecuteAsync(connection, "SELECT pg_advisory_unlock($1);", CancellationToken.None);
+                    await ReleaseLockAsync(connection, CancellationToken.None);
                 }
                 catch (NpgsqlException ex)
                 {
@@ -86,9 +89,22 @@ public sealed class RevitLaunchGate(
         _ = await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken ct)
+    private static async Task AcquireLockAsync(NpgsqlConnection connection, CancellationToken ct)
     {
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new NpgsqlCommand("SELECT pg_advisory_lock($1);", connection)
+        {
+            // pg_advisory_lock intentionally waits while another Worker is starting Revit. Npgsql's
+            // default 30-second command timeout was shorter than the legitimate queue wait and caused
+            // the command to become stuck in processing before Process.Start() was reached.
+            CommandTimeout = 0,
+        };
+        _ = command.Parameters.AddWithValue(AdvisoryLockId);
+        _ = await command.ExecuteScalarAsync(ct);
+    }
+
+    private static async Task ReleaseLockAsync(NpgsqlConnection connection, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand("SELECT pg_advisory_unlock($1);", connection);
         _ = command.Parameters.AddWithValue(AdvisoryLockId);
         _ = await command.ExecuteScalarAsync(ct);
     }

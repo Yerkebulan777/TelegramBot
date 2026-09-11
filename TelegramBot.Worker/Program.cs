@@ -76,6 +76,7 @@ public static class Program
                     _=services.AddSingleton<RevitPathResolver>();
                     _=services.AddSingleton<DialogDismisser>();
 
+                    _=services.AddSingleton<CommandTaskFileStore>();
                     _=services.AddSingleton<CommandPreparer>();
                     _=services.AddSingleton<RevitLaunchGate>();
                     _=services.AddSingleton<ProcessStarter>();

@@ -7,7 +7,7 @@ namespace TelegramBot.Worker.Schemas;
 /// <summary>
 /// Runtime-валидация task-файла по эталонной XSD из <c>RevitBIMFusion/Docs</c>, embedded resource.
 /// Ловит drift между C#-моделью <c>TaskFile</c> и XML-контрактом до того, как файл попадёт
-/// в TaskDirectory к плагину. Используется <c>CommandPreparer.CreateTaskFile</c>.
+/// в TaskDirectory к плагину. Используется <c>CommandTaskFileStore.Create</c>.
 /// </summary>
 public static class TaskFileValidator
 {

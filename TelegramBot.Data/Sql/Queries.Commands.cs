@@ -94,7 +94,9 @@ internal static partial class SqlQueries
                     ELSE CompletedAt
                 END,
                 ProcessId = @ProcessId,
-                ErrorMessage = @ErrorMessage
+                ErrorMessage = @ErrorMessage,
+                Lease = NULL,
+                NextRetryAt = NULL
             WHERE CommandId = @CommandId
               AND Status != 'Deleted';";
 
@@ -213,6 +215,11 @@ internal static partial class SqlQueries
             FROM Commands
             WHERE SessionId = @SessionId
               AND Status IN ('pending', 'processing')";
+
+        // Transaction-scoped lock namespace for one terminal transition and its session completion
+        // notification.  It serializes completions in a session before the active-command count is read.
+        internal const string AcquireSessionCompletionLock = @"
+            SELECT pg_advisory_xact_lock(1234570, @SessionId);";
 
         internal const string GetFailedCommandsBySession = @"
             SELECT FilePath, RootPath, CommandText, ErrorMessage

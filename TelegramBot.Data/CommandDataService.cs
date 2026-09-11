@@ -2,6 +2,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Data;
@@ -46,9 +47,21 @@ public sealed class CommandDataService(
                 new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), MaxRetries = maxRetries }));
     }
 
-    /// <summary>Обновляет статус команды.</summary>
-    public async Task<bool> UpdateCommandStatusAsync(int commandId, string status, int? processId = null, string? errorMessage = null)
+    /// <summary>
+    /// Atomically writes a terminal command outcome and, if it is the last active command in its
+    /// session, puts exactly one completion notification into the outbox.
+    /// </summary>
+    public async Task<bool> CompleteCommandAndNotifyAsync(
+        PendingCommand command,
+        string status,
+        int? processId = null,
+        string? errorMessage = null)
     {
+        if (status is not Statuses.Done and not Statuses.Failed)
+        {
+            throw new ArgumentOutOfRangeException(nameof(status), status, "Only terminal command statuses can be completed.");
+        }
+
         const int maxAttempts = 4;
         for (var attempt = 1; ; attempt++)
         {
@@ -57,28 +70,74 @@ public sealed class CommandDataService(
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 await using var conn = new NpgsqlConnection(ResolveConnectionString(configuration));
                 await conn.OpenAsync(timeout.Token);
+                await using var transaction = await conn.BeginTransactionAsync(timeout.Token);
+
+                // Lock before the command update. A second simultaneous completion waits here, then
+                // observes the first commit when it counts active commands, so the last one cannot miss
+                // the session-completed notification.
+                _ = await conn.ExecuteAsync(new CommandDefinition(
+                    SqlQueries.Commands.AcquireSessionCompletionLock,
+                    new { command.SessionId },
+                    transaction,
+                    cancellationToken: timeout.Token));
+
                 var affected = await conn.ExecuteAsync(new CommandDefinition(
                     SqlQueries.Commands.UpdateStatus,
-                    new { CommandId = commandId, Status = status, ProcessId = processId, ErrorMessage = errorMessage },
+                    new
+                    {
+                        CommandId = command.CommandId,
+                        Status = status,
+                        ProcessId = processId,
+                        ErrorMessage = errorMessage,
+                    },
+                    transaction,
                     cancellationToken: timeout.Token));
+
                 if (affected == 0)
                 {
-                    Logger.LogWarning("Command status not written: id={CommandId}, status={Status}, row removed or deleted",
-                        commandId, status);
+                    Logger.LogWarning("Terminal command status not written: id={CommandId}, status={Status}, row removed or deleted",
+                        command.CommandId, status);
+                    await transaction.CommitAsync(timeout.Token);
+                    return false;
                 }
-                return affected > 0;
+
+                var remaining = await conn.QuerySingleAsync<int>(new CommandDefinition(
+                    SqlQueries.Commands.CountPendingProcessingBySession,
+                    new { command.SessionId },
+                    transaction,
+                    cancellationToken: timeout.Token));
+
+                var notified = false;
+                if (remaining == 0)
+                {
+                    var payload = $"{command.SessionId}|{command.CorrelationId}";
+                    notified = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+                        SqlQueries.Sessions.NotifyCompletionOnce,
+                        new
+                        {
+                            command.SessionId,
+                            command.CorrelationId,
+                            Payload = payload,
+                        },
+                        transaction,
+                        cancellationToken: timeout.Token)) > 0;
+                }
+
+                await transaction.CommitAsync(timeout.Token);
+                return notified;
             }
             catch (Exception ex) when (attempt < maxAttempts &&
                 (ex is NpgsqlException { IsTransient: true } or TimeoutException or OperationCanceledException))
             {
                 var delaySeconds = 1 << attempt;
-                Logger.LogWarning(ex, "Command status write retry: id={CommandId}, status={Status}, attempt={Attempt}, delay={DelaySeconds}s",
-                    commandId, status, attempt, delaySeconds);
+                Logger.LogWarning(ex,
+                    "Terminal command completion retry: id={CommandId}, status={Status}, attempt={Attempt}, delay={DelaySeconds}s",
+                    command.CommandId, status, attempt, delaySeconds);
                 await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
             }
             catch (Exception ex)
             {
-                throw new CommandPersistenceException(commandId, ex);
+                throw new CommandPersistenceException(command.CommandId, ex);
             }
         }
     }

@@ -16,12 +16,12 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 public sealed class ProcessRunner(
     CommandPreparer commandPreparer,
+    CommandTaskFileStore taskFileStore,
     ProcessStarter processStarter,
     OutputCollector outputCollector,
     ResultAnalyzer resultAnalyzer,
     RevitTemporaryDirectoryCleaner temporaryDirectoryCleaner,
     CommandDataService commandDataService,
-    SessionDataService sessionDataService,
     IOptions<WorkerOptions> workerOptions,
     ILogger<ProcessRunner> logger)
 {
@@ -53,16 +53,15 @@ public sealed class ProcessRunner(
             try
             {
                 // Шаг 1: подготовка (валидация + BIM-резолвинг)
-                var commandCfg = await commandPreparer.PrepareAsync(cmd, timeoutToken);
-                if (commandCfg == null)
+                var preparation = await commandPreparer.PrepareAsync(cmd, timeoutToken);
+                if (!preparation.IsReady)
                 {
-                    // PrepareAsync уже записал Failed в БД
-                    await NotifySessionCompletionAsync(cmd);
+                    await CompleteCommandAsync(cmd, Statuses.Failed, preparation.ErrorMessage);
                     return;
                 }
 
                 // Шаг 2: запуск процесса
-                process = await StartProcessAsync(cmd, commandCfg, timeoutToken);
+                process = await StartProcessAsync(cmd, preparation.GetConfiguration(), timeoutToken);
 
                 // Шаг 3: ожидание и обработка ResultFile/exit code + stdout/stderr
                 await WaitAndHandleResultAsync(cmd, process, sw, timeoutToken);
@@ -97,7 +96,7 @@ public sealed class ProcessRunner(
             // Очищаем temp-файлы этой попытки
             if (!preserveEvidence && !ct.IsCancellationRequested)
             {
-                commandPreparer.CleanupTempFiles(cmd.CommandId, cmd.FilePath ?? string.Empty);
+                taskFileStore.Cleanup(cmd.CommandId, cmd.FilePath ?? string.Empty);
             }
 
             // На shutdown не удаляем процесс из tracking'а — пусть LogActiveProcessesOnShutdownAsync его увидит.
@@ -158,17 +157,15 @@ public sealed class ProcessRunner(
             if (commandResult.IsSuccess)
             {
                 // Done + non-empty Commands.ErrorMessage = plugin warningMessage (not a failure).
-                _ = await commandDataService.UpdateCommandStatusAsync(
-                    cmd.CommandId,
+                await CompleteCommandAsync(
+                    cmd,
                     Statuses.Done,
                     errorMessage: commandResult.WarningMessage);
-                await NotifySessionCompletionAsync(cmd);
                 return;
             }
             else if (commandResult.IsCancelled)
             {
-                _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
-                await NotifySessionCompletionAsync(cmd);
+                await CompleteCommandAsync(cmd, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
                 return;
             }
             else if (commandResult.IsFailure)
@@ -213,9 +210,8 @@ public sealed class ProcessRunner(
         logger.LogError("Timeout: id={CommandId}, cmd={Cmd}, corr={CorrelationId}, to={Timeout}m, elapsed={Elapsed:F1}s",
             cmd.CommandId, cmd.CommandText, cmd.CorrelationId, _workerOptions.ProcessTimeoutMinutes, sw.Elapsed.TotalSeconds);
 
-        _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed,
+        await CompleteCommandAsync(cmd, Statuses.Failed,
             errorMessage: $"Process timed out after {_workerOptions.ProcessTimeoutMinutes} min");
-        await NotifySessionCompletionAsync(cmd);
     }
 
     /// <summary>
@@ -240,7 +236,6 @@ public sealed class ProcessRunner(
                 logger.LogWarning(
                     "Revit open retry scheduled: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, retryAt={Next:O}, ms={ElapsedMs}, err={Msg}",
                     cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, nextRetryAt, sw.ElapsedMilliseconds, errorMessage);
-                await NotifySessionCompletionAsync(cmd);
                 return;
             }
 
@@ -249,8 +244,7 @@ public sealed class ProcessRunner(
             logger.LogError(
                 "Revit open retry exhausted: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, sw.ElapsedMilliseconds, finalErrorMessage);
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: finalErrorMessage);
-            await NotifySessionCompletionAsync(cmd);
+            await CompleteCommandAsync(cmd, Statuses.Failed, errorMessage: finalErrorMessage);
             return;
         }
 
@@ -259,8 +253,7 @@ public sealed class ProcessRunner(
             // Валидный result.xml status=Failed — плагин осознанно записал ошибку: permanent, retry бессмысленен.
             logger.LogInformation("Plugin permanent fail (no retry): cmd={Cmd}, id={Id}, corr={CorrelationId}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, sw.ElapsedMilliseconds, errorMessage);
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
-            await NotifySessionCompletionAsync(cmd);
+            await CompleteCommandAsync(cmd, Statuses.Failed, errorMessage: errorMessage);
             return;
         }
 
@@ -272,10 +265,9 @@ public sealed class ProcessRunner(
 
         if (isPermanent)
         {
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
+            await CompleteCommandAsync(cmd, Statuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Permanent fail: cmd={Cmd}, id={Id}, corr={CorrelationId}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
-            await NotifySessionCompletionAsync(cmd);
             return;
         }
         else if (cmd.RetryCount < _workerOptions.MaxRetries)
@@ -287,44 +279,23 @@ public sealed class ProcessRunner(
             logger.LogWarning(ex, "Retry: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
-            await NotifySessionCompletionAsync(cmd);
             return;
         }
         else
         {
-            _ = await commandDataService.UpdateCommandStatusAsync(cmd.CommandId, Statuses.Failed, errorMessage: errorMessage);
+            await CompleteCommandAsync(cmd, Statuses.Failed, errorMessage: errorMessage);
             logger.LogError(ex, "Fail after retries: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, cmd.RetryCount + 1, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
-            await NotifySessionCompletionAsync(cmd);
             return;
         }
     }
 
-    private async Task NotifySessionCompletionAsync(PendingCommand cmd)
+    private async Task CompleteCommandAsync(PendingCommand command, string status, string? errorMessage = null)
     {
-        try
-        {
-            var remainingInDb = await sessionDataService.CountPendingProcessingBySessionAsync(cmd.SessionId);
-            if (remainingInDb > 0)
-            {
-                logger.LogDebug(
-                    "Session {SessionId}: {Remaining} pending, skip notify, corr={CorrelationId}",
-                    cmd.SessionId, remainingInDb, cmd.CorrelationId);
-                return;
-            }
-
-            var notified = await sessionDataService.NotifySessionCompletedOnceAsync(cmd.SessionId, cmd.CorrelationId);
-            if (!notified)
-            {
-                logger.LogDebug(
-                    "Session {SessionId}: notify already sent, corr={CorrelationId}",
-                    cmd.SessionId, cmd.CorrelationId);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Notify session fail: session={SessionId}, corr={CorrelationId}",
-                cmd.SessionId, cmd.CorrelationId);
-        }
+        var notified = await commandDataService.CompleteCommandAndNotifyAsync(command, status, errorMessage: errorMessage);
+        logger.LogDebug(
+            "Terminal command persisted: id={CommandId}, status={Status}, sessionCompletionNotified={SessionCompletionNotified}",
+            command.CommandId, status, notified);
     }
+
 }

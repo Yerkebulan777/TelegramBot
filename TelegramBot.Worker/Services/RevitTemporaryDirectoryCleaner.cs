@@ -115,7 +115,9 @@ public sealed class RevitTemporaryDirectoryCleaner(
         {
             if (!Path.IsPathFullyQualified(request.TemporaryDirectoryPath))
             {
-                logger.LogWarning("Temporary directory cleanup rejected non-absolute path: id={CommandId}", request.CommandId);
+                logger.LogWarning(
+                    "Temporary directory cleanup rejected non-absolute path: id={CommandId}, directoryName={DirectoryName}",
+                    request.CommandId, Path.GetFileName(request.TemporaryDirectoryPath));
                 return null;
             }
 
@@ -123,12 +125,15 @@ public sealed class RevitTemporaryDirectoryCleaner(
             var tempRoot = Normalize(Path.GetTempPath());
             var directoryName = Path.GetFileName(directoryPath);
             var parentPath = Directory.GetParent(directoryPath)?.FullName;
+            var parentMatchesTempRoot = string.Equals(Normalize(parentPath), tempRoot, StringComparison.OrdinalIgnoreCase);
 
-            if (!string.Equals(Normalize(parentPath), tempRoot, StringComparison.OrdinalIgnoreCase)
+            if (!parentMatchesTempRoot
                 || !directoryName.StartsWith("RBF-", StringComparison.OrdinalIgnoreCase)
                 || !Guid.TryParseExact(directoryName.AsSpan(4), "N", out _))
             {
-                logger.LogWarning("Temporary directory cleanup rejected non-contract path: id={CommandId}", request.CommandId);
+                logger.LogWarning(
+                    "Temporary directory cleanup rejected non-contract path: id={CommandId}, parentMatchesTempRoot={ParentMatchesTempRoot}, directoryName={DirectoryName}",
+                    request.CommandId, parentMatchesTempRoot, directoryName);
                 return null;
             }
 
@@ -136,7 +141,9 @@ public sealed class RevitTemporaryDirectoryCleaner(
             if (string.IsNullOrWhiteSpace(sourceFileName)
                 || !Path.GetExtension(sourceFileName).Equals(".rvt", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogWarning("Temporary directory cleanup rejected source file name: id={CommandId}", request.CommandId);
+                logger.LogWarning(
+                    "Temporary directory cleanup rejected source file name: id={CommandId}, sourceFileName={SourceFileName}",
+                    request.CommandId, sourceFileName);
                 return null;
             }
 
@@ -146,7 +153,9 @@ public sealed class RevitTemporaryDirectoryCleaner(
                 || rvtAttributes.HasFlag(FileAttributes.Directory)
                 || rvtAttributes.HasFlag(FileAttributes.ReparsePoint))
             {
-                logger.LogWarning("Temporary directory cleanup rejected invalid directory or RVT marker: id={CommandId}", request.CommandId);
+                logger.LogWarning(
+                    "Temporary directory cleanup rejected invalid directory or RVT marker: id={CommandId}, directoryAttributes={DirectoryAttributes}, rvtAttributes={RvtAttributes}",
+                    request.CommandId, directoryAttributes, rvtAttributes);
                 return null;
             }
 

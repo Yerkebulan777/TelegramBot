@@ -10,6 +10,7 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 public sealed class ProcessStarter(
     CommandPreparer commandPreparer,
+    CommandTaskFileStore taskFileStore,
     RevitLaunchGate revitLaunchGate,
     ILogger<ProcessStarter> logger)
 {
@@ -18,14 +19,14 @@ public sealed class ProcessStarter(
     /// </summary>
     public async Task<Process> StartAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
-        var (resultFilePath, taskFilePath) = commandPreparer.GetTaskFilePaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        var (resultFilePath, taskFilePath) = taskFileStore.GetPaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
         if (File.Exists(resultFilePath))
         {
             // Retain previous evidence, but never consume it as the result of this attempt.
             File.Move(resultFilePath, resultFilePath + ".previous", overwrite: true);
             logger.LogWarning("Previous result retained before new attempt: id={CommandId}", cmd.CommandId);
         }
-        if (!commandPreparer.CreateTaskFile(cmd))
+        if (!taskFileStore.Create(cmd))
         {
             throw new IOException(
                 $"Failed to write task file in TaskDirectory '{taskFilePath}'. " +
@@ -37,7 +38,7 @@ public sealed class ProcessStarter(
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try
         {
-            if (CommandPreparer.IsRevitCommand(cmd.CommandText))
+            if (CommandTraits.RequiresRevit(cmd.CommandText))
             {
                 await revitLaunchGate.StartAsync(process, cmd.CommandId, ct);
             }
