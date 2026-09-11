@@ -70,15 +70,17 @@ public static class Program
 
                     _=services.Configure<FileSystemOptions>(context.Configuration.GetSection(FileSystemOptions.SectionName));
 
-                    // BIM-интеграция (Revit + Navisworks)
+                    // BIM-интеграция (Revit + Navisworks + AutoCAD)
                     _=services.AddSingleton<RevitVersionDetector>();
                     _=services.AddSingleton<NavisworksPathResolver>();
+                    _=services.AddSingleton<AutoCadPathResolver>();
                     _=services.AddSingleton<RevitPathResolver>();
                     _=services.AddSingleton<DialogDismisser>();
 
                     _=services.AddSingleton<CommandTaskFileStore>();
+                    _=services.AddSingleton<MergeDwgCommandPreparer>();
                     _=services.AddSingleton<CommandPreparer>();
-                    _=services.AddSingleton<RevitLaunchGate>();
+                    _=services.AddSingleton<ProcessLaunchGate>();
                     _=services.AddSingleton<ProcessStarter>();
                     _=services.AddSingleton<OutputCollector>();
                     _=services.AddSingleton<ResultAnalyzer>();

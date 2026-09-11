@@ -55,7 +55,7 @@ Handlers: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`
 | Группа | Коды |
 |---|---|
 | Export | `PDF`, `DWG`, `NWC`, `DATA`, `IFC` |
-| Automation | `CLASHREP` (FileConvert; planned Navisworks AddIn), `RESAVE` |
+| Automation | `CLASHREP` (FileConvert; planned Navisworks AddIn), `RESAVE`, `MERGEDWG` (AutoCAD + AutoBIMFusion) |
 
 `FileSystemBrowser`: RootPath → `01_PROJECT` → `01_RVT` (`.rvt` > 50 MiB). Hosted: `DatabaseInitializerService` (фон, не блокирует старт), `TelegramBotHostedService`, `NotificationSenderService` (outbox 3 с), `TrackedMessageCleanupService`.
 
@@ -65,9 +65,11 @@ Handlers: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`
 Polling (1s) → lease cleanup → ClaimPendingCommands → Prepare → Start → Result → Done/retry/Failed
 ```
 
-Ограничения: `MaxConcurrentCommands` + одна команда на Partition. Revit: глобальный `RevitLaunchGate` ≥ 15 с между `Process.Start()`. `CommandPersistenceException` — не BIM-ошибка; ResultFile сохранять при сбое записи.
+Ограничения: `MaxConcurrentCommands` + одна команда на Partition. `ProcessLaunchGate` — ≥ 15 с между глобальными `Process.Start()` Revit и (отдельно) AutoCAD; выбор gate — `CommandTraits.GetLaunchGate`. `CommandPersistenceException` — не BIM-ошибка; ResultFile сохранять при сбое записи.
 
 `CommandTraits.RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE. TaskFile — `REVITBIMFUSION_TASK_FILE` (без контрактных CLI; `/language RUS` допустим).
+
+`MERGEDWG`: RVT → папка `{Base}/02_DWG/{relative?}/{RevitFileName}/` (как DrawingExportModule); `.scr` + status JSON; `acad.exe /nologo /b`.
 
 ## PostgreSQL
 

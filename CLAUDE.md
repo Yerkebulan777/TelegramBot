@@ -16,8 +16,9 @@ dotnet build TelegramBot.slnx
 - Windows-only; PostgreSQL 18; Dapper/Npgsql; soft-delete (`Deleted`), кроме `TrackedMessages`
 - DI — singleton; handlers через `CallbackHandlerBase` (6 шт., включая `RootPath`)
 - Outbox уведомлений — polling 3 с; cleanup по `DeleteAfter`/`NextDeleteAttemptAt`; completion защищён; ack+tracking атомарно
-- Worker: poll 1 с, partition scheduling, `RevitLaunchGate` ≥ 15 с; `CommandPersistenceException` ≠ BIM-ошибка
+- Worker: poll 1 с, partition scheduling, `ProcessLaunchGate` ≥ 15 с (Revit и AutoCAD независимо); `CommandPersistenceException` ≠ BIM-ошибка
 - Revit: `REVITBIMFUSION_TASK_FILE`; `RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE
+- `MERGEDWG`: AutoCAD + AutoBIMFusion; путь DWG как DrawingExportModule (`02_DWG/.../{RevitFileName}/`)
 - `RootPathSetup` — заявка 30 мин; активный корень меняет только admin в Telegram
 - `Async` suffix; без `async void` / sync-over-async / `ConfigureAwait(false)`
 - BIM: эталон v2026-09-09; XSD в `Docs/BimContract/`

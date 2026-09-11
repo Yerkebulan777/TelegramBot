@@ -94,16 +94,15 @@ internal static partial class SqlQueries
                 UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
 
-        internal const string CreateRevitLaunchStateTable = @"
-            CREATE TABLE IF NOT EXISTS RevitLaunchState (
-                Singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (Singleton),
+        // Одна строка на продукт (Revit, AutoCad); строки создаёт сам gate через upsert.
+        // RevitLaunchState — предшественник с единственной singleton-строкой, хранил только cooldown.
+        internal const string CreateProcessLaunchStateTable = @"
+            CREATE TABLE IF NOT EXISTS ProcessLaunchState (
+                Product TEXT PRIMARY KEY,
                 LastLaunchAt TIMESTAMPTZ
-            );";
+            );
 
-        internal const string SeedRevitLaunchState = @"
-            INSERT INTO RevitLaunchState (Singleton)
-            VALUES (TRUE)
-            ON CONFLICT (Singleton) DO NOTHING;";
+            DROP TABLE IF EXISTS RevitLaunchState;";
 
         internal const string CreateNotificationOutboxTable = @"
             CREATE TABLE IF NOT EXISTS NotificationOutbox (

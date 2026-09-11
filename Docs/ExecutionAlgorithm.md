@@ -33,8 +33,8 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 
 ## 3. Подготовка и запуск
 
-`CommandPreparer`: конфиг, валидация FilePath по снимку RootPath, resolve Revit/Navisworks.  
-`ProcessStarter`: TaskFile + XSD; Revit — `/language RUS` + `REVITBIMFUSION_TASK_FILE`; старт через `RevitLaunchGate` (≥ 15 с между глобальными Revit `Process.Start()`). Не-Revit — сразу. Статус уже `processing` во время ожидания gate.
+`CommandPreparer`: конфиг, валидация FilePath по снимку RootPath, resolve Revit/Navisworks/AutoCAD.  
+`ProcessStarter`: TaskFile + XSD; Revit — `/language RUS` + `REVITBIMFUSION_TASK_FILE`. `MERGEDWG` — `.scr` + status JSON. Старт Revit и AutoCAD — через `ProcessLaunchGate` (`CommandTraits.GetLaunchGate`; ≥ 15 с между глобальными `Process.Start()` одного продукта, состояние — `ProcessLaunchState`). Прочие команды — сразу. Статус уже `processing` во время ожидания gate.
 
 ## 4. Результат
 
@@ -45,6 +45,8 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 | plugin `failed` | permanent `Failed`; исключение: Revit `InternalException` + `OpenAndActivateDocument` при RetryCount=0 → один retry через 10 с |
 | `cancelled` | `Failed`, без retry |
 | invalid XML / Revit без ResultFile | retry policy |
+| `MERGEDWG` status JSON `success=true` | `Done` |
+| `MERGEDWG` status JSON `success=false` / отсутствует | permanent `Failed` / retry|permanent по exit |
 | wrapper без ResultFile, exit 0 / ≠0 | `Done` / retry|permanent |
 | timeout | kill, `Failed` без retry |
 
@@ -80,7 +82,7 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 ## Статусы и locks
 
 `pending` → `processing` → `Done`/`Failed`. `Deleted` — скрытие/retention.  
-Advisory locks: lease cleanup, outbox, completion, partition claim, Revit gate. Polling; LISTEN/NOTIFY не используется.
+Advisory locks: lease cleanup, outbox, completion, partition claim, launch gate (Revit и AutoCAD — разные id). Polling; LISTEN/NOTIFY не используется.
 
 ## Добавление команды
 

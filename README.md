@@ -78,7 +78,7 @@ Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedP
 
 ## Поведение (кратко)
 
-- Очередь: Worker polling 1 с (`Worker:FallbackPollingIntervalSeconds`; 0 = 1). Одна операция на файл (`Partition`); разные файлы — до `MaxConcurrentCommands`. Между глобальными запусками Revit — ≥ 15 с (`RevitLaunchGate`).
+- Очередь: Worker polling 1 с (`Worker:FallbackPollingIntervalSeconds`; 0 = 1). Одна операция на файл (`Partition`); разные файлы — до `MaxConcurrentCommands`. Между глобальными запусками Revit — ≥ 15 с, между запусками AutoCAD (`MERGEDWG`) — ≥ 15 с (`ProcessLaunchGate`).
 - Дубликаты активных пар команда+файл пропускаются; `/status` rerun создаёт новое задание.
 - Уведомления старта/итога — durable outbox (poll 3 с). Итог защищён от интерактивной очистки. Defaults очистки — `MessageCleanupOptions`.
 - Обновление: остановить службы → Server (миграция схемы) → Worker.

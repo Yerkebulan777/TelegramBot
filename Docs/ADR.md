@@ -50,3 +50,11 @@ DI регистрирует concrete classes. Handlers — через `CallbackH
 **Статус:** действует
 
 Server — long-polling Telegram, не HTTP API → `Host.CreateDefaultBuilder`.
+
+## ADR-011: AutoCAD MERGEDWG handoff через .scr + status JSON
+
+**Статус:** действует (2026-09-11)
+
+`MERGEDWG` не использует BIM ResultFile/XSD. Worker пишет AutoCAD script (`NETLOAD` + `MERGEDWG_BATCH` + папка DWG + путь status), запускает `acad.exe /nologo /b`, читает JSON статуса плагина AutoBIMFusion. Папка DWG вычисляется из выбранного RVT как в DrawingExportModule (`{Base}/02_DWG/{relative?}/{RevitFileName}/`).
+
+Вместе с командой обобщён launch gate: `RevitLaunchGate` + однострочная `RevitLaunchState` заменены на `ProcessLaunchGate` и `ProcessLaunchState(Product, LastLaunchAt)` — по строке на продукт, upsert без seed, отдельный advisory lock на продукт. Legacy-таблица удаляется при инициализации схемы (хранила только cooldown).

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Xml;
 using System.Xml.Serialization;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Worker.Helpers;
@@ -98,6 +99,11 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
         Process process,
         Stopwatch sw)
     {
+        if (cmd.CommandText is CommandCodes.MergeDwg)
+        {
+            return AnalyzeMergeDwgStatus(cmd, process, sw);
+        }
+
         if (resultReadStatus == ResultFileReadStatus.Valid && result != null)
         {
             return AnalyzePluginResult(cmd, result, sw);
@@ -134,6 +140,47 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
         }
 
         return CommandResult.Failure(errorMessage, process.ExitCode);
+    }
+
+    /// <summary>
+    /// MERGEDWG отвечает status JSON, а не ResultFile: exit code 0 без ответа успехом не считается.
+    /// </summary>
+    private CommandResult AnalyzeMergeDwgStatus(PendingCommand cmd, Process process, Stopwatch sw)
+    {
+        var (_, statusPath) = taskFileStore.GetMergeDwgPaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        var (status, readError) = MergeDwgBatchProtocol.TryReadStatus(statusPath);
+
+        if (status is null)
+        {
+            logger.LogWarning(
+                "MERGEDWG no status: id={Id}, corr={CorrelationId}, exit={ExitCode}, path={StatusPath}, err={Error}, ms={ElapsedMs}",
+                cmd.CommandId, cmd.CorrelationId, process.ExitCode, statusPath, readError, sw.ElapsedMilliseconds);
+
+            return CommandResult.Failure(
+                $"{readError} (AutoCAD exit code {ExitCodeFormatter.Format(process.ExitCode)})",
+                process.ExitCode);
+        }
+
+        if (status.Success)
+        {
+            logger.LogInformation(
+                "MERGEDWG done: id={Id}, corr={CorrelationId}, save={SavePath}, ms={ElapsedMs}",
+                cmd.CommandId, cmd.CorrelationId, status.SavePath ?? "<none>", sw.ElapsedMilliseconds);
+            return CommandResult.Success();
+        }
+
+        var failureMessage = string.IsNullOrWhiteSpace(status.Message)
+            ? "AutoBIMFusion MERGEDWG_BATCH reported failure"
+            : status.Message;
+
+        logger.LogWarning(
+            "MERGEDWG fail: id={Id}, corr={CorrelationId}, msg={Message}, log={LogPath}, ms={ElapsedMs}",
+            cmd.CommandId, cmd.CorrelationId, failureMessage, status.LogPath ?? "<none>", sw.ElapsedMilliseconds);
+
+        return CommandResult.Failure(
+            failureMessage,
+            process.ExitCode,
+            failureDisposition: CommandResult.FailureDisposition.PermanentPlugin);
     }
 
     private CommandResult AnalyzePluginResult(PendingCommand cmd, ResultFile result, Stopwatch sw)
