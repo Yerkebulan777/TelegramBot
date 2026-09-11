@@ -10,25 +10,22 @@ dotnet build TelegramBot.slnx
 
 Тесты не добавлять.
 
-## Ключевые invariants
+## Invariants
 
-- 5 проектов net10.0: Core ← Data; Server/Worker и RootPathSetup зависят от Core+Data
-- Windows-only; PostgreSQL 18, Dapper/Npgsql
-- Soft-delete (`Status='Deleted'`), кроме `TrackedMessages` (physical DELETE)
-- DI services — singleton; callback handlers регистрируются через `CallbackHandlerBase`
-- Server notifications: один polling sender для durable outbox старта/завершения; отдельный cleanup по DeleteAfter/NextDeleteAttemptAt. Completion защищён от интерактивной очистки. Подтверждение доставки и tracking записываются атомарно; детали — Docs/ExecutionAlgorithm.md.
-- CompletionMessageFormatter формирует итог без I/O; SaveDeletionProgressAsync атомарно сохраняет успешные удаления и отложенные попытки. Общая фабрика соединений — DataAccessBase.CreateOpenConnectionAsync.
-- `RootPathSetup` — Windows Forms утилита, создающая 30-минутную заявку в БД; активный корень меняет только подтверждение администратора в Telegram
-- `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
-- Worker: один polling-цикл (1s) + tracked tasks + SQL partition scheduling; retry по NextRetryAt. Только запуск Revit проходит через глобальный PostgreSQL gate с интервалом не менее 15s. Ошибка записи результата — CommandPersistenceException, без немедленного перезапуска BIM.
-- Revit: TaskFile через `REVITBIMFUSION_TASK_FILE`, без контрактных CLI-аргументов (`/language RUS` допустим)
-- `IsRevitCommand()`: PDF, DWG, NWC, DATA, IFC
-- BIM contract: эталон `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-08-10); XSD vendored в `Docs/BimContract/`
+- 5 проектов net10.0: Core ← Data; Server/Worker/RootPathSetup → Core+Data
+- Windows-only; PostgreSQL 18; Dapper/Npgsql; soft-delete (`Deleted`), кроме `TrackedMessages`
+- DI — singleton; handlers через `CallbackHandlerBase` (6 шт., включая `RootPath`)
+- Outbox уведомлений — polling 3 с; cleanup по `DeleteAfter`/`NextDeleteAttemptAt`; completion защищён; ack+tracking атомарно
+- Worker: poll 1 с, partition scheduling, `RevitLaunchGate` ≥ 15 с; `CommandPersistenceException` ≠ BIM-ошибка
+- Revit: `REVITBIMFUSION_TASK_FILE`; `RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE
+- `RootPathSetup` — заявка 30 мин; активный корень меняет только admin в Telegram
+- `Async` suffix; без `async void` / sync-over-async / `ConfigureAwait(false)`
+- BIM: эталон v2026-09-09; XSD в `Docs/BimContract/`
 
 ## GitNexus
 
-1. `node .gitnexus/run.cjs analyze` при stale index
-2. `impact` → `detect_changes` → build
+1. `node .gitnexus/run.cjs analyze` при stale index  
+2. `impact` → `detect_changes` → build  
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

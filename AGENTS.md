@@ -1,36 +1,29 @@
 # AGENTS.md
 
-Инструкции для coding agents в этом репозитории.
+Инструкции для coding agents. При конфликте — код.
 
 ## Источники истины
 
 | Документ / код | Назначение |
 |---|---|
-| [README.md](README.md) | запуск, команды, конфигурация |
+| [README.md](README.md) | запуск, деплой, конфигурация |
 | [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md) | pipeline, статусы, retry, уведомления, БД |
-| [Docs/RevitCrashes.md](Docs/RevitCrashes.md) | историческое расследование Revit |
-| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | эталон TaskFile/ResultFile (v2026-09-09); локально — `../RevitBIMFusion/Docs` |
-| `Docs/BimContract/` | vendored XSD (ресинк из эталона вручную) |
-| `TelegramBot.Data/Sql/` | фактическая схема и SQL |
-| option-классы `Config/` | defaults конфигурации |
+| [Docs/ADR.md](Docs/ADR.md) | принятые архитектурные решения |
+| [BimPluginContract.md](https://github.com/Yerkebulan777/RevitBIMFusion/blob/master/Docs/BimPluginContract.md) | TaskFile/ResultFile (v2026-09-09); локально — `../RevitBIMFusion/Docs` |
+| `Docs/BimContract/` | vendored XSD |
+| `TelegramBot.Data/Sql/` | схема и SQL |
+| `TelegramBot.Core/Config/` | defaults конфигурации |
 
-## Ключевые файлы
+## Структура
 
-| Файл | Назначение |
+| Путь | Роль |
 |---|---|
-| `TelegramBot.Core/Constants/` | `CommandCodes.cs`, `CallbackPrefixes.cs`, `Statuses.cs`, `CommandPriorities.cs` |
-| `TelegramBot.Core/Config/` | `BotOptions.cs`, `FileSystemOptions.cs`, `RateLimitOptions.cs`, `WorkerOptions.cs`, `CommandConfig.cs` |
-| `TelegramBot.Core/Models/` | `UserSession.cs`, `PendingCommand.cs`, `BotUser.cs`, `UserRole.cs`, `TaskFile.cs`, `ResultFile.cs` |
-| `TelegramBot.Data/Sql/Queries.*.cs` | SQL-запросы (Schema, Commands, Sessions, NotificationOutbox, TrackedMessages, Users) |
-| `TelegramBot.Server/Services/Application/Handlers/` | 5 реализаций `CallbackHandlerBase`: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement` |
-| `TelegramBot.Server/Services/Infrastructure/Telegram/` | `TelegramBotHostedService.cs`, `TelegramOutputService.cs`, `KeyboardBuilder.cs`, `NotificationSenderService.cs`, `TrackedMessageCleanupService.cs` |
-| `TelegramBot.Server/Services/Infrastructure/FileSystem/FileSystemBrowser.cs` | 3-уровневая навигация + кэширование |
-| `TelegramBot.Server/Extensions/DependencyInjectionExtensions.cs` | Server DI |
-| `TelegramBot.RootPathSetup/` | Windows Forms: подготовка подтверждаемой заявки на смену рабочего UNC-пути |
-| `Installer/PostgresConnectionCheck/` | CLI установщика: `check` и `ensure` PostgreSQL 18 в Docker Desktop (`docker compose`, `.env`, `appsettings.Local.json`) |
-| `TelegramBot.Worker/Services/` | `CommandExecutionService.cs`, `CommandPreparer.cs`, `ProcessStarter.cs`, `ProcessRunner.cs`, `OutputCollector.cs`, `ResultAnalyzer.cs`, `RevitTemporaryDirectoryCleaner.cs`, `ErrorClassifier.cs`, `SessionCleanupService.cs` |
-| `TelegramBot.Worker/BimLib/` | `RevitVersionDetector.cs`, `NavisworksPathResolver.cs`, `DialogDismisser.cs` |
-| `TelegramBot.Worker/Program.cs` | Worker DI + startup |
+| `TelegramBot.Core/` | константы, модели, options, traits |
+| `TelegramBot.Data/` | Dapper/Npgsql, SQL |
+| `TelegramBot.Server/` | Telegram UI, callbacks, outbox, cleanup |
+| `TelegramBot.Worker/` | очередь, процессы, BimLib |
+| `TelegramBot.RootPathSetup/` | WinForms: заявка на смену UNC (30 мин) |
+| `Installer/PostgresConnectionCheck/` | `check` / `ensure` PostgreSQL 18 в Docker |
 
 ## Build
 
@@ -38,7 +31,6 @@
 dotnet build TelegramBot.slnx
 dotnet run --project TelegramBot.Server/TelegramBot.Server.csproj
 dotnet run --project TelegramBot.Worker/TelegramBot.Worker.csproj
-dotnet publish TelegramBot.Server/TelegramBot.Server.csproj -c Release
 dotnet format TelegramBot.slnx
 ```
 
@@ -46,95 +38,60 @@ dotnet format TelegramBot.slnx
 
 ## Архитектура
 
-Проекты — [README.md](README.md). Ключевые принципы:
-- DI services — singleton. Hosted services — владеет host.
-- BimLib встроен в Worker, Windows-only.
+- 5 проектов net10.0, Windows-only. DI services — singleton; hosted — владеет host.
+- BimLib встроен в Worker.
 
-## Server flow
+### Server
 
 ```text
-Telegram SDK → Channel<Update> (200) → Parallel.ForEachAsync (max 10) → Message/CallbackQuery
-→ SessionManager per-user lock → CommandAppService → SlashCommandService / CallbackDispatcher → CallbackHandlerBase
+Telegram SDK → Channel (200) → Parallel.ForEachAsync (max 10)
+→ SessionManager (per-user lock) → SlashCommand / CallbackDispatcher → CallbackHandlerBase
 ```
 
-- Разные пользователи — параллельно, один пользователь — последовательно
-- `/start`, `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:` без access check
-- `CallbackDispatcher`: dictionary префикс → handler
+Разные пользователи параллельно, один — последовательно. Без access check: `/start`, `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:`.
 
-### Команды и callbacks
-
-`CommandCatalog`:
+Handlers: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement`, `RootPath`. Prefixes — `CallbackPrefixes`.
 
 | Группа | Коды |
 |---|---|
 | Export | `PDF`, `DWG`, `NWC`, `DATA`, `IFC` |
-| Automation | `CLASHREP` (сейчас FileConvert; planned — Navisworks AddIn); `AUTORES` — planned Revit AddIn, не в каталоге |
+| Automation | `CLASHREP` (FileConvert; planned Navisworks AddIn), `RESAVE` |
 
-Handlers и их prefixes — в `TelegramBot.Core/Constants/CallbackPrefixes.cs`.
+`FileSystemBrowser`: RootPath → `01_PROJECT` → `01_RVT` (`.rvt` > 50 MiB). Hosted: `DatabaseInitializerService` (фон, не блокирует старт), `TelegramBotHostedService`, `NotificationSenderService` (outbox 3 с), `TrackedMessageCleanupService`.
 
-### File selection
-
-`FileSystemBrowser` — три уровня: RootPath (проекты, single-select) → 01_PROJECT (разделы) → 01_RVT (файлы, multi-select). Синхронное сканирование с кэшированием. Фильтрация: `.rvt` > 50 MiB, допустимое имя, дедупликация.
-
-### Server DI
-
-`AddTelegramBotServer` регистрирует: 6 `CallbackHandlerBase`, `CallbackDispatcher`, `CommandAppService`, `RateLimiter`, `SlashCommandService`, `SessionManager` (idle 5 мин), `SessionsListRenderer`, `MessageTrackingService`, data services, `FileSystemBrowser`, `ITelegramBotClient`, `TelegramOutputService`, `KeyboardBuilder`; hosted: `DatabaseInitializerService` (первым, фоновая schema-init с retry — не блокирует старт хоста), `TelegramBotHostedService`, `NotificationSenderService`, `TrackedMessageCleanupService`.
-
-Уведомления старта/завершения — durable outbox, один polling sender (3s), без LISTEN/NOTIFY и очереди уведомлений в памяти. Lease failure и обычное завершение создают итоговое событие под одним session completion lock; sender восстанавливает пропущенные события. Подтверждение доставки и tracking — одна транзакция. Для сообщений сохраняются Kind/DeleteAfter/NextDeleteAttemptAt; интерактивная очистка защищает completion, удаление повторяется отдельным циклом. Детали — `Docs/ExecutionAlgorithm.md`.
-
-`CompletionMessageFormatter` — чистое формирование итогового текста; `NotificationSenderService` — доставка. Результат удаления пакета сохраняется атомарно через `SaveDeletionProgressAsync`. Открытие обычных соединений data services — через `DataAccessBase.CreateOpenConnectionAsync` с токеном отмены.
-
-## Worker flow
+### Worker
 
 ```text
-Polling (1s) → lease cleanup when due → CommandOrchestrator.TriggerDrainAsync → ClaimPendingCommands → ProcessRunner.RunAsync
-→ CommandPreparer.PrepareAsync → ProcessStarter.StartAsync → OutputCollector + ResultAnalyzer → Done/retry/Failed
+Polling (1s) → lease cleanup → ClaimPendingCommands → Prepare → Start → Result → Done/retry/Failed
 ```
 
-Ограничение: tracked running tasks + SQL partition scheduling (одна команда на Partition за раз). Единственный polling-цикл подбирает новые команды и retry по NextRetryAt. Все Worker используют PostgreSQL `RevitLaunchGate`: только между глобальными запусками Revit выдерживается не менее 15 секунд; не-Revit команды не задерживаются. CommandPersistenceException не классифицировать как BIM-ошибку; ResultFile сохранять при сбое записи результата.
+Ограничения: `MaxConcurrentCommands` + одна команда на Partition. Revit: глобальный `RevitLaunchGate` ≥ 15 с между `Process.Start()`. `CommandPersistenceException` — не BIM-ошибка; ResultFile сохранять при сбое записи.
 
-### Worker DI
+`CommandTraits.RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE. TaskFile — `REVITBIMFUSION_TASK_FILE` (без контрактных CLI; `/language RUS` допустим).
 
-`Program.cs` регистрирует: `CommandDataService`, `SessionDataService`, `WorkerOptions`, `FileSystemOptions`, `BimIntegrationOptions`, `DialogDismisserOptions`, `RevitVersionDetector`, `NavisworksPathResolver`, `RevitPathResolver`, `DialogDismisser`, `CommandPreparer`, `RevitLaunchGate`, `ProcessStarter`, `OutputCollector`, `ResultAnalyzer`, `RevitTemporaryDirectoryCleaner`, `ProcessRunner`, `CommandExecutionService`, `SessionCleanupService`.
+## PostgreSQL
 
-## BIM-контракт
-
-См. [README.md](README.md) (#bim-контракт). Локальную копию контракта не создавать.
-
-## PostgreSQL invariants
-
-- Parameterized Dapper queries
-- Только soft-delete (`Status = 'Deleted'`). `DELETE` только для `TrackedMessages`
+- Parameterized Dapper; soft-delete (`Status='Deleted'`); физический `DELETE` только `TrackedMessages`
 - Статусы: `pending`, `processing`, `Done`, `Failed`, `Deleted`
 - Claim: `FOR UPDATE SKIP LOCKED` + partition advisory xact lock
-- Lease cleanup и outbox sender — под session advisory locks
-- Session + Commands — в одной транзакции с user-level xact lock
+- Lease cleanup, outbox, terminal completion — session advisory locks
+- Session + Commands — одна транзакция с user-level xact lock
 
-## Logging
+## Logging и стиль
 
-- Structured templates: `logger.LogInformation("Command done: id={CommandId}", id)`
-- Без интерполяции, `IsEnabled()` для дорогих вычислений
-- `Debug` — циклические события, `Information` — milestone, `Warning` — recoverable, `Error` — потеря операции
-- IDs: `CommandId`, `SessionId`, `CorrelationId`, `UserId`, `ProcessId`
-- Не писать token, password, содержимое файлов
-
-## Code style
-
-- C# 12+/net10.0, nullable + implicit usings
-- Primary constructors допустимы
-- Concrete class > интерфейс
-- `Async` suffix, без `async void`/sync-over-async/`ConfigureAwait(false)`
-- Constants из `TelegramBot.Core/Constants`
-- Path input: `Path.GetFullPath`, `IsPathWithinRoot`, allowed extensions, reparse-point guard
-- Минимальный diff, без speculative abstractions
+- Structured templates, без интерполяции; `IsEnabled()` для дорогих вычислений
+- IDs: `CommandId`, `SessionId`, `CorrelationId`, `UserId`, `ProcessId`; не логировать token/password/содержимое файлов
+- C# 12+/net10.0, nullable; concrete class > интерфейс; `Async` suffix; без `async void` / sync-over-async / `ConfigureAwait(false)`
+- Пути: `Path.GetFullPath`, `IsPathWithinRoot`, allowed extensions, reparse-point guard
+- Минимальный diff
 
 ## Documentation policy
 
-1. commands/config/behavior → README
-2. pipeline/schema/SQL/status/retry → ExecutionAlgorithm.md
-3. TaskFile/ResultFile/startup → canonical `RevitBIMFusion/Docs/BimPluginContract.md` (v2026-09-09); XSD — `Docs/BimContract/`
-4. архитектура/DI/agent rules → AGENTS.md + CLAUDE.md
-5. исторический incident — не переписывать
+1. запуск/деплой/config → README  
+2. pipeline/SQL/status/retry → ExecutionAlgorithm.md  
+3. TaskFile/ResultFile → канонический BimPluginContract + `Docs/BimContract/`  
+4. архитектура/правила агентов → AGENTS.md + CLAUDE.md  
+5. решения → ADR.md  
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
