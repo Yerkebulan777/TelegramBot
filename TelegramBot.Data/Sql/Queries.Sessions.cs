@@ -105,6 +105,10 @@ internal static partial class SqlQueries
                 WHERE s.Status != 'Deleted'
                   AND s.CreatedAt < @CutoffUtc
                   AND NOT EXISTS (
+                      SELECT 1 FROM NotificationOutbox n WHERE n.SessionId = s.SessionId
+                        AND n.EventType = 'session_completed' AND n.Status IN ('pending', 'processing')
+                  )
+                  AND NOT EXISTS (
                       SELECT 1
                       FROM Commands c
                       WHERE c.SessionId = s.SessionId
@@ -128,8 +132,10 @@ internal static partial class SqlQueries
                 SET CompletionNotified = TRUE,
                     UpdatedAt = NOW()
                 WHERE SessionId = @SessionId
-                  AND CompletionNotified = FALSE
                   AND Status != 'Deleted'
+                  AND EXISTS (SELECT 1 FROM Commands c WHERE c.SessionId = @SessionId AND c.Status IN ('Done', 'Failed'))
+                  AND NOT EXISTS (SELECT 1 FROM Commands c WHERE c.SessionId = @SessionId AND c.Status IN ('pending', 'processing'))
+                  AND NOT EXISTS (SELECT 1 FROM NotificationOutbox n WHERE n.SessionId = @SessionId AND n.EventType = 'session_completed')
                 RETURNING SessionId
             ),
             outbox AS (
@@ -138,12 +144,7 @@ internal static partial class SqlQueries
                 FROM marked
                 ON CONFLICT DO NOTHING
                 RETURNING OutboxId
-            ),
-            notified AS (
-                SELECT pg_notify('command_completed', @Payload)
-                FROM marked
             )
-            SELECT (SELECT COUNT(*)::int FROM outbox)
-            FROM (SELECT COUNT(*) FROM notified) force_notify;";
+            SELECT COUNT(*)::int FROM outbox;";
     }
 }

@@ -17,6 +17,7 @@ public sealed class CommandPreparer(
     CommandTaskFileStore taskFileStore,
     RevitVersionDetector versionDetector,
     NavisworksPathResolver navisworksPathResolver,
+    MergeDwgCommandPreparer mergeDwgPreparer,
     ILogger<CommandPreparer> logger)
 {
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
@@ -46,6 +47,11 @@ public sealed class CommandPreparer(
             return Task.FromResult(CommandPreparationResult.Failed($"File validation failed for path: {cmd.FilePath}"));
         }
 
+        if (cmd.CommandText is CommandCodes.MergeDwg)
+        {
+            return Task.FromResult(mergeDwgPreparer.Prepare(cmd, commandCfg));
+        }
+
         var (resolvedPath, resolutionError) = ResolveExecutablePath(cmd, commandCfg.ExecutablePath, cmd.CommandText, ct);
         if (resolvedPath == null)
         {
@@ -55,19 +61,8 @@ public sealed class CommandPreparer(
                 resolutionError ?? "Executable path could not be resolved."));
         }
 
-        // Создаём копию CommandConfig — НЕ мутируем shared-объект из IOptions!
-        // Иначе параллельные команды «загрязняют» ExecutablePath друг друга.
-        // https://learn.microsoft.com/en-us/dotnet/core/extensions/options#ios-postconfigure-options
-        var resultCfg = new CommandConfig
-        {
-            ExecutablePath = resolvedPath,
-            ArgumentsTemplate = commandCfg.ArgumentsTemplate,
-            AllowedExtensions = commandCfg.AllowedExtensions != null
-                ? [.. commandCfg.AllowedExtensions]
-                : null,
-            WorkingDirectory = commandCfg.WorkingDirectory,
-        };
-        return Task.FromResult(CommandPreparationResult.Ready(resultCfg));
+        return Task.FromResult(CommandPreparationResult.Ready(
+            commandCfg.WithResolved(resolvedPath, commandCfg.ArgumentsTemplate)));
     }
 
     /// <summary>Валидация FilePath: существование файла, расширение, path traversal.</summary>

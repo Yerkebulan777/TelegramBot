@@ -11,7 +11,7 @@ namespace TelegramBot.Worker.Services;
 public sealed class ProcessStarter(
     CommandPreparer commandPreparer,
     CommandTaskFileStore taskFileStore,
-    RevitLaunchGate revitLaunchGate,
+    ProcessLaunchGate launchGate,
     ILogger<ProcessStarter> logger)
 {
     /// <summary>
@@ -38,13 +38,14 @@ public sealed class ProcessStarter(
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try
         {
-            if (CommandTraits.RequiresRevit(cmd.CommandText))
+            var gate = CommandTraits.GetLaunchGate(cmd.CommandText);
+            if (gate == ProcessLaunchGateKind.None)
             {
-                await revitLaunchGate.StartAsync(process, cmd.CommandId, ct);
+                _ = process.Start();
             }
             else
             {
-                _ = process.Start();
+                await launchGate.StartAsync(process, gate, cmd.CommandId, ct);
             }
 
             logger.LogInformation(

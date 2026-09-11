@@ -1,199 +1,143 @@
-using System.Text;
-using System.Threading.Channels;
-using Microsoft.Extensions.Logging;
+using TelegramBot.Server.Helpers;
+using Microsoft.Extensions.Options;
+using Npgsql;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
-using TelegramBot.Server.Models;
-using TelegramBot.Server.Services.Application;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 
-/// <summary>
-/// Background service: sequentially sends queued command completion notifications to Telegram.
-/// </summary>
+/// <summary>One supervised polling loop owns durable notification delivery.</summary>
 public sealed class NotificationSenderService(
-    Channel<NotificationItem> notificationChannel,
     SessionDataService sessionDataService,
     NotificationOutboxDataService notificationOutboxDataService,
     TelegramOutputService telegramOutput,
-    MessageTrackingService messageTrackingService,
+    IOptions<MessageCleanupOptions> cleanupOptions,
     ILogger<NotificationSenderService> logger) : BackgroundService
 {
-    private static readonly TimeSpan OutboxLeaseDuration = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan OutboxPollInterval = TimeSpan.FromSeconds(30);
-    private const int OutboxBatchSize = 20;
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(5);
+    private DateTime _nextReconciliationAt;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("Notification sender start");
-
+        using var timer = new PeriodicTimer(PollInterval);
         try
         {
-            // Стартовый drain изолирован: если БД ещё не готова (Postgres в Docker
-            // поднимается позже автозапуска службы), здесь бросит — но основной цикл
-            // всё равно должен жить, иначе до поднятия БД сервис умрёт безвозвратно.
-            // Outbox retry'ется polling'ом (RunOutboxPollingAsync) и в SendNotificationItemAsync.
-            try
+            do
             {
-                await DrainCompletionOutboxAsync(stoppingToken);
+                try
+                {
+                    await DrainAsync(stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Notification cycle failed; retrying on next poll");
+                }
             }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Outbox startup drain failed; retrying via polling");
-            }
-
-            _ = RunOutboxPollingAsync(stoppingToken);
-
-            await foreach (var item in notificationChannel.Reader.ReadAllAsync(stoppingToken))
-            {
-                await SendNotificationItemAsync(item, stoppingToken);
-            }
+            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
-        finally
-        {
-            // Сигнализируем писателям, что читатель ушёл: blocked writers получат ChannelClosedException
-            _=notificationChannel.Writer.TryComplete();
-        }
-
         logger.LogInformation("Notification sender stop");
     }
 
-    private async Task RunOutboxPollingAsync(CancellationToken stoppingToken)
+    private async Task DrainAsync(CancellationToken cancellationToken)
     {
-        try
-        {
-            using var timer = new PeriodicTimer(OutboxPollInterval);
-
-            while (await timer.WaitForNextTickAsync(stoppingToken))
-            {
-                await DrainCompletionOutboxAsync(stoppingToken);
-            }
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Outbox polling stopped");
-        }
-    }
-
-    private async Task SendNotificationItemAsync(NotificationItem item, CancellationToken stoppingToken)
-    {
-        try
-        {
-            if (item.DrainCompletionOutbox)
-            {
-                await DrainCompletionOutboxAsync(stoppingToken);
-                return;
-            }
-
-            if (item.UserId.HasValue)
-            {
-                var startedMessage = await telegramOutput.SendMessageAsync(item.UserId.Value, "⚙️ Задание запущено");
-                await messageTrackingService.TrackAsync(startedMessage, item.SessionId!.Value);
-                var startedUsername = await sessionDataService.GetSessionUsernameAsync(item.SessionId!.Value) ?? "(unnamed)";
-                logger.LogInformation("Session started notify: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}",
-                    startedUsername, item.UserId.Value, item.SessionId, item.CorrelationId);
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Send queued notify fail: session={SessionId}, corr={CorrelationId}",
-            item.SessionId, item.CorrelationId);
-        }
-    }
-
-    private async Task DrainCompletionOutboxAsync(CancellationToken stoppingToken)
-    {
-        // Single-writer mutual exclusion: только одна реплика Server одновременно drain'ит outbox.
-        // Session-level advisory lock удерживается на весь drain-цикл; отпускается через await using.
-        // При multi-instance вторая реплика получает null и пропускает цикл — её polling tick
-        // (30 сек) повторит попытку. Это устраняет гонку между репликами при перекрывающихся окнах LockedUntil.
-        await using var lockHolder = await notificationOutboxDataService.TryAcquireSenderLockAsync();
+        await using var lockHolder = await notificationOutboxDataService.TryAcquireSenderLockAsync(cancellationToken);
         if (lockHolder == null)
         {
-            logger.LogDebug("Outbox drain skipped: lock held by another replica");
+            return;
+        }
+        if (DateTime.UtcNow >= _nextReconciliationAt)
+        {
+            await notificationOutboxDataService.ReconcileAsync(lockHolder, cancellationToken);
+            _nextReconciliationAt = DateTime.UtcNow.AddMinutes(1);
+        }
+        // Bound each drain so one busy replica does not hold the sender lock indefinitely.
+        for (var count = 0; count < 20; count++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await notificationOutboxDataService.SuppressObsoleteAsync(lockHolder, cancellationToken);
+            var item = await notificationOutboxDataService.ClaimPendingAsync(lockHolder, LeaseDuration, cancellationToken);
+            if (item == null)
+            {
+                return;
+            }
+            await SendAsync(item, cancellationToken);
+        }
+    }
+
+    private async Task SendAsync(NotificationOutboxItem item, CancellationToken cancellationToken)
+    {
+        Message sent;
+        try
+        {
+            using var sendTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            sendTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+            sent = item.EventType == NotificationOutboxDataService.SessionCompletedEvent
+                ? await SendCompletionNotificationAsync(item.SessionId, item.CorrelationId, sendTimeout.Token)
+                : await telegramOutput.SendNotificationAsync(item.UserId, "⚙️ Задание запущено", sendTimeout.Token);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var permanent = ex is ApiRequestException { ErrorCode: 400 or 403 };
+            var retryAfter = ex is ApiRequestException { ErrorCode: 429 } rateLimit
+                ? Math.Max(1, rateLimit.Parameters?.RetryAfter ?? 5)
+                : Math.Min(300, Math.Max(5, item.Attempts * 10));
+            await notificationOutboxDataService.MarkFailedAsync(item.OutboxId, retryAfter, permanent, ex, cancellationToken);
+            logger.LogWarning(ex, "Notification delivery failed: outboxId={OutboxId}, session={SessionId}, permanent={Permanent}, retrySeconds={RetrySeconds}",
+                item.OutboxId, item.SessionId, permanent, retryAfter);
+            if (ex is ApiRequestException { ErrorCode: 429 })
+            {
+                // Keep the shared sender lock during Telegram's cooldown so another replica
+                // cannot immediately resume this bot's notification traffic.
+                await Task.Delay(TimeSpan.FromSeconds(retryAfter), cancellationToken);
+            }
             return;
         }
 
-        while (!stoppingToken.IsCancellationRequested)
+        // Telegram acknowledged this message: retry only the DB acknowledgement, never send again here.
+        // The unavoidable crash window between the two systems still permits duplicates after restart.
+        var deleteAfter = item.EventType == NotificationOutboxDataService.SessionCompletedEvent
+            ? sent.Date.AddHours(cleanupOptions.Value.RetentionHours)
+            : sent.Date.AddMinutes(cleanupOptions.Value.TemporaryRetentionMinutes);
+        while (true)
         {
-            var items = await notificationOutboxDataService.ClaimPendingAsync(
-                NotificationOutboxDataService.SessionCompletedEvent,
-                OutboxBatchSize,
-                OutboxLeaseDuration);
-
-            if (items.Count == 0)
+            cancellationToken.ThrowIfCancellationRequested();
+            try
             {
+                await notificationOutboxDataService.MarkSentAsync(item, sent.Chat.Id, sent.MessageId, sent.Date, deleteAfter, cancellationToken);
+                logger.LogInformation("Notification delivered: outboxId={OutboxId}, session={SessionId}, event={EventType}, message={MessageId}",
+                    item.OutboxId, item.SessionId, item.EventType, sent.MessageId);
                 return;
             }
-
-            foreach (var item in items)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested &&
+                ex is NpgsqlException { IsTransient: true } or TimeoutException or OperationCanceledException)
             {
-                await SendCompletionOutboxItemAsync(item);
+                logger.LogWarning(ex, "Notification acknowledgement deferred: outboxId={OutboxId}, message={MessageId}",
+                    item.OutboxId, sent.MessageId);
+                await Task.Delay(PollInterval, cancellationToken);
             }
         }
     }
 
-    private async Task SendCompletionOutboxItemAsync(NotificationOutboxItem item)
-    {
-        try
-        {
-            // SendCompletionNotificationAsync возвращает Message?, которое ExecuteWithRetryAsync
-            // отдаёт как null при исчерпании ретраев (429, сетевые) без исключения. null означает
-            // НЕдоставку: трактуем как fail, чтобы outbox сохранил at-least-once (MarkSent только при
-            // подтверждённой доставке).
-            var sent = await SendCompletionNotificationAsync(item.SessionId, item.CorrelationId);
-            if (sent == null)
-            {
-                throw new InvalidOperationException(
-                    "Completion notification not delivered: SendMessageAsync returned null after retries");
-            }
-
-            await notificationOutboxDataService.MarkSentAsync(item.OutboxId);
-        }
-        catch (Exception ex)
-        {
-            await notificationOutboxDataService.MarkFailedAsync(item.OutboxId, item.Attempts, ex);
-            logger.LogError(ex, "Outbox send fail: outboxId={OutboxId}, session={SessionId}, corr={CorrelationId}, attempts={Attempts}",
-                item.OutboxId, item.SessionId, item.CorrelationId, item.Attempts);
-        }
-    }
-
-    private async Task<Message?> SendCompletionNotificationAsync(int sessionId, string correlationId)
+    private async Task<Message> SendCompletionNotificationAsync(int sessionId, string correlationId, CancellationToken cancellationToken)
     {
         var session = await sessionDataService.GetSessionCompletionSummaryAsync(sessionId);
-        var prefix = string.IsNullOrEmpty(session.ProjectName) ? "" : $"{session.ProjectName} — ";
-        var durationPrefix = FormatDurationPrefix(session.DurationSeconds);
-
-        var summary = new StringBuilder();
-
-        _=session.FailedFiles == 0
-            ? session.WarnedCommands.Count == 0
-                ? summary.Append($"✅ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано")
-                : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано (есть предупреждения)")
-            : session.DoneFiles == 0
-                ? summary.Append($"❌ {prefix}{durationPrefix}сессия завершена — все {session.FailedFiles} файлов с ошибками")
-                : summary.Append($"⚠️ {prefix}{durationPrefix}сессия завершена: {session.DoneFiles} ✅, {session.FailedFiles} ❌ из {session.TotalFiles}");
-
-        if (session.FailedFiles > 0 && session.FailedCommands.Count > 0)
-        {
-            AppendCommandNotes(summary, "Ошибки:", session.FailedCommands);
-        }
-
-        if (session.WarnedCommands.Count > 0)
-        {
-            AppendCommandNotes(summary, "Предупреждения:", session.WarnedCommands);
-        }
-
         // Сводка failed-команд для трассировки: дошли ли причины из БД до уведомления.
         var failedWithMsg = session.FailedCommands.Count(c => !string.IsNullOrWhiteSpace(c.ErrorMessage));
         logger.LogInformation(
@@ -209,127 +153,10 @@ public sealed class NotificationSenderService(
             }
         }
 
-        var completionMessage = await telegramOutput.SendMessageAsync(session.UserId, ClampToTelegramLimit(summary));
-        await messageTrackingService.TrackAsync(completionMessage, sessionId);
-        logger.LogInformation("Completion sent: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
+        var completionMessage = await telegramOutput.SendNotificationAsync(session.UserId, CompletionMessageFormatter.Format(session), cancellationToken);
+
+        logger.LogInformation("Completion accepted by Telegram: user={Username} ({UserId}), session={SessionId}, corr={CorrelationId}, project={Project}, done={Done}, failed={Failed}, total={Total}",
             session.Username ?? "(unnamed)", session.UserId, sessionId, correlationId, session.ProjectName, session.DoneFiles, session.FailedFiles, session.TotalFiles);
         return completionMessage;
-    }
-
-    /// <summary>Максимум пунктов с ошибками в одном сообщении; остальные схлопываются в «и ещё N».</summary>
-    private const int MaxFailedFilesInMessage = 15;
-
-    /// <summary>Лимит длины причины сбоя на один файл — чтобы стек/портянка не раздула сообщение.</summary>
-    private const int MaxReasonLength = 200;
-
-    /// <summary>Жёсткий лимит текста под потолок Telegram (4096) с запасом на маркер обрыва.</summary>
-    private const int MaxMessageLength = 4000;
-
-    private static void AppendCommandNotes(StringBuilder summary, string title, List<FailedCommandInfo> commands)
-    {
-        _=summary.Append("\n\n").Append(title).Append('\n');
-
-        var shown = Math.Min(commands.Count, MaxFailedFilesInMessage);
-        for (var i = 0; i < shown; i++)
-        {
-            if (i > 0)
-            {
-                _ = summary.AppendLine();
-            }
-
-            var command = commands[i];
-            var filePath = FormatFilePath(command);
-            _ = summary.Append("- ").Append(filePath)
-                .Append(" [").Append(command.CommandText).Append(']')
-                .Append("\n  Причина: ").Append(FormatReason(command, filePath));
-        }
-
-        if (commands.Count > MaxFailedFilesInMessage)
-        {
-            _ = summary.Append("\n…и ещё ").Append(commands.Count - MaxFailedFilesInMessage);
-        }
-    }
-
-    /// <summary>Оставляет первую строку причины (без стека) и обрезает до <see cref="MaxReasonLength"/>.</summary>
-    private static string FormatReason(FailedCommandInfo command, string filePath)
-    {
-        var errorMessage = command.ErrorMessage;
-        if (string.IsNullOrWhiteSpace(errorMessage))
-        {
-            return "Исполнитель не сообщил причину. Обратитесь к администратору с этим заданием.";
-        }
-
-        // Сокращаем пути до обрезки текста, чтобы длинный UNC-путь не скрывал причину.
-        if (!string.IsNullOrWhiteSpace(command.FilePath))
-        {
-            errorMessage = errorMessage.Replace(command.FilePath, filePath, StringComparison.OrdinalIgnoreCase)
-                .Replace(command.FilePath.Replace('\\', '/'), filePath, StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (!string.IsNullOrWhiteSpace(command.RootPath))
-        {
-            var root = command.RootPath.TrimEnd('\\', '/');
-            errorMessage = errorMessage.Replace(root + "\\", "", StringComparison.OrdinalIgnoreCase)
-                .Replace(root.Replace('\\', '/') + "/", "", StringComparison.OrdinalIgnoreCase);
-        }
-
-        errorMessage = errorMessage.Trim()
-            .Replace("File validation failed for path:", "Файл не прошёл проверку пути, доступности или формата:", StringComparison.OrdinalIgnoreCase)
-            .Replace("Process timed out after", "Превышено время выполнения:", StringComparison.OrdinalIgnoreCase)
-            .Replace("Process exited with code", "Программа завершилась с ошибкой. Код:", StringComparison.OrdinalIgnoreCase)
-            .Replace("Revit exited without writing the required ResultFile", "Revit завершился без отчёта о результате. Успешное выполнение не подтверждено.", StringComparison.OrdinalIgnoreCase)
-            .Replace("Invalid plugin result file", "Не удалось прочитать результат: плагин создал некорректный файл отчёта.", StringComparison.OrdinalIgnoreCase)
-            .Replace("Plugin reported failure", "Плагин сообщил об ошибке выполнения.", StringComparison.OrdinalIgnoreCase)
-            .Replace("Plugin reported cancellation", "Плагин сообщил об отмене выполнения.", StringComparison.OrdinalIgnoreCase)
-            .Replace("Unknown command type:", "Неизвестная команда:", StringComparison.OrdinalIgnoreCase);
-
-        // Стек/детали обычно идут с переноса — пользователю нужна только первая строка (суть ошибки).
-        var firstLine = errorMessage.AsSpan();
-        var newline = firstLine.IndexOfAny('\r', '\n');
-        if (newline >= 0)
-        {
-            firstLine = firstLine[..newline];
-        }
-
-        return firstLine.Length > MaxReasonLength
-            ? $"{firstLine[..MaxReasonLength]}…"
-            : firstLine.ToString();
-    }
-
-    private static string FormatFilePath(FailedCommandInfo command)
-    {
-        if (!string.IsNullOrWhiteSpace(command.RootPath)
-            && FileSystemOptions.IsPathWithinRoot(command.RootPath, command.FilePath))
-        {
-            return Path.GetRelativePath(Path.GetFullPath(command.RootPath), Path.GetFullPath(command.FilePath));
-        }
-
-        // Старые задания могут не иметь сохранённого корня.
-        return Path.GetFileName(command.FilePath);
-    }
-
-    /// <summary>Гарантирует, что сообщение не превысит лимит Telegram — иначе SendAsync выбросит исключение.</summary>
-    private static string ClampToTelegramLimit(StringBuilder summary)
-    {
-        if (summary.Length <= MaxMessageLength)
-        {
-            return summary.ToString();
-        }
-
-        return summary.ToString(0, MaxMessageLength - 1) + "…";
-    }
-
-    private static string FormatDurationPrefix(int? durationSeconds)
-    {
-        return durationSeconds is > 0 ? $"{FormatDuration(durationSeconds.Value)} — " : "";
-    }
-
-    private static string FormatDuration(int totalSeconds)
-    {
-        var duration = TimeSpan.FromSeconds(totalSeconds);
-
-        return duration.TotalHours >= 1
-            ? $"{(int)duration.TotalHours} ч {duration.Minutes:D2} мин"
-            : duration.TotalMinutes >= 1 ? $"{duration.Minutes} мин {duration.Seconds:D2} с" : $"{duration.Seconds} с";
     }
 }

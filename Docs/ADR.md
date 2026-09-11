@@ -1,95 +1,60 @@
-# Architecture Decision Log (ADR)
+# Architecture Decision Log
+
+Краткие действующие решения. Детали реализации — код и [ExecutionAlgorithm.md](ExecutionAlgorithm.md).
 
 ## ADR-001: Revit handoff через environment variable
 
-**Дата:** 2026-07-03 | **Статус:** реализовано
+**Статус:** действует (2026-07-03)
 
-**Контекст:** Worker запускал Revit через `Revit.exe /command "WORKER" "<task.xml>"`. Revit не поддерживает `/command` для `IExternalCommand` — команда трактовалась как открытие файла, вызывая 100% `ACCESS_VIOLATION`.
+CLI `/command "WORKER" "<task.xml>"` трактовался Revit как открытие файла → 100% `ACCESS_VIOLATION`.  
+Решение: без контрактных CLI (`/language RUS` допустим); путь TaskFile — process-scoped `REVITBIMFUSION_TASK_FILE`. AddIn читает переменную в `OnStartup` и подписывает one-shot `Idling`.
 
-**Решение:** Заменить CLI-аргументы на process-scoped environment variable `REVITBIMFUSION_TASK_FILE`. Revit запускается без контрактных аргументов (допускается `/language RUS`), TaskFile path передаётся только через environment.
+## ADR-004: Soft-delete
 
-**Последствия:** (+) Параллельные Revit-процессы не разделяют TaskFile path. (+) Совместимо с документированным Revit API. (-) RevitBIMFusion должен читать переменную в `Application.OnStartup` и подписывать one-shot `Idling`.
+**Статус:** действует
 
----
+Команды/сессии — `Status='Deleted'`. Физический `DELETE` только для `TrackedMessages`. Retention — `SessionCleanupService`.
 
-## ADR-004: Soft-delete вместо DELETE
+## ADR-005: Durable notifications (outbox)
 
-**Дата:** 2026-07 (начало проекта) | **Статус:** действует
+**Статус:** действует
 
-**Контекст:** Необходима возможность восстановления данных и аудит удалений.
+`NotificationOutbox` + атомарная запись с финализацией команды. `NotificationSenderService` drain с advisory lock (at-least-once).
 
-**Решение:** Все команды и сессии удаляются через `Status = 'Deleted'`. Физический `DELETE` разрешён только для `TrackedMessages` (вспомогательная таблица).
+## ADR-006: Partition scheduling
 
-**Последствия:** (+) Возможность отката. (+) Простой аудит. (-) Нужен retention cleanup (`SessionCleanupService`).
+**Статус:** действует
 
----
+`Partition = "file:" + md5(lower(FilePath))`. Одна команда на файл; разные файлы — параллельно.
 
-## ADR-005: Durable notifications через outbox table
+## ADR-007: Per-user serialization
 
-**Дата:** 2026-07 (начало проекта) | **Статус:** действует
+**Статус:** действует
 
-**Контекст:** Telegram может быть недоступен, Server может перезагрузиться между завершением команды и отправкой уведомления.
-
-**Решение:** `NotificationOutbox` таблица с `session_completed` event. Запись создаётся атомарно в одной транзакции с финализацией команды. `NotificationSenderService` drain-ит outbox (advisory lock для multi-instance).
-
-**Последствия:** (+) Гарантированная доставка (at-least-once). (-) Дополнительная таблица и фоновый poll.
-
----
-
-## ADR-006: Partition scheduling — один файл за раз
-
-**Дата:** 2026-07 (начало проекта) | **Статус:** действует
-
-**Контекст:** Две команды одного файла не должны выполняться параллельно (конфликт при открытии .rvt).
-
-**Решение:** `Partition = "file:" + md5(lower(FilePath))`. SQL claim исключает partition с `processing`-командой. Одна команда на partition за раз.
-
-**Последствия:** (+) Последовательная обработка файла — безопасно. (+) Разные файлы — параллельно — максимальная пропускная способность.
-
----
-
-## ADR-007: Per-user serialization через SessionManager
-
-**Дата:** 2026-07 (начало проекта) | **Статус:** действует
-
-**Контекст:** Обновления одного пользователя не должны обрабатываться параллельно (race condition на UserSession).
-
-**Решение:** `SessionManager.AcquireUserLockAsync` — per-user `SemaphoreSlim`. Обновления разных пользователей — параллельно (`Parallel.ForEachAsync max 10`), одного — последовательно.
-
-**Последствия:** (+) Нет гонок на сессии. (+) Масштабируется по числу пользователей.
-
----
+`SessionManager` — per-user `SemaphoreSlim`. Разные пользователи — `Parallel.ForEachAsync` (max 10).
 
 ## ADR-008: Concrete classes over interfaces
 
-**Дата:** 2026-07 (начало проекта) | **Статус:** действует
+**Статус:** действует
 
-**Контекст:** Большинство сервисов имеют одну реализацию — интерфейсы добавляют косвенность без пользы.
-
-**Решение:** DI регистрирует concrete classes. Callback handlers используют общий `CallbackHandlerBase`; отдельный интерфейс для dispatch не нужен. Интерфейсы data services удалены за ненадобностью.
-
-**Последствия:** (+) Меньше файлов и косвенности. (-) Сложнее mock для тестов (тесты отключены — не проблема).
-
----
+DI регистрирует concrete classes. Handlers — через `CallbackHandlerBase`.
 
 ## ADR-009: Тесты отключены
 
-**Дата:** 2026-07 (начало проекта) | **Статус:** действует
+**Статус:** действует
 
-**Контекст:** Проект — Windows-only сервис, интегрированный с PostgreSQL, Telegram API и внешними BIM-процессами. Модульные тесты имеют низкое отношение польза/стоимость.
+Верификация: `dotnet build`, format, GitNexus impact, code review. Test projects не добавлять.
 
-**Решение:** Не добавлять test projects. Верификация — `dotnet build TelegramBot.slnx`. Compliance через статический анализ (Qodana) и format check (dotnet format).
+## ADR-010: Generic Host вместо ASP.NET
 
-**Последствия:** (+) Быстрая сборка. (-) Нет safety net для рефакторинга. Компенсируется GitNexus impact analysis и strict code review.
+**Статус:** действует
 
----
+Server — long-polling Telegram, не HTTP API → `Host.CreateDefaultBuilder`.
 
-## ADR-010: Сервер на Generic Host вместо ASP.NET
+## ADR-011: AutoCAD MERGEDWG handoff через .scr + status JSON
 
-**Дата:** 2026-07-03 | **Статус:** реализовано
+**Статус:** действует (2026-09-11)
 
-**Контекст:** Server не обрабатывает HTTP-запросы — только Telegram long-polling. ASP.NET Web SDK добавляет ненужные middleware и зависимости.
+`MERGEDWG` не использует BIM ResultFile/XSD. Worker пишет AutoCAD script (`NETLOAD` + `MERGEDWG_BATCH` + папка DWG + путь status), запускает `acad.exe /nologo /b`, читает JSON статуса плагина AutoBIMFusion. Папка DWG вычисляется из выбранного RVT как в DrawingExportModule (`{Base}/02_DWG/{relative?}/{RevitFileName}/`).
 
-**Решение:** Заменить `WebApplication.CreateBuilder` на `Host.CreateDefaultBuilder`. Удалить `Serilog.AspNetCore`.
-
-**Последствия:** (+) Меньше зависимостей, быстрее startup. (-) Нет встроенного health-check endpoint (не нужен — проект не Web API).
+Вместе с командой обобщён launch gate: `RevitLaunchGate` + однострочная `RevitLaunchState` заменены на `ProcessLaunchGate` и `ProcessLaunchState(Product, LastLaunchAt)` — по строке на продукт, upsert без seed, отдельный advisory lock на продукт. Legacy-таблица удаляется при инициализации схемы (хранила только cooldown).

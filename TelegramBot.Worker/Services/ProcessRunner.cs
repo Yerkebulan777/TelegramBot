@@ -114,7 +114,7 @@ public sealed class ProcessRunner(
         var process = await processStarter.StartAsync(cmd, commandCfg, ct);
         _activeProcesses[cmd.CommandId] = process;
         _ = await commandDataService.MarkProcessStartedAndNotifyOnceAsync(
-            cmd.CommandId, process.Id, cmd.SessionId, cmd.CorrelationId, cmd.UserId);
+            cmd.CommandId, process.Id);
         return process;
     }
 

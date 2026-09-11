@@ -11,10 +11,13 @@ public sealed class MessageCleanupOptions
     public bool Enabled { get; set; } = true;
 
     /// <summary>Интервал запуска очистки в минутах.</summary>
-    public int IntervalMinutes { get; set; } = 15;
+    public int IntervalMinutes { get; set; } = 1;
 
     /// <summary>Возраст сообщения в часах, после которого оно подлежит удалению.</summary>
     public int RetentionHours { get; set; } = 24;
+
+    /// <summary>Срок хранения временных сообщений в минутах.</summary>
+    public int TemporaryRetentionMinutes { get; set; } = 5;
 
     /// <summary>
     /// Максимальный возраст сообщения для попытки удаления. Должен оставлять запас до лимита Telegram в 48 часов.

@@ -94,16 +94,15 @@ internal static partial class SqlQueries
                 UpdatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );";
 
-        internal const string CreateRevitLaunchStateTable = @"
-            CREATE TABLE IF NOT EXISTS RevitLaunchState (
-                Singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (Singleton),
+        // Одна строка на продукт (Revit, AutoCad); строки создаёт сам gate через upsert.
+        // RevitLaunchState — предшественник с единственной singleton-строкой, хранил только cooldown.
+        internal const string CreateProcessLaunchStateTable = @"
+            CREATE TABLE IF NOT EXISTS ProcessLaunchState (
+                Product TEXT PRIMARY KEY,
                 LastLaunchAt TIMESTAMPTZ
-            );";
+            );
 
-        internal const string SeedRevitLaunchState = @"
-            INSERT INTO RevitLaunchState (Singleton)
-            VALUES (TRUE)
-            ON CONFLICT (Singleton) DO NOTHING;";
+            DROP TABLE IF EXISTS RevitLaunchState;";
 
         internal const string CreateNotificationOutboxTable = @"
             CREATE TABLE IF NOT EXISTS NotificationOutbox (
@@ -124,6 +123,27 @@ internal static partial class SqlQueries
         internal const string MakeTrackedMessagesSessionNullable = @"
             ALTER TABLE TrackedMessages
             ALTER COLUMN SessionId DROP NOT NULL;";
+
+        internal const string EnsureTrackedMessageLifecycle = @"
+            ALTER TABLE TrackedMessages
+                ADD COLUMN IF NOT EXISTS Kind TEXT NOT NULL DEFAULT 'completion',
+                ADD COLUMN IF NOT EXISTS DeleteAfter TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS NextDeleteAttemptAt TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+            -- Legacy rows have no reliable message kind. Protect them until normal retention
+            -- rather than accidentally deleting a fresh completion on the first interaction.
+            ALTER TABLE TrackedMessages ALTER COLUMN Kind SET DEFAULT 'interface';
+
+            DELETE FROM TrackedMessages duplicate
+            USING TrackedMessages original
+            WHERE duplicate.ChatId = original.ChatId
+              AND duplicate.MessageIdPg = original.MessageIdPg
+              AND duplicate.MessageId > original.MessageId;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_messages_identity
+                ON TrackedMessages(ChatId, MessageIdPg);
+            CREATE INDEX IF NOT EXISTS idx_tracked_messages_due
+                ON TrackedMessages(NextDeleteAttemptAt, DeleteAfter);";
 
         internal const string EnsureNotificationOutboxColumns = @"
             ALTER TABLE NotificationOutbox
@@ -164,6 +184,9 @@ internal static partial class SqlQueries
             CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_outbox_session_completed
                 ON NotificationOutbox(EventType, SessionId)
                 WHERE EventType = 'session_completed';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_outbox_session_started
+                ON NotificationOutbox(EventType, SessionId)
+                WHERE EventType = 'session_started';
             CREATE INDEX IF NOT EXISTS idx_notification_outbox_pending
                 ON NotificationOutbox(Status, NextAttemptAt, CreatedAt, OutboxId)
                 WHERE Status IN ('pending', 'processing');";

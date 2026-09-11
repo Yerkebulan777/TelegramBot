@@ -1,10 +1,8 @@
 using Microsoft.Extensions.Options;
-using System.Threading.Channels;
 using Telegram.Bot;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Data;
-using TelegramBot.Server.Models;
 using TelegramBot.Server.Services.Application;
 using TelegramBot.Server.Services.Application.Handlers;
 using TelegramBot.Server.Services.Infrastructure.FileSystem;
@@ -36,6 +34,8 @@ public static class DependencyInjectionExtensions
             .Bind(configuration.GetSection(MessageCleanupOptions.SectionName))
             .Validate(options => options.IntervalMinutes > 0, "MessageCleanup:IntervalMinutes must be greater than 0")
             .Validate(options => options.RetentionHours > 0, "MessageCleanup:RetentionHours must be greater than 0")
+            .Validate(options => options.TemporaryRetentionMinutes > 0 && options.TemporaryRetentionMinutes < options.MaximumDeletionAgeHours * 60,
+                "MessageCleanup:TemporaryRetentionMinutes must be positive and below the deletion age limit")
             .Validate(options => options.MaximumDeletionAgeHours is > 0 and < 48, "MessageCleanup:MaximumDeletionAgeHours must be between 1 and 47")
             .Validate(options => options.MaximumDeletionAgeHours > options.RetentionHours, "MessageCleanup:MaximumDeletionAgeHours must be greater than RetentionHours")
             .Validate(options => options.BatchSize > 0, "MessageCleanup:BatchSize must be greater than 0")
@@ -76,21 +76,8 @@ public static class DependencyInjectionExtensions
 
         _ = services.AddSingleton<TelegramOutputService>();
         _ = services.AddSingleton<KeyboardBuilder>();
-        _ = services.AddSingleton(_ => Channel.CreateBounded<NotificationItem>(new BoundedChannelOptions(256)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
-            SingleWriter = false
-        }));
-        // DatabaseInitializerService создаёт схему в фоне с retry. Остальные hosted
-        // сервисы стартуют параллельно (BackgroundService.ExecuteAsync — fire-and-forget),
-        // поэтому каждый из них сам толерантен к временно недоступной БД: CommandNotification
-        // — reconnect-циклом, NotificationSender — изолированным стартовым drain + polling,
-        // TelegramBotHosted — пер-апдейтным catch. Схема создаётся в отдельном сервисе, а не
-        // блокирует старт хоста (раньше это вызывалось синхронно в Program.Main → таймаут SCM).
         _ = services.AddHostedService<DatabaseInitializerService>();
         _ = services.AddHostedService<TelegramBotHostedService>();
-        _ = services.AddHostedService<CommandNotificationService>();
         _ = services.AddHostedService<NotificationSenderService>();
         _ = services.AddHostedService<TrackedMessageCleanupService>();
 

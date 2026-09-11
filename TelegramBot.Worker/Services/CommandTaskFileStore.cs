@@ -25,6 +25,15 @@ public sealed class CommandTaskFileStore(
             Path.Combine(_taskDirectory, $"task_{projectName}_{commandId}.xml"));
     }
 
+    /// <summary>Пути .scr и status JSON для команды MERGEDWG.</summary>
+    public (string ScriptPath, string StatusPath) GetMergeDwgPaths(int commandId, string filePath)
+    {
+        var projectName = GetProjectName(filePath);
+        return (
+            Path.Combine(_taskDirectory, $"{projectName}_{commandId}.mergedwg.scr"),
+            Path.Combine(_taskDirectory, $"{projectName}_{commandId}.mergedwg.status.json"));
+    }
+
     public bool Create(PendingCommand command)
     {
         var (resultFilePath, taskFilePath) = GetPaths(command.CommandId, command.FilePath ?? string.Empty);
@@ -99,18 +108,12 @@ public sealed class CommandTaskFileStore(
         try
         {
             var (resultFilePath, taskFilePath) = GetPaths(commandId, filePath);
+            var (scriptPath, statusPath) = GetMergeDwgPaths(commandId, filePath);
             var deletedCount = 0;
-            if (File.Exists(taskFilePath))
-            {
-                File.Delete(taskFilePath);
-                deletedCount++;
-            }
-
-            if (File.Exists(resultFilePath))
-            {
-                File.Delete(resultFilePath);
-                deletedCount++;
-            }
+            deletedCount += TryDelete(taskFilePath);
+            deletedCount += TryDelete(resultFilePath);
+            deletedCount += TryDelete(scriptPath);
+            deletedCount += TryDelete(statusPath);
 
             logger.LogDebug("Temp cleanup: cmdId={CommandId}, deleted={DeletedCount}", commandId, deletedCount);
         }
@@ -118,6 +121,17 @@ public sealed class CommandTaskFileStore(
         {
             logger.LogDebug(ex, "Temp cleanup fail: cmdId={CommandId}", commandId);
         }
+    }
+
+    private static int TryDelete(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return 0;
+        }
+
+        File.Delete(path);
+        return 1;
     }
 
     private static string GetProjectName(string filePath)

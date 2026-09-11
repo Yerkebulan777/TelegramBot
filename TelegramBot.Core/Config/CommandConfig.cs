@@ -19,4 +19,18 @@ public sealed class CommandConfig
 
     /// <summary>Рабочая директория. Если null — используется папка обрабатываемого файла. "." — корень процесса.</summary>
     public string? WorkingDirectory { get; set; }
+
+    /// <summary>
+    /// Копия с подставленными exe и аргументами для одного запуска.
+    /// Shared-объект из <c>IOptions</c> мутировать нельзя: параллельные команды «загрязняют»
+    /// конфигурацию друг друга.
+    /// https://learn.microsoft.com/en-us/dotnet/core/extensions/options#ios-postconfigure-options
+    /// </summary>
+    public CommandConfig WithResolved(string executablePath, string argumentsTemplate) => new()
+    {
+        ExecutablePath = executablePath,
+        ArgumentsTemplate = argumentsTemplate,
+        AllowedExtensions = AllowedExtensions is null ? null : [.. AllowedExtensions],
+        WorkingDirectory = WorkingDirectory,
+    };
 }

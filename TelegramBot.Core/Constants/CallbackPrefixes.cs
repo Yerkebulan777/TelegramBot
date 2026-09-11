@@ -32,6 +32,9 @@ public static class CallbackPrefixes
     /// <summary>Пересохранение RVT с аудитом и отсоединением от центральной модели.</summary>
     public const string Resave = "RESAVE:";
 
+    /// <summary>Сборка общего DWG через AutoCAD (MERGEDWG_BATCH) по папке экспорта выбранного RVT.</summary>
+    public const string MergeDwg = "MERGEDWG:";
+
     /// <summary>Применение выбранных команд.</summary>
     public const string ApplyCommands = "APPLYCOMMANDS:";
 

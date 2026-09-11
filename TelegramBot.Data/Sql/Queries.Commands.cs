@@ -116,11 +116,14 @@ internal static partial class SqlQueries
                 WHERE s.SessionId = cu.SessionId
                   AND s.StartNotified = FALSE
                   AND s.Status != 'Deleted'
-                RETURNING s.SessionId
+                RETURNING s.SessionId, s.CorrelationId
             ),
             notified AS (
-                SELECT pg_notify('session_started', @Payload)
+                INSERT INTO NotificationOutbox (EventType, SessionId, CorrelationId)
+                SELECT 'session_started', SessionId, CorrelationId
                 FROM session_marked
+                ON CONFLICT DO NOTHING
+                RETURNING OutboxId
             )
             SELECT COUNT(*)::int FROM notified;";
 
@@ -207,8 +210,15 @@ internal static partial class SqlQueries
                 CompletedAt = CASE WHEN RetryCount + 1 >= @MaxRetries THEN NOW() ELSE CompletedAt END,
                 ErrorMessage = 'Lease expired: worker crash or timeout'
             WHERE Status = 'processing'
+              AND SessionId = @SessionId
               AND Lease IS NOT NULL
               AND Lease < @CurrentTimeSec;";
+
+        internal const string GetExpiredLeaseSessions = @"
+            SELECT DISTINCT c.SessionId, s.CorrelationId
+            FROM Commands c JOIN Sessions s ON s.SessionId = c.SessionId
+            WHERE c.Status = 'processing' AND c.Lease < @CurrentTimeSec
+            ORDER BY c.SessionId;";
 
         internal const string CountPendingProcessingBySession = @"
             SELECT COUNT(*)

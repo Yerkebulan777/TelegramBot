@@ -10,4 +10,5 @@ public static class CommandCodes
     public const string Ifc = "IFC";
     public const string Resave = "RESAVE";
     public const string ClashRep = "CLASHREP";
+    public const string MergeDwg = "MERGEDWG";
 }

@@ -1,190 +1,93 @@
 # Алгоритм выполнения команд
 
-Semantics pipeline Server → PostgreSQL → Worker → Telegram. Точный SQL — в `TelegramBot.Data/Sql/`.
-
-## Общий поток
+Server → PostgreSQL → Worker → Telegram. SQL — `TelegramBot.Data/Sql/`.
 
 ```text
-Telegram update → Server → Sessions + Commands (1 транзакция)
-→ Worker polling → claim → process + TaskFile/ResultFile → Done/retry/Failed → NotificationOutbox → Server отправляет итог
+Telegram → Session + Commands (1 tx)
+→ Worker poll → claim → TaskFile/ResultFile → Done/retry/Failed
+→ NotificationOutbox → Server отправляет итог
 ```
 
-## 0. Старт Server и инициализация схемы
+## 0. Старт Server
 
-`DatabaseInitializerService` — hosted service (`BackgroundService`), зарегистрирован первым среди hosted-сервисов в `AddTelegramBotServer`. Создаёт схему (таблицы, индексы, constraints, legacy soft-delete) в одной транзакции с rollback при ошибке.
-
-Кластер и база появляются раньше, на установке: helper `PostgresConnectionCheck ensure` при выборе Server поднимает PostgreSQL 18 в уже запущенном Docker Desktop (`docker compose up -d` в `%ProgramData%\TelegramBot\PostgreSQL`) и пишет строку подключения в `appsettings.Local.json`. Нативный PostgreSQL установщик не ставит. Схему таблиц по-прежнему создаёт только Server.
-
-Ключевое: **инициализация не блокирует старт хоста**. Раньше вызывалась синхронно в `Program.Main` до `host.RunAsync()` — пока PostgreSQL (в Docker) не поднимался при загрузке машины, инициализация висела > 60 c и SCM убивал старт службы по таймауту (event 7009/7000). Теперь схема создаётся в `ExecuteAsync` с retry (2 → 5 → 15 c, бесконечно до успеха), а хост рапортует SCM «started» немедленно.
-
-Hosted-сервисы стартуют параллельно (fire-and-forget `ExecuteAsync`), поэтому каждый сам толерантен к временно недоступной БД: `CommandNotificationService` — reconnect-циклом, `NotificationSenderService` — изолированным стартовым drain + polling (outbox retry'ется), `TelegramBotHostedService` — пер-апдейтным catch. Стартовое окно без схемы не теряет данные: update'ы буферизуются каналом, outbox и LISTEN переподключаются.
+`DatabaseInitializerService` создаёт схему в фоне с retry (не блокирует SCM). Кластер/БД на установке — `PostgresConnectionCheck ensure` + Docker Desktop. Hosted-сервисы стартуют параллельно; outbox и cleanup переживают временную недоступность БД.
 
 ## 1. Создание задания
 
-`SlashCommandService` проверяет команды и разделы, сканирует `01_RVT`, дедуплицирует, проверяет дневной лимит и дубликаты.
+`SlashCommandService`: сканирование `01_RVT`, лимиты, дедуп. В одной транзакции — `Sessions` + Cartesian product команд×файлов.
 
-В одной DB-транзакции создаётся `Sessions` и Cartesian product команд×файлов в `Commands`.
-`ON CONFLICT (CommandText, FilePath) WHERE Status IN ('pending', 'processing') DO NOTHING`
-пропускает только уже активные пары, глобально по всем пользователям. Остальные операции добавляются.
-Если все пары пропущены, транзакция откатывается. При частичном добавлении `FilesAmount` учитывает
-только файлы с добавленными операциями.
+`ON CONFLICT (CommandText, FilePath) WHERE Status IN ('pending','processing') DO NOTHING` — глобально по активным парам. Все пропущены → rollback. Частичный skip → `FilesAmount` только по добавленным. Для пропусков показывается снимок прежней команды (до 8 деталей).
 
-Для пропусков Server читает снимок прежней активной команды: `CommandId`, `SessionId`, `Status`,
-`CreatedAt`. Сообщение показывает до восьми подробностей и общее количество пропущенных операций.
-Если конфликтующая команда завершилась между INSERT и чтением, сообщение сообщает об изменении
-её статуса. Уведомление `new_tasks` больше не отправляется: Worker читает очередь самостоятельно.
+Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (3) → DATA (4) → остальное (5).  
+`Partition = "file:" + md5(lower(FilePath))` — одна команда на partition.
 
-### Priority
+Корень: `RuntimeSettings.root_path` (+ admin user id). Первый успешный путь закрепляет admin. Буква диска/`UNC` → `UncPathResolver`; в Telegram UNC не показывается. Снимок пишется в `Commands.RootPath`. `RootPathSetup` кладёт заявку на 30 мин; активный путь меняет только подтверждение admin в `/help`.
 
-Меньшее число — раньше: `PDF/DWG` (1) → `NWC` (2) → `IFC` (3) → `DATA` (4) → default/остальные команды (5).
+## 2. Claim
 
-### Partition
+Цикл: lease cleanup (по `CleanupIntervalSeconds`) → drain → пауза `FallbackPollingIntervalSeconds` (default 1; 0 = 1).
 
-```text
-Partition = "file:" + md5(lower(FilePath))
-```
+`availableSlots = MaxConcurrentCommands - running`. Claim: `pending` с наступившим `NextRetryAt`, без partition в `processing`, `FOR UPDATE SKIP LOCKED` + partition advisory lock. Сортировка: Priority, CreatedAt, CommandId.
 
-Одна команда на partition за раз. Операции одного файла — последовательно, разных файлов — параллельно.
-
-## 2. Claim очереди
-
-`CommandExecutionService` выполняет один цикл: очистка истёкших lease (на старте и по
-`CleanupIntervalSeconds`) → `CommandOrchestrator.TriggerDrainAsync` → пауза. При ошибке обращения
-к БД цикл пишет предупреждение и повторяет попытку после паузы, с новым подключением.
-
-Интервал — `Worker:FallbackPollingIntervalSeconds`, по умолчанию 1 секунда. Старое имя ключа
-сохранено для совместимости; значение 0 также означает 1 секунду. Существующие положительные
-переопределения сохраняют своё значение. `LISTEN/NOTIFY`, таймеры отдельных retry и запуск drain
-из continuation завершённой команды удалены. Мониторинг процессов работает независимо.
-
-Drain: `availableSlots = MaxConcurrentCommands - runningTaskCount`. Claim атомарно выбирает
-`pending` с наступившим `NextRetryAt`, исключая partition с `processing`, используя
-`FOR UPDATE SKIP LOCKED` и partition advisory xact lock. Сортировка по `Priority`, `CreatedAt`,
-`CommandId`. Незавершённые tasks учитываются до окончания обработки, включая запись результата.
-Новые команды и retries подбираются очередным циклом при наличии слотов.
-
-Аварийная lease остаётся `ProcessTimeoutMinutes + 5` минут с момента claim (185 минут по
-умолчанию). Перезапуск Worker не снимает неистёкшие lease: по одной записи БД нельзя безопасно
-решить, что прежний процесс уже остановлен. Эта схема не гарантирует exactly-once экспорт при
-аварии между выполнением внешней операции и фиксацией результата.
-
-## Корневой UNC-путь
-
-`RuntimeSettings.root_path` — единый корень для Server; `RuntimeSettings.root_path_admin_user_id` — Telegram ID единственного администратора. Первый пользователь, успешно сохранивший валидный путь, атомарно закрепляется администратором; далее менять корень может только этот пользователь. Пользователь отправляет из `/help` букву подключённого сетевого диска (`Z:\`), вложенную папку (`Z:\Проекты`) или готовый `\\сервер\шара`. `UncPathResolver` сначала использует `WNetGetUniversalName` в сессии Server, а затем ищет `RemotePath` для буквы в загруженных профилях `HKEY_USERS`; принимается только единственный различающийся UNC. Сохраняется только существующий и доступный учётной записи службы Server UNC (проверки: полнота `\\сервер\шара`, `Directory.Exists`, отсутствие reparse-point); в Telegram он не показывается. Профиль с буквой должен быть загружен на машине Server, а Worker также обязан иметь доступ к сохранённому UNC. Локальные диски не принимаются. При создании команды это значение записывается в `Commands.RootPath`. Смена глобального значения немедленно влияет на новые выборы файлов, но Worker валидирует queued/processing-команду по её неизменяемому снимку.
-
-`TelegramBot.RootPathSetup` запускается из меню «Пуск» в интерактивной сессии Windows на машине Server. Он преобразует выбранный сетевой диск через `WNetGetUniversalName` и сохраняет одну заявку в `RuntimeSettings.pending_root_path_change`; активный путь утилита не меняет. Заявка действует 30 минут и заменяется следующей. Администратор бота видит в `/help` только факт ожидающей заявки и может подтвердить или отменить её. При подтверждении Server повторно проверяет UNC и в одной транзакции под существующей advisory lock меняет `root_path`, закрепляет первого администратора при необходимости и закрывает заявку. Созданные команды продолжают использовать свой снимок `Commands.RootPath`.
+Аварийная lease: `ProcessTimeoutMinutes + 5` (185 мин). Перезапуск Worker не снимает неистёкшие lease (нет exactly-once гарантии при аварии mid-export).
 
 ## 3. Подготовка и запуск
 
-`CommandPreparer.PrepareAsync`:
-- находит `CommandConfig`
-- валидирует FilePath (снимок RootPath на момент постановки в очередь, reparse point, extension, существование)
-- резолвит Revit/Navisworks executable через BimLib
-- возвращает копию конфига с resolved path
+`CommandPreparer`: конфиг, валидация FilePath по снимку RootPath, resolve Revit/Navisworks/AutoCAD.  
+`ProcessStarter`: TaskFile + XSD; Revit — `/language RUS` + `REVITBIMFUSION_TASK_FILE`. `MERGEDWG` — `.scr` + status JSON. Старт Revit и AutoCAD — через `ProcessLaunchGate` (`CommandTraits.GetLaunchGate`; ≥ 15 с между глобальными `Process.Start()` одного продукта, состояние — `ProcessLaunchState`). Прочие команды — сразу. Статус уже `processing` во время ожидания gate.
 
-`ProcessStarter.StartAsync`:
-- создаёт TaskFile (`task_{project}_{commandId}.xml`) с XSD-валидацией
-- заполняет `ProcessStartInfo` (Revit: без контрактных CLI-аргументов, `/language RUS`, TaskFile path в `REVITBIMFUSION_TASK_FILE`)
-- только для Revit передаёт запуск в `RevitLaunchGate`: session advisory lock PostgreSQL сериализует все Worker, а singleton-строка `RevitLaunchState` хранит время последнего запуска
-- под advisory lock ожидает остаток глобального интервала и вызывает `Process.Start()`; для lock acquisition отключён стандартный 30-секундный command timeout Npgsql, но ожидание отменяется общим token команды. Между запусками Revit проходит не менее 15 секунд, транзакция на время ожидания не удерживается
-- не-Revit процессы запускаются сразу и глобальную паузу не используют
+## 4. Результат
 
-Команда уже имеет статус `processing`, пока готовится и ожидает Revit launch gate.
-
-## 4. Ожидание и результат
-
-| Условие | Результат |
+| Условие | Итог |
 |---|---|
 | `status=done` | `Done` |
-| `status=done` + `warningMessage` | `Done`; текст warning пишется в `Commands.ErrorMessage` (это не failure) |
-| `status=failed` (plugin) | permanent `Failed`, без retry; исключение: Revit `InternalException` при `OpenAndActivateDocument` в `errorDetails` → один retry через 10 с |
-| `status=cancelled` | `Failed`, без retry |
-| invalid XML | `.bad`, failure → retry policy |
-| Revit без ResultFile | failure → retry policy |
-| wrapper без ResultFile, exit 0 | `Done` fallback |
-| wrapper без ResultFile, exit ≠ 0 | failure → retry/permanent по классификатору |
-| timeout | process kill, `Failed` (без retry) |
+| `done` + `warningMessage` | `Done`; warning → `ErrorMessage` |
+| plugin `failed` | permanent `Failed`; исключение: Revit `InternalException` + `OpenAndActivateDocument` при RetryCount=0 → один retry через 10 с |
+| `cancelled` | `Failed`, без retry |
+| invalid XML / Revit без ResultFile | retry policy |
+| `MERGEDWG` status JSON `success=true` | `Done` |
+| `MERGEDWG` status JSON `success=false` / отсутствует | permanent `Failed` / retry|permanent по exit |
+| wrapper без ResultFile, exit 0 / ≠0 | `Done` / retry|permanent |
+| timeout | kill, `Failed` без retry |
 
-stdout/stderr: 64 KiB capture, 4 KiB в лог. Валидный ResultFile удаляется вместе с TaskFile после успешной обработки результата. После завершения Revit `RevitTemporaryDirectoryCleaner` запускает отслеживаемую фоновую cleanup-задачу, не занимающую слот выполнения команды. Сервис проверяет опциональный `temporaryDirectoryPath`: это должен быть абсолютный непосредственный дочерний каталог текущего `%TEMP%` с контрактным именем `RBF-{GUID}`, без reparse-point и с обычным RVT-файлом, имя которого совпадает с исходным. Проверка повторяется непосредственно перед каждой рекурсивной попыткой удаления; при ошибке выполняется пять повторов с паузой 30 секунд, без изменения статуса команды. При штатной остановке Worker новые cleanup-задачи не принимаются, а активные ожидаются до трёх минут. При ошибке записи в БД task/result-файлы сохраняются; перед новой попыткой прежний ResultFile переносится в `.previous` (одна последняя копия), чтобы не принять его за новый результат. При отрицательном exit code — Revit journal evidence.
+stdout/stderr: 64 KiB capture. Valid ResultFile удаляется с TaskFile. После Revit — фоновый `RevitTemporaryDirectoryCleaner` (`RBF-{GUID}` под `%TEMP%`). При ошибке записи БД файлы сохраняются; перед retry ResultFile → `.previous`.
 
-`Commands.ErrorMessage` при `Status='Failed'` — причина сбоя; при `Status='Done'` — опциональный `ResultFile.warningMessage` (whitespace-only не сохраняется). Выборки warned-команд всегда фильтруют `Status = 'Done'`.
-
-### Ошибка сохранения результата
-
-Финальный статус записывается с четырьмя попытками при временной ошибке БД: до 10 секунд
-на подключение и запрос каждой попытки, паузы 2, 4 и 8 секунд. В одной транзакции сначала берётся
-session advisory xact lock, затем записывается terminal-статус, проверяется число активных команд и,
-если это последняя команда, создаётся outbox-событие и `pg_notify`. Нетранзиентная ошибка не повторяется.
-После исчерпания попыток выбрасывается `CommandPersistenceException`; она не классифицируется
-как ошибка Revit и не вызывает немедленный повтор экспорта. Результат сохраняется для диагностики,
-а запись БД остаётся для существующего lease recovery. Это ограниченные повторы, не durable outbox
-результатов. Нулевая затронутая строка (например, soft-delete) отдельно записывается в лог.
-
-Ошибка `ScheduleRetryAsync` также отделена от BIM-ошибок. Неоднозначный результат SQL не
-повторяется автоматически, поскольку счётчик попыток мог уже увеличиться.
+Финальный статус: до 4 попыток записи (паузы 2/4/8 с) в одной tx с session lock + outbox при последней команде. Исчерпание → `CommandPersistenceException` (не BIM-retry).
 
 ## 5. Retry
 
-Permanent (без retry): plugin `status=failed`/`cancelled`, `PermanentFailureExitCodes`, invalid input, validation errors, non-transient exceptions, timeout. Исключение: Revit-команда с plugin `status=failed`, когда `errorDetails` содержит `Autodesk.Revit.Exceptions.InternalException` и `UIApplication.OpenAndActivateDocument`, при `RetryCount = 0` повторяется один раз через 10 с. `ProcessRunner` завершает текущую попытку; следующий polling-цикл подбирает retry не раньше `NextRetryAt`, когда есть свободный слот. Второй такой сбой становится `Failed`.
+Permanent: plugin failed/cancelled (кроме open-retry выше), permanent exit codes, invalid input, timeout.  
+Transient: `RetryDelayBaseSeconds × 2^RetryCount + jitter`; после `MaxRetries` → `Failed`. Следующий poll подбирает по `NextRetryAt`.
 
-Transient: `delay = RetryDelayBaseSeconds × 2^RetryCount + jitter`. После `MaxRetries` → `Failed`.
+## 6. Завершение и доставка
 
-## 6. Завершение сессии
+Terminal transition и lease-Failed — один session advisory lock: статус → при отсутствии активных команд + Done/Failed → `CompletionNotified` + одна запись `session_completed`.
 
-После terminal transition команды под session advisory xact lock проверяется `pending`/`processing` в сессии. Если нет — в той же транзакции: `CompletionNotified = TRUE`, INSERT в `NotificationOutbox`, `pg_notify('command_completed')`.
+`NotificationSenderService`: poll 3 с, sender advisory lock, до 20 событий/цикл, lease 5 мин. Раз в минуту — recover до 100 сессий без outbox. Telegram timeout 30 с; 429 → `retry_after` под общей блокировкой; transient → `NextAttemptAt` (до 300 с); 400/403 → failed. Ack + tracking — одна tx (at-least-once; возможен дубль при аварии между Telegram и commit).
 
-Server:
-- `CommandNotificationService` слушает `session_started` и `command_completed`
-- `NotificationSenderService` drain-ит outbox (при старте, по wake-up, каждые 30 с)
-- advisory lock на sender для Server replicas
-- completion notify: секции «Ошибки» (`Failed`) и «Предупреждения» (`Done` + non-empty `ErrorMessage`)
+`CompletionMessageFormatter` — чистый текст: Failed и Done-с-warning; относительный путь от `Commands.RootPath` (иначе имя файла); перевод типовых причин только при отображении.
 
 ## 7. Cleanup и shutdown
 
-- **Lease recovery**: каждые `CleanupIntervalSeconds` — expired `processing` → `pending`
-- **Process health monitoring**: каждые `ProcessMonitorIntervalSeconds` — проверка `Process` внутри `CommandExecutionService` + `DialogDismisser`
-- **Session retention**: `SessionCleanupService` — soft-delete сессий старше `CompletedSessionRetentionDays`
-- **Telegram message cleanup**: Server `TrackedMessageCleanupService` каждые `MessageCleanup:IntervalMinutes` удаляет tracking-сообщения старше `RetentionHours`, но младше `MaximumDeletionAgeHours` (по умолчанию 24–47 ч). Неудалённые сообщения остаются для повторной попытки; после окна Telegram запись удаляется только из `TrackedMessages` с Warning.
-  - Решение rate-limit принимается до первого I/O в `CommandAppService`; входящие сообщения регистрируются после проверки, включая отклонённые. Ответы гейтов также отслеживаются; лимитер атомарно разрешает не более одного предупреждения пользователю за `WindowSeconds`. Soft-delete сессии сохраняет tracking для интерактивной/фоновой очистки.
-  - Интерактивная и фоновая очистка используют общий механизм: distinct ID, пакеты до 100, максимум две повторные попытки для 429/5xx/сетевых сбоев; 429 учитывает `RetryAfter`, остальные — exponential backoff. Одиночный fallback применяется только к ошибкам конкретных сообщений (400), а не к лимитам и недоступности чата.
-  - Tracking удаляется после каждого пакета только для подтверждённых удалений (включая уже отсутствующие сообщения). Частичный успех сохраняется даже при ошибке/отмене fallback. Сбой одного чата не прерывает обработку остальных; исключения `exceptMessageIds` действуют и для последнего входящего сообщения.
-  - Обработка пакета возвращает подтверждённые ID и признак отложенной работы; сохранение tracking выполняется отдельно. Фоновый цикл логирует число выбранных и подтверждённо удалённых сообщений. `LastUserMessageId` очищается только после подтверждённого удаления, а не при `UserSession.Reset`. Токен отмены передаётся из обработчиков во все вызовы очистки, Telegram-запросы и задержки retry; при отмене сначала сохраняется частичный результат пакета.
-- **Worker shutdown**: остановка циклов → process-tree kill (30s budget) → освобождение ресурсов
+- Lease recovery → pending или Failed + outbox  
+- Process monitor + DialogDismisser  
+- Soft-delete сессий старше `CompletedSessionRetentionDays`, пока нет pending outbox  
+- Telegram cleanup: Kind (interface/temporary/completion/job_status); interactive ставит `DeleteAfter=NOW` для устаревшего UI, защищая completion; temporary — 5 мин, results — 24 ч; цикл каждую минуту, batch 500, пакеты Telegram до 100; после `MaximumDeletionAgeHours` (47) — удаление только tracking-записи  
+- Worker shutdown: stop loops → process-tree kill (30 с) → release  
 
-## 8. Повторный запуск из /status
+## 8. Rerun из /status
 
-Кнопка с именем файла в `/status` для `Done`/`Failed` шлёт `RERUNCMD:{commandId}:{filter}` → `SessionManagementHandler.HandleRerunCommandAsync`.
+`RERUNCMD` → новый Session/Command/CorrelationId, `RetryCount=0`. Авто-retry продолжает ту же строку.
 
-Server читает принадлежащий пользователю завершённый command как снимок и вызывает обычный
-`CreateSessionWithCommandsAsync`. Поэтому ручной повтор всегда создаёт новые `SessionId`, `CommandId`,
-`CorrelationId` и `RetryCount = 0`; исходная строка `Done`/`Failed` остаётся историей. Частичный
-уникальный индекс не допускает повтор, если та же операция уже `pending`/`processing`; пользователь
-видит «Уже поставлено или выполняется». Новый command подхватывается тем же polling-циклом, что и
-обычное задание. Автоматический retry, в отличие от ручного, продолжает использовать ту же строку.
+## Статусы и locks
 
-## Статусы
-
-`pending` → `processing` → `Done` / `Failed`. `Deleted` — скрыта пользователем/retention. `Cancelled` мигрирован в `Deleted`.
-
-## PostgreSQL channels и locks
-
-| Канал | Назначение |
-|---|---|
-| `session_started` | уведомление «задание запущено» |
-| `command_completed` | разбудить outbox sender |
-
-Session/advisory locks используются для lease cleanup, outbox sender, partition claim, duplicate
-check и глобального Revit launch gate. Worker scheduling при этом остаётся обычным polling PostgreSQL.
+`pending` → `processing` → `Done`/`Failed`. `Deleted` — скрытие/retention.  
+Advisory locks: lease cleanup, outbox, completion, partition claim, launch gate (Revit и AutoCAD — разные id). Polling; LISTEN/NOTIFY не используется.
 
 ## Добавление команды
 
-1. `CommandCodes` + `CallbackPrefixes` + `CommandCatalog`
-2. priority map в `SlashCommandService`
-3. `Worker:Commands` config
-4. `CommandTraits.RequiresRevit` если Revit AddIn
-5. canonical BIM contract/XSD/plugin если меняется boundary
-6. README, AGENTS и этот документ
-
-## Представление причин в итоговом уведомлении
-
-Запросы `GetFailedCommandsBySession` и `GetWarnedCommandsBySession` возвращают `FilePath`, `RootPath`, `CommandText` и `ErrorMessage`. Server использует сохранённый `Commands.RootPath` для относительного пути в уведомлении и сокращает путь входного файла в причине перед ограничением её длины. Без корня используется имя файла. Перевод типовых причин применяется только при отображении; исходный `ErrorMessage` в БД и классификация retry не изменяются.
+1. `CommandCodes` + `CallbackPrefixes` + `CommandCatalog`  
+2. `CommandTraits` (priority / RequiresRevit)  
+3. `Worker:Commands` config  
+4. BIM contract/XSD/plugin при смене boundary  
+5. README / AGENTS / этот документ  

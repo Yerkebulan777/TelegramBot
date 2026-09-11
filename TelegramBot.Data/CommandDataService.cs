@@ -42,9 +42,25 @@ public sealed class CommandDataService(
     {
         _ = await TryExecuteWithAdvisoryLockAsync(
             "release expired leases",
-            conn => conn.ExecuteAsync(
-                SqlQueries.Commands.ReleaseExpiredLeases,
-                new { CurrentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), MaxRetries = maxRetries }));
+            async conn =>
+            {
+                var currentTimeSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                var sessions = await conn.QueryAsync<(int SessionId, string CorrelationId)>(SqlQueries.Commands.GetExpiredLeaseSessions,
+                    new { CurrentTimeSec = currentTimeSec });
+                var count = 0;
+                foreach (var (sessionId, correlationId) in sessions)
+                {
+                    await using var tx = await conn.BeginTransactionAsync();
+                    _ = await conn.ExecuteAsync(SqlQueries.Commands.AcquireSessionCompletionLock,
+                        new { SessionId = sessionId }, tx);
+                    count += await conn.ExecuteAsync(SqlQueries.Commands.ReleaseExpiredLeases,
+                        new { SessionId = sessionId, CurrentTimeSec = currentTimeSec, MaxRetries = maxRetries }, tx);
+                    _ = await conn.ExecuteScalarAsync<int>(SqlQueries.Sessions.NotifyCompletionOnce,
+                        new { SessionId = sessionId, CorrelationId = correlationId }, tx);
+                    await tx.CommitAsync();
+                }
+                return count;
+            });
     }
 
     /// <summary>
@@ -101,27 +117,11 @@ public sealed class CommandDataService(
                     return false;
                 }
 
-                var remaining = await conn.QuerySingleAsync<int>(new CommandDefinition(
-                    SqlQueries.Commands.CountPendingProcessingBySession,
-                    new { command.SessionId },
+                var notified = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+                    SqlQueries.Sessions.NotifyCompletionOnce,
+                    new { command.SessionId, command.CorrelationId },
                     transaction,
-                    cancellationToken: timeout.Token));
-
-                var notified = false;
-                if (remaining == 0)
-                {
-                    var payload = $"{command.SessionId}|{command.CorrelationId}";
-                    notified = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                        SqlQueries.Sessions.NotifyCompletionOnce,
-                        new
-                        {
-                            command.SessionId,
-                            command.CorrelationId,
-                            Payload = payload,
-                        },
-                        transaction,
-                        cancellationToken: timeout.Token)) > 0;
-                }
+                    cancellationToken: timeout.Token)) > 0;
 
                 await transaction.CommitAsync(timeout.Token);
                 return notified;
@@ -143,7 +143,7 @@ public sealed class CommandDataService(
     }
 
     /// <summary>Записывает PID запущенного процесса и один раз уведомляет Server о старте сессии.</summary>
-    public async Task<bool> MarkProcessStartedAndNotifyOnceAsync(int commandId, int processId, int sessionId, string correlationId, long userId)
+    public async Task<bool> MarkProcessStartedAndNotifyOnceAsync(int commandId, int processId)
     {
         try
         {
@@ -154,7 +154,6 @@ public sealed class CommandDataService(
                 {
                     CommandId = commandId,
                     ProcessId = processId,
-                    Payload = $"{sessionId}|{correlationId}|{userId}",
                 });
 
             return notified > 0;

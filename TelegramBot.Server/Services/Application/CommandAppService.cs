@@ -1,4 +1,5 @@
 using Telegram.Bot.Types;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -34,7 +35,8 @@ public sealed class CommandAppService(
         await messageTrackingService.TrackAsync(
             message.Chat.Id,
             message.MessageId,
-            session);
+            session,
+            message.Date);
 
         if (!admitted)
         {
@@ -107,7 +109,7 @@ public sealed class CommandAppService(
                 _ = await messageTrackingService.TrackAsync(
                     outputService.SendMessageAsync(userId,
                         "⚠️ Слишком много запросов. Пожалуйста, подождите немного."),
-                    sessionManager.GetOrCreateSession(userId));
+                    sessionManager.GetOrCreateSession(userId), TrackedMessageKinds.Temporary);
             }
             return false;
         }
@@ -127,7 +129,7 @@ public sealed class CommandAppService(
         logger.LogWarning("Anonymous user rejected: {UserId}", userId);
         _ = await messageTrackingService.TrackAsync(
             outputService.SendMessageAsync(userId, AnonymousProfileMessage),
-            sessionManager.GetOrCreateSession(userId));
+            sessionManager.GetOrCreateSession(userId), TrackedMessageKinds.Temporary);
     }
 
     /// <summary>
@@ -142,7 +144,7 @@ public sealed class CommandAppService(
         _ = await messageTrackingService.TrackAsync(
             outputService.RemoveReplyKeyboardAsync(userId,
                 "⚡️ Сервер перезапущен или сессия истекла.\nСтарые сообщения неактуальны.\n\nВведите /start."),
-            session);
+            session, TrackedMessageKinds.Temporary);
         session.Initialized = true;
     }
 

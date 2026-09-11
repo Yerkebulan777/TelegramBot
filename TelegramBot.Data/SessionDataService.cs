@@ -290,23 +290,4 @@ public sealed class SessionDataService(
         }
     }
 
-    /// <summary>Атомарно отправляет сигнал о завершении сессии не более одного раза.</summary>
-    public async Task<bool> NotifySessionCompletedOnceAsync(int sessionId, string correlationId)
-    {
-        try
-        {
-            var payload = $"{sessionId}|{correlationId}";
-            await using var conn = await CreateOpenConnectionAsync();
-            var notified = await conn.ExecuteScalarAsync<int>(
-                SqlQueries.Sessions.NotifyCompletionOnce,
-                new { SessionId = sessionId, CorrelationId = correlationId, Payload = payload });
-            return notified > 0;
-        }
-        catch (Exception e)
-        {
-            Logger.LogWarning(e, "Failed to send command_completed NOTIFY for session {SessionId}, correlationId={CorrelationId}",
-                sessionId, correlationId);
-            return false;
-        }
-    }
 }
