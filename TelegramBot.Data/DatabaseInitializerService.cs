@@ -10,13 +10,8 @@ namespace TelegramBot.Data;
 
 /// <summary>
 /// Инициализирует схему PostgreSQL при старте как hosted service.
-///
-/// Запускается в фоне, поэтому НЕ блокирует старт хоста: сервис рапортует SCM
-/// «started» немедленно, а схема создаётся с retry-циклом. Раньше это вызывалось
-/// синхронно в Program.Main до host.RunAsync — пока БД (в Docker) не поднималась
-/// при загрузке машины, инициализация висела дольше 60 c и SCM убивал старт
-/// службы по таймауту (event 7009/7000). Сеть/Postgres у Docker поднимаются
-/// позже, чем эта служба (AUTO_START delayed), поэтому retry обязателен.
+/// Не блокирует старт хоста: схема создаётся в фоне с retry, потому что
+/// Docker/Postgres часто ещё не слушают сразу после входа.
 /// </summary>
 public sealed class DatabaseInitializerService(
     IConfiguration configuration,

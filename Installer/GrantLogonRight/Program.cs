@@ -1,3 +1,5 @@
+// Ops-only: Setup no longer ships this exe.
+//
 // Grants "Log on as a service" (SeServiceLogonRight) to an account via the
 // same LSA API the Services GUI uses (LsaAddAccountRights) when you set a
 // service's logon account by hand. sc.exe create skips that step entirely —

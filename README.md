@@ -6,8 +6,10 @@ Windows .NET 10: Telegram-бот ставит задания в PostgreSQL, Work
 
 | Компонент | Развёртывание |
 |---|---|
-| **Server** | Windows Service |
-| **Worker** | Task Scheduler (`onlogon` + `/it`); нужна залогиненная учётка (Revit — интерактивный desktop) |
+| **Server** | Task Scheduler (`onlogon`, интерактивная сессия) |
+| **Worker** | Task Scheduler (`onlogon`, интерактивная сессия); нужна залогиненная учётка (Revit — видимый desktop) |
+
+Оба стартуют после входа (на выделенном ПК — автологон). Почему не Windows Service — [ADR-012](Docs/ADR.md).
 
 Детали pipeline: [Docs/ExecutionAlgorithm.md](Docs/ExecutionAlgorithm.md). Правила для агентов: [AGENTS.md](AGENTS.md).
 
@@ -76,12 +78,28 @@ Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedP
 
 Продление (~90 дней до истечения): `.\scripts\setup-internal-code-signing.ps1 -Renew` → раздать новый CER → снова собрать Setup. PFX не коммитить.
 
+### Troubleshooting: Server не стартует после перезагрузки
+
+Setup регистрирует `TelegramBotServer` как задачу планировщика при входе. После reboot она стартует, только если учётка из мастера уже в сессии.
+
+```powershell
+schtasks /query /tn TelegramBotServer /v /fo list
+Get-Process TelegramBot.Server -ErrorAction SilentlyContinue
+```
+
+| Симптом | Причина | Что делать |
+|---|---|---|
+| Задачи нет | Setup не ставили / ставили только Worker | Повторить Setup, компонент Server |
+| Задача есть, процесса нет, никто не залогинен | Logon-trigger ждёт интерактивный вход | Включить автологон под учёткой задачи |
+| Старая служба `TelegramBotServer` в SCM, события **7038** | leftover Windows Service с прошлых Setup; вход службы не умеет cached credentials и падает, если повреждён secure channel (`Test-ComputerSecureChannel` = False) | Удалить службу (`sc.exe delete TelegramBotServer`) и поставить актуальный Setup — задача планировщика этот вход не использует |
+| Процесс стартовал и сразу вышел | нет `appsettings.Local.json` / токена / Postgres | Логи `%USERPROFILE%\Documents\TelegramBot\Logs\Server`; Docker Desktop и контейнер `postgres_telegram` |
+
 ## Поведение (кратко)
 
 - Очередь: Worker polling 1 с (`Worker:FallbackPollingIntervalSeconds`; 0 = 1). Одна операция на файл (`Partition`); разные файлы — до `MaxConcurrentCommands`. Между глобальными запусками Revit — ≥ 15 с, между запусками AutoCAD (`MERGEDWG`) — ≥ 15 с (`ProcessLaunchGate`).
 - Дубликаты активных пар команда+файл пропускаются; `/status` rerun создаёт новое задание.
 - Уведомления старта/итога — durable outbox (poll 3 с). Итог защищён от интерактивной очистки. Defaults очистки — `MessageCleanupOptions`.
-- Обновление: остановить службы → Server (миграция схемы) → Worker.
+- Обновление: остановить задачи Server/Worker → Server (миграция схемы) → Worker.
 
 ## BIM-контракт
 

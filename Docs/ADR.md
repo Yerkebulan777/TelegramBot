@@ -58,3 +58,11 @@ Server — long-polling Telegram, не HTTP API → `Host.CreateDefaultBuilder`.
 `MERGEDWG` не использует BIM ResultFile/XSD. Worker пишет AutoCAD script (`NETLOAD` + `MERGEDWG_BATCH` + папка DWG + путь status), запускает `acad.exe /nologo /b`, читает JSON статуса плагина AutoBIMFusion. Папка DWG вычисляется из выбранного RVT как в DrawingExportModule (`{Base}/02_DWG/{relative?}/{RevitFileName}/`).
 
 Вместе с командой обобщён launch gate: `RevitLaunchGate` + однострочная `RevitLaunchState` заменены на `ProcessLaunchGate` и `ProcessLaunchState(Product, LastLaunchAt)` — по строке на продукт, upsert без seed, отдельный advisory lock на продукт. Legacy-таблица удаляется при инициализации схемы (хранила только cooldown).
+
+## ADR-012: Server — задача планировщика, не Windows Service
+
+**Статус:** действует (2026-09-11)
+
+Windows Service логинится отдельным network logon к DC (без cached credentials). На доменном ПК с повреждённым secure channel интерактивный вход ещё работает, а SCM пишет 7038 и оставляет службу Stopped после reboot. То же при GPO, который затирает `SeServiceLogonRight`, и при смене пароля учётки после Setup.
+
+Решение: Server регистрируется так же, как Worker — logon-trigger, `InteractiveToken`, рабочий каталог рядом с exe. Пароль в SCM не хранится. Нужна залогиненная учётка (автологон на выделенном ПК). Leftover-службу старых Setup удаляет.

@@ -10,7 +10,7 @@ Telegram → Session + Commands (1 tx)
 
 ## 0. Старт Server
 
-`DatabaseInitializerService` создаёт схему в фоне с retry (не блокирует SCM). Кластер/БД на установке — `PostgresConnectionCheck ensure` + Docker Desktop. Hosted-сервисы стартуют параллельно; outbox и cleanup переживают временную недоступность БД.
+`DatabaseInitializerService` создаёт схему в фоне с retry (не блокирует старт процесса). Кластер/БД на установке — `PostgresConnectionCheck ensure` + Docker Desktop. Hosted-сервисы стартуют параллельно; outbox и cleanup переживают временную недоступность БД.
 
 ## 1. Создание задания
 

@@ -1,22 +1,13 @@
-; TelegramBot installer — Server as a Windows Service, Worker as a Task
-; Scheduler job (see below for why Worker can't be a plain service).
+; TelegramBot installer — Server and Worker as interactive Task Scheduler
+; jobs (onlogon), not Windows Services. Why: Docs/ADR.md ADR-012.
 ;
 ; Prerequisite (run before compiling this script):
 ;   dotnet publish TelegramBot.Server\TelegramBot.Server.csproj -c Release -o Installer\publish\Server
 ;   dotnet publish TelegramBot.Worker\TelegramBot.Worker.csproj -c Release -o Installer\publish\Worker
-;   dotnet publish Installer\GrantLogonRight\GrantLogonRight.csproj -c Release -o Installer\publish\GrantLogonRight
 ;
-; What this script does that a plain "sc.exe create" walkthrough doesn't:
-;   - lets the admin pick Server / Worker / both
-;   - registers Server under a dedicated account with auto-restart
-;   - registers Worker as an interactive Task Scheduler job, NOT a service:
-;     Worker launches Revit, and Windows services run in Session 0, isolated
-;     from any real desktop since Vista — a service-spawned Revit renders on
-;     an invisible desktop no human can see or click through. A logon-trigger
-;     task runs in the actual user's session instead, so Revit shows up
-;     normally. Trade-off: the target account must stay logged on (configure
-;     auto-logon on dedicated machines) — Worker won't run between reboot and
-;     next interactive logon.
+; XML import (not schtasks /create switches) so we can set WorkingDirectory
+; (appsettings.Local.json next to the exe), ExecutionTimeLimit=PT0S (the
+; 72 h default would kill a long-running bot), and RestartOnFailure.
 
 #define AppName "TelegramBot"
 #define ServerExe "TelegramBot.Server.exe"
@@ -56,7 +47,6 @@ Name: "worker"; Description: "TelegramBot Worker"; Types: full worker
 Source: "publish\Server\*"; DestDir: "{app}\Server"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\Worker\*"; DestDir: "{app}\Worker"; Components: worker; Flags: recursesubdirs ignoreversion
 Source: "publish\RootPathSetup\*"; DestDir: "{app}\RootPathSetup"; Components: server; Flags: recursesubdirs ignoreversion
-Source: "publish\GrantLogonRight\*"; DestDir: "{app}\Tools"; Components: server; Flags: recursesubdirs ignoreversion
 Source: "publish\PostgresConnectionCheck\*"; DestDir: "{app}\Tools\PostgresConnectionCheck"; Flags: recursesubdirs ignoreversion
 Source: "..\docker-compose.yml"; DestDir: "{commonappdata}\TelegramBot\PostgreSQL"; Components: server; Flags: ignoreversion
 
@@ -67,18 +57,18 @@ Name: "{autoprograms}\TelegramBot\Изменить рабочую папку"; F
 var
   AccountPage: TInputQueryWizardPage;
   TelegramPage: TInputQueryWizardPage;
+  MustRestartForLegacyService: Boolean;
 
 procedure InitializeWizard;
 begin
   AccountPage := CreateInputQueryPage(wpSelectComponents,
-    'Учётная запись службы', 'Под какой учёткой будут работать Server/Worker?',
+    'Учётная запись', 'Под какой учёткой будут работать Server/Worker?',
     'Не используйте LocalSystem/NetworkService — им нужен явный доступ к сетевой шаре. ' +
     'По умолчанию подставлена текущая учётка (у неё уже есть доступ к сетевой шаре в этой сессии). ' +
-    'Пароль Windows не хранит в доступном виде — введите его вручную (нужен только для Server; ' +
-    'Worker запускается как задача планировщика в сессии этого пользователя при входе в систему — ' +
-    'машина должна оставаться залогиненной под этой учёткой, иначе Worker не стартует).');
+    'Оба процесса — задачи планировщика при входе в систему (интерактивная сессия, не служба). ' +
+    'Машина должна оставаться залогиненной под этой учёткой (на выделенном ПК — автологон), ' +
+    'иначе после перезагрузки Server и Worker не стартуют.');
   AccountPage.Add('Имя учётной записи:', False);
-  AccountPage.Add('Пароль:', True);
   AccountPage.Values[0] := ExpandConstant('{%USERDOMAIN}\{username}');
 
   TelegramPage := CreateInputQueryPage(AccountPage.ID,
@@ -90,7 +80,9 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if PageID = TelegramPage.ID then
+  if PageID = AccountPage.ID then
+    Result := not WizardIsComponentSelected('server') and not WizardIsComponentSelected('worker')
+  else if PageID = TelegramPage.ID then
     Result := not WizardIsComponentSelected('server');
 end;
 
@@ -172,15 +164,11 @@ begin
 end;
 
 { Single, shared mechanic for every privileged CLI call in this script
-  (sc.exe, schtasks.exe, our own GrantLogonRight.exe helper): run it through
-  cmd.exe with stdout+stderr redirected to a log file, and on failure show
-  that log alongside the exit code. A bare "код 1" says nothing about *why*
-  a command failed — this used to be a one-off hack specific to the logon-
-  right helper; it's the one command runner everything else should go
-  through too, instead of each caller improvising its own capture.
-  cmd.exe's /c quoting quirk: when the argument starts and ends with a
-  quote, cmd strips exactly that outer pair before parsing the rest — same
-  trick RegisterWorkerTask uses for schtasks /tr below. }
+  (sc.exe leftover teardown, schtasks.exe): run it through cmd.exe with
+  stdout+stderr redirected to a log file, and on failure show that log
+  alongside the exit code. A bare "код 1" says nothing about *why* a
+  command failed. cmd.exe's /c quoting quirk: when the argument starts and
+  ends with a quote, cmd strips exactly that outer pair before parsing. }
 function RunAdminCommand(const Exe, Args, ErrorContext: String): Boolean;
 var
   LogPath, CmdArgs, LogText: String;
@@ -204,64 +192,84 @@ begin
     MsgBox(ErrorContext + ' (код ' + IntToStr(ResultCode) + ').', mbError, MB_OK);
 end;
 
-{ Grants "Log on as a service" (SeServiceLogonRight) to Account — the same
-  right the Services GUI grants silently via LsaAddAccountRights when you set
-  a service's logon account by hand; sc.exe create skips that step entirely,
-  which is the actual reason a fresh install otherwise needs a manual
-  secpol.msc visit. Calls the LSA API directly through the bundled
-  GrantLogonRight.exe helper (Installer\GrantLogonRight) rather than hand-
-  patching a secedit-exported INF template — that approach turned out too
-  fragile to debug remotely (encoding mismatches, missing sections, and a
-  bare exit code with an empty log).
-  Best-effort only: if a domain GPO enforces this right, it overwrites the
-  local grant again on its own refresh cycle — no local fix survives that,
-  see README troubleshooting section. }
-procedure GrantServiceLogonRight(const Account: String);
+function XmlEscape(const S: String): String;
 begin
-  RunAdminCommand('{app}\Tools\GrantLogonRight.exe', QuoteArg(Account),
-    'Не удалось выдать право "Вход в качестве службы"');
+  Result := S;
+  StringChangeEx(Result, '&', '&amp;', True);
+  StringChangeEx(Result, '<', '&lt;', True);
+  StringChangeEx(Result, '>', '&gt;', True);
+  StringChangeEx(Result, '"', '&quot;', True);
 end;
 
-function RegisterService(const SvcName, DisplayName, ExePath, Account, Password: String): Boolean;
+{ Logon-trigger interactive task. XML (not schtasks /create switches):
+  WorkingDirectory next to the exe, ExecutionTimeLimit=PT0S (no 72 h
+  default), RestartOnFailure. Delay PT5S after logon so desktop/network
+  can settle (auto-logon on dedicated machines). }
+function RegisterLogonTask(const TaskName, ExePath, Account: String): Boolean;
 var
-  CreateCmd: String;
+  XmlPath, Xml, WorkDir: String;
+  Utf8: AnsiString;
 begin
-  CreateCmd := Format('create %s binPath= %s obj= %s password= %s start= delayed-auto DisplayName= %s', [
-    SvcName, QuoteArg(ExePath), QuoteArg(Account), QuoteArg(Password), QuoteArg(DisplayName)]);
-  Result := RunAdminCommand('{sys}\sc.exe', CreateCmd,
-    'Не удалось создать службу ' + SvcName + '. Проверьте имя учётной записи и пароль');
-  if not Result then exit;
-  { Best-effort: auto-restart policy isn't required for the service to work. }
-  RunAdminCommand('{sys}\sc.exe',
-    'failure ' + SvcName + ' reset= 86400 actions= restart/5000/restart/10000/restart/30000',
-    'Не удалось настроить авто-рестарт для ' + SvcName);
-end;
-
-{ Worker runs Revit, which needs a real, visible desktop — a Windows Service
-  can't provide one (Session 0 isolation, no "interact with desktop" option
-  since Vista). /it runs the task in Account's own interactive logon session
-  instead of headless, so Revit renders normally.
-  ponytail: no crash-auto-restart — schtasks' basic switches don't expose an
-  equivalent of sc.exe's "failure actions"; add an XML-imported task with
-  <RestartOnFailure> if that's needed later. }
-function RegisterWorkerTask(const TaskName, ExePath, Account: String): Boolean;
-var
-  CreateCmd: String;
-begin
-  { schtasks' /tr parsing (unlike sc.exe's binPath) truncates at the first
-    space when the path is only wrapped in one layer of quotes — it needs the
-    quote characters embedded in the value itself, hence the escaped \"...\". }
-  { /delay 0000:05 — 5s after logon (which happens at boot via auto-logon)
-    gives the desktop/network a moment to settle before Worker/Revit starts. }
-  CreateCmd := Format('/create /tn %s /tr "\"%s\"" /sc onlogon /ru %s /it /rl highest /delay 0000:05 /f', [
-    QuoteArg(TaskName), ExePath, QuoteArg(Account)]);
-  Result := RunAdminCommand('{sys}\schtasks.exe', CreateCmd,
-    'Не удалось создать задачу планировщика для Worker');
+  WorkDir := ExtractFilePath(ExePath);
+  Xml :=
+    '<?xml version="1.0" encoding="UTF-8"?>' + #13#10 +
+    '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + #13#10 +
+    '  <Triggers>' + #13#10 +
+    '    <LogonTrigger>' + #13#10 +
+    '      <Enabled>true</Enabled>' + #13#10 +
+    '      <UserId>' + XmlEscape(Account) + '</UserId>' + #13#10 +
+    '      <Delay>PT5S</Delay>' + #13#10 +
+    '    </LogonTrigger>' + #13#10 +
+    '  </Triggers>' + #13#10 +
+    '  <Principals>' + #13#10 +
+    '    <Principal id="Author">' + #13#10 +
+    '      <UserId>' + XmlEscape(Account) + '</UserId>' + #13#10 +
+    '      <LogonType>InteractiveToken</LogonType>' + #13#10 +
+    '      <RunLevel>HighestAvailable</RunLevel>' + #13#10 +
+    '    </Principal>' + #13#10 +
+    '  </Principals>' + #13#10 +
+    '  <Settings>' + #13#10 +
+    '    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>' + #13#10 +
+    '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>' + #13#10 +
+    '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>' + #13#10 +
+    '    <AllowHardTerminate>true</AllowHardTerminate>' + #13#10 +
+    '    <StartWhenAvailable>true</StartWhenAvailable>' + #13#10 +
+    '    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>' + #13#10 +
+    '    <AllowStartOnDemand>true</AllowStartOnDemand>' + #13#10 +
+    '    <Enabled>true</Enabled>' + #13#10 +
+    '    <Hidden>false</Hidden>' + #13#10 +
+    '    <RunOnlyIfIdle>false</RunOnlyIfIdle>' + #13#10 +
+    '    <WakeToRun>false</WakeToRun>' + #13#10 +
+    '    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>' + #13#10 +
+    '    <Priority>7</Priority>' + #13#10 +
+    '    <RestartOnFailure>' + #13#10 +
+    '      <Interval>PT1M</Interval>' + #13#10 +
+    '      <Count>3</Count>' + #13#10 +
+    '    </RestartOnFailure>' + #13#10 +
+    '  </Settings>' + #13#10 +
+    '  <Actions Context="Author">' + #13#10 +
+    '    <Exec>' + #13#10 +
+    '      <Command>' + XmlEscape(ExePath) + '</Command>' + #13#10 +
+    '      <WorkingDirectory>' + XmlEscape(WorkDir) + '</WorkingDirectory>' + #13#10 +
+    '    </Exec>' + #13#10 +
+    '  </Actions>' + #13#10 +
+    '</Task>' + #13#10;
+  XmlPath := ExpandConstant('{tmp}\') + TaskName + '.xml';
+  Utf8 := Utf8Encode(Xml);
+  if not SaveStringToFile(XmlPath, Utf8, False) then
+  begin
+    MsgBox('Не удалось записать XML задачи ' + TaskName, mbError, MB_OK);
+    Result := False;
+    exit;
+  end;
+  Result := RunAdminCommand('{sys}\schtasks.exe',
+    Format('/create /tn %s /xml %s /f', [QuoteArg(TaskName), QuoteArg(XmlPath)]),
+    'Не удалось создать задачу планировщика ' + TaskName);
   if not Result then exit;
   { Best-effort immediate start so the admin doesn't have to log off/on now;
     only works if the installer is running under Account's own session. }
   RunAdminCommand('{sys}\schtasks.exe', '/run /tn ' + QuoteArg(TaskName),
-    'Не удалось сразу запустить задачу Worker (запустится при следующем входе)');
+    'Не удалось сразу запустить задачу ' + TaskName + ' (запустится при следующем входе)');
 end;
 
 // If Server is selected and localhost:5432 is empty, the helper starts
@@ -286,23 +294,25 @@ begin
     RaiseException('Установка остановлена: PostgreSQL не настроен. Запустите Docker Desktop и повторите Setup.');
 end;
 
-{ Reinstall-over-existing support: sc.exe create fails if the service already
-  exists, and a running Server/Worker exe keeps its own file locked so [Files]
-  can't overwrite it. Tear down the previous registration first — same
-  stop/delete/end commands as [UninstallRun], just quiet (missing service or
-  task here is the normal first-install case, not an error worth a MsgBox).
-  ponytail: fixed 2s wait for the SCM to actually release the exe handle after
-  "sc stop" returns — no polling; bump the delay or poll SERVICE_STOPPED if a
-  slower machine still hits a file-in-use error during copy. }
+{ Tear down previous registration so [Files] can overwrite locked exes.
+  Quiet: missing service/task is a first install. After sc stop wait 2s for
+  the SCM to release the exe handle (no polling). }
 procedure PrepareReinstall;
 var
   ResultCode: Integer;
 begin
   if WizardIsComponentSelected('server') then
   begin
-    Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServerSvc}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Sleep(2000);
-    Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServerSvc}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'query {#ServerSvc}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode = 0 then
+    begin
+      MustRestartForLegacyService := True;
+      Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServerSvc}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(2000);
+      Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServerSvc}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/end /tn "{#ServerSvc}"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/delete /tn "{#ServerSvc}" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if WizardIsComponentSelected('worker') then
   begin
@@ -313,7 +323,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Account, Password: String;
+  Account: String;
 begin
   if CurStep = ssInstall then
   begin
@@ -323,7 +333,6 @@ begin
   if CurStep <> ssPostInstall then exit;
 
   Account := AccountPage.Values[0];
-  Password := AccountPage.Values[1];
 
   if WizardIsComponentSelected('server') then
     PatchJsonKey(ExpandConstant('{app}\Server\appsettings.Local.json'), 'Token', TelegramPage.Values[0]);
@@ -332,27 +341,28 @@ begin
     EnsurePostgres;
 
   if WizardIsComponentSelected('server') then
-  begin
-    GrantServiceLogonRight(Account);
-    if RegisterService('{#ServerSvc}', 'TelegramBot Server', ExpandConstant('{app}\Server\{#ServerExe}'), Account, Password) then
-      GrantAccess(ExpandConstant('{app}'), Account);
-  end;
+    RegisterLogonTask('{#ServerSvc}', ExpandConstant('{app}\Server\{#ServerExe}'), Account);
 
   if WizardIsComponentSelected('worker') then
-  begin
-    if RegisterWorkerTask('{#WorkerSvc}', ExpandConstant('{app}\Worker\{#WorkerExe}'), Account) then
-      GrantAccess(ExpandConstant('{app}'), Account);
-  end;
+    RegisterLogonTask('{#WorkerSvc}', ExpandConstant('{app}\Worker\{#WorkerExe}'), Account);
+
+  if WizardIsComponentSelected('server') or WizardIsComponentSelected('worker') then
+    GrantAccess(ExpandConstant('{app}'), Account);
 end;
 
 function NeedRestart(): Boolean;
 begin
-  Result := True;
+  { Reboot only if an old Win32 service was still registered — sc delete can
+    leave it marked for deletion until reboot. Fresh task-only installs don't
+    need a restart; the logon task is /run immediately. }
+  Result := MustRestartForLegacyService;
 end;
 
 [UninstallRun]
-Filename: "{sys}\sc.exe"; Parameters: "stop {#ServerSvc}"; Flags: runhidden; Components: server; RunOnceId: "StopServer"
-Filename: "{sys}\sc.exe"; Parameters: "delete {#ServerSvc}"; Flags: runhidden; Components: server; RunOnceId: "DeleteServer"
+Filename: "{sys}\schtasks.exe"; Parameters: "/end /tn ""{#ServerSvc}"""; Flags: runhidden; Components: server; RunOnceId: "EndServerTask"
+Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""{#ServerSvc}"" /f"; Flags: runhidden; Components: server; RunOnceId: "DeleteServerTask"
+Filename: "{sys}\sc.exe"; Parameters: "stop {#ServerSvc}"; Flags: runhidden; Components: server; RunOnceId: "StopLegacyServer"
+Filename: "{sys}\sc.exe"; Parameters: "delete {#ServerSvc}"; Flags: runhidden; Components: server; RunOnceId: "DeleteLegacyServer"
 Filename: "{sys}\schtasks.exe"; Parameters: "/end /tn ""{#WorkerSvc}"""; Flags: runhidden; Components: worker; RunOnceId: "EndWorkerTask"
 Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""{#WorkerSvc}"" /f"; Flags: runhidden; Components: worker; RunOnceId: "DeleteWorkerTask"
 
