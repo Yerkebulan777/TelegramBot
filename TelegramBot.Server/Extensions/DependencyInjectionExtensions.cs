@@ -42,7 +42,6 @@ public static class DependencyInjectionExtensions
             .Validate(options => options.BatchSize > 0, "MessageCleanup:BatchSize must be greater than 0")
             .ValidateOnStart();
 
-        _ = services.AddSingleton<CallbackHandlerBase, FileNavigationHandler>();
         _ = services.AddSingleton<CallbackHandlerBase, FileSelectionHandler>();
         _ = services.AddSingleton<CallbackHandlerBase, CommandToggleHandler>();
         _ = services.AddSingleton<CallbackHandlerBase, SessionManagementHandler>();

@@ -12,7 +12,7 @@ using TelegramBot.Server.Services.Infrastructure.Telegram;
 
 namespace TelegramBot.Server.Services.Application;
 
-public sealed partial class SlashCommandService(
+public sealed class SlashCommandService(
     SessionDataService sessionDataService,
     MessageTrackingService messageTrackingService,
     TelegramOutputService outputService,
@@ -150,9 +150,9 @@ public sealed partial class SlashCommandService(
             username, userId, submission.Commands.Count, selectedFiles.Count);
 
         var commandNames = submission.Commands.Select(GetCommandDisplayName).ToArray();
-        var projectName = ProjectPathHelper.GetProjectName(selectedFiles.First(), _fileSystemOptions.ProjectDirectoryName);
+        var projectName = GetProjectName(selectedFiles.First(), _fileSystemOptions.ProjectDirectoryName);
         var sectionNames = selectedFiles
-            .Select(file => ProjectPathHelper.GetSectionFolderName(file, _fileSystemOptions.ProjectDirectoryName))
+            .Select(file => GetSectionFolderName(file, _fileSystemOptions.ProjectDirectoryName))
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -175,7 +175,7 @@ public sealed partial class SlashCommandService(
                 return;
             }
 
-            var priorities = submission.Commands.Select(GetCommandPriority);
+            var priorities = submission.Commands.Select(CommandTraits.GetPriority);
 
             var correlationId = Guid.NewGuid().ToString("N");
             var (sessionId, queuedFileCount, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
@@ -475,9 +475,44 @@ public sealed partial class SlashCommandService(
         return text.ToLowerInvariant();
     }
 
-    private static int GetCommandPriority(string command)
+    private static string GetProjectName(string filePath, string projectDirectoryName)
     {
-        return CommandTraits.GetPriority(command);
+        var dir = Path.GetDirectoryName(filePath);
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (string.Equals(Path.GetFileName(dir), projectDirectoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                var parent = Path.GetDirectoryName(dir);
+                return parent != null ? GetSafePathName(parent) : GetSafePathName(dir);
+            }
+
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        return GetSafePathName(filePath);
+    }
+
+    private static string? GetSectionFolderName(string filePath, string projectDirectoryName)
+    {
+        var dir = Path.GetDirectoryName(filePath);
+        while (!string.IsNullOrEmpty(dir))
+        {
+            var parent = Path.GetDirectoryName(dir);
+            if (parent != null && string.Equals(Path.GetFileName(parent), projectDirectoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                return GetSafePathName(dir);
+            }
+
+            dir = parent;
+        }
+
+        return null;
+    }
+
+    private static string GetSafePathName(string path)
+    {
+        var name = Path.GetFileName(path);
+        return string.IsNullOrWhiteSpace(name) ? path : name;
     }
 
     /// <summary>Название команды по коду из каталога; неизвестный код отображается как есть.</summary>

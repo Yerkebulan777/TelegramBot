@@ -40,7 +40,7 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
                 using (var validationStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 using (var reader = XmlReader.Create(validationStream))
                 {
-                    var validationErrors = ResultFileValidator.Validate(reader);
+                    var validationErrors = XmlContractValidator.ValidateResultFile(reader);
                     if (validationErrors.Count > 0)
                     {
                         logger.LogWarning(

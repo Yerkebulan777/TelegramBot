@@ -60,22 +60,22 @@ public sealed class SessionsListRenderer(
     /// </summary>
     public static string BuildStatusReply(SessionStatus sessionStatus, List<SessionCommands>? sessionCommands = null)
     {
-        var statusIcon = sessionStatus.Status switch
-        {
-            "Done" => "✅",
-            "Failed" => "❌",
-            "Deleted" => "🗑",
-            _ => "🔄"
-        };
-
         var projectName = MarkdownHelper.Escape(sessionStatus.ProjectName!);
-
-        var header = $"{statusIcon} *{projectName}*\n  📅 {sessionStatus.CreatedAt:dd.MM.yyyy · HH:mm}";
 
         if (sessionCommands == null || sessionCommands.Count == 0)
         {
             return $"*{projectName}*\n  📅 {sessionStatus.CreatedAt:dd.MM.yyyy · HH:mm}";
         }
+
+        var statusIcon = sessionStatus.Status switch
+        {
+            Statuses.Done => "✅",
+            Statuses.Failed => "❌",
+            Statuses.Deleted => "🗑",
+            _ => "🔄"
+        };
+
+        var header = $"{statusIcon} *{projectName}*\n  📅 {sessionStatus.CreatedAt:dd.MM.yyyy · HH:mm}";
 
         var commandLines = sessionCommands
             .GroupBy(c => c.Command)
@@ -83,9 +83,9 @@ public sealed class SessionsListRenderer(
             .Select(group =>
             {
                 var totalInGroup = group.Count();
-                var doneInGroup = group.Count(c => c.Status == "Done");
-                var failedInGroup = group.Count(c => c.Status == "Failed");
-                var processingInGroup = group.Count(c => c.Status == "processing");
+                var doneInGroup = group.Count(c => c.Status == Statuses.Done);
+                var failedInGroup = group.Count(c => c.Status == Statuses.Failed);
+                var processingInGroup = group.Count(c => c.Status == Statuses.Processing);
                 var filesLabel = totalInGroup == 1 ? "файл" : "файлов";
 
                 var groupStatusIcon = "⏳";

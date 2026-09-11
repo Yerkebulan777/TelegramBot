@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text;
-using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Worker.Services;
@@ -69,7 +68,7 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
         {
             if (e.Data != null)
             {
-                Output.AppendBounded(e.Data, ref _outputTruncated, MaxOutputChars);
+                AppendBounded(Output, e.Data, ref _outputTruncated, MaxOutputChars);
             }
         }
 
@@ -77,7 +76,7 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
         {
             if (e.Data != null)
             {
-                Error.AppendBounded(e.Data, ref _errorTruncated, MaxOutputChars);
+                AppendBounded(Error, e.Data, ref _errorTruncated, MaxOutputChars);
             }
         }
 
@@ -89,6 +88,36 @@ public sealed class OutputCollector(ILogger<OutputCollector> logger)
                 _process.ErrorDataReceived -= OnErrorDataReceived;
                 _disposed = true;
             }
+        }
+    }
+
+    private static void AppendBounded(StringBuilder builder, string data, ref bool truncated, int maxChars)
+    {
+        if (truncated)
+        {
+            return;
+        }
+
+        lock (builder)
+        {
+            if (truncated)
+            {
+                return;
+            }
+
+            if (builder.Length + data.Length + 1 <= maxChars)
+            {
+                _ = builder.AppendLine(data);
+                return;
+            }
+
+            var remaining = maxChars - builder.Length;
+            if (remaining > 0)
+            {
+                _ = builder.Append(data.AsSpan(0, Math.Min(remaining, data.Length)));
+            }
+
+            truncated = true;
         }
     }
 }

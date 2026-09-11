@@ -170,19 +170,6 @@ public sealed class SelectionFlow
         }
     }
 
-    /// <summary>Переход по явному пути (GOTOPARENT): выбор файлов сбрасывается.</summary>
-    public void NavigateTo(string path)
-    {
-        _selectedFiles.Clear();
-        CurrentPath = path;
-    }
-
-    /// <summary>Возврат на корень при недопустимом пути навигации (выбор сохраняется).</summary>
-    public void ResetPathToRoot()
-    {
-        CurrentPath = _rootPath;
-    }
-
     // ────────────────────────── Файлы ──────────────────────────
 
     /// <summary>

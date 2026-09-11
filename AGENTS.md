@@ -50,7 +50,7 @@ Telegram SDK → Channel (200) → Parallel.ForEachAsync (max 10)
 
 Разные пользователи параллельно, один — последовательно. Без access check: `/start`, `REQACCESS:`, `APPROVEUSER:`, `REJECTUSER:`.
 
-Handlers: `FileNavigation`, `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement`, `RootPath`. Prefixes — `CallbackPrefixes`.
+Handlers: `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManagement`, `RootPath`. Prefixes — `CallbackPrefixes`.
 
 | Группа | Коды |
 |---|---|

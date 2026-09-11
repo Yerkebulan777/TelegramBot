@@ -1,18 +1,11 @@
 namespace TelegramBot.Core.Models;
 
 /// <summary>
-/// Распарсенные данные callback-запроса (префикс и аргумент).
+/// Распарсенные данные callback-запроса (префикс и аргумент). Формат: "PREFIX:argument".
 /// </summary>
 public readonly record struct ParsedCallback(string Prefix, string Argument)
 {
-}
-
-/// <summary>
-/// Парсер данных callback-запроса.
-/// </summary>
-public static class CallbackDataParser
-{
-    /// <summary>Парсит строку данных callback в префикс и аргумент. Формат: "PREFIX:argument".</summary>
+    /// <summary>Парсит строку данных callback в префикс и аргумент.</summary>
     public static ParsedCallback Parse(string callbackData)
     {
         if (string.IsNullOrEmpty(callbackData))

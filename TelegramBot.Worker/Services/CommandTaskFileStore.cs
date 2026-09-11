@@ -76,7 +76,7 @@ public sealed class CommandTaskFileStore(
             List<string> validationErrors;
             using (var reader = XmlReader.Create(tmpPath))
             {
-                validationErrors = TaskFileValidator.Validate(reader);
+                validationErrors = XmlContractValidator.ValidateTaskFile(reader);
             }
 
             if (validationErrors.Count > 0)

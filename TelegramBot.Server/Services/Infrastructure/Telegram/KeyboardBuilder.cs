@@ -80,18 +80,12 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 
         if (totalPages > 1)
         {
-            var navRow = new List<InlineKeyboardButton>();
-            if (clampedPage > 0)
-            {
-                navRow.Add(InlineKeyboardButton.WithCallbackData(
-                    "◀️ Назад", $"{CallbackPrefixes.StatusPage}{clampedPage - 1}"));
-            }
-            if (clampedPage < totalPages - 1)
-            {
-                navRow.Add(InlineKeyboardButton.WithCallbackData(
-                    "Вперёд ▶️", $"{CallbackPrefixes.StatusPage}{clampedPage + 1}"));
-            }
-            if (navRow.Count > 0)
+            var navRow = TryBuildPageNavRow(
+                clampedPage,
+                totalPages,
+                $"{CallbackPrefixes.StatusPage}{clampedPage - 1}",
+                $"{CallbackPrefixes.StatusPage}{clampedPage + 1}");
+            if (navRow != null)
             {
                 buttons.Add(navRow);
             }
@@ -184,18 +178,15 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 
         if (totalFilePages > 1)
         {
-            var navRow = new List<InlineKeyboardButton>();
-            if (clampedFilePage > 0)
+            var navRow = TryBuildPageNavRow(
+                clampedFilePage,
+                totalFilePages,
+                $"{CallbackPrefixes.CommandsPage}{sessionId}:{selectedFilter}:{clampedFilePage - 1}",
+                $"{CallbackPrefixes.CommandsPage}{sessionId}:{selectedFilter}:{clampedFilePage + 1}");
+            if (navRow != null)
             {
-                navRow.Add(InlineKeyboardButton.WithCallbackData(
-                    "◀️ Назад", $"{CallbackPrefixes.CommandsPage}{sessionId}:{selectedFilter}:{clampedFilePage - 1}"));
+                buttons.Add(navRow);
             }
-            if (clampedFilePage < totalFilePages - 1)
-            {
-                navRow.Add(InlineKeyboardButton.WithCallbackData(
-                    "Вперёд ▶️", $"{CallbackPrefixes.CommandsPage}{sessionId}:{selectedFilter}:{clampedFilePage + 1}"));
-            }
-            buttons.Add(navRow);
         }
 
         return new InlineKeyboardMarkup(buttons);
@@ -205,13 +196,34 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
     {
         return status switch
         {
-            "pending" => "⏳",
-            "processing" => "🔄",
-            "Done" => "✅",
-            "Failed" => "❌",
-            "Deleted" => "🗑",
+            Statuses.Pending => "⏳",
+            Statuses.Processing => "🔄",
+            Statuses.Done => "✅",
+            Statuses.Failed => "❌",
+            Statuses.Deleted => "🗑",
             _ => "❓"
         };
+    }
+
+    private static List<InlineKeyboardButton>? TryBuildPageNavRow(
+        int clampedPage, int totalPages, string prevCallback, string nextCallback)
+    {
+        if (totalPages <= 1)
+        {
+            return null;
+        }
+
+        var navRow = new List<InlineKeyboardButton>();
+        if (clampedPage > 0)
+        {
+            navRow.Add(InlineKeyboardButton.WithCallbackData("◀️ Назад", prevCallback));
+        }
+        if (clampedPage < totalPages - 1)
+        {
+            navRow.Add(InlineKeyboardButton.WithCallbackData("Вперёд ▶️", nextCallback));
+        }
+
+        return navRow.Count > 0 ? navRow : null;
     }
 
     private static string TruncateListButtonText(string text)

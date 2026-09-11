@@ -43,11 +43,11 @@ public class TelegramOutputService(
             await botClient.DeleteMessage(chatId, messageId, cancellationToken);
             return true;
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsMessageToDeleteMissing(ex))
+        catch (ApiRequestException ex) when (IsMessageToDeleteMissing(ex))
         {
             return true;
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsMessageDeletionRefused(ex))
+        catch (ApiRequestException ex) when (IsMessageDeletionRefused(ex))
         {
             logger.LogWarning(
                 "Telegram refused deletion: chat={ChatId}, message={MessageId}, error={Error}",
@@ -94,7 +94,7 @@ public class TelegramOutputService(
             await botClient.DeleteMessages(chatId, messageIds, cancellationToken);
             return new(messageIds, false, DateTime.UtcNow);
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsMessageDeletionRefused(ex) || TelegramErrors.IsMessageToDeleteMissing(ex))
+        catch (ApiRequestException ex) when (IsMessageDeletionRefused(ex) || IsMessageToDeleteMissing(ex))
         {
             // Only message-specific errors justify trying individual messages.
         }
@@ -198,7 +198,7 @@ public class TelegramOutputService(
             return await botClient.SendMessage(
                 chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsReplyMarkupTooLong(ex))
+        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
             logger.LogWarning(
                 "Reply markup too long: {UserId}, fallback text-only",
@@ -245,11 +245,11 @@ public class TelegramOutputService(
         {
             _=await botClient.EditMessageReplyMarkup(chatId: userId, messageId: messageId, replyMarkup: keyboard);
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsMessageNotModified(ex))
+        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
             logger.LogDebug("Reply markup unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsReplyMarkupTooLong(ex))
+        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
             // Существующая клавиатура остаётся — фронт не ломаем, только логируем.
             logger.LogWarning(
@@ -268,11 +268,11 @@ public class TelegramOutputService(
         {
             _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message, replyMarkup: keyboard);
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsMessageNotModified(ex))
+        catch (ApiRequestException ex) when (IsMessageNotModified(ex))
         {
             logger.LogDebug("Text+keyboard unchanged: {UserId} msg={MessageId}", userId, messageId);
         }
-        catch (ApiRequestException ex) when (TelegramErrors.IsReplyMarkupTooLong(ex))
+        catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
             logger.LogWarning(
                 "Reply markup too long: {UserId} msg={MessageId}; fallback text-only",
@@ -281,7 +281,7 @@ public class TelegramOutputService(
             {
                 _=await botClient.EditMessageText(chatId: userId, messageId: messageId, text: message);
             }
-            catch (ApiRequestException fbEx) when (TelegramErrors.IsMessageNotModified(fbEx))
+            catch (ApiRequestException fbEx) when (IsMessageNotModified(fbEx))
             {
                 logger.LogDebug(
                     "Text fallback unchanged: {UserId} msg={MessageId}", userId, messageId);
@@ -365,5 +365,18 @@ public class TelegramOutputService(
         return null;
     }
 
+    private static bool IsMessageToDeleteMissing(ApiRequestException ex) =>
+        ex.ErrorCode == 400 && ex.Message.Contains("message to delete not found", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsMessageDeletionRefused(ApiRequestException ex) =>
+        ex.ErrorCode == 400 && ex.Message.Contains("message can't be deleted", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsMessageNotModified(ApiRequestException ex) =>
+        ex.ErrorCode == 400
+        && ex.Message.Contains("message is not modified", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsReplyMarkupTooLong(ApiRequestException ex) =>
+        ex.ErrorCode == 400
+        && ex.Message.Contains("reply markup", StringComparison.OrdinalIgnoreCase)
+        && ex.Message.Contains("too long", StringComparison.OrdinalIgnoreCase);
 }

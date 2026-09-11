@@ -5,9 +5,6 @@ namespace TelegramBot.Core.Constants;
 /// </summary>
 public static class CallbackPrefixes
 {
-    /// <summary>Переход в родительскую папку.</summary>
-    public const string GoToParent = "GOTOPARENT:";
-
     /// <summary>Навигация по файлам.</summary>
     public const string File = "FILE:";
 

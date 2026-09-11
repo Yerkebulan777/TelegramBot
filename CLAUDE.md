@@ -14,7 +14,7 @@ dotnet build TelegramBot.slnx
 
 - 5 проектов net10.0: Core ← Data; Server/Worker/RootPathSetup → Core+Data. Server и RootPathSetup — `net10.0-windows`.
 - Windows-only; PostgreSQL 18; Dapper/Npgsql; soft-delete (`Deleted`), кроме `TrackedMessages`
-- DI — singleton; handlers через `CallbackHandlerBase` (6 шт., включая `RootPath`)
+- DI — singleton; handlers через `CallbackHandlerBase` (5 шт., включая `RootPath`)
 - Outbox уведомлений — polling 3 с; cleanup по `DeleteAfter`/`NextDeleteAttemptAt`; completion защищён; ack+tracking атомарно
 - Worker: poll 1 с, partition scheduling, `ProcessLaunchGate` ≥ 15 с (Revit и AutoCAD независимо); `CommandPersistenceException` ≠ BIM-ошибка
 - Revit: `REVITBIMFUSION_TASK_FILE`; `RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE

@@ -12,12 +12,11 @@ namespace TelegramBot.Worker.Services;
 
 /// <summary>
 /// Координирует запуск, ожидание и обработку результатов внешних процессов.
-/// Делегирует специализированным сервисам: ProcessStarter, OutputCollector, ResultAnalyzer.
 /// </summary>
 public sealed class ProcessRunner(
     CommandPreparer commandPreparer,
     CommandTaskFileStore taskFileStore,
-    ProcessStarter processStarter,
+    ProcessLaunchGate launchGate,
     OutputCollector outputCollector,
     ResultAnalyzer resultAnalyzer,
     RevitTemporaryDirectoryCleaner temporaryDirectoryCleaner,
@@ -108,10 +107,46 @@ public sealed class ProcessRunner(
         }
     }
 
-    /// <summary>Запускает процесс по конфигурации команды.</summary>
+    /// <summary>Запускает процесс по конфигурации команды и регистрирует его в tracking.</summary>
     private async Task<Process> StartProcessAsync(PendingCommand cmd, CommandConfig commandCfg, CancellationToken ct)
     {
-        var process = await processStarter.StartAsync(cmd, commandCfg, ct);
+        var (resultFilePath, taskFilePath) = taskFileStore.GetPaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
+        if (File.Exists(resultFilePath))
+        {
+            File.Move(resultFilePath, resultFilePath + ".previous", overwrite: true);
+            logger.LogWarning("Previous result retained before new attempt: id={CommandId}", cmd.CommandId);
+        }
+        if (!taskFileStore.Create(cmd))
+        {
+            throw new IOException(
+                $"Failed to write task file in TaskDirectory '{taskFilePath}'. " +
+                $"AddIn cannot proceed without the task file. Check FileSystem:TaskDirectory permissions, disk space, and antivirus.");
+        }
+
+        var startInfo = commandPreparer.CreateProcessStartInfo(cmd, commandCfg);
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        try
+        {
+            var gate = CommandTraits.GetLaunchGate(cmd.CommandText);
+            if (gate == ProcessLaunchGateKind.None)
+            {
+                _ = process.Start();
+            }
+            else
+            {
+                await launchGate.StartAsync(process, gate, cmd.CommandId, ct);
+            }
+
+            logger.LogInformation(
+                "Process started: cmd={Cmd}, id={Id}, corr={CorrelationId}, pid={Pid}, attempt={Attempt}",
+                cmd.CommandText, cmd.CommandId, cmd.CorrelationId, process.Id, cmd.RetryCount + 1);
+        }
+        catch
+        {
+            process.Dispose();
+            throw;
+        }
+
         _activeProcesses[cmd.CommandId] = process;
         _ = await commandDataService.MarkProcessStartedAndNotifyOnceAsync(
             cmd.CommandId, process.Id);
@@ -189,7 +224,7 @@ public sealed class ProcessRunner(
     /// Обрабатывает таймаут процесса: убивает процесс, записывает Failed.
     /// </summary>
     /// <remarks>
-    /// Таймаут intentionally идёт в Failed напрямую, минуя ErrorClassifier и retry-механизм
+    /// Таймаут intentionally идёт в Failed напрямую, минуя классификатор и retry-механизм
     /// (в отличие от crash-исключения, который ретраится). Причина: <see cref="WorkerOptions.ProcessTimeoutMinutes"/>
     /// по умолчанию 180 минут (3 ч) — повтор такой задачи ещё 5 раз обойдётся в 15 часов CPU.
     /// Типичные причины таймаута (зависший сетевой диск, modal dialog) классифицируются как transient,
@@ -257,7 +292,7 @@ public sealed class ProcessRunner(
             return;
         }
 
-        var isPermanent = ErrorClassifier.IsPermanentFailure(errorMessage, ex);
+        var isPermanent = IsPermanentFailure(errorMessage, ex);
 
         // Лог решения классификатора — развилка retry/Failed: по exitCode, типу исключения или паттерну текста.
         logger.LogInformation("Classify: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}/{Max}, exit={ExitCode}, permanent={IsPermanent}, err={Msg}",
@@ -296,6 +331,47 @@ public sealed class ProcessRunner(
         logger.LogDebug(
             "Terminal command persisted: id={CommandId}, status={Status}, sessionCompletionNotified={SessionCompletionNotified}",
             command.CommandId, status, notified);
+    }
+
+    private static readonly string[] PermanentFailurePatterns =
+    [
+        "not found",
+        "no such file",
+        "cannot open file",
+        "access is denied",
+        "access denied",
+        "invalid file",
+        "file does not exist",
+        "permission denied",
+        "path not found",
+        "invalid file path",
+        "unsupported command:",
+        "notimplemented:",
+        "no such directory",
+        "cannot access",
+        "файл не найден",
+        "не удается найти указанный файл",
+        "не удаётся найти указанный файл",
+        "путь не найден",
+        "отказано в доступе",
+        "доступ запрещен",
+        "доступ запрещён",
+        "нет доступа",
+        "недопустимый файл",
+        "неверный формат файла",
+        "невозможно открыть файл",
+    ];
+
+    private static bool IsPermanentFailure(string errorMessage, Exception? exception)
+    {
+        if (exception is FileNotFoundException or DirectoryNotFoundException
+            or UnauthorizedAccessException or PathTooLongException)
+        {
+            return true;
+        }
+
+        var message = errorMessage.ToLowerInvariant();
+        return PermanentFailurePatterns.Any(message.Contains);
     }
 
 }

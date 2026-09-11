@@ -74,7 +74,7 @@ public sealed class CommandAppService(
         }
 
         var session = sessionManager.GetOrCreateSession(userId);
-        var parsed = CallbackDataParser.Parse(callback.Data);
+        var parsed = ParsedCallback.Parse(callback.Data);
 
         // Stale-session detection for callbacks. Callbacks depend on session-local state
         // (pending commands, file selection, status filters) that no longer exists after restart,
