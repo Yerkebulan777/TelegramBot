@@ -90,6 +90,7 @@ Get-Process TelegramBot.Server -ErrorAction SilentlyContinue
 | Симптом | Причина | Что делать |
 |---|---|---|
 | Задачи нет | Setup не ставили / ставили только Worker | Повторить Setup, компонент Server |
+| Setup: ошибка XML `(1,40)`, «не удалось переключить кодировку» | Старый Setup записывал XML задачи в UTF-8 | Пересобрать Setup из актуальных исходников и повторить установку: XML записывается в UTF-16LE с BOM |
 | Задача есть, процесса нет, никто не залогинен | Logon-trigger ждёт интерактивный вход | Включить автологон под учёткой задачи |
 | Старая служба `TelegramBotServer` в SCM, события **7038** | leftover Windows Service с прошлых Setup; вход службы не умеет cached credentials и падает, если повреждён secure channel (`Test-ComputerSecureChannel` = False) | Удалить службу (`sc.exe delete TelegramBotServer`) и поставить актуальный Setup — задача планировщика этот вход не использует |
 | Процесс стартовал и сразу вышел | нет `appsettings.Local.json` / токена / Postgres | Логи `%USERPROFILE%\Documents\TelegramBot\Logs\Server`; Docker Desktop и контейнер `postgres_telegram` |

@@ -184,6 +184,9 @@ begin
     per-line Unicode split) — convert once here rather than threading
     AnsiString through the rest of the function. }
   LoadStringFromFile(LogPath, LogTextA);
+  { schtasks writes OEM bytes; an ANSI cast garbles localized errors. }
+  if Exe = '{sys}\schtasks.exe' then
+    OemToCharBuff(LogTextA);
   LogText := Trim(String(LogTextA));
 
   if LogText <> '' then
@@ -208,11 +211,12 @@ end;
 function RegisterLogonTask(const TaskName, ExePath, Account: String): Boolean;
 var
   XmlPath, Xml, WorkDir: String;
-  Utf8: AnsiString;
+  XmlBytes: AnsiString;
+  I, CodeUnit: Integer;
 begin
   WorkDir := ExtractFilePath(ExePath);
   Xml :=
-    '<?xml version="1.0" encoding="UTF-8"?>' + #13#10 +
+    '<?xml version="1.0" encoding="UTF-16"?>' + #13#10 +
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + #13#10 +
     '  <Triggers>' + #13#10 +
     '    <LogonTrigger>' + #13#10 +
@@ -255,8 +259,18 @@ begin
     '  </Actions>' + #13#10 +
     '</Task>' + #13#10;
   XmlPath := ExpandConstant('{tmp}\') + TaskName + '.xml';
-  Utf8 := Utf8Encode(Xml);
-  if not SaveStringToFile(XmlPath, Utf8, False) then
+  { schtasks /xml expects UTF-16LE. SaveStringToFile writes raw bytes,
+    so include the BOM and preserve each Unicode code unit explicitly. }
+  SetLength(XmlBytes, 2 + Length(Xml) * 2);
+  XmlBytes[1] := Chr(255);
+  XmlBytes[2] := Chr(254);
+  for I := 1 to Length(Xml) do
+  begin
+    CodeUnit := Ord(Xml[I]);
+    XmlBytes[I * 2 + 1] := Chr(CodeUnit and $FF);
+    XmlBytes[I * 2 + 2] := Chr(CodeUnit shr 8);
+  end;
+  if not SaveStringToFile(XmlPath, XmlBytes, False) then
   begin
     MsgBox('Не удалось записать XML задачи ' + TaskName, mbError, MB_OK);
     Result := False;
