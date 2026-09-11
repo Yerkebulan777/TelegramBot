@@ -42,7 +42,11 @@ public sealed class NotificationOutboxDataService(
         _ = await conn.ExecuteAsync(new CommandDefinition(SqlQueries.NotificationOutbox.TrackDeliveredMessage,
             new
             {
-                item.SessionId, ChatId = chatId, MessageId = messageId, SentAt = sentAt, DeleteAfter = deleteAfter,
+                item.SessionId,
+                ChatId = chatId,
+                MessageId = messageId,
+                SentAt = sentAt,
+                DeleteAfter = deleteAfter,
                 Kind = item.EventType == SessionCompletedEvent ? TrackedMessageKinds.Completion : TrackedMessageKinds.JobStatus
             }, tx, cancellationToken: cancellationToken));
         if (item.EventType == SessionCompletedEvent)

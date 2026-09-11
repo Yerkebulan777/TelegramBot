@@ -18,8 +18,15 @@ public sealed class MessageTrackingDataService(
         DateTime deleteAfter, CancellationToken cancellationToken = default)
     {
         _ = await ExecuteAsync(SqlQueries.TrackedMessages.Insert,
-            new { SessionId = sessionId, ChatId = chatId, MessageIdPg = messageId, Kind = kind,
-                SentAt = sentAt, DeleteAfter = deleteAfter }, cancellationToken);
+            new
+            {
+                SessionId = sessionId,
+                ChatId = chatId,
+                MessageIdPg = messageId,
+                Kind = kind,
+                SentAt = sentAt,
+                DeleteAfter = deleteAfter
+            }, cancellationToken);
     }
 
     /// <summary>Atomically acknowledges successful deletions and schedules the remaining batch.</summary>
@@ -45,15 +52,26 @@ public sealed class MessageTrackingDataService(
     {
         var ids = messageIds.Distinct().ToArray();
         return ids.Length == 0 ? [] : await QueryAsync<int>(SqlQueries.TrackedMessages.ScheduleDeletionByChat,
-            new { ChatId = chatId, MessageIds = ids, InterfaceKind = TrackedMessageKinds.Interface,
-                CompletionKind = TrackedMessageKinds.Completion }, cancellationToken);
+            new
+            {
+                ChatId = chatId,
+                MessageIds = ids,
+                InterfaceKind = TrackedMessageKinds.Interface,
+                CompletionKind = TrackedMessageKinds.Completion
+            }, cancellationToken);
     }
 
     public Task<IReadOnlyList<TrackedMessageReference>> GetTrackedMessagesForCleanupAsync(
         DateTime olderThan, DateTime newerThan, int limit, CancellationToken cancellationToken = default) =>
         QueryAsync<TrackedMessageReference>(SqlQueries.TrackedMessages.GetForCleanup,
-            new { OlderThan = olderThan, NewerThan = newerThan, Limit = limit,
-                Retention = DateTime.UtcNow - olderThan, JobStatusKind = TrackedMessageKinds.JobStatus }, cancellationToken);
+            new
+            {
+                OlderThan = olderThan,
+                NewerThan = newerThan,
+                Limit = limit,
+                Retention = DateTime.UtcNow - olderThan,
+                JobStatusKind = TrackedMessageKinds.JobStatus
+            }, cancellationToken);
 
     /// <summary>Forgets records past Telegram's deletion age limit.</summary>
     public Task<int> DeleteTrackedMessagesOlderThanAsync(DateTime olderThan, CancellationToken cancellationToken = default) =>
