@@ -177,16 +177,9 @@ public sealed class SessionDataService(
             new { SessionId = sessionId })
             ?? throw new KeyNotFoundException($"Session {sessionId} not found");
 
-        var failedCommands = await conn.QueryAsync<FailedCommandInfo>(
-            SqlQueries.Commands.GetFailedCommandsBySession,
-            new { SessionId = sessionId });
-
-        var warnedCommands = await conn.QueryAsync<FailedCommandInfo>(
-            SqlQueries.Commands.GetWarnedCommandsBySession,
-            new { SessionId = sessionId });
-
-        summary.FailedCommands = failedCommands.ToList();
-        summary.WarnedCommands = warnedCommands.ToList();
+        summary.Commands = [.. await conn.QueryAsync<SessionCommandInfo>(
+            SqlQueries.Commands.GetCommandsForCompletion,
+            new { SessionId = sessionId })];
         return summary;
     }
 

@@ -1,5 +1,4 @@
 using System.Text;
-using TelegramBot.Core.Config;
 using TelegramBot.Core.Models;
 
 namespace TelegramBot.Server.Helpers;
@@ -7,35 +6,8 @@ namespace TelegramBot.Server.Helpers;
 /// <summary>Renders a completion summary without database or Telegram I/O.</summary>
 public static class CompletionMessageFormatter
 {
-    public static string Format(SessionCompletionSummary session)
-    {
-        var prefix = string.IsNullOrEmpty(session.ProjectName) ? "" : $"{session.ProjectName} — ";
-        var durationPrefix = FormatDurationPrefix(session.DurationSeconds);
-
-        var header = (session.FailedFiles, session.DoneFiles, session.WarnedCommands.Count) switch
-        {
-            (0, _, 0) => $"✅ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано",
-            (0, _, _) => $"⚠️ {prefix}{durationPrefix}сессия завершена — все {session.DoneFiles} файлов обработано (есть предупреждения)",
-            (_, 0, _) => $"❌ {prefix}{durationPrefix}сессия завершена — все {session.FailedFiles} файлов с ошибками",
-            _ => $"⚠️ {prefix}{durationPrefix}сессия завершена: {session.DoneFiles} ✅, {session.FailedFiles} ❌ из {session.TotalFiles}"
-        };
-        var summary = new StringBuilder(header);
-
-        if (session.FailedFiles > 0 && session.FailedCommands.Count > 0)
-        {
-            AppendCommandNotes(summary, "Ошибки:", session.FailedCommands);
-        }
-
-        if (session.WarnedCommands.Count > 0)
-        {
-            AppendCommandNotes(summary, "Предупреждения:", session.WarnedCommands);
-        }
-
-        return ClampToTelegramLimit(summary);
-    }
-
-    /// <summary>Максимум пунктов с ошибками в одном сообщении; остальные схлопываются в «и ещё N».</summary>
-    private const int MaxFailedFilesInMessage = 15;
+    /// <summary>Максимум имён файлов или пунктов ошибки в одном сообщении; остальные схлопываются в «и ещё N».</summary>
+    private const int MaxItemsInMessage = 15;
 
     /// <summary>Лимит длины причины сбоя на один файл — чтобы стек/портянка не раздула сообщение.</summary>
     private const int MaxReasonLength = 200;
@@ -43,33 +15,104 @@ public static class CompletionMessageFormatter
     /// <summary>Жёсткий лимит текста под потолок Telegram (4096) с запасом на маркер обрыва.</summary>
     private const int MaxMessageLength = 4000;
 
-    private static void AppendCommandNotes(StringBuilder summary, string title, List<FailedCommandInfo> commands)
+    public static string Format(SessionCompletionSummary session)
     {
-        _=summary.Append("\n\n").Append(title).Append('\n');
+        var failed = session.Failed.ToList();
+        var warned = session.Warned.ToList();
+        var summary = new StringBuilder();
+        AppendJobLines(summary, session);
 
-        var shown = Math.Min(commands.Count, MaxFailedFilesInMessage);
-        for (var i = 0; i < shown; i++)
+        var duration = session.DurationSeconds is > 0 ? $" ({FormatDuration(session.DurationSeconds.Value)})" : "";
+        _ = summary.Append('\n').Append(StatusLine(failed.Count > 0, warned.Count > 0)).Append(duration);
+        AppendNotes(summary, "Ошибка:", failed);
+        AppendNotes(summary, "Предупреждение:", warned);
+        return ClampToTelegramLimit(summary);
+    }
+
+    private static string StatusLine(bool hasErrors, bool hasWarnings) =>
+        hasErrors ? "❌ есть ошибки" : hasWarnings ? "⚠️ есть предупреждения" : "✅ выполнено без ошибок";
+
+    private static void AppendJobLines(StringBuilder summary, SessionCompletionSummary session)
+    {
+        var commands = new List<string>();
+        var commandSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fileNames = new List<string>();
+        var fileSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var command in session.Commands)
         {
-            if (i > 0)
+            if (!string.IsNullOrWhiteSpace(command.CommandText) && commandSeen.Add(command.CommandText))
             {
-                _ = summary.AppendLine();
+                commands.Add(command.CommandText);
             }
 
-            var command = commands[i];
-            var filePath = FormatFilePath(command);
-            _ = summary.Append("- ").Append(filePath)
-                .Append(" [").Append(command.CommandText).Append(']')
-                .Append("\n  Причина: ").Append(FormatReason(command, filePath));
+            var fileName = Path.GetFileName(command.FilePath);
+            if (!string.IsNullOrWhiteSpace(fileName) && fileSeen.Add(fileName))
+            {
+                fileNames.Add(fileName);
+            }
         }
 
-        if (commands.Count > MaxFailedFilesInMessage)
+        var project = string.IsNullOrWhiteSpace(session.ProjectName) ? "—" : session.ProjectName.Trim();
+        var commandText = commands.Count == 0 ? "—" : string.Join(", ", commands);
+        _ = summary.Append(commandText).Append('\n').Append(project);
+        AppendCappedLines(summary, fileNames.Count == 0 ? ["—"] : fileNames);
+    }
+
+    private static void AppendNotes(StringBuilder summary, string title, List<SessionCommandInfo> commands)
+    {
+        if (commands.Count == 0)
         {
-            _ = summary.Append("\n…и ещё ").Append(commands.Count - MaxFailedFilesInMessage);
+            return;
+        }
+
+        _ = summary.Append('\n').Append(title);
+        var shown = Math.Min(commands.Count, MaxItemsInMessage);
+        var showCommand = commands
+            .Select(command => command.CommandText)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count() > 1;
+
+        for (var i = 0; i < shown; i++)
+        {
+            var command = commands[i];
+            var fileName = Path.GetFileName(command.FilePath);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                fileName = command.FilePath;
+            }
+
+            _ = summary.Append('\n').Append(fileName);
+            if (showCommand && !string.IsNullOrWhiteSpace(command.CommandText))
+            {
+                _ = summary.Append(" [").Append(command.CommandText).Append(']');
+            }
+
+            _ = summary.Append(": ").Append(FormatReason(command));
+        }
+
+        if (commands.Count > MaxItemsInMessage)
+        {
+            _ = summary.Append("\n…и ещё ").Append(commands.Count - MaxItemsInMessage);
+        }
+    }
+
+    private static void AppendCappedLines(StringBuilder summary, List<string> lines)
+    {
+        var shown = Math.Min(lines.Count, MaxItemsInMessage);
+        for (var i = 0; i < shown; i++)
+        {
+            _ = summary.Append('\n').Append(lines[i]);
+        }
+
+        if (lines.Count > MaxItemsInMessage)
+        {
+            _ = summary.Append("\n…и ещё ").Append(lines.Count - MaxItemsInMessage);
         }
     }
 
     /// <summary>Оставляет первую строку причины (без стека) и обрезает до <see cref="MaxReasonLength"/>.</summary>
-    private static string FormatReason(FailedCommandInfo command, string filePath)
+    private static string FormatReason(SessionCommandInfo command)
     {
         var errorMessage = command.ErrorMessage;
         if (string.IsNullOrWhiteSpace(errorMessage))
@@ -80,8 +123,14 @@ public static class CompletionMessageFormatter
         // Сокращаем пути до обрезки текста, чтобы длинный UNC-путь не скрывал причину.
         if (!string.IsNullOrWhiteSpace(command.FilePath))
         {
-            errorMessage = errorMessage.Replace(command.FilePath, filePath, StringComparison.OrdinalIgnoreCase)
-                .Replace(command.FilePath.Replace('\\', '/'), filePath, StringComparison.OrdinalIgnoreCase);
+            var replacement = Path.GetFileName(command.FilePath);
+            if (string.IsNullOrWhiteSpace(replacement))
+            {
+                replacement = command.FilePath;
+            }
+
+            errorMessage = errorMessage.Replace(command.FilePath, replacement, StringComparison.OrdinalIgnoreCase)
+                .Replace(command.FilePath.Replace('\\', '/'), replacement, StringComparison.OrdinalIgnoreCase);
         }
 
         if (!string.IsNullOrWhiteSpace(command.RootPath))
@@ -114,18 +163,6 @@ public static class CompletionMessageFormatter
             : firstLine.ToString();
     }
 
-    private static string FormatFilePath(FailedCommandInfo command)
-    {
-        if (!string.IsNullOrWhiteSpace(command.RootPath)
-            && FileSystemOptions.IsPathWithinRoot(command.RootPath, command.FilePath))
-        {
-            return Path.GetRelativePath(Path.GetFullPath(command.RootPath), Path.GetFullPath(command.FilePath));
-        }
-
-        // Старые задания могут не иметь сохранённого корня.
-        return Path.GetFileName(command.FilePath);
-    }
-
     /// <summary>Гарантирует, что сообщение не превысит лимит Telegram — иначе SendAsync выбросит исключение.</summary>
     private static string ClampToTelegramLimit(StringBuilder summary)
     {
@@ -135,11 +172,6 @@ public static class CompletionMessageFormatter
         }
 
         return summary.ToString(0, MaxMessageLength - 1) + "…";
-    }
-
-    private static string FormatDurationPrefix(int? durationSeconds)
-    {
-        return durationSeconds is > 0 ? $"{FormatDuration(durationSeconds.Value)} — " : "";
     }
 
     private static string FormatDuration(int totalSeconds)

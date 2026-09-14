@@ -67,7 +67,7 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 
 `NotificationSenderService`: poll 3 с, sender advisory lock, до 20 событий/цикл, lease 5 мин. Раз в минуту — recover до 100 сессий без outbox. Telegram timeout 30 с; 429 → `retry_after` под общей блокировкой; transient → `NextAttemptAt` (до 300 с); 400/403 → failed. Ack + tracking — одна tx (at-least-once; возможен дубль при аварии между Telegram и commit).
 
-`CompletionMessageFormatter` — чистый текст: Failed и Done-с-warning; относительный путь от `Commands.RootPath` (иначе имя файла); перевод типовых причин только при отображении.
+`CompletionMessageFormatter` — чистый текст для любого итога: код команды, проект, имена файлов, затем `выполнено без ошибок` / `есть ошибки` / `есть предупреждения`. При сбое — `Ошибка:` и причина по файлу; warning плагина — `Предупреждение:`. Перевод типовых причин только при отображении; UNC в причине сжимается до имени файла.
 
 ## 7. Cleanup и shutdown
 

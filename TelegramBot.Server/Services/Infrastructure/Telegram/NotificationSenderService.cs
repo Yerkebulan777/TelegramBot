@@ -140,14 +140,14 @@ public sealed class NotificationSenderService(
     {
         var session = await sessionDataService.GetSessionCompletionSummaryAsync(sessionId);
         // Сводка failed-команд для трассировки: дошли ли причины из БД до уведомления.
-        var failedWithMsg = session.FailedCommands.Count(c => !string.IsNullOrWhiteSpace(c.ErrorMessage));
+        var failedWithMsg = session.Failed.Count(command => !string.IsNullOrWhiteSpace(command.ErrorMessage));
         logger.LogInformation(
             "Notify summary: session={SessionId}, corr={CorrelationId}, done={Done}, failed={Failed}, failedWithMsg={FailedWithMsg}, warned={Warned}, total={Total}",
-            sessionId, correlationId, session.DoneFiles, session.FailedFiles, failedWithMsg, session.WarnedCommands.Count, session.TotalFiles);
+            sessionId, correlationId, session.DoneFiles, session.FailedFiles, failedWithMsg, session.Warned.Count(), session.TotalFiles);
 
         if (logger.IsEnabled(LogLevel.Debug))
         {
-            foreach (var failed in session.FailedCommands)
+            foreach (var failed in session.Failed)
             {
                 logger.LogDebug("Notify failed detail: session={SessionId}, file={File}, err={Msg}",
                     sessionId, Path.GetFileName(failed.FilePath), failed.ErrorMessage ?? "<null>");

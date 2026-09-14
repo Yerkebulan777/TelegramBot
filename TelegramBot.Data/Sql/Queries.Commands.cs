@@ -231,22 +231,12 @@ internal static partial class SqlQueries
         internal const string AcquireSessionCompletionLock = @"
             SELECT pg_advisory_xact_lock(1234570, @SessionId);";
 
-        internal const string GetFailedCommandsBySession = @"
-            SELECT FilePath, RootPath, CommandText, ErrorMessage
+        // Все не-Deleted строки сессии. Warning плагина — Status=Done и непустой ErrorMessage (см. SessionCompletionSummary.Warned).
+        internal const string GetCommandsForCompletion = @"
+            SELECT FilePath, RootPath, CommandText, Status, ErrorMessage
             FROM Commands
             WHERE SessionId = @SessionId
-              AND Status = 'Failed'
-            ORDER BY ExecutionOrder, CommandId";
-
-        // Done rows reuse Commands.ErrorMessage for ResultFile.warningMessage (success with recoverable issues).
-        // Always filter Status = 'Done' — never treat ErrorMessage alone as failure.
-        internal const string GetWarnedCommandsBySession = @"
-            SELECT FilePath, RootPath, CommandText, ErrorMessage
-            FROM Commands
-            WHERE SessionId = @SessionId
-              AND Status = 'Done'
-              AND ErrorMessage IS NOT NULL
-              AND TRIM(ErrorMessage) <> ''
+              AND Status != 'Deleted'
             ORDER BY ExecutionOrder, CommandId";
 
     }
