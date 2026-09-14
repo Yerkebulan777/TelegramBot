@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -12,6 +13,7 @@ public class TelegramBotHostedService(
     ITelegramBotClient botClient,
     CommandAppService commandAppService,
     SchemaReadyGate schemaReadyGate,
+    IHostApplicationLifetime lifetime,
     ILogger<TelegramBotHostedService> logger,
     SessionManager sessionManager) : BackgroundService
 {
@@ -285,6 +287,14 @@ public class TelegramBotHostedService(
 
     private Task HandleErrorAsync(ITelegramBotClient client, Exception exception, CancellationToken token)
     {
+        if (exception is ApiRequestException { ErrorCode: 409 })
+        {
+            logger.LogCritical(exception,
+                "Polling conflict: another instance is using this bot token; stopping host");
+            lifetime.StopApplication();
+            return Task.CompletedTask;
+        }
+
         logger.LogError(exception, "Polling error");
         return Task.CompletedTask;
     }

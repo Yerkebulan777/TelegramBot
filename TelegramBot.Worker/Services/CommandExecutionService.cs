@@ -4,7 +4,6 @@ using System.Diagnostics;
 using TelegramBot.Core.Config;
 using TelegramBot.Data;
 using TelegramBot.BimLib.Monitor;
-using TelegramBot.Worker.Helpers;
 
 namespace TelegramBot.Worker.Services;
 
@@ -144,6 +143,8 @@ public sealed class CommandExecutionService(
             _ = _unresponsiveSince.TryRemove(staleCommandId, out _);
         }
 
+        dialogDismisser.PruneInactiveCommands(activeIds);
+
         foreach (var (commandId, process) in processRunner.ActiveProcesses)
         {
             if (process.HasExited)
@@ -188,7 +189,7 @@ public sealed class CommandExecutionService(
                 }
                 try
                 {
-                    if (dialogDismisser.NeedsProcessKillAfterDismiss((uint)process.Id))
+                    if (dialogDismisser.NeedsProcessKillAfterDismiss(commandId, (uint)process.Id))
                     {
                         await processRunner.KillTrackedProcessAsync(
                             commandId, _shutdownCts?.Token ?? CancellationToken.None);
@@ -220,22 +221,13 @@ public sealed class CommandExecutionService(
             await _shutdownCts.CancelAsync();
         }
 
-        logger.LogInformation("Shutdown: active={Count}", processRunner.ActiveProcesses.Count(p => !p.Value.HasExited));
-
-        // Принудительно завершаем все активные процессы параллельно в общем shutdown-бюджете.
-        var processesToKill = processRunner.ActiveProcesses.ToList();
-        var killTasks = processesToKill.Select(kvp => KillProcessAsync(kvp.Key, kvp.Value, shutdownBudgetCts.Token)).ToList();
-
-        if (killTasks.Count > 0)
+        try
         {
-            try
-            {
-                await Task.WhenAll(killTasks);
-            }
-            catch (OperationCanceledException) when (shutdownBudgetCts.IsCancellationRequested)
-            {
-                logger.LogWarning("Shutdown kill >{BudgetSeconds}s", ShutdownBudgetSeconds);
-            }
+            await processRunner.KillAllTrackedAsync(shutdownBudgetCts.Token);
+        }
+        catch (OperationCanceledException) when (shutdownBudgetCts.IsCancellationRequested)
+        {
+            logger.LogWarning("Shutdown kill >{BudgetSeconds}s", ShutdownBudgetSeconds);
         }
 
         int Remaining() => Math.Max(1, ShutdownBudgetSeconds - (int)(DateTime.UtcNow - shutdownStartedAt).TotalSeconds);
@@ -249,36 +241,6 @@ public sealed class CommandExecutionService(
         _shutdownCts?.Dispose();
 
         logger.LogInformation("Shutdown done");
-    }
-
-    private async Task KillProcessAsync(int commandId, Process process, CancellationToken shutdownToken)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                logger.LogInformation("Kill process: id={Id}, pid={Pid}",
-                    commandId, process.Id);
-
-                var exited = await ProcessKillHelper.KillAsync(
-                    process, TimeSpan.FromSeconds(10), logger, commandId, shutdownToken);
-
-                if (exited)
-                {
-                    logger.LogInformation("Process killed: id={Id}, pid={Pid}",
-                        commandId, process.Id);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Kill error: id={Id}, pid={Pid}",
-                commandId, process.Id);
-        }
-        finally
-        {
-            process.Dispose();
-        }
     }
 
     private async Task WaitForTasksAsync(Task? single, string name, CancellationToken token, int timeoutSeconds)

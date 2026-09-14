@@ -292,6 +292,29 @@ public sealed class ProcessRunner(
             cancellationToken);
     }
 
+    /// <summary>Параллельно убивает все tracked-процессы. Ошибка одного PID не отменяет остальные.</summary>
+    public async Task KillAllTrackedAsync(CancellationToken cancellationToken)
+    {
+        var commandIds = _tracked.Keys.ToArray();
+        logger.LogInformation("Shutdown kill: tracked={Count}", commandIds.Length);
+        if (commandIds.Length == 0)
+        {
+            return;
+        }
+
+        await Task.WhenAll(commandIds.Select(async commandId =>
+        {
+            try
+            {
+                await KillTrackedProcessAsync(commandId, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Kill error: id={CommandId}", commandId);
+            }
+        }));
+    }
+
     /// <summary>
     /// После kill на shutdown возвращает оставшиеся claimed команды в pending без инкремента RetryCount.
     /// </summary>
@@ -315,7 +338,10 @@ public sealed class ProcessRunner(
             }
             finally
             {
-                _ = _tracked.TryRemove(commandId, out _);
+                if (_tracked.TryRemove(commandId, out var removed))
+                {
+                    removed.Process?.Dispose();
+                }
             }
         }
     }

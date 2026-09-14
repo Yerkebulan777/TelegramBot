@@ -68,7 +68,8 @@ public sealed class DatabaseInitializerService(
             out var legacyRootPath,
             out _);
 
-        await using var conn = await CreateOpenConnectionAsync(ct);
+        await using var conn = await DataAccessBase.OpenConnectionAsync(
+            DataAccessBase.ResolveConnectionString(configuration), ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         try
@@ -103,12 +104,5 @@ public sealed class DatabaseInitializerService(
             await tx.RollbackAsync(CancellationToken.None);
             throw;
         }
-    }
-
-    private async Task<NpgsqlConnection> CreateOpenConnectionAsync(CancellationToken ct)
-    {
-        var conn = new NpgsqlConnection(DataAccessBase.ResolveConnectionString(configuration));
-        await conn.OpenAsync(ct);
-        return conn;
     }
 }

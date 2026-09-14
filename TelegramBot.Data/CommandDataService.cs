@@ -283,6 +283,7 @@ public sealed class CommandDataService(
         catch (Exception e)
         {
             Logger.LogWarning(e, "Failed to {Description}", description);
+            return false;
         }
 
         return true;

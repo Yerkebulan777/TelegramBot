@@ -21,7 +21,7 @@ public abstract class DataAccessBase
     /// <c>Minimum Pool Size=2</c> — держит 2 подключения «тёплыми» для снижения latency на cold-start;
     /// <c>Connection Idle Lifetime=300</c> — закрывает idle-подключения старше 5 минут;
     /// <c>Max Pool Size</c> не задаётся (default=100 достаточно: Server DOP=10 + notification, Worker drain+cleanup+health);
-    /// <c>Multiplexing</c> не задаётся (default=true в Npgsql 6+);
+    /// <c>Multiplexing</c> не задаётся (в Npgsql 6+ default=false, opt-in; session advisory locks с multiplexing несовместимы);
     /// <c>Timeout=30</c> — budget на cold-start TCP-handshake под пиковой нагрузкой (default 15s
     /// недостаточен при 5+ параллельных Revit: localhost-connect таймаутился при старте Worker).
     /// </remarks>
@@ -52,9 +52,12 @@ public abstract class DataAccessBase
     /// <summary>
     /// Создаёт и открывает подключение к PostgreSQL.
     /// </summary>
-    protected async Task<NpgsqlConnection> CreateOpenConnectionAsync(CancellationToken cancellationToken = default)
+    protected Task<NpgsqlConnection> CreateOpenConnectionAsync(CancellationToken cancellationToken = default) =>
+        OpenConnectionAsync(_connectionString, cancellationToken);
+
+    internal static async Task<NpgsqlConnection> OpenConnectionAsync(string connectionString, CancellationToken cancellationToken = default)
     {
-        var conn = new NpgsqlConnection(_connectionString);
+        var conn = new NpgsqlConnection(connectionString);
         try
         {
             await conn.OpenAsync(cancellationToken);

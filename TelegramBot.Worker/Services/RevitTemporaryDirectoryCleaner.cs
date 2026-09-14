@@ -11,13 +11,14 @@ public sealed class RevitTemporaryDirectoryCleaner(
 
     private readonly HashSet<Task> _activeCleanups = [];
     private readonly object _gate = new();
-    private bool _acceptingRequests;
+    private CancellationTokenSource? _stoppingCts;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         lock (_gate)
         {
-            _acceptingRequests = true;
+            _stoppingCts?.Dispose();
+            _stoppingCts = new CancellationTokenSource();
         }
 
         return Task.CompletedTask;
@@ -34,14 +35,15 @@ public sealed class RevitTemporaryDirectoryCleaner(
         Task? cleanupTask;
         lock (_gate)
         {
-            if (!_acceptingRequests)
+            if (_stoppingCts is null)
             {
                 cleanupTask = null;
             }
             else
             {
                 var request = new CleanupRequest(temporaryDirectoryPath, sourceFilePath, commandId);
-                cleanupTask = Task.Run(() => ProcessRequestAsync(request));
+                var stoppingToken = _stoppingCts.Token;
+                cleanupTask = Task.Run(() => ProcessRequestAsync(request, stoppingToken));
                 _ = _activeCleanups.Add(cleanupTask);
             }
         }
@@ -70,20 +72,25 @@ public sealed class RevitTemporaryDirectoryCleaner(
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         Task[] pendingCleanups;
+        CancellationTokenSource? stoppingCts;
         lock (_gate)
         {
-            _acceptingRequests = false;
             pendingCleanups = [.. _activeCleanups];
+            stoppingCts = _stoppingCts;
+            _stoppingCts = null;
         }
 
-        if (pendingCleanups.Length == 0)
+        if (stoppingCts is not null)
         {
-            return;
+            await stoppingCts.CancelAsync();
         }
 
         try
         {
-            await Task.WhenAll(pendingCleanups).WaitAsync(cancellationToken);
+            if (pendingCleanups.Length > 0)
+            {
+                await Task.WhenAll(pendingCleanups).WaitAsync(cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -91,17 +98,25 @@ public sealed class RevitTemporaryDirectoryCleaner(
                 "Temporary directory cleanup shutdown timeout: pending={PendingCount}",
                 pendingCleanups.Count(task => !task.IsCompleted));
         }
+        finally
+        {
+            stoppingCts?.Dispose();
+        }
     }
 
-    private async Task ProcessRequestAsync(CleanupRequest request)
+    private async Task ProcessRequestAsync(CleanupRequest request, CancellationToken cancellationToken)
     {
         try
         {
             var directoryPath = Validate(request);
             if (directoryPath is not null)
             {
-                await DeleteWithRetryAsync(directoryPath, request.CommandId);
+                await DeleteWithRetryAsync(directoryPath, request.CommandId, cancellationToken);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            logger.LogDebug("Temporary directory cleanup cancelled during shutdown: id={CommandId}", request.CommandId);
         }
         catch (Exception ex)
         {
@@ -171,10 +186,11 @@ public sealed class RevitTemporaryDirectoryCleaner(
         }
     }
 
-    private async Task DeleteWithRetryAsync(string directoryPath, int commandId)
+    private async Task DeleteWithRetryAsync(string directoryPath, int commandId, CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt <= DeleteRetryCount; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 if (!IsOrdinaryDirectory(File.GetAttributes(directoryPath)))
@@ -204,7 +220,7 @@ public sealed class RevitTemporaryDirectoryCleaner(
                 logger.LogDebug(ex,
                     "Temporary directory cleanup retry: id={CommandId}, retry={Retry}/{RetryCount}",
                     commandId, attempt + 1, DeleteRetryCount);
-                await Task.Delay(DeleteRetryDelay);
+                await Task.Delay(DeleteRetryDelay, cancellationToken);
             }
         }
     }

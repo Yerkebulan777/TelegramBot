@@ -47,7 +47,7 @@ internal static partial class SqlQueries
                 CreatedAt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 StartedAt TIMESTAMPTZ,
                 CompletedAt TIMESTAMPTZ,
-                Lease INTEGER,
+                Lease BIGINT,
                 Partition TEXT,
                 Priority INTEGER NOT NULL DEFAULT 5,
                 ProcessId INTEGER,
@@ -59,7 +59,7 @@ internal static partial class SqlQueries
 
         internal const string EnsureCommandsColumns = @"
             ALTER TABLE Commands
-            ADD COLUMN IF NOT EXISTS Lease INTEGER,
+            ADD COLUMN IF NOT EXISTS Lease BIGINT,
             ADD COLUMN IF NOT EXISTS Partition TEXT,
             ADD COLUMN IF NOT EXISTS Priority INTEGER NOT NULL DEFAULT 5,
             ADD COLUMN IF NOT EXISTS ProcessId INTEGER,
@@ -70,6 +70,7 @@ internal static partial class SqlQueries
             ADD COLUMN IF NOT EXISTS RootPath TEXT;
 
             ALTER TABLE Commands
+            ALTER COLUMN Lease TYPE BIGINT,
             ALTER COLUMN Priority SET DEFAULT 5,
             ALTER COLUMN RetryCount SET DEFAULT 0;
 

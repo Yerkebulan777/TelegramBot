@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -22,9 +21,6 @@ public sealed partial class FileSystemBrowser(IOptions<FileSystemOptions> option
 
     [GeneratedRegex(@"\.\d{3,5}$", RegexOptions.Compiled)]
     private static partial Regex RevitBackupFilePattern();
-
-    // Токены выбора путей стабильны (SHA256 от нормализованного пути) и не зависят от содержимого ФС.
-    private readonly ConcurrentDictionary<string, string> _tokenCache = new();
 
     private static readonly HashSet<string> _sectionAcronyms = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -177,14 +173,12 @@ public sealed partial class FileSystemBrowser(IOptions<FileSystemOptions> option
         return new InlineKeyboardMarkup(buttons);
     }
 
-    private string CreateSelectionToken(string path)
+    /// <summary>SHA256 от нормализованного пути; не зависит от содержимого ФС.</summary>
+    private static string CreateSelectionToken(string path)
     {
-        return _tokenCache.GetOrAdd(path, static p =>
-        {
-            var normalized = Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant();
-            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-            return Convert.ToHexString(hash)[..16];
-        });
+        var normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant();
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexString(hash)[..16];
     }
 
     /// <summary>

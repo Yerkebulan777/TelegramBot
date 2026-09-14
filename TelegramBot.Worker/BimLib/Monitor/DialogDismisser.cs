@@ -22,21 +22,21 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
 {
     private readonly ILogger<DialogDismisser> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly DialogDismisserOptions _options = optionsAccessor.Value;
-    private readonly ConcurrentDictionary<uint, int> _dismissAttempts = new();
+    private readonly ConcurrentDictionary<int, int> _dismissAttempts = new();
 
     private const string _dialogWindowClass = "#32770";
 
     /// <summary>
-    /// Проверяет и закрывает диалоговые окна для указанного процесса.
+    /// Проверяет и закрывает диалоговые окна tracked-команды.
+    /// Счётчик попыток — по CommandId (PID на Windows переиспользуется).
     /// Возвращает true, если ProcessRunner должен убить tracked-процесс.
     /// </summary>
-    public bool NeedsProcessKillAfterDismiss(uint processId)
+    public bool NeedsProcessKillAfterDismiss(int commandId, uint processId)
     {
         var dialogs = FindDialogs(processId);
         if (dialogs.Count == 0)
         {
-            // Диалогов нет — сбрасываем счётчик попыток
-            _=_dismissAttempts.TryRemove(processId, out _);
+            _ = _dismissAttempts.TryRemove(commandId, out _);
             return false;
         }
 
@@ -94,31 +94,41 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
 
         if (dismissed)
         {
-            // Успешно закрыли — сбрасываем счётчик
-            _=_dismissAttempts.TryRemove(processId, out _);
+            _ = _dismissAttempts.TryRemove(commandId, out _);
         }
         else if (_options.MaxDismissAttempts > 0)
         {
-            // Диалоги есть, но закрыть не удалось — учитываем попытку
-            var attempts = _dismissAttempts.AddOrUpdate(processId, 1, (_, count) => count + 1);
-            _logger.LogWarning("Dismiss fail: pid={ProcessId} (attempt {Attempts}/{Max})", processId, attempts, _options.MaxDismissAttempts);
+            var attempts = _dismissAttempts.AddOrUpdate(commandId, 1, (_, count) => count + 1);
+            _logger.LogWarning("Dismiss fail: id={CommandId}, pid={ProcessId} (attempt {Attempts}/{Max})",
+                commandId, processId, attempts, _options.MaxDismissAttempts);
 
             if (attempts >= _options.MaxDismissAttempts)
             {
                 _logger.LogWarning(
-                    "Dismiss fail limit: pid={ProcessId} after {Max} attempts; requesting tracked kill",
-                    processId, _options.MaxDismissAttempts);
-                _ = _dismissAttempts.TryRemove(processId, out _);
+                    "Dismiss fail limit: id={CommandId}, pid={ProcessId} after {Max} attempts; requesting tracked kill",
+                    commandId, processId, _options.MaxDismissAttempts);
+                _ = _dismissAttempts.TryRemove(commandId, out _);
                 return true;
             }
         }
         else
         {
-            // MaxDismissAttempts == 0 — авто-kill отключён, логируем без счётчика
-            _logger.LogWarning("Dismiss fail: pid={ProcessId} (auto-kill off)", processId);
+            _logger.LogWarning("Dismiss fail: id={CommandId}, pid={ProcessId} (auto-kill off)", commandId, processId);
         }
 
         return false;
+    }
+
+    /// <summary>Убирает счётчики команд, которых уже нет в tracking.</summary>
+    public void PruneInactiveCommands(IReadOnlySet<int> activeCommandIds)
+    {
+        foreach (var commandId in _dismissAttempts.Keys)
+        {
+            if (!activeCommandIds.Contains(commandId))
+            {
+                _ = _dismissAttempts.TryRemove(commandId, out _);
+            }
+        }
     }
 
     /// <summary>
