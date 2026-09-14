@@ -15,10 +15,6 @@ public sealed class NotificationOutboxDataService(
     public const string SessionCompletedEvent = "session_completed";
     public const string SessionStartedEvent = "session_started";
 
-    // namespace: telegram_bot_outbox_sender — mutual exclusion между репликами Server.
-    // Не конфликтует с 1_234_567 (lease cleanup) и 1_234_568 (partition claim).
-    private const int SenderAdvisoryLockId = 1_234_569;
-
     public async Task<NotificationOutboxItem?> ClaimPendingAsync(
         SenderLockHolder lockHolder,
         TimeSpan leaseDuration,
@@ -125,7 +121,7 @@ public sealed class NotificationOutboxDataService(
             conn = await CreateOpenConnectionAsync(cancellationToken);
             var locked = await conn.QuerySingleAsync<bool>(new CommandDefinition(
                 SqlQueries.NotificationOutbox.TryAcquireSenderLock,
-                new { LockId = SenderAdvisoryLockId }, cancellationToken: cancellationToken));
+                new { LockId = AdvisoryLockIds.OutboxSender }, cancellationToken: cancellationToken));
 
             if (!locked)
             {
@@ -133,7 +129,7 @@ public sealed class NotificationOutboxDataService(
                 return null;
             }
 
-            return new SenderLockHolder(conn, SenderAdvisoryLockId, Logger);
+            return new SenderLockHolder(conn, AdvisoryLockIds.OutboxSender, Logger);
         }
         catch (Exception ex)
         {

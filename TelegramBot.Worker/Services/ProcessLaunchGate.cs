@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 
@@ -75,11 +76,11 @@ public sealed class ProcessLaunchGate(
         }
     }
 
-    /// <summary>Строка состояния и advisory lock id; значения не конфликтуют с lease cleanup/outbox/claim.</summary>
+    /// <summary>Строка состояния и 1-arg advisory lock; ключи — <see cref="AdvisoryLockIds"/>.</summary>
     private static (string Product, long AdvisoryLockId) GetGateSettings(ProcessLaunchGateKind kind) => kind switch
     {
-        ProcessLaunchGateKind.Revit => ("Revit", 1_234_569),
-        ProcessLaunchGateKind.AutoCad => ("AutoCad", 1_234_570),
+        ProcessLaunchGateKind.Revit => ("Revit", AdvisoryLockIds.RevitLaunch),
+        ProcessLaunchGateKind.AutoCad => ("AutoCad", AdvisoryLockIds.AutoCadLaunch),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Launch gate kind has no shared state."),
     };
 

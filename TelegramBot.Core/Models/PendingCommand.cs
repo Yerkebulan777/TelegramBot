@@ -11,4 +11,7 @@ public class PendingCommand
     public string? RootPath { get; set; }
     public long UserId { get; set; }
     public int RetryCount { get; set; }
+
+    /// <summary>Unix-секунды lease, выставленные при claim. Нужны для fencing retry/complete/shutdown.</summary>
+    public long Lease { get; set; }
 }

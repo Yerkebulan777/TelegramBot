@@ -20,10 +20,10 @@ public sealed class SessionsListRenderer(
 {
     /// <summary>Строит текст сообщения и клавиатуру для текущего фильтра и страницы.</summary>
     private async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
-        string filter, int page, CancellationToken cancellationToken = default)
+        long userId, string filter, int page, CancellationToken cancellationToken = default)
     {
-        var sessionsTask = sessionDataService.GetSessionsListFilteredAsync(filter);
-        var countTask = sessionDataService.CountSessionsFilteredAsync(filter);
+        var sessionsTask = sessionDataService.GetSessionsListFilteredAsync(userId, filter);
+        var countTask = sessionDataService.CountSessionsFilteredAsync(userId, filter);
         await Task.WhenAll(sessionsTask, countTask);
 
         var sessions = await sessionsTask;
@@ -39,19 +39,19 @@ public sealed class SessionsListRenderer(
     }
 
     /// <summary>Отправляет список как новое сообщение (первый запуск /status).</summary>
-    public async Task<Message?> SendNewAsync(long chatId, string filter, int page = 0, CancellationToken cancellationToken = default)
+    public async Task<Message?> SendNewAsync(long userId, string filter, int page = 0, CancellationToken cancellationToken = default)
     {
-        var (text, keyboard) = await BuildAsync(filter, page, cancellationToken);
-        return await outputService.SendMessageWithKeyboardAsync(chatId, text, keyboard);
+        var (text, keyboard) = await BuildAsync(userId, filter, page, cancellationToken);
+        return await outputService.SendMessageWithKeyboardAsync(userId, text, keyboard);
     }
 
     /// <summary>Редактирует существующее сообщение /status (переключение фильтра/страницы, возврат после удаления).</summary>
     public async Task EditExistingAsync(
-        long chatId, int targetMessageId, string filter, int page, string username, CancellationToken cancellationToken = default)
+        long userId, int targetMessageId, string filter, int page, string username, CancellationToken cancellationToken = default)
     {
-        var (text, keyboard) = await BuildAsync(filter, page, cancellationToken);
+        var (text, keyboard) = await BuildAsync(userId, filter, page, cancellationToken);
         logger.LogInformation("{Username} view sessions: filter={Filter}, page={Page}", username, filter, page);
-        await outputService.EditMessageTextWithKeyboardAsync(chatId, targetMessageId, text, keyboard);
+        await outputService.EditMessageTextWithKeyboardAsync(userId, targetMessageId, text, keyboard);
     }
 
     /// <summary>

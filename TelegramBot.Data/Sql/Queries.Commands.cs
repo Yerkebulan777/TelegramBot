@@ -1,3 +1,5 @@
+using TelegramBot.Core.Constants;
+
 namespace TelegramBot.Data;
 
 internal static partial class SqlQueries
@@ -35,6 +37,7 @@ internal static partial class SqlQueries
             FROM Commands c
             JOIN Sessions s ON s.SessionId = c.SessionId
             WHERE c.SessionId = @SessionId
+              AND s.UserId = @UserId
               AND c.Status != 'Deleted';";
 
         internal const string CountActive = @"
@@ -45,17 +48,28 @@ internal static partial class SqlQueries
               AND c.Status != 'Deleted';";
 
         internal const string SoftDelete = @"
-            UPDATE Commands SET Status = 'Deleted'
-            WHERE CommandId = @CommandId;";
+            UPDATE Commands c
+            SET Status = 'Deleted'
+            FROM Sessions s
+            WHERE c.CommandId = @CommandId
+              AND s.SessionId = c.SessionId
+              AND s.UserId = @UserId
+              AND c.Status NOT IN ('Deleted', 'processing');";
 
-        internal const string SoftDeleteBySession =
-            "UPDATE Commands SET Status = 'Deleted' WHERE SessionId = @SessionId;";
-
-        internal const string SoftDeleteBySessionAndType = @"
+        internal const string SoftDeleteBySession = @"
             UPDATE Commands SET Status = 'Deleted'
             WHERE SessionId = @SessionId
-              AND CommandText = @CommandType
               AND Status NOT IN ('Deleted', 'processing');";
+
+        internal const string SoftDeleteBySessionAndType = @"
+            UPDATE Commands c
+            SET Status = 'Deleted'
+            FROM Sessions s
+            WHERE c.SessionId = @SessionId
+              AND s.SessionId = c.SessionId
+              AND s.UserId = @UserId
+              AND c.CommandText = @CommandType
+              AND c.Status NOT IN ('Deleted', 'processing');";
 
         internal const string SoftDeleteLegacyCancelled =
             "UPDATE Commands SET Status = 'Deleted' WHERE Status = 'Cancelled';";
@@ -65,6 +79,7 @@ internal static partial class SqlQueries
             FROM Commands c
             JOIN Sessions s ON s.SessionId = c.SessionId
             WHERE c.CommandId = @CommandId
+              AND s.UserId = @UserId
               AND c.Status != 'Deleted'
               AND s.Status != 'Deleted'
             LIMIT 1;";
@@ -98,7 +113,8 @@ internal static partial class SqlQueries
                 Lease = NULL,
                 NextRetryAt = NULL
             WHERE CommandId = @CommandId
-              AND Status != 'Deleted';";
+              AND Status = 'processing'
+              AND Lease = @ClaimedLease;";
 
         internal const string MarkProcessStartedAndNotifyOnce = @"
             WITH command_updated AS (
@@ -127,7 +143,7 @@ internal static partial class SqlQueries
             )
             SELECT COUNT(*)::int FROM notified;";
 
-        internal const string ClaimAndReturn = @"
+        internal static readonly string ClaimAndReturn = $@"
             WITH candidates AS (
                 SELECT c.CommandId, c.SessionId, c.CommandText, c.FilePath, c.RootPath, c.ExecutionOrder,
                        s.UserId, s.Username, s.CorrelationId,
@@ -161,7 +177,7 @@ internal static partial class SqlQueries
                 FROM one_per_partition p
                 JOIN Commands lockc ON lockc.CommandId = p.CommandId
                 WHERE lockc.Status = 'pending'
-                  AND pg_try_advisory_xact_lock(1234568, hashtext(p.Partition))
+                  AND pg_try_advisory_xact_lock({AdvisoryLockIds.PartitionClaim}, hashtext(p.Partition))
                 ORDER BY p.Priority ASC, p.CreatedAt ASC, p.CommandId ASC
                 LIMIT @Limit
                 FOR UPDATE OF lockc SKIP LOCKED
@@ -177,17 +193,19 @@ internal static partial class SqlQueries
                       selected.FilePath, selected.RootPath, selected.ExecutionOrder, selected.UserId,
                       selected.Username, selected.CorrelationId,
                       selected.Partition,
-                      selected.Priority, selected.RetryCount;";
+                      selected.Priority, selected.RetryCount, c.Lease;";
 
-        internal const string ScheduleRetry = @"
+        internal const string ReturnToPending = @"
             UPDATE Commands
             SET Status = 'pending',
                 Lease = NULL,
                 StartedAt = NULL,
-                RetryCount = COALESCE(RetryCount, 0) + 1,
+                RetryCount = CASE WHEN @IncrementRetry THEN COALESCE(RetryCount, 0) + 1 ELSE RetryCount END,
                 NextRetryAt = @NextRetryAt,
                 ErrorMessage = @ErrorMessage
             WHERE CommandId = @CommandId
+              AND Status = 'processing'
+              AND Lease = @ClaimedLease
             RETURNING RetryCount;";
 
         internal const string TryAdvisoryLock = "SELECT pg_try_advisory_lock(@LockId);";
@@ -228,8 +246,8 @@ internal static partial class SqlQueries
 
         // Transaction-scoped lock namespace for one terminal transition and its session completion
         // notification.  It serializes completions in a session before the active-command count is read.
-        internal const string AcquireSessionCompletionLock = @"
-            SELECT pg_advisory_xact_lock(1234570, @SessionId);";
+        internal static readonly string AcquireSessionCompletionLock =
+            $"SELECT pg_advisory_xact_lock({AdvisoryLockIds.SessionCompletion}, @SessionId);";
 
         // Все не-Deleted строки сессии. Warning плагина — Status=Done и непустой ErrorMessage (см. SessionCompletionSummary.Warned).
         internal const string GetCommandsForCompletion = @"

@@ -15,8 +15,6 @@ public sealed class CommandDataService(
     ILogger<CommandDataService> logger)
     : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
-    private const int AdvisoryLockId = 1_234_567; // namespace: telegram_bot_lease_cleanup
-
     /// <summary>Забирает pending команды для выполнения.</summary>
     public async Task<IReadOnlyList<PendingCommand>> ClaimPendingCommandsAsync(int limit = 50, int leaseTimeoutMinutes = 5)
     {
@@ -105,6 +103,7 @@ public sealed class CommandDataService(
                         Status = status,
                         ProcessId = processId,
                         ErrorMessage = errorMessage,
+                        ClaimedLease = command.Lease,
                     },
                     transaction,
                     cancellationToken: timeout.Token));
@@ -165,19 +164,36 @@ public sealed class CommandDataService(
         }
     }
 
-    /// <summary>Планирует повторную попытку.</summary>
-    public async Task<int> ScheduleRetryAsync(int commandId, DateTime nextRetryAt, string errorMessage)
+    /// <summary>Планирует повторную попытку, только если команда всё ещё processing с тем же lease.</summary>
+    public Task<int?> ScheduleRetryAsync(int commandId, long claimedLease, DateTime nextRetryAt, string errorMessage) =>
+        ReturnToPendingAsync(commandId, claimedLease, nextRetryAt, errorMessage, incrementRetry: true);
+
+    /// <summary>
+    /// Возвращает claimed команду в pending без инкремента RetryCount (graceful shutdown Worker).
+    /// </summary>
+    public async Task<bool> ReleaseClaimedLeaseAsync(
+        int commandId, long claimedLease, DateTime nextRetryAt, string errorMessage) =>
+        await ReturnToPendingAsync(commandId, claimedLease, nextRetryAt, errorMessage, incrementRetry: false) is not null;
+
+    private async Task<int?> ReturnToPendingAsync(
+        int commandId, long claimedLease, DateTime nextRetryAt, string errorMessage, bool incrementRetry)
     {
         try
         {
             await using var conn = await CreateOpenConnectionAsync();
-            return await conn.QuerySingleAsync<int>(
-                SqlQueries.Commands.ScheduleRetry,
-                new { CommandId = commandId, NextRetryAt = nextRetryAt, ErrorMessage = errorMessage });
+            return await conn.QuerySingleOrDefaultAsync<int?>(
+                SqlQueries.Commands.ReturnToPending,
+                new
+                {
+                    CommandId = commandId,
+                    ClaimedLease = claimedLease,
+                    NextRetryAt = nextRetryAt,
+                    ErrorMessage = errorMessage,
+                    IncrementRetry = incrementRetry,
+                });
         }
         catch (Exception ex)
         {
-            // Retrying an uncertain write could increment RetryCount twice.
             throw new CommandPersistenceException(commandId, ex);
         }
     }
@@ -191,18 +207,18 @@ public sealed class CommandDataService(
             new { CommandId = commandId, UserId = userId });
     }
 
-    /// <summary>Мягкое удаление команды.</summary>
-    public async Task<bool> DeleteCommandAsync(int commandId)
+    /// <summary>Мягкое удаление команды владельца. processing не удаляется.</summary>
+    public async Task<bool> DeleteCommandAsync(int commandId, long userId)
     {
         try
         {
             await using var conn = await CreateOpenConnectionAsync();
             var affected = await conn.ExecuteAsync(
-                SqlQueries.Commands.SoftDelete, new { CommandId = commandId });
+                SqlQueries.Commands.SoftDelete, new { CommandId = commandId, UserId = userId });
 
             if (affected == 0)
             {
-                Logger.LogWarning("Failed to delete command {CommandId}: not found", commandId);
+                Logger.LogWarning("Failed to delete command {CommandId}: not found, not owned, or processing", commandId);
                 return false;
             }
 
@@ -215,14 +231,15 @@ public sealed class CommandDataService(
         }
     }
 
-    /// <summary>Мягкое удаление команд по типу.</summary>
-    public async Task<int> DeleteCommandsByTypeAsync(int sessionId, string commandType)
+    /// <summary>Мягкое удаление команд по типу у владельца сессии. processing не удаляется.</summary>
+    public async Task<int> DeleteCommandsByTypeAsync(int sessionId, string commandType, long userId)
     {
         try
         {
             await using var conn = await CreateOpenConnectionAsync();
             return await conn.ExecuteAsync(
-                SqlQueries.Commands.SoftDeleteBySessionAndType, new { SessionId = sessionId, CommandType = commandType });
+                SqlQueries.Commands.SoftDeleteBySessionAndType,
+                new { SessionId = sessionId, CommandType = commandType, UserId = userId });
         }
         catch (Exception e)
         {
@@ -240,7 +257,7 @@ public sealed class CommandDataService(
             await using var conn = await CreateOpenConnectionAsync();
 
             var locked = await conn.QuerySingleAsync<bool>(
-                SqlQueries.Commands.TryAdvisoryLock, new { LockId = AdvisoryLockId });
+                SqlQueries.Commands.TryAdvisoryLock, new { LockId = AdvisoryLockIds.LeaseCleanup });
 
             if (!locked)
             {
@@ -258,7 +275,7 @@ public sealed class CommandDataService(
             }
             finally
             {
-                _ = await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = AdvisoryLockId });
+                _ = await conn.ExecuteAsync(SqlQueries.Commands.ReleaseAdvisoryLock, new { LockId = AdvisoryLockIds.LeaseCleanup });
             }
         }
         catch (Exception e)

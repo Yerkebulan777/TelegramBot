@@ -91,7 +91,7 @@ public sealed class CommandOrchestrator(
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Normal host shutdown.
+            // Shutdown: lease отпускает CommandExecutionService после kill процессов.
         }
         catch (Exception ex)
         {

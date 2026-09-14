@@ -97,8 +97,13 @@ public sealed class SessionManagementHandler(
     {
         context.Session.SessionId = sessionId;
 
-        var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
-        var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId);
+        var sessionStatus = await TryGetOwnedSessionAsync(context, sessionId);
+        if (sessionStatus is null)
+        {
+            return;
+        }
+
+        var sessionCommands = await sessionDataService.GetSessionsCommandsAsync(sessionId, context.UserId);
         var keyboard = keyboardBuilder.GetSessionCommandsKeyboard(sessionCommands, sessionId, filter, page);
         await outputService.EditMessageTextWithKeyboardAsync(
             context.UserId, context.MessageId, SessionsListRenderer.BuildStatusReply(sessionStatus, sessionCommands), keyboard);
@@ -122,7 +127,11 @@ public sealed class SessionManagementHandler(
             Logger.LogInformation("{Username} view session summary {SessionId}", context.Username, sessionId);
             session.SessionId = sessionId;
 
-            var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId);
+            var sessionStatus = await TryGetOwnedSessionAsync(context, sessionId);
+            if (sessionStatus is null)
+            {
+                return;
+            }
             var keyboard = keyboardBuilder.GetSessionStatusKeyboard(sessionId);
             await outputService.EditMessageTextWithKeyboardAsync(
                 context.UserId, context.MessageId, SessionsListRenderer.BuildStatusReply(sessionStatus), keyboard);
@@ -224,8 +233,10 @@ public sealed class SessionManagementHandler(
 
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
-        if (!await DeleteSessionAndMessagesAsync(sessionId))
+        if (!await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
         {
+            await outputService.AnswerCallbackAsync(
+                context.CallbackQueryId, "⚠️ Сессия выполняется или недоступна");
             return;
         }
 
@@ -244,8 +255,10 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("{Username} delete cmd {CommandId}", context.Username, commandId);
 
         var sessionId = await ResolveSessionByCommandAsync(context, commandId);
-        if (!sessionId.HasValue || !await commandDataService.DeleteCommandAsync(commandId))
+        if (!sessionId.HasValue || !await commandDataService.DeleteCommandAsync(commandId, context.UserId))
         {
+            await outputService.AnswerCallbackAsync(
+                context.CallbackQueryId, "⚠️ Команда выполняется или недоступна");
             return;
         }
 
@@ -266,7 +279,7 @@ public sealed class SessionManagementHandler(
         Logger.LogInformation("{Username} delete all commands of type {CommandType} in session {SessionId}",
             context.Username, commandType, sessionId);
 
-        var deleted = await commandDataService.DeleteCommandsByTypeAsync(sessionId, commandType);
+        var deleted = await commandDataService.DeleteCommandsByTypeAsync(sessionId, commandType, context.UserId);
         if (deleted == 0)
         {
             Logger.LogWarning("{Username} no commands deleted for type {CommandType} session {SessionId}",
@@ -343,9 +356,9 @@ public sealed class SessionManagementHandler(
 
     // ────────────────────── Shared Helpers ──────────────────────
 
-    private async Task<bool> DeleteSessionAndMessagesAsync(int sessionId)
+    private async Task<bool> DeleteSessionAndMessagesAsync(int sessionId, long userId)
     {
-        if (!await sessionDataService.DeleteSessionAsync(sessionId))
+        if (!await sessionDataService.DeleteSessionAsync(sessionId, userId))
         {
             return false;
         }
@@ -389,7 +402,7 @@ public sealed class SessionManagementHandler(
     {
         if (!await sessionDataService.CheckCommandsStatusAsync(sessionId))
         {
-            if (await DeleteSessionAndMessagesAsync(sessionId))
+            if (await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
             {
                 await ShowSessionsListAsync(context);
             }
@@ -403,12 +416,23 @@ public sealed class SessionManagementHandler(
     /// <summary>Резолвит SessionId по CommandId с проверкой прав.</summary>
     private async Task<int?> ResolveSessionByCommandAsync(CallbackContext context, int commandId)
     {
-        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId);
+        var sessionId = await sessionDataService.GetSessionIdByCommandAsync(commandId, context.UserId);
         if (!sessionId.HasValue)
         {
             Logger.LogWarning("{Username} foreign or missing cmd {CommandId}", context.Username, commandId);
         }
         return sessionId;
+    }
+
+    private async Task<SessionStatus?> TryGetOwnedSessionAsync(CallbackContext context, int sessionId)
+    {
+        var sessionStatus = await sessionDataService.GetSessionsStatusAsync(sessionId, context.UserId);
+        if (sessionStatus is null)
+        {
+            Logger.LogWarning("{Username} foreign or missing session {SessionId}", context.Username, sessionId);
+        }
+
+        return sessionStatus;
     }
 
     private async Task ShowSessionsListAsync(CallbackContext context)

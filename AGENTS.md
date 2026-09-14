@@ -74,9 +74,10 @@ Polling (1s) → lease cleanup → ClaimPendingCommands → Prepare → Start �
 ## PostgreSQL
 
 - Parameterized Dapper; soft-delete (`Status='Deleted'`); физический `DELETE` только `TrackedMessages`
+- `/status` и delete — только `UserId` владельца; `processing` не soft-delete
 - Статусы: `pending`, `processing`, `Done`, `Failed`, `Deleted`
 - Claim: `FOR UPDATE SKIP LOCKED` + partition advisory xact lock
-- Lease cleanup, outbox, terminal completion — session advisory locks
+- Lease cleanup, outbox, terminal completion — session advisory locks (`AdvisoryLockIds`; Revit gate ≠ outbox)
 - Session + Commands — одна транзакция с user-level xact lock
 
 ## Logging и стиль

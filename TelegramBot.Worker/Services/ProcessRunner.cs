@@ -26,13 +26,32 @@ public sealed class ProcessRunner(
 {
     private readonly WorkerOptions _workerOptions = workerOptions.Value;
 
-    // Трекинг активных процессов для health-мониторинга и graceful shutdown
-    private readonly ConcurrentDictionary<int, Process> _activeProcesses = new();
+    private sealed class TrackedCommand(long lease)
+    {
+        public long Lease { get; } = lease;
+        public Process? Process { get; set; }
+    }
+
+    private readonly ConcurrentDictionary<int, TrackedCommand> _tracked = new();
     private const int PerProcessKillTimeoutSeconds = 10;
+    private const int StreamDrainTimeoutMs = 10_000;
+    private const int ShutdownLeaseRetryDelaySeconds = 15;
     private const int RevitOpenRetryDelaySeconds = 10;
 
-    /// <summary>Снимок активных процессов для health-мониторинга.</summary>
-    public IEnumerable<KeyValuePair<int, Process>> ActiveProcesses => _activeProcesses;
+    /// <summary>Снимок запущенных процессов для health-мониторинга и shutdown kill.</summary>
+    public IEnumerable<KeyValuePair<int, Process>> ActiveProcesses
+    {
+        get
+        {
+            foreach (var (commandId, tracked) in _tracked)
+            {
+                if (tracked.Process is { } process)
+                {
+                    yield return new KeyValuePair<int, Process>(commandId, process);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Полный цикл выполнения одной команды: подготовка → запуск → ожидание → retry/fail.
@@ -41,6 +60,7 @@ public sealed class ProcessRunner(
     {
         var sw = Stopwatch.StartNew();
         Process? process = null;
+        _tracked[cmd.CommandId] = new TrackedCommand(cmd.Lease);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromMinutes(_workerOptions.ProcessTimeoutMinutes));
@@ -73,8 +93,7 @@ public sealed class ProcessRunner(
             }
             catch (OperationCanceledException)
             {
-                // Shutdown — НЕ удаляем из _activeProcesses и НЕ диспозим процесс:
-                // LogActiveProcessesOnShutdownAsync должен видеть все активные процессы до остановки.
+                // Shutdown: tracking остаётся, пока CommandExecutionService не убьёт процессы и не отпустит lease.
                 throw;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is not CommandPersistenceException)
@@ -98,11 +117,10 @@ public sealed class ProcessRunner(
                 taskFileStore.Cleanup(cmd.CommandId, cmd.FilePath ?? string.Empty);
             }
 
-            // На shutdown не удаляем процесс из tracking'а — пусть LogActiveProcessesOnShutdownAsync его увидит.
-            if (!ct.IsCancellationRequested)
+            // На shutdown tracking держит CommandExecutionService (kill + release lease).
+            if (!ct.IsCancellationRequested && _tracked.TryRemove(cmd.CommandId, out var tracked))
             {
-                _ = _activeProcesses.TryRemove(cmd.CommandId, out var removedProcess);
-                removedProcess?.Dispose();
+                tracked.Process?.Dispose();
             }
         }
     }
@@ -147,7 +165,7 @@ public sealed class ProcessRunner(
             throw;
         }
 
-        _activeProcesses[cmd.CommandId] = process;
+        _tracked[cmd.CommandId].Process = process;
         _ = await commandDataService.MarkProcessStartedAndNotifyOnceAsync(
             cmd.CommandId, process.Id);
         return process;
@@ -166,11 +184,7 @@ public sealed class ProcessRunner(
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             await process.WaitForExitAsync(ct);
-            // Sync WaitForExit после WaitForExitAsync — НЕ ошибка и НЕ sync-over-async в вредном смысле.
-            // Это рекомендуемый .NET-приём для redirected output: после асинхронного выхода процесса
-            // sync-перегрузка дочитывает остатки stdout/stderr-буферов, гарантируя, что OutputDataReceived
-            // успел отстрелять до разбора ResultFile. НЕ заменять на один только WaitForExitAsync.
-            process.WaitForExit();
+            await DrainRedirectedOutputAsync(cmd, process);
         }
         finally
         {
@@ -250,6 +264,61 @@ public sealed class ProcessRunner(
     }
 
     /// <summary>
+    /// Sync WaitForExit после WaitForExitAsync дочитывает redirected stdout/stderr.
+    /// Без timeout дочерние процессы могут держать pipe бесконечно.
+    /// </summary>
+    private async Task DrainRedirectedOutputAsync(PendingCommand cmd, Process process)
+    {
+        if (process.WaitForExit(StreamDrainTimeoutMs))
+        {
+            return;
+        }
+
+        logger.LogWarning(
+            "Process output drain timed out: id={CommandId}, pid={Pid}",
+            cmd.CommandId, process.Id);
+        _ = await ProcessKillHelper.KillAsync(
+            process,
+            TimeSpan.FromSeconds(PerProcessKillTimeoutSeconds),
+            logger,
+            cmd.CommandId);
+        if (!process.WaitForExit(StreamDrainTimeoutMs))
+        {
+            logger.LogWarning(
+                "Process output drain still blocked after kill: id={CommandId}",
+                cmd.CommandId);
+        }
+    }
+
+    /// <summary>
+    /// После kill на shutdown возвращает оставшиеся claimed команды в pending без инкремента RetryCount.
+    /// </summary>
+    public async Task ReleaseClaimedLeasesOnShutdownAsync()
+    {
+        var nextRetryAt = DateTime.UtcNow.AddSeconds(ShutdownLeaseRetryDelaySeconds);
+        foreach (var (commandId, tracked) in _tracked.ToArray())
+        {
+            try
+            {
+                var released = await commandDataService.ReleaseClaimedLeaseAsync(
+                    commandId, tracked.Lease, nextRetryAt, "Worker shutdown");
+                if (released)
+                {
+                    logger.LogInformation("Shutdown released lease: id={CommandId}", commandId);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Shutdown lease release failed: id={CommandId}", commandId);
+            }
+            finally
+            {
+                _ = _tracked.TryRemove(commandId, out _);
+            }
+        }
+    }
+
+    /// <summary>
     /// Планирует retry (для ProcessCrashError) или помечает команду как Failed (для InvalidFileError).
     /// </summary>
     private async Task HandleFailureAsync(
@@ -267,7 +336,11 @@ public sealed class ProcessRunner(
             if (cmd.RetryCount == 0)
             {
                 DateTime nextRetryAt = DateTime.UtcNow.AddSeconds(RevitOpenRetryDelaySeconds);
-                int newRetryCount = await commandDataService.ScheduleRetryAsync(cmd.CommandId, nextRetryAt, errorMessage);
+                var newRetryCount = await TryScheduleRetryAsync(cmd, nextRetryAt, errorMessage);
+                if (newRetryCount is null)
+                {
+                    return;
+                }
                 logger.LogWarning(
                     "Revit open retry scheduled: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}, retryAt={Next:O}, ms={ElapsedMs}, err={Msg}",
                     cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, nextRetryAt, sw.ElapsedMilliseconds, errorMessage);
@@ -310,7 +383,11 @@ public sealed class ProcessRunner(
             var baseDelay = _workerOptions.RetryDelayBaseSeconds * (1 << cmd.RetryCount);
             var jitterSeconds = Random.Shared.Next(0, _workerOptions.RetryDelayBaseSeconds);
             var nextRetryAt = DateTime.UtcNow.AddSeconds(baseDelay + jitterSeconds);
-            var newRetryCount = await commandDataService.ScheduleRetryAsync(cmd.CommandId, nextRetryAt, errorMessage);
+            var newRetryCount = await TryScheduleRetryAsync(cmd, nextRetryAt, errorMessage);
+            if (newRetryCount is null)
+            {
+                return;
+            }
             logger.LogWarning(ex, "Retry: cmd={Cmd}, id={Id}, corr={CorrelationId}, attempt={Attempt}/{Max}, retryAt={Next:O}, exit={ExitCode}, ms={ElapsedMs}, err={Msg}",
                 cmd.CommandText, cmd.CommandId, cmd.CorrelationId, newRetryCount, _workerOptions.MaxRetries,
                 nextRetryAt, ExitCodeFormatter.Format(exitCode), sw.ElapsedMilliseconds, errorMessage);
@@ -331,6 +408,20 @@ public sealed class ProcessRunner(
         logger.LogDebug(
             "Terminal command persisted: id={CommandId}, status={Status}, sessionCompletionNotified={SessionCompletionNotified}",
             command.CommandId, status, notified);
+    }
+
+    private async Task<int?> TryScheduleRetryAsync(PendingCommand cmd, DateTime nextRetryAt, string errorMessage)
+    {
+        var retryCount = await commandDataService.ScheduleRetryAsync(
+            cmd.CommandId, cmd.Lease, nextRetryAt, errorMessage);
+        if (retryCount is null)
+        {
+            logger.LogWarning(
+                "Retry not scheduled: id={CommandId} (lease mismatch or not processing)",
+                cmd.CommandId);
+        }
+
+        return retryCount;
     }
 
     private static readonly string[] PermanentFailurePatterns =

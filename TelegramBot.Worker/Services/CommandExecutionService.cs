@@ -238,6 +238,8 @@ public sealed class CommandExecutionService(
         await WaitForTasksAsync(null, "Running tasks", shutdownBudgetCts.Token, Math.Min(TaskWaitTimeoutSeconds, Remaining()));
 #pragma warning restore VSTHRD003
 
+        await processRunner.ReleaseClaimedLeasesOnShutdownAsync();
+
         _shutdownCts?.Dispose();
 
         logger.LogInformation("Shutdown done");

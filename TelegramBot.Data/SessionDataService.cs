@@ -121,23 +121,23 @@ public sealed class SessionDataService(
         return (sessionId, queuedFileCount, skippedPairs);
     }
 
-    /// <summary>Возвращает отфильтрованный список сессий.</summary>
-    public async Task<List<SessionsList>> GetSessionsListFilteredAsync(string filter)
+    /// <summary>Возвращает отфильтрованный список сессий владельца.</summary>
+    public async Task<List<SessionsList>> GetSessionsListFilteredAsync(long userId, string filter)
     {
         await using var conn = await CreateOpenConnectionAsync();
         var result = await conn.QueryAsync<SessionsList>(
             SqlQueries.Sessions.GetListFiltered,
-            new { Filter = filter });
+            new { UserId = userId, Filter = filter });
         return result.ToList();
     }
 
-    /// <summary>Считает количество сессий по фильтру (для счётчика «(всего N)» в заголовке /status).</summary>
-    public async Task<int> CountSessionsFilteredAsync(string filter)
+    /// <summary>Считает количество сессий владельца по фильтру (для счётчика «(всего N)» в заголовке /status).</summary>
+    public async Task<int> CountSessionsFilteredAsync(long userId, string filter)
     {
         await using var conn = await CreateOpenConnectionAsync();
         return await conn.QuerySingleAsync<int>(
             SqlQueries.Sessions.CountFiltered,
-            new { Filter = filter });
+            new { UserId = userId, Filter = filter });
     }
 
     /// <summary>Считает очередь файлов пользователя с момента since.</summary>
@@ -158,13 +158,12 @@ public sealed class SessionDataService(
             new { SessionId = sessionId });
     }
 
-    /// <summary>Возвращает статус сессии.</summary>
-    public async Task<SessionStatus> GetSessionsStatusAsync(int sessionId)
+    /// <summary>Возвращает статус сессии владельца или null, если сессии нет / чужая / удалена.</summary>
+    public async Task<SessionStatus?> GetSessionsStatusAsync(int sessionId, long userId)
     {
         await using var conn = await CreateOpenConnectionAsync();
-        var result = await conn.QuerySingleOrDefaultAsync<SessionStatus>(
-            SqlQueries.Sessions.GetStatus, new { SessionId = sessionId });
-        return result ?? throw new KeyNotFoundException($"Session {sessionId} not found");
+        return await conn.QuerySingleOrDefaultAsync<SessionStatus>(
+            SqlQueries.Sessions.GetStatus, new { SessionId = sessionId, UserId = userId });
     }
 
     /// <summary>Возвращает готовую сводку завершения сессии для уведомления.</summary>
@@ -183,17 +182,17 @@ public sealed class SessionDataService(
         return summary;
     }
 
-    /// <summary>Возвращает команды сессии.</summary>
-    public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId)
+    /// <summary>Возвращает команды сессии владельца.</summary>
+    public async Task<List<SessionCommands>> GetSessionsCommandsAsync(int sessionId, long userId)
     {
         await using var conn = await CreateOpenConnectionAsync();
         var result = await conn.QueryAsync<SessionCommands>(
-            SqlQueries.Commands.GetBySession, new { SessionId = sessionId });
+            SqlQueries.Commands.GetBySession, new { SessionId = sessionId, UserId = userId });
         return result.ToList();
     }
 
-    /// <summary>Мягкое удаление сессии.</summary>
-    public async Task<bool> DeleteSessionAsync(int sessionId)
+    /// <summary>Мягкое удаление сессии владельца. Отказ, если есть processing.</summary>
+    public async Task<bool> DeleteSessionAsync(int sessionId, long userId)
     {
         try
         {
@@ -203,13 +202,13 @@ public sealed class SessionDataService(
             {
                 var affected = await conn.ExecuteAsync(
                     SqlQueries.Sessions.SoftDelete,
-                    new { SessionId = sessionId },
+                    new { SessionId = sessionId, UserId = userId },
                     tx);
 
                 if (affected == 0)
                 {
                     await tx.RollbackAsync();
-                    Logger.LogWarning("Failed to delete session {SessionId}: not found", sessionId);
+                    Logger.LogWarning("Failed to delete session {SessionId}: not found, not owned, or processing", sessionId);
                     return false;
                 }
 
@@ -250,12 +249,12 @@ public sealed class SessionDataService(
             new { SessionId = sessionId });
     }
 
-    /// <summary>Возвращает SessionId по CommandId.</summary>
-    public async Task<int?> GetSessionIdByCommandAsync(int commandId)
+    /// <summary>Возвращает SessionId по CommandId, только если команда принадлежит userId.</summary>
+    public async Task<int?> GetSessionIdByCommandAsync(int commandId, long userId)
     {
         await using var conn = await CreateOpenConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<int?>(
-            SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId });
+            SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId });
     }
 
     /// <summary>Мягкое удаление неактивных сессий старше cutoff.</summary>

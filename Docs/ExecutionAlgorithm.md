@@ -31,7 +31,7 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 
 `availableSlots = MaxConcurrentCommands - running`. Claim: `pending` с наступившим `NextRetryAt`, без partition в `processing`, `FOR UPDATE SKIP LOCKED` + partition advisory lock. Сортировка: Priority, CreatedAt, CommandId.
 
-Аварийная lease: `ProcessTimeoutMinutes + 5` (185 мин). Перезапуск Worker не снимает неистёкшие lease (нет exactly-once гарантии при аварии mid-export).
+Аварийная lease: `ProcessTimeoutMinutes + 5` (185 мин). Crash mid-export не снимает неистёкший lease. Штатный shutdown Worker после kill дерева возвращает claimed `processing` в `pending` (`NextRetryAt` ≈ now+15 с, `RetryCount` не растёт, тот же lease-fencing).
 
 ## 3. Подготовка и запуск
 
@@ -52,14 +52,15 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 | wrapper без ResultFile, exit 0 / ≠0 | `Done` / retry|permanent |
 | timeout | kill, `Failed` без retry |
 
-stdout/stderr: 64 KiB capture. Valid ResultFile удаляется с TaskFile. После Revit — фоновый `RevitTemporaryDirectoryCleaner` (`RBF-{GUID}` под `%TEMP%`). При ошибке записи БД файлы сохраняются; перед retry ResultFile → `.previous`.
+stdout/stderr: 64 KiB capture. После `WaitForExitAsync` sync `WaitForExit` ограничен 10 с (drain redirected pipes); таймаут → kill дерева. Valid ResultFile удаляется с TaskFile. После Revit — фоновый `RevitTemporaryDirectoryCleaner` (`RBF-{GUID}` под `%TEMP%`). При ошибке записи БД файлы сохраняются; перед retry ResultFile → `.previous`.
 
 Финальный статус: до 4 попыток записи (паузы 2/4/8 с) в одной tx с session lock + outbox при последней команде. Исчерпание → `CommandPersistenceException` (не BIM-retry).
 
 ## 5. Retry
 
 Permanent: plugin failed/cancelled (кроме open-retry выше), permanent exit codes, invalid input, timeout.  
-Transient: `RetryDelayBaseSeconds × 2^RetryCount + jitter`; после `MaxRetries` → `Failed`. Следующий poll подбирает по `NextRetryAt`.
+Transient: `RetryDelayBaseSeconds × 2^RetryCount + jitter`; после `MaxRetries` → `Failed`. Следующий poll подбирает по `NextRetryAt`.  
+`ScheduleRetry` и terminal `UpdateStatus` — только `Status='processing'` и `Lease` claim'а; иначе no-op.
 
 ## 6. Завершение и доставка
 
@@ -75,16 +76,17 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 - Process monitor + DialogDismisser  
 - Soft-delete сессий старше `CompletedSessionRetentionDays`, пока нет pending outbox  
 - Telegram cleanup: Kind (interface/temporary/completion/job_status); interactive ставит `DeleteAfter=NOW` для устаревшего UI, защищая completion; `temporary` снимается сразу на следующем сообщении или колбэке, иначе 5 мин; results — 24 ч; цикл каждую минуту, batch 500, пакеты Telegram до 100; после `MaximumDeletionAgeHours` (47) — удаление только tracking-записи  
-- Worker shutdown: stop loops → process-tree kill (30 с) → release  
+- Soft-delete команд и сессий не трогает `processing`; `/status` list/count/details/delete только с `UserId`  
+- Worker shutdown: stop loops → process-tree kill (30 с) → release claimed leases в `pending` (`NextRetryAt` +15 с)  
 
 ## 8. Rerun из /status
 
-`RERUNCMD` → новый Session/Command/CorrelationId, `RetryCount=0`. Авто-retry продолжает ту же строку.
+`RERUNCMD` → новый Session/Command/CorrelationId, `RetryCount=0`. Авто-retry продолжает ту же строку. Список и действия `/status` — только сессии вызывающего `UserId`.
 
 ## Статусы и locks
 
-`pending` → `processing` → `Done`/`Failed`. `Deleted` — скрытие/retention.  
-Advisory locks: lease cleanup, outbox, completion, partition claim, launch gate (Revit и AutoCAD — разные id). Polling; LISTEN/NOTIFY не используется.
+`pending` → `processing` → `Done`/`Failed`. `Deleted` — скрытие/retention. Soft-delete `processing` запрещён.  
+Advisory locks (ключи в `AdvisoryLockIds`): 1-arg — lease cleanup `1234567`, outbox `1234569`, AutoCAD launch `1234570`, Revit launch `1234571`; 2-arg — partition claim `(1234568, hashtext)`, completion `(1234570, SessionId)` (та же цифра, что AutoCAD, другая арность). Polling; LISTEN/NOTIFY не используется.
 
 ## Добавление команды
 

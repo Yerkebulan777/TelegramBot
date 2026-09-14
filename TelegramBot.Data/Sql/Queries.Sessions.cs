@@ -22,6 +22,7 @@ internal static partial class SqlQueries
                 FROM Sessions s
                 LEFT JOIN Commands c ON c.SessionId = s.SessionId AND c.Status != 'Deleted'
                 WHERE s.Status != 'Deleted'
+                  AND s.UserId = @UserId
                 GROUP BY s.SessionId
             )
             SELECT
@@ -35,6 +36,7 @@ internal static partial class SqlQueries
             FROM Sessions s
             LEFT JOIN session_stats stats ON stats.SessionId = s.SessionId
             WHERE s.Status != 'Deleted'
+              AND s.UserId = @UserId
               AND (@Filter = 'ALL'
                    OR (@Filter = 'ACTIVE' AND COALESCE(stats.ActiveCount, 0) > 0)
                    OR (@Filter = 'DONE' AND COALESCE(stats.ActiveCount, 0) = 0 AND COALESCE(stats.FailedCount, 0) = 0 AND COALESCE(stats.DoneCount, 0) > 0)
@@ -51,12 +53,14 @@ internal static partial class SqlQueries
                 FROM Sessions s
                 LEFT JOIN Commands c ON c.SessionId = s.SessionId AND c.Status != 'Deleted'
                 WHERE s.Status != 'Deleted'
+                  AND s.UserId = @UserId
                 GROUP BY s.SessionId
             )
             SELECT COUNT(*)::int
             FROM Sessions s
             LEFT JOIN session_stats stats ON stats.SessionId = s.SessionId
             WHERE s.Status != 'Deleted'
+              AND s.UserId = @UserId
               AND (@Filter = 'ALL'
                    OR (@Filter = 'ACTIVE' AND COALESCE(stats.ActiveCount, 0) > 0)
                    OR (@Filter = 'DONE' AND COALESCE(stats.ActiveCount, 0) = 0 AND COALESCE(stats.FailedCount, 0) = 0 AND COALESCE(stats.DoneCount, 0) > 0)
@@ -77,7 +81,9 @@ internal static partial class SqlQueries
         internal const string GetStatus = @"
             SELECT s.Status, s.ProjectName, s.CreatedAt
             FROM Sessions s
-            WHERE s.SessionId = @SessionId;";
+            WHERE s.SessionId = @SessionId
+              AND s.UserId = @UserId
+              AND s.Status != 'Deleted';";
 
         internal const string GetCompletionSummary = @"
             SELECT
@@ -95,7 +101,14 @@ internal static partial class SqlQueries
 
         internal const string SoftDelete = @"
             UPDATE Sessions SET Status = 'Deleted'
-            WHERE SessionId = @SessionId;";
+            WHERE SessionId = @SessionId
+              AND UserId = @UserId
+              AND Status != 'Deleted'
+              AND NOT EXISTS (
+                  SELECT 1 FROM Commands c
+                  WHERE c.SessionId = @SessionId
+                    AND c.Status = 'processing'
+              );";
 
         internal const string SoftDeleteInactiveOlderThan = @"
             WITH deleted_sessions AS (
