@@ -35,14 +35,14 @@ public sealed class FileSelectionHandler(
 
     private async Task HandleConfirmAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+        await outputService.AnswerCallbackAsync(context, "");
         await slashCommandService.ConfirmFileSelectionAsync(
             context.UserId, context.Username, context.Session, cancellationToken);
     }
 
     private async Task HandleCancelAsync(CallbackContext context, CancellationToken cancellationToken)
     {
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, "");
+        await outputService.AnswerCallbackAsync(context, "");
         await slashCommandService.CancelSelectionAsync(context.UserId, context.Session, cancellationToken);
     }
 
@@ -58,7 +58,7 @@ public sealed class FileSelectionHandler(
             flow.GoBack();
             if (!ValidatePathWithinRoot(session.RootPath, flow.CurrentPath, "folder navigation", context))
             {
-                await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
+                await outputService.AnswerCallbackAsync(context, "⚠ Недопустимый путь.");
                 return;
             }
         }
@@ -67,7 +67,7 @@ public sealed class FileSelectionHandler(
             var newPath = fileBrowser.ResolveSelectionPath(session.RootPath, flow.CurrentPath, context.ParsedCallback.Argument);
             if (newPath == null || !ValidatePathWithinRoot(session.RootPath, newPath, "folder navigation", context))
             {
-                await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Недопустимый путь.");
+                await outputService.AnswerCallbackAsync(context, "⚠ Недопустимый путь.");
                 return;
             }
 
@@ -106,7 +106,7 @@ public sealed class FileSelectionHandler(
         var filePath = fileBrowser.ResolveSelectionPath(session.RootPath, flow.CurrentPath, context.ParsedCallback.Argument);
         if (string.IsNullOrEmpty(filePath))
         {
-            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠ Файл не найден.");
+            await outputService.AnswerCallbackAsync(context, "⚠ Файл не найден.");
             return;
         }
 
@@ -124,6 +124,6 @@ public sealed class FileSelectionHandler(
     {
         var keyboard = keyboardBuilder.GetSelectionKeyboard(context.Session);
         await outputService.EditMessageReplyMarkupAsync(context.UserId, context.MessageId, keyboard);
-        await outputService.AnswerCallbackAsync(context.CallbackQueryId, ackText);
+        await outputService.AnswerCallbackAsync(context, ackText);
     }
 }

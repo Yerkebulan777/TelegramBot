@@ -173,23 +173,32 @@ public sealed class SlashCommandService(
                 return;
             }
 
-            if (!await CheckDailyFileLimitAsync(userId, username, session, filesToProcess.Count, cancellationToken))
-            {
-                return;
-            }
-
             var priorities = submission.Commands.Select(CommandTraits.GetPriority);
 
             var correlationId = Guid.NewGuid().ToString("N");
-            var (sessionId, queuedFileCount, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
-                submission.Commands, filesToProcess, userId, username, filesToProcess.Count, session.RootPath, projectName, priorities, correlationId);
-            if (sessionId is null)
+            var created = await sessionDataService.CreateSessionWithCommandsAsync(
+                submission.Commands, filesToProcess, userId, username, filesToProcess.Count, session.RootPath, projectName, priorities, correlationId,
+                maxFilesPerUserPerDay: _rateLimitOptions.MaxFilesPerUserPerDay);
+            if (created.Status == SessionCreateStatus.DailyLimitExceeded)
+            {
+                logger.LogWarning(
+                    "Job blocked: {Username} ({UserId}), reason=daily_limit, queued={Queued}, requested={Requested}, limit={Limit}",
+                    username, userId, created.DailyLimitQueuedToday, filesToProcess.Count, _rateLimitOptions.MaxFilesPerUserPerDay);
+                await RejectAndWarnAsync(
+                    userId, session, FormatDailyLimitMessage(created.DailyLimitQueuedToday), cancellationToken);
+                return;
+            }
+            if (created.Status != SessionCreateStatus.Created || created.SessionId is null)
             {
                 // Каждая пара (команда, файл) пойман уникальным индексом idx_commands_active_unique — все пары дубли
                 logger.LogWarning("Job blocked: {Username} ({UserId}), reason=all_dup_cmds", username, userId);
-                await CancelSelectionAsync(userId, session, cancellationToken, JobMessageFormatter.BuildConflictsMessage(skippedPairs));
+                await CancelSelectionAsync(userId, session, cancellationToken, JobMessageFormatter.BuildConflictsMessage(created.SkippedPairs));
                 return;
             }
+
+            var sessionId = created.SessionId.Value;
+            var queuedFileCount = created.QueuedFileCount;
+            var skippedPairs = created.SkippedPairs;
 
             var skipped = skippedPairs.Select(p => (p.Command, p.FilePath)).ToHashSet();
             var queuedFiles = filesToProcess
@@ -201,7 +210,7 @@ public sealed class SlashCommandService(
                 "Job queued: session={SessionId}, corr={CorrelationId}, user={Username} ({UserId}), cmds={CommandCount}, files={FileCount}, skipped={SkippedCount}",
                 sessionId, correlationId, username, userId, submission.Commands.Count, queuedFileCount, skippedPairs.Count);
 
-            session.SessionId = sessionId.Value;
+            session.SessionId = sessionId;
             await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
 
             session.Selection.Reset(session.RootPath);
@@ -245,32 +254,12 @@ public sealed class SlashCommandService(
         }
     }
 
-    private async Task<bool> CheckDailyFileLimitAsync(long userId, string username, UserSession session, int newFileCount, CancellationToken cancellationToken)
+    private string FormatDailyLimitMessage(int queuedToday)
     {
-        if (_rateLimitOptions.MaxFilesPerUserPerDay <= 0)
-        {
-            return true;
-        }
-
-        var sinceUtc = DateTime.UtcNow.AddDays(-1);
-        var queuedToday = await sessionDataService.CountQueuedFilesByUserSinceAsync(userId, sinceUtc);
         var remaining = _rateLimitOptions.MaxFilesPerUserPerDay - queuedToday;
-
-        if (newFileCount <= remaining)
-        {
-            return true;
-        }
-
-        logger.LogWarning(
-            "Job blocked: {Username} ({UserId}), reason=daily_limit, queued={Queued}, requested={Requested}, limit={Limit}",
-            username, userId, queuedToday, newFileCount, _rateLimitOptions.MaxFilesPerUserPerDay);
-
-        var message = remaining > 0
+        return remaining > 0
             ? $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. Уже в очереди за 24 часа: {queuedToday}. Можно добавить ещё {remaining}."
             : $"⚠️ Дневной лимит файлов: {_rateLimitOptions.MaxFilesPerUserPerDay}. За последние 24 часа лимит уже исчерпан.";
-
-        await RejectAndWarnAsync(userId, session, message, cancellationToken);
-        return false;
     }
 
     private async Task StartCommandSelectionAsync(

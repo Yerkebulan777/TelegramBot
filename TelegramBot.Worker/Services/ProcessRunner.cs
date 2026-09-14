@@ -200,7 +200,8 @@ public sealed class ProcessRunner(
 
         try
         {
-            var commandResult = resultAnalyzer.DetermineResult(cmd, resultReadStatus, result, resultReadError, process, sw);
+            var commandResult = await resultAnalyzer.DetermineResultAsync(
+                cmd, resultReadStatus, result, resultReadError, process, sw, ct);
             await ApplyCommandResultAsync(cmd, commandResult, sw);
             return;
         }
@@ -267,6 +268,28 @@ public sealed class ProcessRunner(
                 "Process output drain still blocked after kill: id={CommandId}",
                 cmd.CommandId);
         }
+    }
+
+    /// <summary>Убивает tracked-процесс команды (диалоги, которые DialogDismisser не закрыл).</summary>
+    public async Task KillTrackedProcessAsync(int commandId, CancellationToken cancellationToken = default)
+    {
+        if (!_tracked.TryGetValue(commandId, out var tracked) || tracked.Process is not { } process)
+        {
+            return;
+        }
+
+        if (process.HasExited)
+        {
+            return;
+        }
+
+        logger.LogWarning("Kill tracked process: id={CommandId}, pid={Pid}", commandId, process.Id);
+        _ = await ProcessKillHelper.KillAsync(
+            process,
+            TimeSpan.FromSeconds(PerProcessKillTimeoutSeconds),
+            logger,
+            commandId,
+            cancellationToken);
     }
 
     /// <summary>

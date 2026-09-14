@@ -1,3 +1,5 @@
+using TelegramBot.Core.Constants;
+
 namespace TelegramBot.Data;
 
 internal static partial class SqlQueries
@@ -8,6 +10,9 @@ internal static partial class SqlQueries
             INSERT INTO Sessions (UserId, Username, CorrelationId, ProjectName, FilesAmount)
             VALUES (@UserId, @Username, @CorrelationId, @ProjectName, @FilesAmount)
             RETURNING SessionId;";
+
+        internal static readonly string AcquireUserQueueLock =
+            $"SELECT pg_advisory_xact_lock({AdvisoryLockIds.UserQueue}, hashtext(CAST(@UserId AS text)));";
 
         internal const string UpdateFilesAmount = @"
             UPDATE Sessions SET FilesAmount = @FilesAmount WHERE SessionId = @SessionId;";

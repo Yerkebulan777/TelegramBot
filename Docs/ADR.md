@@ -19,7 +19,7 @@ CLI `/command "WORKER" "<task.xml>"` трактовался Revit как отк�
 
 **Статус:** действует
 
-`NotificationOutbox` + атомарная запись с финализацией команды. `NotificationSenderService` drain с advisory lock (at-least-once).
+`NotificationOutbox` + атомарная запись с финализацией команды. `NotificationSenderService` drain с advisory lock (at-least-once). Дубль возможен, если процесс упал после accept Telegram и до commit `MarkSent`; ключ OutboxId в текст уведомления не добавляем.
 
 ## ADR-006: Partition scheduling
 

@@ -15,11 +15,11 @@ dotnet build TelegramBot.slnx
 - 5 проектов net10.0: Core ← Data; Server/Worker/RootPathSetup → Core+Data. Server и RootPathSetup — `net10.0-windows`.
 - Windows-only; PostgreSQL 18; Dapper/Npgsql; soft-delete (`Deleted`), кроме `TrackedMessages`; `/status`/delete по `UserId`, `processing` не удалять
 - DI — singleton; handlers через `CallbackHandlerBase` (5 шт., включая `RootPath`)
-- Outbox уведомлений — polling 3 с; cleanup по `DeleteAfter`/`NextDeleteAttemptAt`; completion защищён; ack+tracking атомарно
+- Outbox уведомлений — polling 3 с; cleanup по `DeleteAfter`/`NextDeleteAttemptAt`; completion защищён; ack+tracking атомарно (at-least-once, дубль при crash между Telegram и `MarkSent`)
 - Worker: poll 1 с, partition scheduling, `ProcessLaunchGate` ≥ 15 с (Revit и AutoCAD независимо, lock ids в `AdvisoryLockIds`); `CommandPersistenceException` ≠ BIM-ошибка; очередь и cleanup ждут `SchemaReadyGate`
 - Revit: `REVITBIMFUSION_TASK_FILE`; `RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE
-- `MERGEDWG`: AutoCAD + AutoBIMFusion; путь DWG как DrawingExportModule (`02_DWG/.../{RevitFileName}/`)
-- `RootPathSetup` — заявка 30 мин; активный корень меняет только admin в Telegram
+- `MERGEDWG`: AutoCAD + AutoBIMFusion; путь DWG как DrawingExportModule (`02_DWG/.../{RevitFileName}/`); status JSON — retry/FileShare как ResultFile
+- `RootPathSetup` — заявка 30 мин; активный корень меняет только admin в Telegram; ошибка чтения admin → fail-closed
 - `Async` suffix; без `async void` / sync-over-async / `ConfigureAwait(false)`
 - BIM: эталон v2026-09-09; XSD в `Docs/BimContract/`
 

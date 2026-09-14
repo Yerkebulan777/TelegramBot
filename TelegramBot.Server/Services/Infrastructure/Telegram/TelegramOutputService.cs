@@ -258,6 +258,17 @@ public class TelegramOutputService(
             cancellationToken);
     }
 
+    public async Task AnswerCallbackAsync(CallbackContext context, string messageText)
+    {
+        if (context.CallbackAnswered)
+        {
+            return;
+        }
+
+        await AnswerCallbackAsync(context.CallbackQueryId, messageText);
+        context.CallbackAnswered = true;
+    }
+
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
     {
         try

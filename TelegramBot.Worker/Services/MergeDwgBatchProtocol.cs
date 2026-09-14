@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using TelegramBot.Worker.Helpers;
 using TelegramBot.Worker.Models;
 
 namespace TelegramBot.Worker.Services;
@@ -60,26 +61,57 @@ public static class MergeDwgBatchProtocol
         File.WriteAllLines(scriptPath, lines, ScriptEncoding);
     }
 
-    /// <summary>Читает ответ плагина; <c>null</c> статус означает, что итог неизвестен.</summary>
-    public static (MergeDwgBatchStatus? Status, string? ErrorMessage) TryReadStatus(string statusPath)
+    /// <summary>Исход чтения status JSON.</summary>
+    public enum StatusReadKind
+    {
+        Missing,
+        Parsed,
+        InvalidJson,
+        TransientIo,
+    }
+
+    public readonly record struct StatusRead(
+        StatusReadKind Kind,
+        MergeDwgBatchStatus? Status,
+        string? ErrorMessage);
+
+    /// <summary>Читает ответ плагина с тем же retry/FileShare, что у ResultFile.</summary>
+    public static async Task<StatusRead> ReadStatusAsync(string statusPath, CancellationToken cancellationToken)
+    {
+        var read = ReadStatusOnce(statusPath);
+        for (var attempt = 0;
+             read.Kind == StatusReadKind.TransientIo && await PluginOutputFileRead.ShouldRetryAsync(attempt, cancellationToken);
+             attempt++)
+        {
+            read = ReadStatusOnce(statusPath);
+        }
+
+        return read;
+    }
+
+    private static StatusRead ReadStatusOnce(string statusPath)
     {
         if (!File.Exists(statusPath))
         {
-            return (null, "AutoCAD did not write the MERGEDWG status file");
+            return new(StatusReadKind.Missing, null, "AutoCAD did not write the MERGEDWG status file");
         }
 
         try
         {
-            var status = JsonSerializer.Deserialize<MergeDwgBatchStatus>(
-                File.ReadAllText(statusPath), StatusJsonOptions);
+            using var stream = PluginOutputFileRead.Open(statusPath);
+            var status = JsonSerializer.Deserialize<MergeDwgBatchStatus>(stream, StatusJsonOptions);
 
             return status is null
-                ? (null, "MERGEDWG status file is empty")
-                : (status, null);
+                ? new(StatusReadKind.InvalidJson, null, "MERGEDWG status file is empty")
+                : new(StatusReadKind.Parsed, status, null);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException ex)
         {
-            return (null, $"MERGEDWG status file cannot be read: {ex.Message}");
+            return new(StatusReadKind.InvalidJson, null, $"MERGEDWG status file cannot be read: {ex.Message}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new(StatusReadKind.TransientIo, null, $"MERGEDWG status file cannot be read: {ex.Message}");
         }
     }
 

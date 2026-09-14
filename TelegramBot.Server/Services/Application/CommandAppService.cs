@@ -59,45 +59,68 @@ public sealed class CommandAppService(
 
     public async Task HandleCallbackAsync(CallbackQuery callback, CancellationToken cancellationToken = default)
     {
-        var userId = callback.From.Id;
-        var username = callback.From.Username ?? callback.From.FirstName;
-
-        if (!await TryAdmitAsync(userId, username))
+        CallbackContext? context = null;
+        try
         {
-            return;
+            var userId = callback.From.Id;
+            var username = callback.From.Username ?? callback.From.FirstName;
+
+            if (!await TryAdmitAsync(userId, username))
+            {
+                return;
+            }
+
+            if (callback.Message?.Text == null || callback.Data == null)
+            {
+                logger.LogWarning("Incomplete callback: user={UserId}", userId);
+                return;
+            }
+
+            var session = sessionManager.GetOrCreateSession(userId);
+            var parsed = ParsedCallback.Parse(callback.Data);
+
+            // Stale-session detection for callbacks. Callbacks depend on session-local state
+            // (pending commands, file selection, status filters) that no longer exists after restart,
+            // so a fresh session is redirected to /start via a single hint.
+            if (!session.Initialized)
+            {
+                await NotifyStaleSessionAsync(session, userId, username, cancellationToken);
+                return;
+            }
+
+            await outputService.DeleteTemporaryMessagesAsync(userId, cancellationToken);
+
+            context = new CallbackContext
+            {
+                UserId = userId,
+                MessageId = callback.Message.MessageId,
+                Username = username!, // non-null: TryAdmitAsync rejected blank usernames above
+                CallbackQueryId = callback.Id,
+                ParsedCallback = parsed,
+                Session = session
+            };
+
+            try
+            {
+                await callbackDispatcher.DispatchAsync(context, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Callback handler error: prefix={Prefix}", parsed.Prefix);
+                await outputService.AnswerCallbackAsync(context, "⚠️ Не удалось обработать действие.");
+            }
         }
-
-        if (callback.Message?.Text == null || callback.Data == null)
+        finally
         {
-            logger.LogWarning("Incomplete callback: user={UserId}", userId);
-            return;
+            if (context?.CallbackAnswered != true)
+            {
+                await outputService.AnswerCallbackAsync(callback.Id, "");
+            }
         }
-
-        var session = sessionManager.GetOrCreateSession(userId);
-        var parsed = ParsedCallback.Parse(callback.Data);
-
-        // Stale-session detection for callbacks. Callbacks depend on session-local state
-        // (pending commands, file selection, status filters) that no longer exists after restart,
-        // so a fresh session is redirected to /start via a single hint.
-        if (!session.Initialized)
-        {
-            await NotifyStaleSessionAsync(session, userId, username, cancellationToken);
-            return;
-        }
-
-        await outputService.DeleteTemporaryMessagesAsync(userId, cancellationToken);
-
-        var context = new CallbackContext
-        {
-            UserId = userId,
-            MessageId = callback.Message.MessageId,
-            Username = username!, // non-null: TryAdmitAsync rejected blank usernames above
-            CallbackQueryId = callback.Id,
-            ParsedCallback = parsed,
-            Session = session
-        };
-
-        await callbackDispatcher.DispatchAsync(context, cancellationToken);
     }
 
     /// <summary>Общие входные гейты для сообщений и коллбэков: rate limit, затем анонимность.</summary>

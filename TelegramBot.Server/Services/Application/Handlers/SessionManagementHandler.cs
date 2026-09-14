@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
@@ -13,6 +15,7 @@ public sealed class SessionManagementHandler(
     KeyboardBuilder keyboardBuilder,
     TelegramOutputService outputService,
     SessionsListRenderer sessionsListRenderer,
+    IOptions<RateLimitOptions> rateLimitOptions,
     ILogger<SessionManagementHandler> logger) : CallbackHandlerBase(logger)
 {
     public override HashSet<string> SupportedPrefixes { get; } =
@@ -236,7 +239,7 @@ public sealed class SessionManagementHandler(
         if (!await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
         {
             await outputService.AnswerCallbackAsync(
-                context.CallbackQueryId, "⚠️ Сессия выполняется или недоступна");
+                context, "⚠️ Сессия выполняется или недоступна");
             return;
         }
 
@@ -258,7 +261,7 @@ public sealed class SessionManagementHandler(
         if (!sessionId.HasValue || !await commandDataService.DeleteCommandAsync(commandId, context.UserId))
         {
             await outputService.AnswerCallbackAsync(
-                context.CallbackQueryId, "⚠️ Команда выполняется или недоступна");
+                context, "⚠️ Команда выполняется или недоступна");
             return;
         }
 
@@ -309,13 +312,13 @@ public sealed class SessionManagementHandler(
             if (source == null)
             {
                 await outputService.AnswerCallbackAsync(
-                    context.CallbackQueryId,
+                    context,
                     "⚠️ Команда уже активна или недоступна");
                 return;
             }
 
             var correlationId = Guid.NewGuid().ToString("N");
-            var (sessionId, _, skippedPairs) = await sessionDataService.CreateSessionWithCommandsAsync(
+            var created = await sessionDataService.CreateSessionWithCommandsAsync(
                 [source.CommandText],
                 [source.FilePath],
                 context.UserId,
@@ -324,16 +327,23 @@ public sealed class SessionManagementHandler(
                 rootPath: source.RootPath,
                 projectName: source.ProjectName,
                 commandPriorities: [source.Priority],
-                correlationId: correlationId);
+                correlationId: correlationId,
+                maxFilesPerUserPerDay: rateLimitOptions.Value.MaxFilesPerUserPerDay);
 
-            if (!sessionId.HasValue)
+            if (created.Status == SessionCreateStatus.DailyLimitExceeded)
+            {
+                await outputService.AnswerCallbackAsync(context, "⚠️ Дневной лимит файлов");
+                return;
+            }
+
+            if (created.Status != SessionCreateStatus.Created || created.SessionId is null)
             {
                 Logger.LogInformation(
                     "Rerun skipped: source={SourceCommandId}, activeConflicts={ConflictCount}",
                     source.SourceCommandId,
-                    skippedPairs.Count);
+                    created.SkippedPairs.Count);
                 await outputService.AnswerCallbackAsync(
-                    context.CallbackQueryId,
+                    context,
                     "⏳ Уже поставлено или выполняется");
                 return;
             }
@@ -341,16 +351,16 @@ public sealed class SessionManagementHandler(
             Logger.LogInformation(
                 "Rerun queued: source={SourceCommandId}, session={SessionId}, corr={CorrelationId}",
                 source.SourceCommandId,
-                sessionId.Value,
+                created.SessionId.Value,
                 correlationId);
-            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "🔁 Новое задание создано");
-            context.Session.SessionId = sessionId.Value;
-            await RenderCommandsViewAsync(context, sessionId.Value, "ALL");
+            await outputService.AnswerCallbackAsync(context, "🔁 Новое задание создано");
+            context.Session.SessionId = created.SessionId.Value;
+            await RenderCommandsViewAsync(context, created.SessionId.Value, "ALL");
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Rerun submission failed: source={SourceCommandId}", commandId);
-            await outputService.AnswerCallbackAsync(context.CallbackQueryId, "⚠️ Не удалось создать задание");
+            await outputService.AnswerCallbackAsync(context, "⚠️ Не удалось создать задание");
         }
     }
 

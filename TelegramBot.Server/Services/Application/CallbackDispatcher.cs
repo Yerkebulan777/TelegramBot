@@ -17,25 +17,14 @@ public sealed class CallbackDispatcher(IEnumerable<CallbackHandlerBase> handlers
     /// <summary>
     /// Отправляет callback соответствующему хендлеру.
     /// </summary>
-    public async Task DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
+    public Task DispatchAsync(CallbackContext context, CancellationToken cancellationToken = default)
     {
         if (!_handlerMap.TryGetValue(context.ParsedCallback.Prefix, out var handler))
         {
             logger.LogDebug("Callback ignored: prefix={Prefix}", context.ParsedCallback.Prefix);
-            return;
+            return Task.CompletedTask;
         }
 
-        try
-        {
-            await handler.HandleAsync(context, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Handler error: {HandlerName}", handler.GetType().Name);
-        }
+        return handler.HandleAsync(context, cancellationToken);
     }
 }

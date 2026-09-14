@@ -244,16 +244,7 @@ public class TelegramBotHostedService(
 
             using (await sessionManager.AcquireUserLockAsync(callback.From.Id, ct))
             {
-                try
-                {
-                    await commandAppService.HandleCallbackAsync(callback, ct);
-                }
-                finally
-                {
-                    // AnswerCallbackQuery обязан сработать даже при исключении handler'а —
-                    // иначе у пользователя остаются «часики» на кнопке до таймаута Telegram (~30 с).
-                    await botClient.AnswerCallbackQuery(callback.Id, cancellationToken: ct);
-                }
+                await commandAppService.HandleCallbackAsync(callback, ct);
             }
 
             return;
@@ -276,12 +267,15 @@ public class TelegramBotHostedService(
         }
         catch (ChannelClosedException ex)
         {
-            logger.LogDebug(ex, "Channel writer reject {UpdateId}: closed", update.Id);
+            logger.LogWarning(ex,
+                "Dropped update {UpdateId}: channel closed (shutdown); Telegram offset already advanced",
+                update.Id);
         }
         catch (OperationCanceledException)
         {
-            // Отмена токена (shutdown) — ожидаемо, обновление уйдёт в следующий polling-цикл
-            logger.LogDebug("Channel writer reject {UpdateId}: cancelled", update.Id);
+            logger.LogWarning(
+                "Dropped update {UpdateId}: enqueue cancelled (shutdown); Telegram offset already advanced",
+                update.Id);
         }
         catch (Exception ex)
         {

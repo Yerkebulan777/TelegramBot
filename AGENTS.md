@@ -69,7 +69,7 @@ Polling (1s) → lease cleanup → ClaimPendingCommands → Prepare → Start �
 
 `CommandTraits.RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE. TaskFile — `REVITBIMFUSION_TASK_FILE` (без контрактных CLI; `/language RUS` допустим).
 
-`MERGEDWG`: RVT → папка `{Base}/02_DWG/{relative?}/{RevitFileName}/` (как DrawingExportModule); `.scr` + status JSON; `acad.exe /nologo /b`.
+`MERGEDWG`: RVT → папка `{Base}/02_DWG/{relative?}/{RevitFileName}/` (как DrawingExportModule); `.scr` + status JSON (retry/FileShare как ResultFile); `acad.exe /nologo /b`.
 
 ## PostgreSQL
 
@@ -78,7 +78,8 @@ Polling (1s) → lease cleanup → ClaimPendingCommands → Prepare → Start �
 - Статусы: `pending`, `processing`, `Done`, `Failed`, `Deleted`
 - Claim: `FOR UPDATE SKIP LOCKED` + partition advisory xact lock
 - Lease cleanup, outbox, terminal completion — session advisory locks (`AdvisoryLockIds`; Revit gate ≠ outbox)
-- Session + Commands — одна транзакция с user-level xact lock
+- Session + Commands — одна транзакция с user-level xact lock (`AdvisoryLockIds.UserQueue`) и пересчётом дневного лимита
+- Смена RootPath: ошибка чтения admin → отказ (fail-closed), не пропуск «admin ещё не задан»
 
 ## Logging и стиль
 

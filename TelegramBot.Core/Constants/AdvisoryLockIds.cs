@@ -27,4 +27,7 @@ public static class AdvisoryLockIds
     /// Число совпадает с <see cref="AutoCadLaunch"/>; это безопасно из‑за другой арности.
     /// </summary>
     public const int SessionCompletion = 1_234_570;
+
+    /// <summary>2-arg namespace: <c>(UserQueue, hashtext(UserId))</c> на создание Session+Commands и пересчёт дневного лимита.</summary>
+    public const int UserQueue = 1_234_572;
 }

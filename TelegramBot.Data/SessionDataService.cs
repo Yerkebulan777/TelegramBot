@@ -21,9 +21,10 @@ public sealed class SessionDataService(
     /// (команда, файл) и отсекается точечно уникальным индексом idx_commands_active_unique
     /// через ON CONFLICT DO NOTHING — остальные пары из того же запроса всё равно встают в очередь
     /// (напр. если DWG для файла уже в очереди, а PDF для того же файла — нет, PDF всё равно queued).
-    /// SessionId = null, если дубликатами оказались все пары (очередь пополнить нечем).
+    /// SessionId задан только при <see cref="SessionCreateStatus.Created"/>.
+    /// Транзакция берёт user-level advisory lock и пересчитывает лимит до INSERT.
     /// </summary>
-    public async Task<(int? SessionId, int QueuedFileCount, IReadOnlyList<CommandConflict> SkippedPairs)> CreateSessionWithCommandsAsync(
+    public async Task<SessionCreateResult> CreateSessionWithCommandsAsync(
         IEnumerable<string> commandText,
         IEnumerable<string> files,
         long userId,
@@ -32,7 +33,8 @@ public sealed class SessionDataService(
         string rootPath,
         string? projectName = null,
         IEnumerable<int>? commandPriorities = null,
-        string? correlationId = null)
+        string? correlationId = null,
+        int maxFilesPerUserPerDay = 0)
     {
         var commands = commandText.Distinct(StringComparer.Ordinal).ToArray();
         var fileList = files.Distinct(StringComparer.Ordinal).ToArray();
@@ -44,6 +46,24 @@ public sealed class SessionDataService(
 
         await using var conn = await CreateOpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
+
+        await conn.ExecuteAsync(SqlQueries.Sessions.AcquireUserQueueLock, new { UserId = userId }, tx);
+
+        if (maxFilesPerUserPerDay > 0)
+        {
+            var queuedToday = await conn.QuerySingleAsync<int>(
+                SqlQueries.Sessions.CountQueuedFilesByUserSince,
+                new { UserId = userId, SinceUtc = DateTime.UtcNow.AddDays(-1) },
+                tx);
+            if (fileList.Length > maxFilesPerUserPerDay - queuedToday)
+            {
+                await tx.RollbackAsync();
+                Logger.LogWarning(
+                    "Session rejected: daily file limit for user {UserId}, queued={Queued}, requested={Requested}, limit={Limit}",
+                    userId, queuedToday, fileList.Length, maxFilesPerUserPerDay);
+                return SessionCreateResult.DailyLimitExceeded(queuedToday);
+            }
+        }
 
         correlationId ??= Guid.NewGuid().ToString("N");
         var sessionId = await conn.QuerySingleAsync<int>(
@@ -105,7 +125,7 @@ public sealed class SessionDataService(
         {
             await tx.RollbackAsync();
             Logger.LogWarning("Session rejected: all (command, file) pairs already active for user {UserId}", userId);
-            return (null, 0, skippedPairs);
+            return SessionCreateResult.AllDuplicates(skippedPairs);
         }
 
         var queuedFileCount = insertedRows.Select(r => r.FilePath).Distinct().Count();
@@ -118,7 +138,7 @@ public sealed class SessionDataService(
 
         await tx.CommitAsync();
         Logger.LogInformation("Session created: session={SessionId}, correlationId={CorrelationId}, skipped={SkippedCount}", sessionId, correlationId, skippedPairs.Length);
-        return (sessionId, queuedFileCount, skippedPairs);
+        return SessionCreateResult.Created(sessionId, queuedFileCount, skippedPairs);
     }
 
     /// <summary>Возвращает отфильтрованный список сессий владельца.</summary>
@@ -138,15 +158,6 @@ public sealed class SessionDataService(
         return await conn.QuerySingleAsync<int>(
             SqlQueries.Sessions.CountFiltered,
             new { UserId = userId, Filter = filter });
-    }
-
-    /// <summary>Считает очередь файлов пользователя с момента since.</summary>
-    public async Task<int> CountQueuedFilesByUserSinceAsync(long userId, DateTime sinceUtc)
-    {
-        await using var conn = await CreateOpenConnectionAsync();
-        return await conn.QuerySingleAsync<int>(
-            SqlQueries.Sessions.CountQueuedFilesByUserSince,
-            new { UserId = userId, SinceUtc = sinceUtc });
     }
 
     /// <summary>Возвращает имя пользователя по ID сессии.</summary>

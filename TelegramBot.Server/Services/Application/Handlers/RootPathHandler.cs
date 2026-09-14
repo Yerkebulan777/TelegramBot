@@ -26,13 +26,13 @@ public sealed class RootPathHandler(
                 context.ParsedCallback.Argument,
                 context.ParsedCallback.Prefix == CallbackPrefixes.ApplyPendingRootPath,
                 cancellationToken);
-            await outputService.AnswerCallbackAsync(context.CallbackQueryId, message);
+            await outputService.AnswerCallbackAsync(context, message);
             return;
         }
 
         var canConfigure = await slashCommandService.BeginRootPathUpdateAsync(context.UserId, context.Session, cancellationToken);
         await outputService.AnswerCallbackAsync(
-            context.CallbackQueryId,
+            context,
             canConfigure ? "Введите букву диска или UNC-путь." : "Корневой путь может менять только администратор.");
     }
 }

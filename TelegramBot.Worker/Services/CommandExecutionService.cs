@@ -44,7 +44,7 @@ public sealed class CommandExecutionService(
                 ? RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds) : 0,
             disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
             cycleName: "process monitor",
-            cycle: () => { CheckProcessesHealth(); return Task.CompletedTask; });
+            cycle: CheckProcessesHealthAsync);
 
         var nextCleanup = DateTime.MinValue;
         try
@@ -130,7 +130,7 @@ public sealed class CommandExecutionService(
         });
     }
 
-    private void CheckProcessesHealth()
+    private async Task CheckProcessesHealthAsync()
     {
         var thresholdSeconds = Math.Max(
             RoundUpTo30Seconds(_workerOptions.UnresponsiveThresholdSeconds),
@@ -188,7 +188,11 @@ public sealed class CommandExecutionService(
                 }
                 try
                 {
-                    _ = dialogDismisser.DismissDialogsForProcess((uint)process.Id);
+                    if (dialogDismisser.NeedsProcessKillAfterDismiss((uint)process.Id))
+                    {
+                        await processRunner.KillTrackedProcessAsync(
+                            commandId, _shutdownCts?.Token ?? CancellationToken.None);
+                    }
                 }
                 catch (Exception ex)
                 {

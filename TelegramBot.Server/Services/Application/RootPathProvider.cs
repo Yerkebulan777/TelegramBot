@@ -44,8 +44,16 @@ public sealed class RootPathProvider(
 
     public async Task<bool> CanConfigureRootPathAsync(long userId, CancellationToken cancellationToken = default)
     {
-        var administratorUserId = await GetRootPathAdministratorUserIdAsync(cancellationToken);
-        return !administratorUserId.HasValue || administratorUserId.Value == userId;
+        try
+        {
+            var administratorUserId = await GetRootPathAdministratorUserIdAsync(cancellationToken);
+            return !administratorUserId.HasValue || administratorUserId.Value == userId;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Root path administrator unavailable; refusing configuration");
+            return false;
+        }
     }
 
     public async Task<RootPathUpdateResult> SetRootPathAsync(string rootPath, long updatedByUserId, CancellationToken cancellationToken = default)
@@ -125,16 +133,8 @@ public sealed class RootPathProvider(
                 return _administratorUserId;
             }
 
-            try
-            {
-                _administratorUserId = await rootPathDataService.GetRootPathAdministratorUserIdAsync(cancellationToken);
-                _isAdministratorLoaded = true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to load runtime root path administrator");
-            }
-
+            _administratorUserId = await rootPathDataService.GetRootPathAdministratorUserIdAsync(cancellationToken);
+            _isAdministratorLoaded = true;
             return _administratorUserId;
         }
         finally

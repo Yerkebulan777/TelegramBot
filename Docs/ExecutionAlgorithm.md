@@ -16,14 +16,14 @@ Telegram → Session + Commands (1 tx)
 
 ## 1. Создание задания
 
-`SlashCommandService`: сканирование `01_RVT`, лимиты, дедуп. В одной транзакции — `Sessions` + Cartesian product команд×файлов.
+`SlashCommandService`: сканирование `01_RVT`, лимиты, дедуп. В одной транзакции — user-level `pg_advisory_xact_lock(UserQueue, hashtext(UserId))`, пересчёт дневного лимита, затем `Sessions` + Cartesian product команд×файлов.
 
 `ON CONFLICT (CommandText, FilePath) WHERE Status IN ('pending','processing') DO NOTHING` — глобально по активным парам. Все пропущены → rollback. Частичный skip → `FilesAmount` только по добавленным. Для пропусков показывается снимок прежней команды (до 8 деталей).
 
 Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (3) → DATA (4) → остальное (5).  
 `Partition = "file:" + md5(lower(FilePath))` — одна команда на partition.
 
-Корень: `RuntimeSettings.root_path` (+ admin user id). Первый успешный путь закрепляет admin. Буква диска/`UNC` → `UncPathResolver`; в Telegram UNC не показывается. Снимок пишется в `Commands.RootPath`. `RootPathSetup` кладёт заявку на 30 мин; активный путь меняет только подтверждение admin в `/help`.
+Корень: `RuntimeSettings.root_path` (+ admin user id). Первый успешный путь закрепляет admin. Ошибка чтения admin → отказ смены корня (fail-closed). Буква диска/`UNC` → `UncPathResolver`; в Telegram UNC не показывается. Снимок пишется в `Commands.RootPath`. `RootPathSetup` кладёт заявку на 30 мин; активный путь меняет только подтверждение admin в `/help`.
 
 ## 2. Claim
 
@@ -36,7 +36,7 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 ## 3. Подготовка и запуск
 
 `CommandPreparer`: конфиг, валидация FilePath по снимку RootPath, resolve Revit/Navisworks/AutoCAD.  
-`ProcessRunner`: TaskFile + XSD; Revit — `/language RUS` + `REVITBIMFUSION_TASK_FILE`. `MERGEDWG` — `.scr` + status JSON. Старт Revit и AutoCAD — через `ProcessLaunchGate` (`CommandTraits.GetLaunchGate`; ≥ 15 с между глобальными `Process.Start()` одного продукта, состояние — `ProcessLaunchState`). Прочие команды — сразу. Статус уже `processing` во время ожидания gate.
+`ProcessRunner`: TaskFile + XSD; Revit — `/language RUS` + `REVITBIMFUSION_TASK_FILE`. `MERGEDWG` — `.scr` + status JSON (чтение с FileShare и retry как ResultFile). Старт Revit и AutoCAD — через `ProcessLaunchGate` (`CommandTraits.GetLaunchGate`; ≥ 15 с между глобальными `Process.Start()` одного продукта, состояние — `ProcessLaunchState`). Прочие команды — сразу. Статус уже `processing` во время ожидания gate.
 
 ## 4. Результат
 
@@ -46,9 +46,12 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 | `done` + `warningMessage` | `Done`; warning → `ErrorMessage` |
 | plugin `failed` | permanent `Failed`; исключение: Revit `InternalException` + `OpenAndActivateDocument` при RetryCount=0 → один retry через 10 с |
 | `cancelled` | `Failed`, без retry |
-| invalid XML / Revit без ResultFile | retry policy |
+| invalid XML / schema | permanent `Failed` |
+| ResultFile sharing/IO после retry чтения | retry policy |
+| Revit без ResultFile | retry policy |
 | `MERGEDWG` status JSON `success=true` | `Done` |
-| `MERGEDWG` status JSON `success=false` / отсутствует | permanent `Failed` / retry|permanent по exit |
+| `MERGEDWG` status JSON `success=false` / битый JSON | permanent `Failed` |
+| `MERGEDWG` status отсутствует / sharing после retry | retry|permanent по exit |
 | wrapper без ResultFile, exit 0 / ≠0 | `Done` / retry|permanent |
 | timeout | kill, `Failed` без retry |
 
@@ -58,7 +61,7 @@ stdout/stderr: 64 KiB capture. После `WaitForExitAsync` sync `WaitForExit` 
 
 ## 5. Retry
 
-Permanent: plugin failed/cancelled (кроме open-retry выше), permanent exit codes, invalid input, timeout.  
+Permanent: plugin failed/cancelled (кроме open-retry выше), schema/invalid XML, битый MERGEDWG JSON, permanent exit codes, invalid input, timeout.  
 Transient: `RetryDelayBaseSeconds × 2^RetryCount + jitter`; после `MaxRetries` → `Failed`. Следующий poll подбирает по `NextRetryAt`.  
 `ScheduleRetry` и terminal `UpdateStatus` — только `Status='processing'` и `Lease` claim'а; иначе no-op.
 
@@ -66,14 +69,14 @@ Transient: `RetryDelayBaseSeconds × 2^RetryCount + jitter`; после `MaxRetr
 
 Terminal transition и lease-Failed — один session advisory lock: статус → при отсутствии активных команд + Done/Failed → `CompletionNotified` + одна запись `session_completed`.
 
-`NotificationSenderService`: poll 3 с, sender advisory lock, до 20 событий/цикл, lease 5 мин. Раз в минуту — recover до 100 сессий без outbox и requeue `session_completed` со статусом `failed` (не чаще чем раз в 15 мин). Telegram timeout 30 с; 429 → `retry_after` под общей блокировкой; transient → `NextAttemptAt` (до 300 с); 400/403 → failed. Ack + tracking — одна tx (at-least-once; возможен дубль при аварии между Telegram и commit).
+`NotificationSenderService`: poll 3 с, sender advisory lock, до 20 событий/цикл, lease 5 мин. Раз в минуту — recover до 100 сессий без outbox и requeue `session_completed` со статусом `failed` (не чаще чем раз в 15 мин). Telegram timeout 30 с; 429 → `retry_after` под общей блокировкой; transient → `NextAttemptAt` (до 300 с); 400/403 → failed. Ack + tracking — одна tx (at-least-once). Окно дубля: процесс упал после accept Telegram и до `MarkSent` — повтор той же записи outbox; идемпотентный ключ в текст не вставляем.
 
 `CompletionMessageFormatter` — чистый текст для любого итога: код команды, проект, имена файлов, затем `выполнено без ошибок` / `есть ошибки` / `есть предупреждения`. При сбое — `Ошибка:` и причина по файлу; warning плагина — `Предупреждение:`. Перевод типовых причин только при отображении; UNC в причине сжимается до имени файла.
 
 ## 7. Cleanup и shutdown
 
 - Lease recovery → pending или Failed + outbox  
-- Process monitor + DialogDismisser  
+- Process monitor + DialogDismisser (kill только через ProcessRunner; заголовок «Revit» не матчится как произвольный диалог)  
 - Soft-delete сессий старше `CompletedSessionRetentionDays`, пока нет pending outbox  
 - Telegram cleanup: Kind (interface/temporary/completion/job_status); interactive ставит `DeleteAfter=NOW` для устаревшего UI, защищая completion; `temporary` снимается сразу на следующем сообщении или колбэке, иначе 5 мин; results — 24 ч; цикл каждую минуту, batch 500, пакеты Telegram до 100; после `MaximumDeletionAgeHours` (47) — удаление только tracking-записи  
 - Soft-delete команд и сессий не трогает `processing`; `/status` list/count/details/delete только с `UserId`  
@@ -86,7 +89,7 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 ## Статусы и locks
 
 `pending` → `processing` → `Done`/`Failed`. `Deleted` — скрытие/retention. Soft-delete `processing` запрещён.  
-Advisory locks (ключи в `AdvisoryLockIds`): 1-arg — lease cleanup `1234567`, outbox `1234569`, AutoCAD launch `1234570`, Revit launch `1234571`; 2-arg — partition claim `(1234568, hashtext)`, completion `(1234570, SessionId)` (та же цифра, что AutoCAD, другая арность). Polling; LISTEN/NOTIFY не используется.
+Advisory locks (ключи в `AdvisoryLockIds`): 1-arg — lease cleanup `1234567`, outbox `1234569`, AutoCAD launch `1234570`, Revit launch `1234571`; 2-arg — partition claim `(1234568, hashtext)`, completion `(1234570, SessionId)` (та же цифра, что AutoCAD, другая арность), user queue `(1234572, hashtext(UserId))`. Polling; LISTEN/NOTIFY не используется.
 
 ## Добавление команды
 

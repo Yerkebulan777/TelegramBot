@@ -15,7 +15,7 @@ namespace TelegramBot.BimLib.Monitor;
 /// <list type="number">
 ///   <item>Клик известной кнопки по тексту (CloseButtonTexts) среди Button-контролов</item>
 ///   <item>WM_CLOSE + WM_SYSCOMMAND + SC_CLOSE</item>
-///   <item>Принудительное завершение процесса (после MaxDismissAttempts)</item>
+///   <item>Запрос kill tracked-процесса через ProcessRunner (после MaxDismissAttempts)</item>
 /// </list>
 /// </summary>
 public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<DialogDismisserOptions> optionsAccessor)
@@ -28,9 +28,9 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
 
     /// <summary>
     /// Проверяет и закрывает диалоговые окна для указанного процесса.
-    /// Возвращает true, если хотя бы один диалог был закрыт.
+    /// Возвращает true, если ProcessRunner должен убить tracked-процесс.
     /// </summary>
-    public bool DismissDialogsForProcess(uint processId)
+    public bool NeedsProcessKillAfterDismiss(uint processId)
     {
         var dialogs = FindDialogs(processId);
         if (dialogs.Count == 0)
@@ -105,7 +105,11 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
 
             if (attempts >= _options.MaxDismissAttempts)
             {
-                KillProcess(processId);
+                _logger.LogWarning(
+                    "Dismiss fail limit: pid={ProcessId} after {Max} attempts; requesting tracked kill",
+                    processId, _options.MaxDismissAttempts);
+                _ = _dismissAttempts.TryRemove(processId, out _);
+                return true;
             }
         }
         else
@@ -114,7 +118,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             _logger.LogWarning("Dismiss fail: pid={ProcessId} (auto-kill off)", processId);
         }
 
-        return dismissed;
+        return false;
     }
 
     /// <summary>
@@ -177,7 +181,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
                 => ["Relinquish all elements and worksets", "Relinquish elements and worksets", "Освободить все элементы и рабочие наборы"],
             var t when ContainsAny(t, "Local Changes Not Synchronized with Central")
                 => ["Close the local file", "Закрыть локальный файл"],
-            var t when ContainsAny(t, "Elements Lost on Import", "Navisworks NWC Exporter", "Revit")
+            var t when ContainsAny(t, "Elements Lost on Import", "Navisworks NWC Exporter")
                 => ["Close", "OK", "Закрыть", "ОК"],
             _ => null
         };
@@ -261,7 +265,7 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
 
     /// <summary>
     /// Закрывает диалог через отправку WM_CLOSE и WM_SYSCOMMAND + SC_CLOSE.
-    /// Используется как последняя попытка перед KillProcess.
+    /// Используется как последняя попытка перед запросом kill через ProcessRunner.
     /// </summary>
     private static bool TryCloseDialogViaWindowMessage(IntPtr hwndDlg)
     {
@@ -285,25 +289,6 @@ public sealed class DialogDismisser(ILogger<DialogDismisser> logger, IOptions<Di
             WinApiHelper.LogError(nameof(TryCloseDialogViaWindowMessage), ex,
                 $"hWnd={hwndDlg}");
             return false;
-        }
-    }
-
-    /// <summary>Принудительно завершает процесс по ID.</summary>
-    private void KillProcess(uint processId)
-    {
-        try
-        {
-            using var process = Process.GetProcessById((int)processId);
-            _logger.LogWarning("Kill process: pid={ProcessId}) after {Max} dismiss fails", processId, _options.MaxDismissAttempts);
-            process.Kill(entireProcessTree: true);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Kill fail: pid={ProcessId}", processId);
-        }
-        finally
-        {
-            _=_dismissAttempts.TryRemove(processId, out _);
         }
     }
 }

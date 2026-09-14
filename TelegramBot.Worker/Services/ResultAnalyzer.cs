@@ -15,8 +15,6 @@ namespace TelegramBot.Worker.Services;
 public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<ResultAnalyzer> logger)
 {
     private static readonly XmlSerializer ResultFileSerializer = new(typeof(ResultFile));
-    private const int ResultFileReadRetryCount = 50;
-    private static readonly TimeSpan ResultFileReadRetryDelay = TimeSpan.FromMilliseconds(200);
 
     /// <summary>
     /// Пробует прочитать result-файл и возвращает статус.
@@ -33,16 +31,21 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
             return (ResultFileReadStatus.NotFound, null, null);
         }
 
-        for (var attempt = 0; attempt <= ResultFileReadRetryCount; attempt++)
+        for (var attempt = 0; attempt <= PluginOutputFileRead.RetryCount; attempt++)
         {
             try
             {
-                using (var validationStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var validationStream = PluginOutputFileRead.Open(path))
                 using (var reader = XmlReader.Create(validationStream))
                 {
                     var validationErrors = XmlContractValidator.ValidateResultFile(reader);
                     if (validationErrors.Count > 0)
                     {
+                        if (await PluginOutputFileRead.ShouldRetryAsync(attempt, ct))
+                        {
+                            continue;
+                        }
+
                         logger.LogWarning(
                             "Plugin result file violates schema: id={CommandId}, errors={ErrorCount}",
                             commandId, validationErrors.Count);
@@ -51,7 +54,7 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
                     }
                 }
 
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var stream = PluginOutputFileRead.Open(path);
                 var result = (ResultFile)ResultFileSerializer.Deserialize(stream)!;
 
                 if (result.Status is ResultStatus.Done or ResultStatus.Failed or ResultStatus.Cancelled)
@@ -65,7 +68,7 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
             }
             catch (Exception ex) when (ex is InvalidOperationException or XmlException)
             {
-                if (await RetryReadAsync(attempt, ct))
+                if (await PluginOutputFileRead.ShouldRetryAsync(attempt, ct))
                 {
                     continue;
                 }
@@ -76,32 +79,33 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                if (await RetryReadAsync(attempt, ct))
+                if (await PluginOutputFileRead.ShouldRetryAsync(attempt, ct))
                 {
                     continue;
                 }
 
-                return (ResultFileReadStatus.Invalid, null, $"Plugin result file cannot be read: {path}. {ex.Message}");
+                return (ResultFileReadStatus.Unreadable, null, $"Plugin result file cannot be read: {path}. {ex.Message}");
             }
         }
 
-        return (ResultFileReadStatus.Invalid, null, $"Plugin result file cannot be read: {path}");
+        return (ResultFileReadStatus.Unreadable, null, $"Plugin result file cannot be read: {path}");
     }
 
     /// <summary>
     /// Определяет финальный статус команды на основе result-файла или exit code.
     /// </summary>
-    public CommandResult DetermineResult(
+    public async Task<CommandResult> DetermineResultAsync(
         PendingCommand cmd,
         ResultFileReadStatus resultReadStatus,
         ResultFile? result,
         string? resultReadError,
         Process process,
-        Stopwatch sw)
+        Stopwatch sw,
+        CancellationToken ct)
     {
         if (cmd.CommandText is CommandCodes.MergeDwg)
         {
-            return AnalyzeMergeDwgStatus(cmd, process, sw);
+            return await AnalyzeMergeDwgStatusAsync(cmd, process, sw, ct);
         }
 
         if (resultReadStatus == ResultFileReadStatus.Valid && result != null)
@@ -111,7 +115,15 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
 
         if (resultReadStatus == ResultFileReadStatus.Invalid)
         {
-            return CommandResult.Failure(resultReadError ?? "Invalid plugin result file", null);
+            return CommandResult.Failure(
+                resultReadError ?? "Invalid plugin result file",
+                null,
+                CommandResult.FailureDisposition.PermanentPlugin);
+        }
+
+        if (resultReadStatus == ResultFileReadStatus.Unreadable)
+        {
+            return CommandResult.Failure(resultReadError ?? "Plugin result file cannot be read", null);
         }
 
         // Fallback по exit code
@@ -144,21 +156,27 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
 
     /// <summary>
     /// MERGEDWG отвечает status JSON, а не ResultFile: exit code 0 без ответа успехом не считается.
+    /// Sharing violation ретраится как ResultFile; битый JSON — permanent fail.
     /// </summary>
-    private CommandResult AnalyzeMergeDwgStatus(PendingCommand cmd, Process process, Stopwatch sw)
+    private async Task<CommandResult> AnalyzeMergeDwgStatusAsync(
+        PendingCommand cmd, Process process, Stopwatch sw, CancellationToken ct)
     {
         var (_, statusPath) = taskFileStore.GetMergeDwgPaths(cmd.CommandId, cmd.FilePath ?? string.Empty);
-        var (status, readError) = MergeDwgBatchProtocol.TryReadStatus(statusPath);
+        var read = await MergeDwgBatchProtocol.ReadStatusAsync(statusPath, ct);
+        var status = read.Status;
 
         if (status is null)
         {
             logger.LogWarning(
                 "MERGEDWG no status: id={Id}, corr={CorrelationId}, exit={ExitCode}, path={StatusPath}, err={Error}, ms={ElapsedMs}",
-                cmd.CommandId, cmd.CorrelationId, process.ExitCode, statusPath, readError, sw.ElapsedMilliseconds);
+                cmd.CommandId, cmd.CorrelationId, process.ExitCode, statusPath, read.ErrorMessage, sw.ElapsedMilliseconds);
 
             return CommandResult.Failure(
-                $"{readError} (AutoCAD exit code {ExitCodeFormatter.Format(process.ExitCode)})",
-                process.ExitCode);
+                $"{read.ErrorMessage} (AutoCAD exit code {ExitCodeFormatter.Format(process.ExitCode)})",
+                process.ExitCode,
+                failureDisposition: read.Kind == MergeDwgBatchProtocol.StatusReadKind.InvalidJson
+                    ? CommandResult.FailureDisposition.PermanentPlugin
+                    : CommandResult.FailureDisposition.Classify);
         }
 
         if (status.Success)
@@ -264,22 +282,12 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
         }
     }
 
-    private static async Task<bool> RetryReadAsync(int attempt, CancellationToken ct)
-    {
-        if (attempt >= ResultFileReadRetryCount)
-        {
-            return false;
-        }
-
-        await Task.Delay(ResultFileReadRetryDelay, ct);
-        return true;
-    }
-
     public enum ResultFileReadStatus
     {
         NotFound,
         Valid,
         Invalid,
+        Unreadable,
     }
 
     public sealed class CommandResult
