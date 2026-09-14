@@ -38,12 +38,7 @@ public sealed class CommandExecutionService(
             _workerOptions.MaxConcurrentCommands, pollSeconds);
         await schemaReadyGate.WaitAsync(stoppingToken);
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        _processMonitorTask = StartPeriodicBackgroundTaskAsync(
-            intervalSeconds: _workerOptions.ProcessMonitorIntervalSeconds > 0
-                ? RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds) : 0,
-            disabledMessage: interval => $"Process monitor disabled: interval={interval}s",
-            cycleName: "process monitor",
-            cycle: CheckProcessesHealthAsync);
+        _processMonitorTask = StartPeriodicBackgroundTaskAsync();
 
         var nextCleanup = DateTime.MinValue;
         try
@@ -88,21 +83,17 @@ public sealed class CommandExecutionService(
     }
 
     /// <summary>
-    /// Универсальный каркас для фоновых циклов на <see cref="PeriodicTimer"/>:
-    /// disabled-проверка, повтор с подавлением ошибок итерации, штатное завершение по shutdown-токену.
-    /// ponytail: добавление CancellationToken в data-сервисы — отдельный PR, контракт пока не меняем.
+    /// Мониторинг процессов на <see cref="PeriodicTimer"/> с обработкой ошибок итерации и shutdown.
     /// </summary>
-    private Task StartPeriodicBackgroundTaskAsync(
-        int intervalSeconds,
-        Func<int, string> disabledMessage,
-        string cycleName,
-        Func<Task> cycle)
+    private Task StartPeriodicBackgroundTaskAsync()
     {
         return Task.Run(async () =>
         {
+            var intervalSeconds = _workerOptions.ProcessMonitorIntervalSeconds > 0
+                ? RoundUpTo30Seconds(_workerOptions.ProcessMonitorIntervalSeconds) : 0;
             if (intervalSeconds <= 0)
             {
-                logger.LogWarning("{Msg}", disabledMessage(intervalSeconds));
+                logger.LogWarning("Process monitor disabled: interval={IntervalSeconds}s", intervalSeconds);
                 return;
             }
 
@@ -114,11 +105,11 @@ public sealed class CommandExecutionService(
                 {
                     try
                     {
-                        await cycle();
+                        await CheckProcessesHealthAsync();
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Error in {Cycle}", cycleName);
+                        logger.LogError(ex, "Error in {Cycle}", "process monitor");
                     }
                 }
             }

@@ -9,7 +9,7 @@ using TelegramBot.Server.Services.Infrastructure.Telegram;
 namespace TelegramBot.Server.Services.Application;
 
 /// <summary>
-/// Рендерит список сессий /status: параллельный fetch, шапка с фильтром, отправка или редактирование.
+/// Рендерит список сессий /status: загрузка списка, шапка с фильтром, отправка или редактирование.
 /// Используется из <see cref="SlashCommandService"/> (исходный /status) и <see cref="Handlers.SessionManagementHandler"/> (фильтры/возврат).
 /// </summary>
 public sealed class SessionsListRenderer(
@@ -22,12 +22,8 @@ public sealed class SessionsListRenderer(
     private async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
         long userId, string filter, int page, CancellationToken cancellationToken = default)
     {
-        var sessionsTask = sessionDataService.GetSessionsListFilteredAsync(userId, filter);
-        var countTask = sessionDataService.CountSessionsFilteredAsync(userId, filter);
-        await Task.WhenAll(sessionsTask, countTask);
-
-        var sessions = await sessionsTask;
-        var total = await countTask;
+        var sessions = await sessionDataService.GetSessionsListFilteredAsync(userId, filter);
+        var total = sessions.Count;
         var (clampedPage, totalPages) = Pagination.Calculate(total, page, KeyboardBuilder.SessionsPageSize);
 
         var text = totalPages > 1

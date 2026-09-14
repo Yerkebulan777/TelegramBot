@@ -151,15 +151,6 @@ public sealed class SessionDataService(
         return result.ToList();
     }
 
-    /// <summary>Считает количество сессий владельца по фильтру (для счётчика «(всего N)» в заголовке /status).</summary>
-    public async Task<int> CountSessionsFilteredAsync(long userId, string filter)
-    {
-        await using var conn = await CreateOpenConnectionAsync();
-        return await conn.QuerySingleAsync<int>(
-            SqlQueries.Sessions.CountFiltered,
-            new { UserId = userId, Filter = filter });
-    }
-
     /// <summary>Возвращает имя пользователя по ID сессии.</summary>
     public async Task<string?> GetSessionUsernameAsync(int sessionId)
     {
@@ -249,15 +240,6 @@ public sealed class SessionDataService(
         var count = await conn.ExecuteScalarAsync<int>(
             SqlQueries.Commands.CountActive, new { SessionId = sessionId });
         return count > 0;
-    }
-
-    /// <summary>Считает pending/processing команды в сессии.</summary>
-    public async Task<int> CountPendingProcessingBySessionAsync(int sessionId)
-    {
-        await using var conn = await CreateOpenConnectionAsync();
-        return await conn.ExecuteScalarAsync<int>(
-            SqlQueries.Commands.CountPendingProcessingBySession,
-            new { SessionId = sessionId });
     }
 
     /// <summary>Возвращает SessionId по CommandId, только если команда принадлежит userId.</summary>

@@ -242,7 +242,7 @@ public sealed partial class FileSystemBrowser(IOptions<FileSystemOptions> option
         {
             // We're at the section level, add valid subfolders and ONLY top-level files
             var subfolders = GetValidSubfolders(currentPath);
-            result.AddRange(subfolders);
+            result.AddRange(subfolders.Select(s => s.Path));
 
             var rvtDir = Path.Combine(currentPath, _options.RvtDirectoryName);
             if (Directory.Exists(rvtDir))
@@ -256,9 +256,9 @@ public sealed partial class FileSystemBrowser(IOptions<FileSystemOptions> option
     }
 
     /// <summary>
-    /// Получает подпапки в 01_RVT, которые не содержат '#' и имеют .rvt файлы.
+    /// Получает подпапки в 01_RVT и собранные файлы; исключает '#' и пустые подпапки.
     /// </summary>
-    private List<string> GetValidSubfolders(string sectionPath)
+    private List<(string Path, List<string> Files)> GetValidSubfolders(string sectionPath)
     {
         var rvtDir = Path.Combine(sectionPath, _options.RvtDirectoryName);
 
@@ -271,8 +271,9 @@ public sealed partial class FileSystemBrowser(IOptions<FileSystemOptions> option
         {
             var root = new DirectoryInfo(rvtDir);
             return [.. root.EnumerateDirectories("*", _enumOptions)
-                .Where(s => !s.Name.Contains('#') && CollectRevitFiles(s).Count > 0)
-                .Select(s => s.FullName)];
+                .Where(s => !s.Name.Contains('#'))
+                .Select(s => (Path: s.FullName, Files: CollectRevitFiles(s)))
+                .Where(s => s.Files.Count > 0)];
         }
         catch (IOException ex)
         {
@@ -334,7 +335,7 @@ public sealed partial class FileSystemBrowser(IOptions<FileSystemOptions> option
 
                 // Always add files from all valid subfolders
                 var validSubfolders = GetValidSubfolders(sectionPath);
-                allFiles.AddRange(validSubfolders.SelectMany(s => CollectRevitFiles(new DirectoryInfo(s))));
+                allFiles.AddRange(validSubfolders.SelectMany(s => s.Files));
 
                 return RevitFileDeduplicator.Deduplicate(allFiles);
             }

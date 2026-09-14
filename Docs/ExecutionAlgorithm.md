@@ -16,6 +16,8 @@ Telegram → Session + Commands (1 tx)
 
 ## 1. Создание задания
 
+`FileSystemBrowser`: при выборе всех файлов раздела каждая подпапка `01_RVT` сканируется один раз. Собранные списки используются для проверки наличия файлов и общей дедупликации в рамках текущего вызова; между вызовами не кешируются.
+
 `SlashCommandService`: сканирование `01_RVT`, лимиты, дедуп. В одной транзакции — user-level `pg_advisory_xact_lock(UserQueue, hashtext(UserId))`, пересчёт дневного лимита, затем `Sessions` + Cartesian product команд×файлов.
 
 `ON CONFLICT (CommandText, FilePath) WHERE Status IN ('pending','processing') DO NOTHING` — глобально по активным парам. Все пропущены → rollback. Частичный skip → `FilesAmount` только по добавленным. Для пропусков показывается снимок прежней команды (до 8 деталей).
@@ -83,6 +85,8 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 - Worker shutdown: stop loops → process-tree kill (30 с) → release claimed leases в `pending` (`NextRetryAt` +15 с)  
 
 ## 8. Rerun из /status
+
+Список `/status` загружается одним запросом с фильтром и `UserId`. Общее количество берётся из загруженного списка; пагинация выполняется при построении клавиатуры.
 
 `RERUNCMD` → новый Session/Command/CorrelationId, `RetryCount=0`. Авто-retry продолжает ту же строку. Список и действия `/status` — только сессии вызывающего `UserId`.
 

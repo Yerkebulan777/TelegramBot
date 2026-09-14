@@ -48,29 +48,6 @@ internal static partial class SqlQueries
                    OR (@Filter = 'FAILED' AND COALESCE(stats.FailedCount, 0) > 0))
             ORDER BY s.CreatedAt DESC;";
 
-        internal const string CountFiltered = @"
-            WITH session_stats AS (
-                SELECT
-                    s.SessionId,
-                    COUNT(c.CommandId) FILTER (WHERE c.Status IN ('pending', 'processing')) AS ActiveCount,
-                    COUNT(c.CommandId) FILTER (WHERE c.Status = 'Failed') AS FailedCount,
-                    COUNT(c.CommandId) FILTER (WHERE c.Status = 'Done') AS DoneCount
-                FROM Sessions s
-                LEFT JOIN Commands c ON c.SessionId = s.SessionId AND c.Status != 'Deleted'
-                WHERE s.Status != 'Deleted'
-                  AND s.UserId = @UserId
-                GROUP BY s.SessionId
-            )
-            SELECT COUNT(*)::int
-            FROM Sessions s
-            LEFT JOIN session_stats stats ON stats.SessionId = s.SessionId
-            WHERE s.Status != 'Deleted'
-              AND s.UserId = @UserId
-              AND (@Filter = 'ALL'
-                   OR (@Filter = 'ACTIVE' AND COALESCE(stats.ActiveCount, 0) > 0)
-                   OR (@Filter = 'DONE' AND COALESCE(stats.ActiveCount, 0) = 0 AND COALESCE(stats.FailedCount, 0) = 0 AND COALESCE(stats.DoneCount, 0) > 0)
-                   OR (@Filter = 'FAILED' AND COALESCE(stats.FailedCount, 0) > 0));";
-
         internal const string CountQueuedFilesByUserSince = @"
             SELECT COALESCE(SUM(FilesAmount), 0)::int
             FROM Sessions

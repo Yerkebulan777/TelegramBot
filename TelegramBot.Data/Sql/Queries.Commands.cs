@@ -238,12 +238,6 @@ internal static partial class SqlQueries
             WHERE c.Status = 'processing' AND c.Lease < @CurrentTimeSec
             ORDER BY c.SessionId;";
 
-        internal const string CountPendingProcessingBySession = @"
-            SELECT COUNT(*)
-            FROM Commands
-            WHERE SessionId = @SessionId
-              AND Status IN ('pending', 'processing')";
-
         // Transaction-scoped lock namespace for one terminal transition and its session completion
         // notification.  It serializes completions in a session before the active-command count is read.
         internal static readonly string AcquireSessionCompletionLock =
