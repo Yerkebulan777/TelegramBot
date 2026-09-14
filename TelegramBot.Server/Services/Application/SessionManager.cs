@@ -56,10 +56,10 @@ public class SessionManager : IDisposable
     /// пользователя — нарушению per-user взаимоисключения. Ленивое удержание семафоров безопасно:
     /// их размер мал, а число пользователей ограничено.
     /// </remarks>
-    public async Task<IDisposable> AcquireUserLockAsync(long userId)
+    public async Task<IDisposable> AcquireUserLockAsync(long userId, CancellationToken cancellationToken = default)
     {
         var sessionLock = _sessionLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
-        await sessionLock.WaitAsync();
+        await sessionLock.WaitAsync(cancellationToken);
         RemoveExpiredSessionValue(userId, DateTime.UtcNow);
         return new SessionLockReleaser(sessionLock);
     }

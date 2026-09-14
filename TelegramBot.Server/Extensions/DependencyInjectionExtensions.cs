@@ -56,6 +56,7 @@ public static class DependencyInjectionExtensions
         _ = services.AddSingleton<MessageTrackingService>();
         _ = services.AddSingleton<SessionManager>(_ => new SessionManager(TimeSpan.FromMinutes(5)));
 
+        _ = services.AddSingleton<SchemaReadyGate>();
         _ = services.AddSingleton<CommandDataService>();
         _ = services.AddSingleton<UncRootPathValidator>();
         _ = services.AddSingleton<RootPathDataService>();

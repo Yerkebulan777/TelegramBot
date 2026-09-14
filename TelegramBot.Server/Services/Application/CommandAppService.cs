@@ -44,12 +44,11 @@ public sealed class CommandAppService(
         }
 
         // Stale-session detection: a fresh session (after restart, idle timeout, or first run)
-        // is not yet initialized. A slash command initializes it; any other text gets a single
-        // redirect-to-/start hint. Initialized is then set unconditionally — true is idempotent
-        // for already-initialized sessions.
+        // is not yet initialized. A slash command initializes it; any other text gets a
+        // redirect-to-/start hint until the user sends /start.
         if (!session.Initialized && !message.Text!.StartsWith('/'))
         {
-            await NotifyStaleSessionAsync(session, userId, username);
+            await NotifyStaleSessionAsync(session, userId, username, cancellationToken);
             return;
         }
         session.Initialized = true;
@@ -82,10 +81,9 @@ public sealed class CommandAppService(
         // so a fresh session is redirected to /start via a single hint.
         if (!session.Initialized)
         {
-            await NotifyStaleSessionAsync(session, userId, username);
+            await NotifyStaleSessionAsync(session, userId, username, cancellationToken);
             return;
         }
-        session.Initialized = true;
 
         await outputService.DeleteTemporaryMessagesAsync(userId, cancellationToken);
 
@@ -137,18 +135,19 @@ public sealed class CommandAppService(
 
     /// <summary>
     /// Notifies the user that their previous session is gone (server restart, idle timeout, or
-    /// first run) and they should start over. Removes any lingering reply keyboard, tracks the
-    /// sent message so it is cleaned up by ClearChatHistoryAsync, and marks the session
-    /// initialized so the hint fires at most once per session.
+    /// first run) and they should start over. Removes any lingering reply keyboard and tracks the
+    /// sent message so it is cleaned up by ClearChatHistoryAsync. Does not mark the session
+    /// initialized — that happens only on a slash command such as /start.
     /// </summary>
-    private async Task NotifyStaleSessionAsync(UserSession session, long userId, string? username)
+    private async Task NotifyStaleSessionAsync(
+        UserSession session, long userId, string? username, CancellationToken cancellationToken)
     {
         logger.LogDebug("Stale session redirected to /start: {Username} ({UserId})", username, userId);
         _ = await messageTrackingService.TrackAsync(
             outputService.RemoveReplyKeyboardAsync(userId,
-                "⚡️ Сервер перезапущен или сессия истекла.\nСтарые сообщения неактуальны.\n\nВведите /start."),
+                "⚡️ Сервер перезапущен или сессия истекла.\nСтарые сообщения неактуальны.\n\nВведите /start.",
+                cancellationToken),
             session, TrackedMessageKinds.Temporary);
-        session.Initialized = true;
     }
 
 }

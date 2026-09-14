@@ -15,6 +15,7 @@ public sealed class NotificationSenderService(
     SessionDataService sessionDataService,
     NotificationOutboxDataService notificationOutboxDataService,
     TelegramOutputService telegramOutput,
+    SchemaReadyGate schemaReadyGate,
     IOptions<MessageCleanupOptions> cleanupOptions,
     ILogger<NotificationSenderService> logger) : BackgroundService
 {
@@ -25,6 +26,7 @@ public sealed class NotificationSenderService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("Notification sender start");
+        await schemaReadyGate.WaitAsync(stoppingToken);
         using var timer = new PeriodicTimer(PollInterval);
         try
         {

@@ -10,7 +10,7 @@ Telegram → Session + Commands (1 tx)
 
 ## 0. Старт Server
 
-`DatabaseInitializerService` создаёт схему в фоне с retry (не блокирует старт процесса). Кластер/БД на установке — `PostgresConnectionCheck ensure` + Docker Desktop. Hosted-сервисы стартуют параллельно; outbox и cleanup переживают временную недоступность БД.
+`DatabaseInitializerService` создаёт схему в фоне с retry (не блокирует старт процесса) и выставляет `SchemaReadyGate`. Кластер/БД на установке — `PostgresConnectionCheck ensure` + Docker Desktop. Трей и health check стартуют сразу; polling Telegram, outbox, cleanup и очередь Worker ждут схему. `SoftDeleteLegacyCancelled` выполняется до `CHECK` на `Commands.Status`.
 
 Иконка в трее (`ServerTrayHostedService`): процесс жив. Раз в 15 с `ServerHealthCheckService` проверяет PostgreSQL (`SELECT 1`) и Telegram (`getMe`). Серый — ещё проверка, зелёный — оба ок, жёлтый — одно недоступно, красный — оба. `SetMyCommands` при старте тоже retry, чтобы недоступный Telegram не ронял хост.
 
@@ -52,7 +52,7 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 | wrapper без ResultFile, exit 0 / ≠0 | `Done` / retry|permanent |
 | timeout | kill, `Failed` без retry |
 
-stdout/stderr: 64 KiB capture. После `WaitForExitAsync` sync `WaitForExit` ограничен 10 с (drain redirected pipes); таймаут → kill дерева. Valid ResultFile удаляется с TaskFile. После Revit — фоновый `RevitTemporaryDirectoryCleaner` (`RBF-{GUID}` под `%TEMP%`). При ошибке записи БД файлы сохраняются; перед retry ResultFile → `.previous`.
+stdout/stderr: 64 KiB capture. После `WaitForExitAsync` sync `WaitForExit` ограничен 10 с (drain redirected pipes); таймаут → kill дерева. Valid ResultFile удаляется с TaskFile. После Revit — фоновый `RevitTemporaryDirectoryCleaner` (`RBF-{GUID}` под `%TEMP%`). При ошибке записи БД файлы сохраняются; Worker отпускает lease в `pending` (`NextRetryAt` ≈ now+15 с). Следующий claim, если ResultFile валиден, закрывает команду без нового Process.Start; иначе ResultFile → `.previous` и повторный запуск.
 
 Финальный статус: до 4 попыток записи (паузы 2/4/8 с) в одной tx с session lock + outbox при последней команде. Исчерпание → `CommandPersistenceException` (не BIM-retry).
 
@@ -66,7 +66,7 @@ Transient: `RetryDelayBaseSeconds × 2^RetryCount + jitter`; после `MaxRetr
 
 Terminal transition и lease-Failed — один session advisory lock: статус → при отсутствии активных команд + Done/Failed → `CompletionNotified` + одна запись `session_completed`.
 
-`NotificationSenderService`: poll 3 с, sender advisory lock, до 20 событий/цикл, lease 5 мин. Раз в минуту — recover до 100 сессий без outbox. Telegram timeout 30 с; 429 → `retry_after` под общей блокировкой; transient → `NextAttemptAt` (до 300 с); 400/403 → failed. Ack + tracking — одна tx (at-least-once; возможен дубль при аварии между Telegram и commit).
+`NotificationSenderService`: poll 3 с, sender advisory lock, до 20 событий/цикл, lease 5 мин. Раз в минуту — recover до 100 сессий без outbox и requeue `session_completed` со статусом `failed` (не чаще чем раз в 15 мин). Telegram timeout 30 с; 429 → `retry_after` под общей блокировкой; transient → `NextAttemptAt` (до 300 с); 400/403 → failed. Ack + tracking — одна tx (at-least-once; возможен дубль при аварии между Telegram и commit).
 
 `CompletionMessageFormatter` — чистый текст для любого итога: код команды, проект, имена файлов, затем `выполнено без ошибок` / `есть ошибки` / `есть предупреждения`. При сбое — `Ошибка:` и причина по файлу; warning плагина — `Предупреждение:`. Перевод типовых причин только при отображении; UNC в причине сжимается до имени файла.
 

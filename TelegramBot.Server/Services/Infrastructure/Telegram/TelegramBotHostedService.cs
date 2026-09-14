@@ -3,6 +3,7 @@ using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using TelegramBot.Data;
 using TelegramBot.Server.Services.Application;
 
 namespace TelegramBot.Server.Services.Infrastructure.Telegram;
@@ -10,6 +11,7 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 public class TelegramBotHostedService(
     ITelegramBotClient botClient,
     CommandAppService commandAppService,
+    SchemaReadyGate schemaReadyGate,
     ILogger<TelegramBotHostedService> logger,
     SessionManager sessionManager) : BackgroundService
 {
@@ -52,6 +54,8 @@ public class TelegramBotHostedService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await schemaReadyGate.WaitAsync(stoppingToken);
+
         BotCommand[] commands =
         [
             new() { Command = "export", Description = "Export to different formats" },
@@ -189,6 +193,10 @@ public class TelegramBotHostedService(
                     {
                         await ProcessUpdateAsync(update, token);
                     }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        // Shutdown while waiting for the per-user lock.
+                    }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
                         // Отдельное обновление было отменено (например, таймаут) — логируем и продолжаем
@@ -219,7 +227,7 @@ public class TelegramBotHostedService(
         {
             logger.LogDebug("Update: id={UpdateId}, type={UpdateType}, input=Message", update.Id, update.Type);
 
-            using (await sessionManager.AcquireUserLockAsync(message.From.Id))
+            using (await sessionManager.AcquireUserLockAsync(message.From.Id, ct))
             {
                 await commandAppService.HandleUserCommandAsync(message, ct);
             }
@@ -234,7 +242,7 @@ public class TelegramBotHostedService(
 
             logger.LogDebug("Update: id={UpdateId}, type={UpdateType}, input=CallbackQuery", update.Id, update.Type);
 
-            using (await sessionManager.AcquireUserLockAsync(callback.From.Id))
+            using (await sessionManager.AcquireUserLockAsync(callback.From.Id, ct))
             {
                 try
                 {

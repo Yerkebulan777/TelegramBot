@@ -57,7 +57,7 @@ Handlers: `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManageme
 | Export | `PDF`, `DWG`, `NWC`, `DATA`, `IFC` |
 | Automation | `CLASHREP` (FileConvert; planned Navisworks AddIn), `RESAVE`, `MERGEDWG` (AutoCAD + AutoBIMFusion) |
 
-`FileSystemBrowser`: RootPath → `01_PROJECT` → `01_RVT` (`.rvt` > 50 MiB). Hosted: `ServerTrayHostedService` (иконка в трее), `ServerHealthCheckService` (БД+Telegram, 15 с), `DatabaseInitializerService` (фон, не блокирует старт), `TelegramBotHostedService`, `NotificationSenderService` (outbox 3 с), `TrackedMessageCleanupService`.
+`FileSystemBrowser`: RootPath → `01_PROJECT` → `01_RVT` (`.rvt` > 50 MiB). Hosted: `ServerTrayHostedService` (иконка в трее), `ServerHealthCheckService` (БД+Telegram, 15 с), `DatabaseInitializerService` (фон, `SchemaReadyGate`), `TelegramBotHostedService` / outbox / cleanup ждут схему.
 
 ### Worker
 
@@ -65,7 +65,7 @@ Handlers: `FileSelection`, `CommandToggle`, `CommandSelection`, `SessionManageme
 Polling (1s) → lease cleanup → ClaimPendingCommands → Prepare → Start → Result → Done/retry/Failed
 ```
 
-Ограничения: `MaxConcurrentCommands` + одна команда на Partition. `ProcessLaunchGate` — ≥ 15 с между глобальными `Process.Start()` Revit и (отдельно) AutoCAD; выбор gate — `CommandTraits.GetLaunchGate`. `CommandPersistenceException` — не BIM-ошибка; ResultFile сохранять при сбое записи.
+Ограничения: `MaxConcurrentCommands` + одна команда на Partition. `ProcessLaunchGate` — ≥ 15 с между глобальными `Process.Start()` Revit и (отдельно) AutoCAD; выбор gate — `CommandTraits.GetLaunchGate`. `CommandPersistenceException` — не BIM-ошибка; ResultFile сохранять при сбое записи; следующий claim закрывает команду из ResultFile без нового Revit. Worker тоже ждёт `SchemaReadyGate`.
 
 `CommandTraits.RequiresRevit`: PDF, DWG, NWC, DATA, IFC, RESAVE. TaskFile — `REVITBIMFUSION_TASK_FILE` (без контрактных CLI; `/language RUS` допустим).
 

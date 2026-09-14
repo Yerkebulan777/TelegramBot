@@ -4,6 +4,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using TelegramBot.Core.Config;
 using TelegramBot.Core.Constants;
+using TelegramBot.Core.Helpers;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Server.Helpers;
@@ -53,14 +54,15 @@ public sealed class SlashCommandService(
         if (command == "/start")
         {
             session.Reset(await rootPathProvider.GetRootPathAsync(cancellationToken));
-            await SendHelpMessageAsync(userId, session);
+            await SendHelpMessageAsync(userId, session, cancellationToken);
             return;
         }
 
-        await HandleSlashCommandAsync(command, userId, session, username!);
+        await HandleSlashCommandAsync(command, userId, session, username!, cancellationToken);
     }
 
-    private async Task HandleSlashCommandAsync(string command, long userId, UserSession session, string username)
+    private async Task HandleSlashCommandAsync(
+        string command, long userId, UserSession session, string username, CancellationToken cancellationToken)
     {
         var isSlashCommand = command.StartsWith('/');
 
@@ -68,28 +70,28 @@ public sealed class SlashCommandService(
         {
             case "/export":
                 logger.LogDebug("/export: user={Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, CommandGroup.Export);
+                await StartCommandSelectionAsync(userId, session, CommandGroup.Export, cancellationToken);
                 break;
 
             case "/status":
                 logger.LogDebug("/status: user={Username} ({UserId})", username, userId);
-                session.Reset(await rootPathProvider.GetRootPathAsync());
+                session.Reset(await rootPathProvider.GetRootPathAsync(cancellationToken));
                 session.StatusFilter = StatusFilters.All;
 
-                var sent = await sessionsListRenderer.SendNewAsync(userId, session.StatusFilter);
+                var sent = await sessionsListRenderer.SendNewAsync(userId, session.StatusFilter, cancellationToken: cancellationToken);
                 var tracked = await messageTrackingService.TrackAsync(sent, session);
                 session.StatusMessageId = tracked?.Id;
                 break;
 
             case "/automation":
                 logger.LogDebug("/automation: user={Username} ({UserId})", username, userId);
-                await StartCommandSelectionAsync(userId, session, CommandGroup.Automation);
+                await StartCommandSelectionAsync(userId, session, CommandGroup.Automation, cancellationToken);
                 break;
 
             case "/help":
                 logger.LogDebug("/help: user={Username} ({UserId})", username, userId);
-                session.Reset(await rootPathProvider.GetRootPathAsync());
-                await SendHelpMessageAsync(userId, session);
+                session.Reset(await rootPathProvider.GetRootPathAsync(cancellationToken));
+                await SendHelpMessageAsync(userId, session, cancellationToken);
                 break;
 
             default:
@@ -162,7 +164,8 @@ public sealed class SlashCommandService(
 
         try
         {
-            var filesToProcess = selectedFiles.Where(File.Exists).ToList();
+            var filesToProcess = await FileExistence.ExistingPathsAsync(
+                selectedFiles, TimeSpan.FromSeconds(3), cancellationToken);
             if (filesToProcess.Count == 0)
             {
                 logger.LogWarning("Job blocked: {Username} ({UserId}), reason=no_files_found", username, userId);
@@ -203,7 +206,8 @@ public sealed class SlashCommandService(
 
             session.Selection.Reset(session.RootPath);
 
-            _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, queuedMessage), session,
+            _ = await messageTrackingService.TrackAsync(
+                outputService.SendMessageAsync(userId, queuedMessage, cancellationToken), session,
                 TrackedMessageKinds.JobStatus);
         }
         finally
@@ -269,12 +273,13 @@ public sealed class SlashCommandService(
         return false;
     }
 
-    private async Task StartCommandSelectionAsync(long userId, UserSession session, CommandGroup commandGroup)
+    private async Task StartCommandSelectionAsync(
+        long userId, UserSession session, CommandGroup commandGroup, CancellationToken cancellationToken)
     {
-        var rootPath = await rootPathProvider.GetRootPathAsync();
+        var rootPath = await rootPathProvider.GetRootPathAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(rootPath))
         {
-            await SendSafeResponseAsync(userId, "⚠️ Корневой сетевой путь не настроен. Откройте /help и задайте его.", session);
+            await SendSafeResponseAsync(userId, "⚠️ Корневой сетевой путь не настроен. Откройте /help и задайте его.", session, cancellationToken);
             return;
         }
 
@@ -282,15 +287,18 @@ public sealed class SlashCommandService(
 
         var commandKeyboard = keyboardBuilder.GetCommandKeyboard(commandGroup, session);
 
-        var commandSelectionMessage = await messageTrackingService.TrackAsync(outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard), session);
+        var commandSelectionMessage = await messageTrackingService.TrackAsync(
+            outputService.SendMessageWithKeyboardAsync(userId, "Выберите команду:", commandKeyboard, cancellationToken), session);
         session.CommandSelectionMessageId = commandSelectionMessage?.Id;
     }
 
-    private async Task SendSafeResponseAsync(long chatId, string message, UserSession session)
+    private async Task SendSafeResponseAsync(
+        long chatId, string message, UserSession session, CancellationToken cancellationToken = default)
     {
         try
         {
-            _ = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(chatId, message), session,
+            _ = await messageTrackingService.TrackAsync(
+                outputService.SendMessageAsync(chatId, message, cancellationToken), session,
                 TrackedMessageKinds.Temporary);
         }
         catch (ApiRequestException ex)
@@ -299,12 +307,12 @@ public sealed class SlashCommandService(
         }
     }
 
-    private async Task SendHelpMessageAsync(long userId, UserSession session)
+    private async Task SendHelpMessageAsync(long userId, UserSession session, CancellationToken cancellationToken = default)
     {
-        var configuredRootPath = await rootPathProvider.GetRootPathAsync();
+        var configuredRootPath = await rootPathProvider.GetRootPathAsync(cancellationToken);
         var rootPath = string.IsNullOrWhiteSpace(configuredRootPath) ? "не настроен" : "настроен";
-        var canConfigure = await rootPathProvider.CanConfigureRootPathAsync(userId);
-        var pendingChange = canConfigure ? await rootPathProvider.GetPendingRootPathChangeAsync() : null;
+        var canConfigure = await rootPathProvider.CanConfigureRootPathAsync(userId, cancellationToken);
+        var pendingChange = canConfigure ? await rootPathProvider.GetPendingRootPathChangeAsync(cancellationToken) : null;
         var activePendingChange = pendingChange is { IsPending: true }
             && pendingChange.CreatedAtUtc.AddMinutes(30) >= DateTimeOffset.UtcNow
             ? pendingChange
@@ -323,8 +331,8 @@ public sealed class SlashCommandService(
             .ToString();
 
         var response = canConfigure
-            ? outputService.SendMessageWithKeyboardAsync(userId, helpText, keyboardBuilder.GetRootPathKeyboard(activePendingChange?.Id))
-            : outputService.SendMessageAsync(userId, helpText);
+            ? outputService.SendMessageWithKeyboardAsync(userId, helpText, keyboardBuilder.GetRootPathKeyboard(activePendingChange?.Id), cancellationToken)
+            : outputService.SendMessageAsync(userId, helpText, cancellationToken);
 
         _ = await messageTrackingService.TrackAsync(response, session);
     }
@@ -340,7 +348,7 @@ public sealed class SlashCommandService(
         await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
         session.AwaitingRootPath = true;
         _ = await messageTrackingService.TrackAsync(
-            outputService.SendForceReplyAsync(userId, "Отправьте букву диска с проектами, например Z:\\ (можно и вложенную папку). Бот определит сетевой UNC-путь сам."), session);
+            outputService.SendForceReplyAsync(userId, "Отправьте букву диска с проектами, например Z:\\ (можно и вложенную папку). Бот определит сетевой UNC-путь сам.", cancellationToken), session);
         return true;
     }
 
@@ -386,7 +394,7 @@ public sealed class SlashCommandService(
         var userId = message.From!.Id;
         if (!uncRootPathValidator.TryValidate(message.Text, out var rootPath, out var error))
         {
-            await SendSafeResponseAsync(userId, $"⚠️ {error} Попробуйте ещё раз.", session);
+            await SendSafeResponseAsync(userId, $"⚠️ {error} Попробуйте ещё раз.", session, cancellationToken);
             return;
         }
 
@@ -394,19 +402,19 @@ public sealed class SlashCommandService(
         if (updateResult == RootPathUpdateResult.NotAdministrator)
         {
             session.AwaitingRootPath = false;
-            await SendSafeResponseAsync(userId, "⚠️ Корневой путь может менять только администратор.", session);
+            await SendSafeResponseAsync(userId, "⚠️ Корневой путь может менять только администратор.", session, cancellationToken);
             return;
         }
 
         if (updateResult != RootPathUpdateResult.Updated)
         {
-            await SendSafeResponseAsync(userId, "⚠️ Не удалось сохранить путь в базе данных. Попробуйте ещё раз.", session);
+            await SendSafeResponseAsync(userId, "⚠️ Не удалось сохранить путь в базе данных. Попробуйте ещё раз.", session, cancellationToken);
             return;
         }
 
         session.Reset(rootPath);
         await outputService.ClearChatHistoryAsync(userId, session, cancellationToken);
-        await SendHelpMessageAsync(userId, session);
+        await SendHelpMessageAsync(userId, session, cancellationToken);
     }
 
     /// <summary>
@@ -420,11 +428,11 @@ public sealed class SlashCommandService(
 
         if (message is null)
         {
-            await SendHelpMessageAsync(userId, session);
+            await SendHelpMessageAsync(userId, session, cancellationToken);
         }
         else
         {
-            await SendSafeResponseAsync(userId, message, session);
+            await SendSafeResponseAsync(userId, message, session, cancellationToken);
         }
     }
 
@@ -439,7 +447,8 @@ public sealed class SlashCommandService(
 
     private async Task SendWarningAndCleanupAsync(long userId, UserSession session, string message, CancellationToken cancellationToken)
     {
-        var warning = await messageTrackingService.TrackAsync(outputService.SendMessageAsync(userId, message), session,
+        var warning = await messageTrackingService.TrackAsync(
+            outputService.SendMessageAsync(userId, message, cancellationToken), session,
             TrackedMessageKinds.Temporary);
         await CleanupCurrentViewAsync(userId, session, cancellationToken, warning?.Id);
     }

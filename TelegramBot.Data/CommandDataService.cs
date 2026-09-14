@@ -142,18 +142,20 @@ public sealed class CommandDataService(
     }
 
     /// <summary>Записывает PID запущенного процесса и один раз уведомляет Server о старте сессии.</summary>
-    public async Task<bool> MarkProcessStartedAndNotifyOnceAsync(int commandId, int processId)
+    public async Task<bool> MarkProcessStartedAndNotifyOnceAsync(
+        int commandId, int processId, CancellationToken cancellationToken = default)
     {
         try
         {
-            await using var conn = await CreateOpenConnectionAsync();
-            var notified = await conn.ExecuteScalarAsync<int>(
+            await using var conn = await CreateOpenConnectionAsync(cancellationToken);
+            var notified = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
                 SqlQueries.Commands.MarkProcessStartedAndNotifyOnce,
                 new
                 {
                     CommandId = commandId,
                     ProcessId = processId,
-                });
+                },
+                cancellationToken: cancellationToken));
 
             return notified > 0;
         }

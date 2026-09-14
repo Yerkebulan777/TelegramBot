@@ -12,6 +12,7 @@ namespace TelegramBot.Worker.Services;
 /// </summary>
 public sealed class SessionCleanupService(
     SessionDataService sessionDataService,
+    SchemaReadyGate schemaReadyGate,
     IOptions<WorkerOptions> workerOptions,
     ILogger<SessionCleanupService> logger) : BackgroundService
 {
@@ -30,6 +31,7 @@ public sealed class SessionCleanupService(
         logger.LogInformation(
             "Session cleanup: retention={RetentionDays}d, interval={Interval}s",
             _options.CompletedSessionRetentionDays, intervalSeconds);
+        await schemaReadyGate.WaitAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {

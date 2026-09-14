@@ -106,7 +106,7 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
 
         if (resultReadStatus == ResultFileReadStatus.Valid && result != null)
         {
-            return AnalyzePluginResult(cmd, result, sw);
+            return DeterminePluginResult(cmd, result, sw);
         }
 
         if (resultReadStatus == ResultFileReadStatus.Invalid)
@@ -183,7 +183,8 @@ public sealed class ResultAnalyzer(CommandTaskFileStore taskFileStore, ILogger<R
             failureDisposition: CommandResult.FailureDisposition.PermanentPlugin);
     }
 
-    private CommandResult AnalyzePluginResult(PendingCommand cmd, ResultFile result, Stopwatch sw)
+    /// <summary>Исход валидного ResultFile без процесса — recovery после сбоя записи БД.</summary>
+    public CommandResult DeterminePluginResult(PendingCommand cmd, ResultFile result, Stopwatch sw)
     {
         if (result.Status == ResultStatus.Done)
         {

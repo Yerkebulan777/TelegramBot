@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
 using TelegramBot.Core.Constants;
@@ -17,7 +16,12 @@ public sealed class ProcessLaunchGate(
 {
     private readonly string _connectionString = DataAccessBase.ResolveConnectionString(configuration);
 
-    public async Task StartAsync(Process process, ProcessLaunchGateKind kind, int commandId, CancellationToken ct)
+    /// <summary>
+    /// Удерживает product lock и cooldown; <paramref name="start"/> выполняется внутри lock сразу после паузы.
+    /// Вызывающий владеет Process.Start и регистрацией PID.
+    /// </summary>
+    public async Task StartAsync(
+        ProcessLaunchGateKind kind, int commandId, CancellationToken ct, Action start)
     {
         var (product, advisoryLockId) = GetGateSettings(kind);
 
@@ -41,7 +45,7 @@ public sealed class ProcessLaunchGate(
 
             // Предварительная запись сохраняет cooldown, даже если Worker упадёт во время Process.Start().
             await SetLastLaunchAtAsync(connection, product, ct);
-            _ = process.Start();
+            start();
             // После успешного запуска отсчитываем 15 секунд от фактического старта процесса.
             try
             {

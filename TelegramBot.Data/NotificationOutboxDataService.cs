@@ -83,6 +83,13 @@ public sealed class NotificationOutboxDataService(
     public async Task ReconcileAsync(SenderLockHolder lockHolder, CancellationToken cancellationToken)
     {
         var conn = lockHolder.Connection;
+        var requeued = await conn.ExecuteAsync(new CommandDefinition(
+            SqlQueries.NotificationOutbox.RequeueFailedCompletions, cancellationToken: cancellationToken));
+        if (requeued > 0)
+        {
+            Logger.LogInformation("Requeued failed completion notifications: count={Count}", requeued);
+        }
+
         var sessions = await conn.QueryAsync<(int SessionId, string CorrelationId)>(new CommandDefinition(
             SqlQueries.NotificationOutbox.GetMissingCompletions, cancellationToken: cancellationToken));
         var recovered = 0;

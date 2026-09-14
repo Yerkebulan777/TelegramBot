@@ -52,6 +52,26 @@ internal static partial class SqlQueries
               AND NOT EXISTS (SELECT 1 FROM NotificationOutbox n WHERE n.SessionId = s.SessionId AND n.EventType = 'session_completed')
             ORDER BY s.SessionId LIMIT 100;";
 
+        // Unique index on session_completed blocks a second INSERT; revive failed rows instead.
+        internal const string RequeueFailedCompletions = @"
+            UPDATE NotificationOutbox n
+            SET Status = 'pending',
+                NextAttemptAt = NOW(),
+                LockedUntil = NULL,
+                UpdatedAt = NOW()
+            FROM Sessions s
+            WHERE n.SessionId = s.SessionId
+              AND n.EventType = 'session_completed'
+              AND n.Status = 'failed'
+              AND n.UpdatedAt < NOW() - INTERVAL '15 minutes'
+              AND s.Status != 'Deleted'
+              AND EXISTS (SELECT 1 FROM Commands c WHERE c.SessionId = s.SessionId AND c.Status IN ('Done', 'Failed'))
+              AND NOT EXISTS (
+                  SELECT 1 FROM Commands c
+                  WHERE c.SessionId = s.SessionId
+                    AND c.Status IN ('pending', 'processing')
+              );";
+
         internal const string MarkSent = @"
             UPDATE NotificationOutbox
             SET Status = 'sent',

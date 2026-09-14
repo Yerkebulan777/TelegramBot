@@ -11,6 +11,7 @@ public sealed class TrackedMessageCleanupService(
     IOptions<MessageCleanupOptions> cleanupOptions,
     MessageTrackingDataService messageTrackingDataService,
     TelegramOutputService telegramOutputService,
+    SchemaReadyGate schemaReadyGate,
     ILogger<TrackedMessageCleanupService> logger) : BackgroundService
 {
     private readonly MessageCleanupOptions _options = cleanupOptions.Value;
@@ -24,6 +25,7 @@ public sealed class TrackedMessageCleanupService(
         }
 
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_options.IntervalMinutes));
+        await schemaReadyGate.WaitAsync(stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
             await RunCleanupCycleAsync(stoppingToken);

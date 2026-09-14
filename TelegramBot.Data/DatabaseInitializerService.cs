@@ -10,13 +10,15 @@ namespace TelegramBot.Data;
 
 /// <summary>
 /// Инициализирует схему PostgreSQL при старте как hosted service.
-/// Не блокирует старт хоста: схема создаётся в фоне с retry, потому что
-/// Docker/Postgres часто ещё не слушают сразу после входа.
+/// Не блокирует старт процесса: схема создаётся в фоне с retry, потому что
+/// Docker/Postgres часто ещё не слушают сразу после входа. Остальные hosted-сервисы
+/// ждут <see cref="SchemaReadyGate"/> и не ходят в БД до успеха.
 /// </summary>
 public sealed class DatabaseInitializerService(
     IConfiguration configuration,
     IOptions<FileSystemOptions> fileSystemOptions,
     UncRootPathValidator uncRootPathValidator,
+    SchemaReadyGate schemaReadyGate,
     ILogger<DatabaseInitializerService> logger)
     : BackgroundService
 {
@@ -32,6 +34,7 @@ public sealed class DatabaseInitializerService(
             try
             {
                 await InitializeSchemaAsync(stoppingToken);
+                schemaReadyGate.MarkReady();
                 logger.LogInformation("Database schema initialized");
                 return;
             }
@@ -82,10 +85,10 @@ public sealed class DatabaseInitializerService(
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateRuntimeSettingsTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateProcessLaunchStateTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddCommandsStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddSessionsStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddNotificationOutboxStatusCheck, transaction: tx);
-            _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled, transaction: tx);
 
             if (hasLegacyRootPath)
             {

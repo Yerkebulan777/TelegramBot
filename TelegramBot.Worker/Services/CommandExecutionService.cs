@@ -16,6 +16,7 @@ public sealed class CommandExecutionService(
     CommandDataService commandDataService,
     CommandOrchestrator orchestrator,
     ProcessRunner processRunner,
+    SchemaReadyGate schemaReadyGate,
     IOptions<WorkerOptions> workerOptions,
     ILogger<CommandExecutionService> logger,
     DialogDismisser dialogDismisser) : BackgroundService
@@ -36,6 +37,7 @@ public sealed class CommandExecutionService(
             ? _workerOptions.FallbackPollingIntervalSeconds : 1;
         logger.LogInformation("Worker start: maxC={MaxConcurrentCommands}, poll={PollSeconds}s",
             _workerOptions.MaxConcurrentCommands, pollSeconds);
+        await schemaReadyGate.WaitAsync(stoppingToken);
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _processMonitorTask = StartPeriodicBackgroundTaskAsync(
             intervalSeconds: _workerOptions.ProcessMonitorIntervalSeconds > 0

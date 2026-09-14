@@ -79,6 +79,11 @@ public sealed class ProcessRunner(
                     return;
                 }
 
+                if (await TryCompleteFromExistingPluginResultAsync(cmd, sw, timeoutToken))
+                {
+                    return;
+                }
+
                 // Шаг 2: запуск процесса
                 process = await StartProcessAsync(cmd, preparation.GetConfiguration(), timeoutToken);
 
@@ -103,11 +108,12 @@ public sealed class ProcessRunner(
                 return;
             }
         }
-        catch (CommandPersistenceException)
+        catch (CommandPersistenceException ex)
         {
-            // Keep result evidence and do not convert a database outage into a process retry.
             preserveEvidence = true;
-            throw;
+            logger.LogError(ex, "Persistence after BIM work: id={CommandId}, corr={CorrelationId}",
+                cmd.CommandId, cmd.CorrelationId);
+            await ReleaseLeaseAfterPersistenceFailureAsync(cmd);
         }
         finally
         {
@@ -145,15 +151,7 @@ public sealed class ProcessRunner(
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try
         {
-            var gate = CommandTraits.GetLaunchGate(cmd.CommandText);
-            if (gate == ProcessLaunchGateKind.None)
-            {
-                _ = process.Start();
-            }
-            else
-            {
-                await launchGate.StartAsync(process, gate, cmd.CommandId, ct);
-            }
+            await StartAndTrackAsync(cmd, process, ct);
 
             logger.LogInformation(
                 "Process started: cmd={Cmd}, id={Id}, corr={CorrelationId}, pid={Pid}, attempt={Attempt}",
@@ -165,9 +163,10 @@ public sealed class ProcessRunner(
             throw;
         }
 
-        _tracked[cmd.CommandId].Process = process;
+        using var sqlCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        sqlCts.CancelAfter(TimeSpan.FromSeconds(5));
         _ = await commandDataService.MarkProcessStartedAndNotifyOnceAsync(
-            cmd.CommandId, process.Id);
+            cmd.CommandId, process.Id, sqlCts.Token);
         return process;
     }
 
@@ -194,7 +193,6 @@ public sealed class ProcessRunner(
         sw.Stop();
         outputCollector.LogOutput(cmd, outputSubscription.Output, outputSubscription.Error, outputSubscription.OutputTruncated, outputSubscription.ErrorTruncated);
 
-        // Определяем результат
         var (resultReadStatus, result, resultReadError) = await resultAnalyzer.TryReadResultFileAsync(
             cmd.CommandId,
             cmd.FilePath ?? string.Empty,
@@ -203,26 +201,7 @@ public sealed class ProcessRunner(
         try
         {
             var commandResult = resultAnalyzer.DetermineResult(cmd, resultReadStatus, result, resultReadError, process, sw);
-            if (commandResult.IsSuccess)
-            {
-                // Done + non-empty Commands.ErrorMessage = plugin warningMessage (not a failure).
-                await CompleteCommandAsync(
-                    cmd,
-                    Statuses.Done,
-                    errorMessage: commandResult.WarningMessage);
-                return;
-            }
-            else if (commandResult.IsCancelled)
-            {
-                await CompleteCommandAsync(cmd, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
-                return;
-            }
-            else if (commandResult.IsFailure)
-            {
-                await HandleFailureAsync(cmd, commandResult.ErrorMessage!, sw, commandResult.ExitCode,
-                    failureDisposition: commandResult.Disposition);
-            }
-
+            await ApplyCommandResultAsync(cmd, commandResult, sw);
             return;
         }
         finally
@@ -408,6 +387,107 @@ public sealed class ProcessRunner(
         logger.LogDebug(
             "Terminal command persisted: id={CommandId}, status={Status}, sessionCompletionNotified={SessionCompletionNotified}",
             command.CommandId, status, notified);
+    }
+
+    private void TrackStartedProcess(int commandId, Process process)
+    {
+        if (_tracked.TryGetValue(commandId, out var tracked))
+        {
+            tracked.Process = process;
+        }
+    }
+
+    private async Task StartAndTrackAsync(PendingCommand cmd, Process process, CancellationToken ct)
+    {
+        void Start()
+        {
+            _ = process.Start();
+            TrackStartedProcess(cmd.CommandId, process);
+        }
+
+        var gate = CommandTraits.GetLaunchGate(cmd.CommandText);
+        if (gate == ProcessLaunchGateKind.None)
+        {
+            Start();
+            return;
+        }
+
+        await launchGate.StartAsync(gate, cmd.CommandId, ct, Start);
+    }
+
+    private async Task ReleaseLeaseAfterPersistenceFailureAsync(PendingCommand cmd)
+    {
+        try
+        {
+            var released = await commandDataService.ReleaseClaimedLeaseAsync(
+                cmd.CommandId,
+                cmd.Lease,
+                DateTime.UtcNow.AddSeconds(ShutdownLeaseRetryDelaySeconds),
+                "Command persistence failed");
+            if (released)
+            {
+                logger.LogInformation("Released lease after persistence failure: id={CommandId}", cmd.CommandId);
+            }
+        }
+        catch (Exception releaseEx)
+        {
+            logger.LogWarning(releaseEx, "Lease release after persistence failure failed: id={CommandId}", cmd.CommandId);
+        }
+    }
+
+    /// <summary>
+    /// Если предыдущая попытка уже записала валидный ResultFile (CPE или crash после плагина),
+    /// закрываем команду без нового Process.Start.
+    /// </summary>
+    private async Task<bool> TryCompleteFromExistingPluginResultAsync(
+        PendingCommand cmd, Stopwatch sw, CancellationToken ct)
+    {
+        if (cmd.CommandText is CommandCodes.MergeDwg)
+        {
+            return false;
+        }
+
+        var (resultReadStatus, result, resultReadError) = await resultAnalyzer.TryReadResultFileAsync(
+            cmd.CommandId,
+            cmd.FilePath ?? string.Empty,
+            ct);
+        if (resultReadStatus != ResultAnalyzer.ResultFileReadStatus.Valid || result is null)
+        {
+            return false;
+        }
+
+        logger.LogInformation(
+            "Completing from existing ResultFile without relaunch: id={CommandId}, corr={CorrelationId}",
+            cmd.CommandId, cmd.CorrelationId);
+        await ApplyCommandResultAsync(cmd, resultAnalyzer.DeterminePluginResult(cmd, result, sw), sw);
+        temporaryDirectoryCleaner.Schedule(result.TemporaryDirectoryPath, cmd.FilePath, cmd.CommandId);
+        return true;
+    }
+
+    private async Task ApplyCommandResultAsync(
+        PendingCommand cmd, ResultAnalyzer.CommandResult commandResult, Stopwatch sw)
+    {
+        if (commandResult.IsSuccess)
+        {
+            await CompleteCommandAsync(cmd, Statuses.Done, errorMessage: commandResult.WarningMessage);
+            return;
+        }
+
+        if (commandResult.IsCancelled)
+        {
+            await CompleteCommandAsync(cmd, Statuses.Failed, errorMessage: commandResult.ErrorMessage);
+            return;
+        }
+
+        if (commandResult.IsFailure)
+        {
+            await HandleFailureAsync(
+                cmd,
+                commandResult.ErrorMessage!,
+                sw,
+                commandResult.ExitCode,
+                failureDisposition: commandResult.Disposition);
+        }
     }
 
     private async Task<int?> TryScheduleRetryAsync(PendingCommand cmd, DateTime nextRetryAt, string errorMessage)

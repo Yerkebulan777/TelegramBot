@@ -39,6 +39,8 @@ public static class Program
                 {
                     _=services.Configure<HostOptions>(options =>
                         options.ShutdownTimeout = TimeSpan.FromMinutes(3));
+                    _=services.AddSingleton<UncRootPathValidator>();
+                    _=services.AddSingleton<SchemaReadyGate>();
                     _=services.AddSingleton<CommandDataService>();
                     _=services.AddSingleton<SessionDataService>();
                     _=services.AddOptions<WorkerOptions>()
@@ -87,6 +89,7 @@ public static class Program
                     _=services.AddSingleton<ProcessRunner>();
                     _=services.AddSingleton<CommandOrchestrator>();
 
+                    _=services.AddHostedService<DatabaseInitializerService>();
                     _=services.AddHostedService(serviceProvider =>
                         serviceProvider.GetRequiredService<RevitTemporaryDirectoryCleaner>());
                     _=services.AddHostedService<CommandExecutionService>();

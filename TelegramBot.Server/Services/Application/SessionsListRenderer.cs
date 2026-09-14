@@ -42,7 +42,7 @@ public sealed class SessionsListRenderer(
     public async Task<Message?> SendNewAsync(long userId, string filter, int page = 0, CancellationToken cancellationToken = default)
     {
         var (text, keyboard) = await BuildAsync(userId, filter, page, cancellationToken);
-        return await outputService.SendMessageWithKeyboardAsync(userId, text, keyboard);
+        return await outputService.SendMessageWithKeyboardAsync(userId, text, keyboard, cancellationToken);
     }
 
     /// <summary>Редактирует существующее сообщение /status (переключение фильтра/страницы, возврат после удаления).</summary>

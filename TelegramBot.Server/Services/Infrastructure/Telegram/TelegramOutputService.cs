@@ -22,7 +22,7 @@ public class TelegramOutputService(
     public Task<Message> SendNotificationAsync(long userId, string message, CancellationToken cancellationToken) =>
         botClient.SendMessage(chatId: userId, text: message, cancellationToken: cancellationToken);
 
-    public async Task<Message?> SendMessageAsync(long userId, string message)
+    public async Task<Message?> SendMessageAsync(long userId, string message, CancellationToken cancellationToken = default)
     {
         return string.IsNullOrWhiteSpace(message)
             ? null
@@ -31,10 +31,11 @@ public class TelegramOutputService(
             var t = await botClient.SendMessage(
                 chatId: new ChatId(userId),
                 text: MarkdownHelper.Escape(message, ParseMode.MarkdownV2),
-                parseMode: ParseMode.MarkdownV2);
+                parseMode: ParseMode.MarkdownV2,
+                cancellationToken: cancellationToken);
             logger.LogDebug("Sent: {UserId}: {Message}", userId, message);
             return t;
-        }, userId);
+        }, userId, cancellationToken);
     }
 
     private async Task<bool> TryDeleteMessageAsync(long chatId, int messageId, CancellationToken cancellationToken)
@@ -196,13 +197,18 @@ public class TelegramOutputService(
         return deletedCount;
     }
 
-    public async Task<Message?> RemoveReplyKeyboardAsync(long userId, string message)
+    public async Task<Message?> RemoveReplyKeyboardAsync(
+        long userId, string message, CancellationToken cancellationToken = default)
     {
-        return await ExecuteWithRetryAsync(() => botClient.SendMessage(
-                chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown), userId);
+        return await ExecuteWithRetryAsync(
+            () => botClient.SendMessage(
+                chatId: userId, text: message, replyMarkup: new ReplyKeyboardRemove(), parseMode: ParseMode.Markdown, cancellationToken: cancellationToken),
+            userId,
+            cancellationToken);
     }
 
-    public async Task<Message?> SendMessageWithKeyboardAsync(long userId, string message, InlineKeyboardMarkup keyboard)
+    public async Task<Message?> SendMessageWithKeyboardAsync(
+        long userId, string message, InlineKeyboardMarkup keyboard, CancellationToken cancellationToken = default)
     {
         // Сначала пробуем отправить с inline-клавиатурой без retry-цикла, чтобы
         // поймать permanent-ошибку «reply markup is too long» и сразу упасть в
@@ -211,15 +217,18 @@ public class TelegramOutputService(
         try
         {
             return await botClient.SendMessage(
-                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
+                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
         }
         catch (ApiRequestException ex) when (IsReplyMarkupTooLong(ex))
         {
             logger.LogWarning(
                 "Reply markup too long: {UserId}, fallback text-only",
                 userId);
-            return await ExecuteWithRetryAsync(() => botClient.SendMessage(
-                chatId: userId, text: message, parseMode: ParseMode.Markdown), userId);
+            return await ExecuteWithRetryAsync(
+                () => botClient.SendMessage(
+                    chatId: userId, text: message, parseMode: ParseMode.Markdown, cancellationToken: cancellationToken),
+                userId,
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -228,18 +237,25 @@ public class TelegramOutputService(
         catch (Exception)
         {
             // Transient-ошибка — попадаем в retry-цикл (429, сетевые и т.п.).
-            return await ExecuteWithRetryAsync(() => botClient.SendMessage(
-                chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown), userId);
+            return await ExecuteWithRetryAsync(
+                () => botClient.SendMessage(
+                    chatId: userId, text: message, replyMarkup: keyboard, parseMode: ParseMode.Markdown, cancellationToken: cancellationToken),
+                userId,
+                cancellationToken);
         }
     }
 
-    public Task<Message?> SendForceReplyAsync(long userId, string message)
+    public Task<Message?> SendForceReplyAsync(long userId, string message, CancellationToken cancellationToken = default)
     {
-        return ExecuteWithRetryAsync(() => botClient.SendMessage(
-            chatId: userId,
-            text: message,
-            replyMarkup: new ForceReplyMarkup(),
-            parseMode: ParseMode.Markdown), userId);
+        return ExecuteWithRetryAsync(
+            () => botClient.SendMessage(
+                chatId: userId,
+                text: message,
+                replyMarkup: new ForceReplyMarkup(),
+                parseMode: ParseMode.Markdown,
+                cancellationToken: cancellationToken),
+            userId,
+            cancellationToken);
     }
 
     public async Task AnswerCallbackAsync(string callbackId, string messageText)
@@ -334,13 +350,19 @@ public class TelegramOutputService(
     /// Retry-цикл: для rate limit (429) ждёт RetryAfter, для остальных ошибок — exponential backoff.
     /// После исчерпания попыток возвращает null, не прерывая поток.
     /// </summary>
-    private async Task<Message?> ExecuteWithRetryAsync(Func<Task<Message>> action, long userId)
+    private async Task<Message?> ExecuteWithRetryAsync(
+        Func<Task<Message>> action, long userId, CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt <= MaxRetries; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 return await action();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (ApiRequestException ex) when (ex.ErrorCode == 429)
             {
@@ -351,7 +373,7 @@ public class TelegramOutputService(
 
                 if (attempt < MaxRetries)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(retryAfter));
+                    await Task.Delay(TimeSpan.FromSeconds(retryAfter), cancellationToken);
                 }
                 else
                 {
@@ -366,8 +388,7 @@ public class TelegramOutputService(
 
                 if (attempt < MaxRetries)
                 {
-                    // Exponential backoff for non-rate-limit errors
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), cancellationToken);
                 }
                 else
                 {
