@@ -124,7 +124,7 @@ internal static partial class SqlQueries
                   AND s.CreatedAt < @CutoffUtc
                   AND NOT EXISTS (
                       SELECT 1 FROM NotificationOutbox n WHERE n.SessionId = s.SessionId
-                        AND n.EventType = 'session_completed' AND n.Status IN ('pending', 'processing')
+                        AND n.EventType = 'session_completed' AND n.Status != 'sent'
                   )
                   AND NOT EXISTS (
                       SELECT 1

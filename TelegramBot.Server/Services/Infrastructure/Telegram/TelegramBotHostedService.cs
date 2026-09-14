@@ -43,14 +43,8 @@ public class TelegramBotHostedService(
             SingleWriter = false,
         });
 
-    /// <summary>
-    /// Независимый CTS для фоновой обработки (НЕ linked к stoppingToken).
-    /// При остановке host: сначала завершаем writer канала, дожидаемся опустошения буфера,
-    /// и только потом отменяем reader через этот CTS.
-    /// Если бы CTS был linked к stoppingToken, ReadAllAsync(ct) прекратился бы немедленно
-    /// при shutdown и буферизованные обновления (до 200) были бы потеряны.
-    /// </summary>
-    private CancellationTokenSource? _processingCts;
+    private static readonly TimeSpan UpdateDrainTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan UpdateCancelGrace = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan[] CommandSetupRetryBackoff =
         [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15)];
 
@@ -72,10 +66,9 @@ public class TelegramBotHostedService(
             return;
         }
 
-        // Независимый CTS: см. комментарий к полю _processingCts
-        _processingCts = new CancellationTokenSource();
-        var processingToken = _processingCts.Token;
-        var processingTask = ProcessUpdatesAsync(processingToken);
+        // Не linked к stoppingToken: иначе ReadAllAsync оборвётся сразу и буфер (до 200) пропадёт.
+        using var processingCts = new CancellationTokenSource();
+        var processingTask = ProcessUpdatesAsync(processingCts.Token);
 
         logger.LogInformation("Polling start: concurrency={MaxConcurrency}, capacity={Capacity}",
             MaxConcurrentUpdates, ChannelCapacity);
@@ -102,24 +95,35 @@ public class TelegramBotHostedService(
             // Expected when the host is stopping
         }
 
-        // Шаг 1: завершаем writer — новые обновления больше не попадут в канал
-        _=_updateChannel.Writer.TryComplete();
-
-        // Шаг 2: ждём, пока ProcessUpdatesAsync дочитает оставшиеся в буфере обновления
-        // processingTask НЕ отменён (processingToken не cancelled), поэтому ReadAllAsync
-        // будет читать до Completion (пока writer не завершён).
+        // Complete writer, чтобы ReadAllAsync дочитал буфер. Cancel в finally — одна ветка
+        // и для успешного drain (задача уже completed), и для зависших handlers.
+        _ = _updateChannel.Writer.TryComplete();
         try
         {
-            _=await Task.WhenAny(processingTask, Task.Delay(TimeSpan.FromSeconds(10)));
+            await processingTask.WaitAsync(UpdateDrainTimeout);
         }
-        catch (OperationCanceledException)
+        catch (TimeoutException)
         {
-            // ignored
+            logger.LogWarning(
+                "Update drain still running after {DrainSeconds}s, cancelling in-flight handlers",
+                UpdateDrainTimeout.TotalSeconds);
         }
-
-        // Шаг 3: отменяем processing CTS — останавливаем reader (только если ещё работает)
-        await _processingCts.CancelAsync();
-        _processingCts.Dispose();
+        finally
+        {
+            await processingCts.CancelAsync();
+            try
+            {
+                await processingTask.WaitAsync(UpdateCancelGrace);
+            }
+            catch (TimeoutException)
+            {
+                logger.LogWarning("In-flight updates did not stop after cancel");
+            }
+            catch (Exception) when (processingTask.IsCompleted)
+            {
+                // Cancel или fault — CTS всё равно уйдёт в Dispose через using.
+            }
+        }
 
         logger.LogInformation("Polling stopped");
     }

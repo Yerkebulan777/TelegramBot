@@ -553,39 +553,27 @@ public sealed class ProcessRunner(
         return retryCount;
     }
 
+    // ACL/UNC/access denied — transient retry, не этот список и не UnauthorizedAccessException.
     private static readonly string[] PermanentFailurePatterns =
     [
         "not found",
         "no such file",
-        "cannot open file",
-        "access is denied",
-        "access denied",
         "invalid file",
         "file does not exist",
-        "permission denied",
-        "path not found",
-        "invalid file path",
         "unsupported command:",
         "notimplemented:",
         "no such directory",
-        "cannot access",
         "файл не найден",
         "не удается найти указанный файл",
         "не удаётся найти указанный файл",
         "путь не найден",
-        "отказано в доступе",
-        "доступ запрещен",
-        "доступ запрещён",
-        "нет доступа",
         "недопустимый файл",
         "неверный формат файла",
-        "невозможно открыть файл",
     ];
 
     private static bool IsPermanentFailure(string errorMessage, Exception? exception)
     {
-        if (exception is FileNotFoundException or DirectoryNotFoundException
-            or UnauthorizedAccessException or PathTooLongException)
+        if (exception is FileNotFoundException or DirectoryNotFoundException or PathTooLongException)
         {
             return true;
         }

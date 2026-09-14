@@ -61,7 +61,7 @@ stdout/stderr: 64 KiB capture. После `WaitForExitAsync` sync `WaitForExit` 
 
 ## 5. Retry
 
-Permanent: plugin failed/cancelled (кроме open-retry выше), schema/invalid XML, битый MERGEDWG JSON, permanent exit codes, invalid input, timeout.  
+Permanent: plugin failed/cancelled (кроме open-retry выше), schema/invalid XML, битый MERGEDWG JSON, permanent exit codes, missing/invalid file or path, unsupported command, timeout. ACL/UNC/`UnauthorizedAccessException` / access denied — transient, как retry policy.  
 Transient: `RetryDelayBaseSeconds × 2^RetryCount + jitter`; после `MaxRetries` → `Failed`. Следующий poll подбирает по `NextRetryAt`.  
 `ScheduleRetry` и terminal `UpdateStatus` — только `Status='processing'` и `Lease` claim'а; иначе no-op.
 
@@ -77,7 +77,7 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 
 - Lease recovery → pending или Failed + outbox  
 - Process monitor + DialogDismisser (kill только через ProcessRunner; заголовок «Revit» не матчится как произвольный диалог)  
-- Soft-delete сессий старше `CompletedSessionRetentionDays`, пока нет pending outbox  
+- Soft-delete сессий старше `CompletedSessionRetentionDays`, пока есть `session_completed` не в `sent` (requeue failed outbox ждёт 15 мин и требует `s.Status != 'Deleted'`)  
 - Telegram cleanup: Kind (interface/temporary/completion/job_status); interactive ставит `DeleteAfter=NOW` для устаревшего UI, защищая completion; `temporary` снимается сразу на следующем сообщении или колбэке, иначе 5 мин; results — 24 ч; цикл каждую минуту, batch 500, пакеты Telegram до 100; после `MaximumDeletionAgeHours` (47) — удаление только tracking-записи  
 - Soft-delete команд и сессий не трогает `processing`; `/status` list/count/details/delete только с `UserId`  
 - Worker shutdown: stop loops → process-tree kill (30 с) → release claimed leases в `pending` (`NextRetryAt` +15 с)  
