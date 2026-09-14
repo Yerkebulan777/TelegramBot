@@ -13,7 +13,6 @@ public sealed class NotificationOutboxDataService(
     : DataAccessBase(ResolveConnectionString(configuration), logger)
 {
     public const string SessionCompletedEvent = "session_completed";
-    public const string SessionStartedEvent = "session_started";
 
     public async Task<NotificationOutboxItem?> ClaimPendingAsync(
         SenderLockHolder lockHolder,
