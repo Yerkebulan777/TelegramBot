@@ -37,6 +37,11 @@ internal static partial class SqlQueries
             WHERE ChatId = @ChatId AND Kind <> @CompletionKind
             ORDER BY CreatedAt ASC";
 
+        internal const string GetByChatAndKind = @"
+            SELECT MessageIdPg FROM TrackedMessages
+            WHERE ChatId = @ChatId AND Kind = @Kind
+            ORDER BY CreatedAt ASC";
+
         internal const string GetForCleanup = @"
             SELECT t.ChatId, t.MessageIdPg AS MessageId
             FROM TrackedMessages t

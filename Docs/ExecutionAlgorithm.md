@@ -74,7 +74,7 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 - Lease recovery → pending или Failed + outbox  
 - Process monitor + DialogDismisser  
 - Soft-delete сессий старше `CompletedSessionRetentionDays`, пока нет pending outbox  
-- Telegram cleanup: Kind (interface/temporary/completion/job_status); interactive ставит `DeleteAfter=NOW` для устаревшего UI, защищая completion; temporary — 5 мин, results — 24 ч; цикл каждую минуту, batch 500, пакеты Telegram до 100; после `MaximumDeletionAgeHours` (47) — удаление только tracking-записи  
+- Telegram cleanup: Kind (interface/temporary/completion/job_status); interactive ставит `DeleteAfter=NOW` для устаревшего UI, защищая completion; `temporary` снимается сразу на следующем сообщении или колбэке, иначе 5 мин; results — 24 ч; цикл каждую минуту, batch 500, пакеты Telegram до 100; после `MaximumDeletionAgeHours` (47) — удаление только tracking-записи  
 - Worker shutdown: stop loops → process-tree kill (30 с) → release  
 
 ## 8. Rerun из /status

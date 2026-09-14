@@ -46,6 +46,11 @@ public sealed class MessageTrackingDataService(
         QueryAsync<int>(SqlQueries.TrackedMessages.GetByChat,
             new { ChatId = chatId, CompletionKind = TrackedMessageKinds.Completion }, cancellationToken);
 
+    public Task<IReadOnlyList<int>> GetTrackedMessagesByKindAsync(long chatId, string kind,
+        CancellationToken cancellationToken = default) =>
+        QueryAsync<int>(SqlQueries.TrackedMessages.GetByChatAndKind,
+            new { ChatId = chatId, Kind = kind }, cancellationToken);
+
     /// <summary>Records intent before Telegram I/O and returns due, unprotected messages.</summary>
     public async Task<IReadOnlyList<int>> ScheduleDeletionByChatAsync(long chatId, IEnumerable<int> messageIds,
         CancellationToken cancellationToken = default)

@@ -112,9 +112,10 @@ public sealed class NotificationSenderService(
 
         // Telegram acknowledged this message: retry only the DB acknowledgement, never send again here.
         // The unavoidable crash window between the two systems still permits duplicates after restart.
+        var now = DateTime.UtcNow;
         var deleteAfter = item.EventType == NotificationOutboxDataService.SessionCompletedEvent
-            ? sent.Date.AddHours(cleanupOptions.Value.RetentionHours)
-            : sent.Date.AddMinutes(cleanupOptions.Value.TemporaryRetentionMinutes);
+            ? now.AddHours(cleanupOptions.Value.RetentionHours)
+            : now.AddMinutes(cleanupOptions.Value.TemporaryRetentionMinutes);
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();

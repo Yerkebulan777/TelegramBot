@@ -54,6 +54,7 @@ public sealed class CommandAppService(
         }
         session.Initialized = true;
 
+        await outputService.DeleteTemporaryMessagesAsync(userId, cancellationToken);
         await slashCommandService.HandleUserCommandAsync(message, session, cancellationToken);
     }
 
@@ -85,6 +86,8 @@ public sealed class CommandAppService(
             return;
         }
         session.Initialized = true;
+
+        await outputService.DeleteTemporaryMessagesAsync(userId, cancellationToken);
 
         var context = new CallbackContext
         {

@@ -34,10 +34,11 @@ public sealed class MessageTrackingService(
         string kind = TrackedMessageKinds.Interface)
     {
         var sessionId = session.SessionId > 0 ? session.SessionId : (int?)null;
-        var createdAt = sentAt ?? DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        var createdAt = sentAt ?? now;
         var deleteAfter = kind == TrackedMessageKinds.Temporary
-            ? createdAt.AddMinutes(cleanupOptions.Value.TemporaryRetentionMinutes)
-            : createdAt.AddHours(cleanupOptions.Value.RetentionHours);
+            ? now.AddMinutes(cleanupOptions.Value.TemporaryRetentionMinutes)
+            : now.AddHours(cleanupOptions.Value.RetentionHours);
         await messageTrackingDataService.TrackMessageAsync(chatId, messageId, sessionId,
             kind, createdAt, deleteAfter);
     }

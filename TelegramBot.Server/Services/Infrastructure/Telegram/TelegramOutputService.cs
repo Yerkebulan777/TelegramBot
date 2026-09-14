@@ -3,6 +3,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data;
 using TelegramBot.Data.Models;
@@ -134,6 +135,20 @@ public class TelegramOutputService(
         DateTime.UtcNow.AddSeconds(exception is ApiRequestException { ErrorCode: 429 } request
             ? Math.Max(60, request.Parameters?.RetryAfter ?? 60)
             : 60);
+
+    public async Task DeleteTemporaryMessagesAsync(long chatId, CancellationToken cancellationToken)
+    {
+        var temporaryIds = await messageTrackingService.GetTrackedMessagesByKindAsync(
+            chatId, TrackedMessageKinds.Temporary, cancellationToken);
+        if (temporaryIds.Count == 0)
+        {
+            return;
+        }
+
+        var dueIds = await messageTrackingService.ScheduleDeletionByChatAsync(
+            chatId, temporaryIds, cancellationToken);
+        _ = await DeleteMessagesAsync(chatId, dueIds, cancellationToken);
+    }
 
     public async Task ClearChatHistoryAsync(
         long chatId, UserSession session, CancellationToken cancellationToken, IEnumerable<int>? exceptMessageIds = null)
