@@ -118,6 +118,14 @@ internal static partial class SqlQueries
                 WHERE c.SessionId = ds.SessionId
                   AND c.Status != 'Deleted'
                 RETURNING c.CommandId
+            ),
+            due_messages AS (
+                UPDATE TrackedMessages t
+                SET DeleteAfter = LEAST(t.DeleteAfter, NOW()),
+                    NextDeleteAttemptAt = NOW()
+                FROM deleted_sessions ds
+                WHERE t.SessionId = ds.SessionId
+                RETURNING t.MessageId
             )
             SELECT COUNT(*)::int FROM deleted_sessions;";
 

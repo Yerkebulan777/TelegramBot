@@ -40,10 +40,10 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.SessionDetails => HandleSessionDetailsAsync(context),
             CallbackPrefixes.DeleteSession => HandleDeleteSessionConfirmationAsync(context),
             CallbackPrefixes.DeleteCommand => HandleDeleteCommandConfirmationAsync(context),
-            CallbackPrefixes.ConfirmDeleteSession => HandleDeleteSessionAsync(context),
-            CallbackPrefixes.ConfirmDeleteCommand => HandleDeleteCommandAsync(context),
+            CallbackPrefixes.ConfirmDeleteSession => HandleDeleteSessionAsync(context, cancellationToken),
+            CallbackPrefixes.ConfirmDeleteCommand => HandleDeleteCommandAsync(context, cancellationToken),
             CallbackPrefixes.DeleteSessionByType => HandleDeleteByTypeConfirmationAsync(context),
-            CallbackPrefixes.ConfirmDeleteSessionByType => HandleDeleteByTypeAsync(context),
+            CallbackPrefixes.ConfirmDeleteSessionByType => HandleDeleteByTypeAsync(context, cancellationToken),
             CallbackPrefixes.StatusFilter => HandleStatusFilterAsync(context),
             CallbackPrefixes.StatusPage => HandleStatusPageAsync(context),
             CallbackPrefixes.CommandsPage => HandleCommandsPageAsync(context),
@@ -227,7 +227,7 @@ public sealed class SessionManagementHandler(
 
     // ────────────────────── Delete Execution ──────────────────────
 
-    private async Task HandleDeleteSessionAsync(CallbackContext context)
+    private async Task HandleDeleteSessionAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseId(context, out var sessionId))
         {
@@ -236,7 +236,7 @@ public sealed class SessionManagementHandler(
 
         Logger.LogInformation("{Username} delete session {SessionId}", context.Username, sessionId);
 
-        if (!await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
+        if (!await DeleteSessionAndMessagesAsync(sessionId, context.UserId, cancellationToken))
         {
             await outputService.AnswerCallbackAsync(
                 context, "⚠️ Сессия выполняется или недоступна");
@@ -247,7 +247,7 @@ public sealed class SessionManagementHandler(
 
     }
 
-    private async Task HandleDeleteCommandAsync(CallbackContext context)
+    private async Task HandleDeleteCommandAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseCompoundId(context, out var commandId, out var filter))
         {
@@ -266,11 +266,11 @@ public sealed class SessionManagementHandler(
         }
 
         context.Session.SessionId = sessionId.Value;
-        await HandlePostDeletionAsync(context, sessionId.Value, filter);
+        await HandlePostDeletionAsync(context, sessionId.Value, filter, cancellationToken);
 
     }
 
-    private async Task HandleDeleteByTypeAsync(CallbackContext context)
+    private async Task HandleDeleteByTypeAsync(CallbackContext context, CancellationToken cancellationToken)
     {
         if (!TryParseCompoundId(context, out var sessionId, out var commandType)
             || string.IsNullOrEmpty(commandType))
@@ -290,7 +290,7 @@ public sealed class SessionManagementHandler(
         }
 
         context.Session.SessionId = sessionId;
-        await HandlePostDeletionAsync(context, sessionId, "ALL");
+        await HandlePostDeletionAsync(context, sessionId, "ALL", cancellationToken);
 
     }
 
@@ -366,14 +366,33 @@ public sealed class SessionManagementHandler(
 
     // ────────────────────── Shared Helpers ──────────────────────
 
-    private async Task<bool> DeleteSessionAndMessagesAsync(int sessionId, long userId)
+    private async Task<bool> DeleteSessionAndMessagesAsync(
+        int sessionId, long userId, CancellationToken cancellationToken)
     {
-        if (!await sessionDataService.DeleteSessionAsync(sessionId, userId))
+        var deleted = await sessionDataService.DeleteSessionAsync(sessionId, userId);
+        if (!deleted.Deleted)
         {
             return false;
         }
 
-        // Keep tracking until Telegram confirms deletion; soft-delete does not delete chat messages.
+        if (deleted.Messages.Count == 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            _ = await outputService.CleanupTrackedMessagesAsync(deleted.Messages, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Session message deletion deferred: session={SessionId}", sessionId);
+        }
+
         return true;
     }
 
@@ -408,11 +427,12 @@ public sealed class SessionManagementHandler(
     /// После удаления команды(д): если сессия пуста — удаляем её и tracked messages,
     /// иначе обновляем отображение команд.
     /// </summary>
-    private async Task HandlePostDeletionAsync(CallbackContext context, int sessionId, string filter)
+    private async Task HandlePostDeletionAsync(
+        CallbackContext context, int sessionId, string filter, CancellationToken cancellationToken)
     {
         if (!await sessionDataService.CheckCommandsStatusAsync(sessionId))
         {
-            if (await DeleteSessionAndMessagesAsync(sessionId, context.UserId))
+            if (await DeleteSessionAndMessagesAsync(sessionId, context.UserId, cancellationToken))
             {
                 await ShowSessionsListAsync(context);
             }

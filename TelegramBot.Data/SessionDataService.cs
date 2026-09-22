@@ -3,8 +3,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
+using TelegramBot.Data.Models;
 
 namespace TelegramBot.Data;
+
+/// <summary>Итог мягкого удаления сессии. Сообщения уже поставлены на удаление.</summary>
+public sealed record SessionDeleteResult(bool Deleted, IReadOnlyList<TrackedMessageReference> Messages);
 
 /// <summary>
 /// Service for session data persistence and notifications.
@@ -193,8 +197,11 @@ public sealed class SessionDataService(
         return result.ToList();
     }
 
-    /// <summary>Мягкое удаление сессии владельца. Отказ, если есть processing.</summary>
-    public async Task<bool> DeleteSessionAsync(int sessionId, long userId)
+    /// <summary>
+    /// Мягкое удаление сессии владельца и постановка её сообщений на удаление в одной транзакции.
+    /// Отказ, если есть processing.
+    /// </summary>
+    public async Task<SessionDeleteResult> DeleteSessionAsync(int sessionId, long userId)
     {
         try
         {
@@ -211,25 +218,28 @@ public sealed class SessionDataService(
                 {
                     await tx.RollbackAsync();
                     Logger.LogWarning("Failed to delete session {SessionId}: not found, not owned, or processing", sessionId);
-                    return false;
+                    return new SessionDeleteResult(false, []);
                 }
 
                 _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteBySession,
                     new { SessionId = sessionId }, tx);
+                var messages = (await conn.QueryAsync<TrackedMessageReference>(
+                    SqlQueries.TrackedMessages.ScheduleDeletionBySession,
+                    new { SessionId = sessionId },
+                    tx)).ToList();
                 await tx.CommitAsync();
+                return new SessionDeleteResult(true, messages);
             }
             catch
             {
                 await tx.RollbackAsync();
                 throw;
             }
-
-            return true;
         }
         catch (Exception e)
         {
             Logger.LogError(e, "Failed to delete session {SessionId}", sessionId);
-            return false;
+            return new SessionDeleteResult(false, []);
         }
     }
 

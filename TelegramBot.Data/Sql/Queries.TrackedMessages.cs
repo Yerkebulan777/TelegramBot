@@ -22,6 +22,22 @@ internal static partial class SqlQueries
             )
             SELECT MessageIdPg FROM scheduled WHERE NextDeleteAttemptAt <= NOW()";
 
+        internal const string ScheduleDeletionBySession = @"
+            UPDATE TrackedMessages
+            SET DeleteAfter = LEAST(DeleteAfter, NOW()),
+                NextDeleteAttemptAt = NOW()
+            WHERE SessionId = @SessionId
+            RETURNING ChatId, MessageIdPg AS MessageId";
+
+        internal const string ScheduleMessagesOfDeletedSessions = @"
+            UPDATE TrackedMessages t
+            SET DeleteAfter = LEAST(t.DeleteAfter, NOW()),
+                NextDeleteAttemptAt = LEAST(t.NextDeleteAttemptAt, NOW())
+            FROM Sessions s
+            WHERE t.SessionId = s.SessionId
+              AND s.Status = 'Deleted'
+              AND (t.DeleteAfter IS NULL OR t.DeleteAfter > NOW())";
+
         internal const string SaveDeletionProgress = @"
             WITH removed AS (
                 DELETE FROM TrackedMessages
