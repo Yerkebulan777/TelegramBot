@@ -18,35 +18,29 @@ public sealed class SessionsListRenderer(
     TelegramOutputService outputService,
     ILogger<SessionsListRenderer> logger)
 {
-    /// <summary>Строит текст сообщения и клавиатуру для текущего фильтра и страницы.</summary>
+    /// <summary>Строит текст сообщения и клавиатуру для текущего фильтра.</summary>
     private async Task<(string Text, InlineKeyboardMarkup Keyboard)> BuildAsync(
-        long userId, string filter, int page, CancellationToken cancellationToken = default)
+        long userId, string filter, CancellationToken cancellationToken = default)
     {
         var sessions = await sessionDataService.GetSessionsListFilteredAsync(userId, filter);
-        var total = sessions.Count;
-        var (clampedPage, totalPages) = Pagination.Calculate(total, page, KeyboardBuilder.SessionsPageSize);
-
-        var text = totalPages > 1
-            ? $"{StatusFilters.GetTitle(filter)} (всего {total} • стр. {clampedPage + 1}/{totalPages})"
-            : $"{StatusFilters.GetTitle(filter)} (всего {total})";
-
-        var keyboard = keyboardBuilder.GetSessionsListKeyboard(sessions, filter, clampedPage);
+        var text = $"{StatusFilters.GetTitle(filter)} (всего {sessions.Count})";
+        var keyboard = keyboardBuilder.GetSessionsListKeyboard(sessions, filter);
         return (text, keyboard);
     }
 
     /// <summary>Отправляет список как новое сообщение (первый запуск /status).</summary>
-    public async Task<Message?> SendNewAsync(long userId, string filter, int page = 0, CancellationToken cancellationToken = default)
+    public async Task<Message?> SendNewAsync(long userId, string filter, CancellationToken cancellationToken = default)
     {
-        var (text, keyboard) = await BuildAsync(userId, filter, page, cancellationToken);
+        var (text, keyboard) = await BuildAsync(userId, filter, cancellationToken);
         return await outputService.SendMessageWithKeyboardAsync(userId, text, keyboard, cancellationToken);
     }
 
-    /// <summary>Редактирует существующее сообщение /status (переключение фильтра/страницы, возврат после удаления).</summary>
+    /// <summary>Редактирует существующее сообщение /status (переключение фильтра, возврат после удаления).</summary>
     public async Task EditExistingAsync(
-        long userId, int targetMessageId, string filter, int page, string username, CancellationToken cancellationToken = default)
+        long userId, int targetMessageId, string filter, string username, CancellationToken cancellationToken = default)
     {
-        var (text, keyboard) = await BuildAsync(userId, filter, page, cancellationToken);
-        logger.LogInformation("{Username} view sessions: filter={Filter}, page={Page}", username, filter, page);
+        var (text, keyboard) = await BuildAsync(userId, filter, cancellationToken);
+        logger.LogInformation("{Username} view sessions: filter={Filter}", username, filter);
         await outputService.EditMessageTextWithKeyboardAsync(userId, targetMessageId, text, keyboard);
     }
 

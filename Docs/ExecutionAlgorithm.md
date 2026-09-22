@@ -79,14 +79,15 @@ Terminal transition и lease-Failed — один session advisory lock: стат
 
 - Lease recovery → pending или Failed + outbox  
 - Process monitor + DialogDismisser (kill только через ProcessRunner; заголовок «Revit» не матчится как произвольный диалог)  
-- Soft-delete сессий старше `CompletedSessionRetentionDays`, пока есть `session_completed` не в `sent` (requeue failed outbox ждёт 15 мин и требует `s.Status != 'Deleted'`)  
+- Soft-delete сессий старше `CompletedSessionRetentionDays`, пока есть `session_completed` не в `sent` (requeue failed outbox ждёт 15 мин и требует `s.Status != 'Deleted'`)
+- История `/status`: 15 последних команд на пользователя. Более старые `Done`/`Failed` помечаются `Deleted` в той же транзакции, что и загрузка списка, и тем же циклом cleanup; пустая после этого сессия тоже `Deleted`, её tracked-сообщения получают `DeleteAfter=NOW`. `pending`/`processing` и сессия с `session_completed` не в `sent` не трогаются  
 - Telegram cleanup: Kind (interface/temporary/completion/job_status); interactive ставит `DeleteAfter=NOW` для устаревшего UI, защищая completion; `temporary` снимается сразу на следующем сообщении или колбэке, иначе 5 мин; results — 24 ч; цикл каждую минуту, batch 500, пакеты Telegram до 100; после `MaximumDeletionAgeHours` (47) — удаление только tracking-записи. Soft-delete сессии (вручную и retention) в той же транзакции ставит её tracked-сообщения, включая completion, на `DeleteAfter=NOW` и сразу зовёт Telegram; строка трекинга снимается только после подтверждения. Уже удалённые сессии догоняются при инициализации схемы  
 - Soft-delete команд и сессий не трогает `processing`; `/status` list/count/details/delete только с `UserId`  
 - Worker shutdown: stop loops → process-tree kill (30 с) → release claimed leases в `pending` (`NextRetryAt` +15 с)  
 
 ## 8. Rerun из /status
 
-Список `/status` загружается одним запросом с фильтром и `UserId`. Общее количество берётся из загруженного списка; пагинация выполняется при построении клавиатуры.
+Список `/status` загружается одним запросом с фильтром и `UserId` после обрезки истории до 15 команд. Постраничной навигации списка сессий нет. Кнопка удаления (сессия, команда, тип) пишет soft-delete в БД и только после этого обновляет сообщение.
 
 `RERUNCMD` → новый Session/Command/CorrelationId, `RetryCount=0`. Авто-retry продолжает ту же строку. Список и действия `/status` — только сессии вызывающего `UserId`.
 

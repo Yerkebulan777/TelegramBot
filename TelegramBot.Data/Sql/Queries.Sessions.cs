@@ -92,6 +92,64 @@ internal static partial class SqlQueries
                     AND c.Status = 'processing'
               );";
 
+        // @UserId IS NULL — все пользователи. pending/processing и недоставленный session_completed не трогает.
+        internal const string SoftDeleteExcessCommands = @"
+            WITH ranked AS (
+                SELECT
+                    c.CommandId,
+                    c.SessionId,
+                    c.Status AS CommandStatus,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY s.UserId
+                        ORDER BY c.CreatedAt DESC, c.CommandId DESC
+                    ) AS rn
+                FROM Commands c
+                JOIN Sessions s ON s.SessionId = c.SessionId
+                WHERE c.Status != 'Deleted'
+                  AND s.Status != 'Deleted'
+                  AND (@UserId IS NULL OR s.UserId = @UserId)
+            )
+            UPDATE Commands c
+            SET Status = 'Deleted'
+            FROM ranked r
+            WHERE c.CommandId = r.CommandId
+              AND r.rn > @KeepCount
+              AND r.CommandStatus NOT IN ('pending', 'processing')
+              AND c.Status NOT IN ('Deleted', 'pending', 'processing')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM NotificationOutbox n
+                  WHERE n.SessionId = r.SessionId
+                    AND n.EventType = 'session_completed'
+                    AND n.Status != 'sent'
+              )
+            RETURNING c.SessionId;";
+
+        internal const string SoftDeleteSessionsWithoutCommands = @"
+            WITH deleted_sessions AS (
+                UPDATE Sessions s
+                SET Status = 'Deleted',
+                    UpdatedAt = NOW()
+                WHERE s.SessionId = ANY(@SessionIds)
+                  AND s.Status != 'Deleted'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM Commands c
+                      WHERE c.SessionId = s.SessionId
+                        AND c.Status != 'Deleted'
+                  )
+                RETURNING s.SessionId
+            ),
+            due_messages AS (
+                UPDATE TrackedMessages t
+                SET DeleteAfter = LEAST(t.DeleteAfter, NOW()),
+                    NextDeleteAttemptAt = NOW()
+                FROM deleted_sessions ds
+                WHERE t.SessionId = ds.SessionId
+                RETURNING t.MessageId
+            )
+            SELECT COUNT(*)::int FROM deleted_sessions;";
+
         internal const string SoftDeleteInactiveOlderThan = @"
             WITH deleted_sessions AS (
                 UPDATE Sessions s

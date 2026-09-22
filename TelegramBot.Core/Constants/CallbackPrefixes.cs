@@ -74,7 +74,7 @@ public static class CallbackPrefixes
     /// <summary>Фильтр статуса в /status.</summary>
     public const string StatusFilter = "STATUSFILTER:";
 
-    /// <summary>Постраничная навигация в /status.</summary>
+    /// <summary>Старые сообщения /status. Страниц больше нет, обработчик заново показывает список.</summary>
     public const string StatusPage = "STATUSPAGE:";
 
     /// <summary>Постраничная навигация по командам сессии. Аргумент: "sessionId:filter:page".</summary>

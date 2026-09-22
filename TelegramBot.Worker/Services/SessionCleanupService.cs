@@ -6,9 +6,9 @@ namespace TelegramBot.Worker.Services;
 
 /// <summary>
 /// Фоновый сервис автоматической очистки завершённых сессий.
-/// Периодически помечает как Deleted сессии старше CompletedSessionRetentionDays дней,
-/// у которых нет pending/processing команд.
-/// Если CompletedSessionRetentionDays &lt;= 0 — очистка отключена.
+/// Каждый цикл оставляет 15 последних команд на пользователя и помечает как Deleted
+/// сессии старше CompletedSessionRetentionDays дней без pending/processing команд.
+/// Если CompletedSessionRetentionDays &lt;= 0 — очистка по возрасту отключена, лимит истории остаётся.
 /// </summary>
 public sealed class SessionCleanupService(
     SessionDataService sessionDataService,
@@ -52,6 +52,8 @@ public sealed class SessionCleanupService(
     {
         try
         {
+            _ = await sessionDataService.TrimAllStatusHistoryAsync();
+
             var retentionDays = _options.CompletedSessionRetentionDays;
             if (retentionDays <= 0)
             {

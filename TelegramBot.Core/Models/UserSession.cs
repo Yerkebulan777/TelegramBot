@@ -14,9 +14,6 @@ public class UserSession
     /// <summary>Текущий фильтр в /status: ALL, ACTIVE, DONE, FAILED.</summary>
     public string StatusFilter { get; set; } = "ALL";
 
-    /// <summary>Текущая страница в /status (0-based). Сбрасывается при смене фильтра.</summary>
-    public int StatusPage { get; set; }
-
     /// <summary>False until the first user interaction on this session (slash command, text message, or callback).
     /// Used to detect stale sessions (after restart, idle eviction, or first run) and redirect to /start once.</summary>
     public bool Initialized { get; set; }
@@ -44,7 +41,6 @@ public class UserSession
         SessionId = 0;
         // Cleanup owns LastUserMessageId; resetting the view must preserve failed deletions.
         StatusFilter = "ALL";
-        StatusPage = 0;
         AwaitingRootPath = false;
     }
 }

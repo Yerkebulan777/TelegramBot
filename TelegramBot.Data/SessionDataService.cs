@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using TelegramBot.Core.Constants;
 using TelegramBot.Core.Models;
 using TelegramBot.Data.Models;
@@ -145,14 +146,35 @@ public sealed class SessionDataService(
         return SessionCreateResult.Created(sessionId, queuedFileCount, skippedPairs);
     }
 
-    /// <summary>Возвращает отфильтрованный список сессий владельца.</summary>
+    private const int StatusCommandHistoryLimit = 15;
+
+    /// <summary>
+    /// Возвращает отфильтрованный список сессий владельца.
+    /// В той же транзакции оставляет последние <see cref="StatusCommandHistoryLimit"/> команд.
+    /// </summary>
     public async Task<List<SessionsList>> GetSessionsListFilteredAsync(long userId, string filter)
     {
         await using var conn = await CreateOpenConnectionAsync();
-        var result = await conn.QueryAsync<SessionsList>(
+        await using var tx = await conn.BeginTransactionAsync();
+        var trimmed = await TrimStatusHistoryAsync(conn, tx, userId);
+        var result = (await conn.QueryAsync<SessionsList>(
             SqlQueries.Sessions.GetListFiltered,
-            new { UserId = userId, Filter = filter });
-        return result.ToList();
+            new { UserId = userId, Filter = filter },
+            tx)).ToList();
+        await tx.CommitAsync();
+        LogStatusTrim(userId, trimmed);
+        return result;
+    }
+
+    /// <summary>Оставляет последние <see cref="StatusCommandHistoryLimit"/> команд каждому пользователю.</summary>
+    public async Task<int> TrimAllStatusHistoryAsync()
+    {
+        await using var conn = await CreateOpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        var trimmed = await TrimStatusHistoryAsync(conn, tx, userId: null);
+        await tx.CommitAsync();
+        LogStatusTrim(userId: null, trimmed);
+        return trimmed;
     }
 
     /// <summary>Возвращает имя пользователя по ID сессии.</summary>
@@ -258,6 +280,42 @@ public sealed class SessionDataService(
         await using var conn = await CreateOpenConnectionAsync();
         return await conn.QuerySingleOrDefaultAsync<int?>(
             SqlQueries.Commands.GetSessionIdByCommandId, new { CommandId = commandId, UserId = userId });
+    }
+
+    /// <summary>
+    /// null в <paramref name="userId"/> — все пользователи.
+    /// Возвращает число помеченных команд. Пустые сессии закрываются вторым оператором той же транзакции.
+    /// </summary>
+    private async Task<int> TrimStatusHistoryAsync(
+        NpgsqlConnection conn, NpgsqlTransaction transaction, long? userId)
+    {
+        var commandSessionIds = (await conn.QueryAsync<int>(
+            SqlQueries.Sessions.SoftDeleteExcessCommands,
+            new { UserId = userId, KeepCount = StatusCommandHistoryLimit },
+            transaction)).ToArray();
+
+        if (commandSessionIds.Length == 0)
+        {
+            return 0;
+        }
+
+        _ = await conn.QuerySingleAsync<int>(
+            SqlQueries.Sessions.SoftDeleteSessionsWithoutCommands,
+            new { SessionIds = commandSessionIds.Distinct().ToArray() },
+            transaction);
+        return commandSessionIds.Length;
+    }
+
+    private void LogStatusTrim(long? userId, int deletedCommands)
+    {
+        if (deletedCommands <= 0)
+        {
+            return;
+        }
+
+        Logger.LogInformation(
+            "Trimmed status history: user={UserId}, commands={Count}, keep={Keep}",
+            userId, deletedCommands, StatusCommandHistoryLimit);
     }
 
     /// <summary>Мягкое удаление неактивных сессий старше cutoff.</summary>

@@ -45,7 +45,7 @@ public sealed class SessionManagementHandler(
             CallbackPrefixes.DeleteSessionByType => HandleDeleteByTypeConfirmationAsync(context),
             CallbackPrefixes.ConfirmDeleteSessionByType => HandleDeleteByTypeAsync(context, cancellationToken),
             CallbackPrefixes.StatusFilter => HandleStatusFilterAsync(context),
-            CallbackPrefixes.StatusPage => HandleStatusPageAsync(context),
+            CallbackPrefixes.StatusPage => ShowSessionsListAsync(context),
             CallbackPrefixes.CommandsPage => HandleCommandsPageAsync(context),
             CallbackPrefixes.RerunCommand => HandleRerunCommandAsync(context),
             _ => Task.CompletedTask
@@ -61,22 +61,6 @@ public sealed class SessionManagementHandler(
             : context.ParsedCallback.Argument;
 
         context.Session.StatusFilter = filter;
-        // Сброс страницы при смене фильтра — новый список может быть короче.
-        context.Session.StatusPage = 0;
-        await ShowSessionsListAsync(context);
-    }
-
-    // ────────────────────────── Page ──────────────────────────
-
-    private async Task HandleStatusPageAsync(CallbackContext context)
-    {
-        if (!int.TryParse(context.ParsedCallback.Argument, out var page) || page < 0)
-        {
-            LogInvalidInput("page", context.ParsedCallback.Argument, context.Username, context.UserId);
-            return;
-        }
-
-        context.Session.StatusPage = page;
         await ShowSessionsListAsync(context);
     }
 
@@ -470,7 +454,7 @@ public sealed class SessionManagementHandler(
         var session = context.Session;
         var targetMessageId = session.StatusMessageId ?? context.MessageId;
         await sessionsListRenderer.EditExistingAsync(
-            context.UserId, targetMessageId, session.StatusFilter, session.StatusPage, context.Username);
+            context.UserId, targetMessageId, session.StatusFilter, context.Username);
         session.StatusMessageId ??= context.MessageId;
     }
 

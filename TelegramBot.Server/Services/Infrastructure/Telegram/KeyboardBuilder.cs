@@ -10,8 +10,8 @@ namespace TelegramBot.Server.Services.Infrastructure.Telegram;
 public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
 {
     /// <summary>
-    /// Размер страницы списков в /status. Длинные подписи кнопок обрезаются,
-    /// чтобы не превышать лимит Telegram reply_markup (~4096 байт).
+    /// Размер страницы списка файлов внутри сессии.
+    /// Подписи обрезаются под лимит Telegram reply_markup (~4096 байт).
     /// </summary>
     public const int SessionsPageSize = 15;
     private const int MaxListButtonTextLength = 64;
@@ -46,13 +46,9 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
         return new InlineKeyboardMarkup(buttons);
     }
 
-    /// <summary>Строит клавиатуру списка сессий с фильтрами и постраничной навигацией.</summary>
-    /// <param name="page">Запрошенная страница (0-based). Клампится в валидный диапазон.</param>
-    public InlineKeyboardMarkup GetSessionsListKeyboard(
-        List<SessionsList> sessionsList, string currentFilter, int page = 0)
+    /// <summary>Строит клавиатуру списка сессий с фильтрами, без постраничной навигации.</summary>
+    public InlineKeyboardMarkup GetSessionsListKeyboard(List<SessionsList> sessionsList, string currentFilter)
     {
-        var (clampedPage, totalPages) = Pagination.Calculate(sessionsList.Count, page, SessionsPageSize);
-
         var buttons = new List<List<InlineKeyboardButton>>
         {
             StatusFilters.AllDescriptors
@@ -62,7 +58,7 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
                 .ToList()
         };
 
-        foreach (var session in sessionsList.Skip(clampedPage * SessionsPageSize).Take(SessionsPageSize))
+        foreach (var session in sessionsList)
         {
             var finished = session.DoneCommands + session.FailedCommands == session.TotalCommands;
             var progressIcon = finished ? "✅" : "🔄";
@@ -76,19 +72,6 @@ public class KeyboardBuilder(FileSystemBrowser fileNavigationService)
                     TruncateListButtonText(label),
                     $"{CallbackPrefixes.SessionDetails}{session.SessionId}")
             ]);
-        }
-
-        if (totalPages > 1)
-        {
-            var navRow = TryBuildPageNavRow(
-                clampedPage,
-                totalPages,
-                $"{CallbackPrefixes.StatusPage}{clampedPage - 1}",
-                $"{CallbackPrefixes.StatusPage}{clampedPage + 1}");
-            if (navRow != null)
-            {
-                buttons.Add(navRow);
-            }
         }
 
         return new InlineKeyboardMarkup(buttons);
