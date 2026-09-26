@@ -29,6 +29,19 @@ internal static partial class SqlQueries
             WHERE SessionId = @SessionId
             RETURNING ChatId, MessageIdPg AS MessageId";
 
+        // Доставленные итоги раньше писались как completion и не стирались следующим действием.
+        internal const string ScheduleDeliveredCompletions = @"
+            UPDATE TrackedMessages t
+            SET DeleteAfter = LEAST(t.DeleteAfter, NOW()),
+                NextDeleteAttemptAt = LEAST(t.NextDeleteAttemptAt, NOW())
+            WHERE t.Kind = 'completion'
+              AND EXISTS (
+                  SELECT 1
+                  FROM NotificationOutbox n
+                  WHERE n.SessionId = t.SessionId
+                    AND n.EventType = 'session_completed'
+                    AND n.Status = 'sent');";
+
         internal const string ScheduleMessagesOfDeletedSessions = @"
             UPDATE TrackedMessages t
             SET DeleteAfter = LEAST(t.DeleteAfter, NOW()),

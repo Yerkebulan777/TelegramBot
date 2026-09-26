@@ -87,6 +87,7 @@ public sealed class DatabaseInitializerService(
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateProcessLaunchStateTable, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.CreateIndexes, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Commands.SoftDeleteLegacyCancelled, transaction: tx);
+            _ = await conn.ExecuteAsync(SqlQueries.TrackedMessages.ScheduleDeliveredCompletions, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.TrackedMessages.ScheduleMessagesOfDeletedSessions, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddCommandsStatusCheck, transaction: tx);
             _ = await conn.ExecuteAsync(SqlQueries.Schema.AddSessionsStatusCheck, transaction: tx);

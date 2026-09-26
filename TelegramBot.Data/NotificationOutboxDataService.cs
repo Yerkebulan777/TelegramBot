@@ -34,6 +34,8 @@ public sealed class NotificationOutboxDataService(
     {
         await using var conn = await CreateOpenConnectionAsync(cancellationToken);
         await using var tx = await conn.BeginTransactionAsync(cancellationToken);
+        // Итог (успех и ошибка) стирается следующим действием. «Запущено» живёт до своего DeleteAfter.
+        var kind = item.EventType == SessionCompletedEvent ? TrackedMessageKinds.Temporary : TrackedMessageKinds.JobStatus;
         _ = await conn.ExecuteAsync(new CommandDefinition(SqlQueries.NotificationOutbox.TrackDeliveredMessage,
             new
             {
@@ -42,7 +44,7 @@ public sealed class NotificationOutboxDataService(
                 MessageId = messageId,
                 SentAt = sentAt,
                 DeleteAfter = deleteAfter,
-                Kind = item.EventType == SessionCompletedEvent ? TrackedMessageKinds.Completion : TrackedMessageKinds.JobStatus
+                Kind = kind
             }, tx, cancellationToken: cancellationToken));
         if (item.EventType == SessionCompletedEvent)
         {
