@@ -95,13 +95,14 @@ Get-Process TelegramBot.Server -ErrorAction SilentlyContinue
 | Старая служба `TelegramBotServer` в SCM, события **7038** | leftover Windows Service с прошлых Setup; вход службы не умеет cached credentials и падает, если повреждён secure channel (`Test-ComputerSecureChannel` = False) | Удалить службу (`sc.exe delete TelegramBotServer`) и поставить актуальный Setup — задача планировщика этот вход не использует |
 | Процесс стартовал и сразу вышел | нет `appsettings.Local.json` / токена / Postgres | Логи `%USERPROFILE%\Documents\TelegramBot\Logs\Server`; Docker Desktop и контейнер `postgres_telegram` |
 | Иконки в трее нет | процесс не запущен или сессия не интерактивная | `Get-Process TelegramBot.Server`; задача должна быть `InteractiveToken`. Жёлтая/красная иконка — БД или Telegram недоступны; меню → «Открыть логи» |
+| Бот не отвечает, в логе `[ERR]` на каждый апдейт с `FileNotFoundException: System.Runtime.Numerics` | .NET обновился, пока задачи работали: каталог старого рантайма удалён, ленивая загрузка сборки падает | Меню трея → «Перезапустить Server» и «Перезапустить Worker» (ADR-013); вручную — `schtasks /end` + `/run` |
 
 ## Поведение (кратко)
 
 - Очередь: Worker polling 1 с (`Worker:FallbackPollingIntervalSeconds`; 0 = 1). Одна операция на файл (`Partition`); разные файлы — до `MaxConcurrentCommands`. Между глобальными запусками Revit — ≥ 15 с, между запусками AutoCAD (`MERGEDWG`) — ≥ 15 с (`ProcessLaunchGate`).
 - Дубликаты активных пар команда+файл пропускаются; `/status` rerun создаёт новое задание.
 - Уведомления старта/итога — durable outbox (poll 3 с). Итог защищён от интерактивной очистки. Defaults очистки — `MessageCleanupOptions`.
-- Обновление: остановить задачи Server/Worker → Server (миграция схемы) → Worker.
+- Обновление: остановить задачи Server/Worker → Server (миграция схемы) → Worker. Перезапуск из трея — «Перезапустить Server» / «Перезапустить Worker».
 
 ## BIM-контракт
 

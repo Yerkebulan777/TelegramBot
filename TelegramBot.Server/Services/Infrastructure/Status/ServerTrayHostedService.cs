@@ -68,6 +68,10 @@ public sealed class ServerTrayHostedService(
 
 internal sealed class ServerTrayApplicationContext : ApplicationContext
 {
+    private const string ServerTaskName = "TelegramBotServer";
+    private const string WorkerTaskName = "TelegramBotWorker";
+    private const string WorkerProcessName = "TelegramBot.Worker";
+
     private readonly ServerHealthMonitor _monitor;
     private readonly ServerHealthCheckService _healthCheck;
     private readonly string _logDirectory;
@@ -105,12 +109,19 @@ internal sealed class ServerTrayApplicationContext : ApplicationContext
         refreshItem.Click += (_, _) => OnRefreshClicked();
         var logsItem = new ToolStripMenuItem("Открыть логи");
         logsItem.Click += (_, _) => OpenLogs();
+        var restartServerItem = new ToolStripMenuItem("Перезапустить Server");
+        restartServerItem.Click += (_, _) => RestartServer();
+        var restartWorkerItem = new ToolStripMenuItem("Перезапустить Worker");
+        restartWorkerItem.Click += (_, _) => RestartWorker();
         menu.Items.Add(_serverItem);
         menu.Items.Add(_databaseItem);
         menu.Items.Add(_telegramItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(refreshItem);
         menu.Items.Add(logsItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(restartServerItem);
+        menu.Items.Add(restartWorkerItem);
 
         _notifyIcon = new NotifyIcon
         {
@@ -236,6 +247,110 @@ internal sealed class ServerTrayApplicationContext : ApplicationContext
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Open logs folder fail");
+        }
+    }
+
+    private void RestartServer()
+    {
+        try
+        {
+            // /end завершит этот процесс, поэтому /run выполняет отдельный cmd:
+            // он не входит в задачу и переживает остановку её процесса.
+            // && — если /end отказал, старый экземпляр жив и /run всё равно не запустит новый.
+            _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c schtasks /end /tn \"{ServerTaskName}\" && ping -n 3 127.0.0.1 >nul && schtasks /run /tn \"{ServerTaskName}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
+            // Иконку прячем только после успешного старта cmd: иначе при ошибке трей исчезнет навсегда.
+            _notifyIcon.Visible = false;
+            _logger.LogInformation("Tray restart requested: task={Task}", ServerTaskName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Tray restart fail: task={Task}", ServerTaskName);
+        }
+    }
+
+    private void RestartWorker()
+    {
+        // /end завершает процесс жёстко: Worker не успевает погасить Revit/AutoCAD и освободить lease.
+        var confirm = MessageBox.Show(
+            "Перезапустить Worker?\n\nАктивные задания будут прерваны и вернутся в работу "
+                + "только после истечения аренды (~3 часа).",
+            "TelegramBot",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes)
+        {
+            return;
+        }
+
+        var oldPid = WorkerProcessId();
+        // Результат /end нарочно не проверяется: ошибка «задача не запущена» перезапуску не мешает.
+        RunScheduledTaskCommand($"/end /tn \"{WorkerTaskName}\"");
+        RunScheduledTaskCommand($"/run /tn \"{WorkerTaskName}\"");
+
+        // Код возврата не доказывает перезапуск: /run для уже работающей задачи тоже возвращает 0.
+        var newPid = WaitForNewWorkerPid(oldPid);
+        if (newPid is not null)
+        {
+            _logger.LogInformation(
+                "Tray restart: task={Task}, oldPid={OldPid}, pid={ProcessId}", WorkerTaskName, oldPid, newPid);
+            _notifyIcon.ShowBalloonTip(
+                3000, "TelegramBot", $"Worker перезапущен (PID {newPid}).", ToolTipIcon.Info);
+            return;
+        }
+
+        _logger.LogWarning("Tray restart unconfirmed: task={Task}, oldPid={OldPid}", WorkerTaskName, oldPid);
+        _notifyIcon.ShowBalloonTip(
+            5000,
+            "TelegramBot",
+            "Worker не перезапустился: новый процесс не появился. Подробности — в логах.",
+            ToolTipIcon.Warning);
+    }
+
+    private static int? WorkerProcessId()
+    {
+        using var worker = Process.GetProcessesByName(WorkerProcessName).FirstOrDefault();
+        return worker?.Id;
+    }
+
+    private static int? WaitForNewWorkerPid(int? oldPid)
+    {
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            var pid = WorkerProcessId();
+            if (pid is not null && pid != oldPid)
+            {
+                return pid;
+            }
+
+            Thread.Sleep(300);
+        }
+
+        return null;
+    }
+
+    private void RunScheduledTaskCommand(string arguments)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = arguments,
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
+            // Ждём завершения: /run не должен стартовать раньше, чем /end отпустит задачу.
+            process?.WaitForExit(TimeSpan.FromSeconds(10));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "schtasks fail: args={Args}", arguments);
         }
     }
 
