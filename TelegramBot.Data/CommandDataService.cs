@@ -32,6 +32,15 @@ public sealed class CommandDataService(
         return result.ToList().AsReadOnly();
     }
 
+    /// <summary>processing-команды с записанным ProcessId — Worker при старте проверяет, жив ли процесс.</summary>
+    public async Task<IReadOnlyList<(int CommandId, long Lease, int ProcessId, int RetryCount)>> GetProcessingLeasesAsync()
+    {
+        await using var conn = await CreateOpenConnectionAsync();
+        var result = await conn.QueryAsync<(int CommandId, long Lease, int ProcessId, int RetryCount)>(
+            SqlQueries.Commands.GetProcessingLeases);
+        return result.ToList().AsReadOnly();
+    }
+
     /// <summary>
     /// Освобождает истёкшие leases. Команды, чей RetryCount после инкремента достигает
     /// <paramref name="maxRetries"/>, переводятся в 'Failed' (poison-command guard), остальные — в 'pending'.

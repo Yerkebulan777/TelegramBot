@@ -50,6 +50,9 @@ public sealed class CommandExecutionService(
                     if (DateTime.UtcNow >= nextCleanup)
                     {
                         await commandDataService.ReleaseExpiredLeasesAsync(_workerOptions.MaxRetries);
+                        // Первый тик — сразу после schema gate: рестарт Worker не замораживает
+                        // прерванные команды до lease-таймаута; повторы закрывают окно умирающего дерева /end.
+                        await ReleaseDeadProcessLeasesAsync(stoppingToken);
                         nextCleanup = _workerOptions.CleanupIntervalSeconds > 0
                             ? DateTime.UtcNow.AddSeconds(_workerOptions.CleanupIntervalSeconds)
                             : DateTime.MaxValue;
@@ -199,6 +202,85 @@ public sealed class CommandExecutionService(
     }
 
     private static int RoundUpTo30Seconds(int seconds) => Math.Max(30, ((seconds + 29) / 30) * 30);
+
+    /// <summary>
+    /// Команды в 'processing', чей BIM-процесс мёртв (жёсткий /end или crash), возвращаются в очередь
+    /// немедленно, не дожидаясь lease-таймаута (185 мин). Живой процесс (осиротевший Revit) не трогаем —
+    /// lease истечёт, команду закроет ResultFile. Собственные команды Worker исключаются: их процессы
+    /// легально завершаются и закрываются ProcessRunner'ом, а HasExited в этот момент ещё true не говорит.
+    /// </summary>
+    private async Task ReleaseDeadProcessLeasesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var processing = await commandDataService.GetProcessingLeasesAsync();
+            // TrackedCommandIds (не ActiveProcesses): claim → Process.Start занимает до минуты
+            // (подготовка + launch gate), и в этом окне команда обязана быть исключена из проверки.
+            var trackedIds = processRunner.TrackedCommandIds.ToHashSet();
+            foreach (var (commandId, lease, pid, retryCount) in processing)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (trackedIds.Contains(commandId) || IsProcessAlive(pid))
+                {
+                    continue;
+                }
+
+                // Исчерпанные retry не поднимаем: мгновенный requeue без cap превратил бы
+                // цикл «Worker умирает mid-run → рестарт» в бесконечный claim-loop. Такие команды
+                // закрывает poison-guard ReleaseExpiredLeases (Failed по lease-таймауту).
+                if (retryCount >= _workerOptions.MaxRetries)
+                {
+                    logger.LogWarning(
+                        "Startup lease release skipped: retries exhausted: id={CommandId}, pid={ProcessId}, retry={RetryCount}/{MaxRetries}",
+                        commandId, pid, retryCount, _workerOptions.MaxRetries);
+                    continue;
+                }
+
+                try
+                {
+                    var newRetryCount = await commandDataService.ScheduleRetryAsync(
+                        commandId, lease, DateTime.UtcNow, $"Worker recovery: process {pid} no longer running");
+                    if (newRetryCount is not null)
+                    {
+                        logger.LogInformation(
+                            "Startup lease release: id={CommandId}, pid={ProcessId}, retry={RetryCount}",
+                            commandId, pid, newRetryCount);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Startup lease release fail: id={CommandId}", commandId);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Shutdown до завершения recovery: остаток закроет lease-таймаут или следующий старт.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Startup lease recovery fail");
+        }
+    }
+
+    // ProcessId машинно-локален: предполагается один Worker на БД (иначе PID с другой машины совпадёт с местным).
+    private static bool IsProcessAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (Exception)
+        {
+            // Недоступный процесс считаем живым: безопаснее дождаться lease-таймаута.
+            return true;
+        }
+    }
 
     private async Task PerformGracefulShutdownAsync()
     {

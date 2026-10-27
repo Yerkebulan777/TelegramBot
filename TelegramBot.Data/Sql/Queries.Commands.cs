@@ -238,6 +238,14 @@ internal static partial class SqlQueries
             WHERE c.Status = 'processing' AND c.Lease < @CurrentTimeSec
             ORDER BY c.SessionId;";
 
+        // Worker в каждом cleanup-тике отпускает lease команд, чей BIM-процесс уже мёртв (жёсткий /end
+        // или crash), не дожидаясь истечения 185-минутной аварийной аренды.
+        internal const string GetProcessingLeases = @"
+            SELECT CommandId, Lease, ProcessId, RetryCount
+            FROM Commands
+            WHERE Status = 'processing'
+              AND ProcessId IS NOT NULL;";
+
         // Transaction-scoped lock namespace for one terminal transition and its session completion
         // notification.  It serializes completions in a session before the active-command count is read.
         internal static readonly string AcquireSessionCompletionLock =

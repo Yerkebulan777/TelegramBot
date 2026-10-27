@@ -277,9 +277,10 @@ internal sealed class ServerTrayApplicationContext : ApplicationContext
     private void RestartWorker()
     {
         // /end завершает процесс жёстко: Worker не успевает погасить Revit/AutoCAD и освободить lease.
+        // Новый Worker сам возвращает такие команды в очередь (ReleaseDeadProcessLeasesAsync —
+        // каждый cleanup-тик, первый сразу при старте): Lease им не мешает — отпускается по мёртвому ProcessId.
         var confirm = MessageBox.Show(
-            "Перезапустить Worker?\n\nАктивные задания будут прерваны и вернутся в работу "
-                + "только после истечения аренды (~3 часа).",
+            "Перезапустить Worker?\n\nАктивные задания будут прерваны и вернутся в очередь автоматически.",
             "TelegramBot",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning);

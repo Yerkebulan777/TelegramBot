@@ -53,6 +53,9 @@ public sealed class ProcessRunner(
         }
     }
 
+    /// <summary>Все команды, которыми владеет живой RunAsync — от claim до закрытия, с процессом или без.</summary>
+    public IEnumerable<int> TrackedCommandIds => _tracked.Keys;
+
     /// <summary>
     /// Полный цикл выполнения одной команды: подготовка → запуск → ожидание → retry/fail.
     /// </summary>

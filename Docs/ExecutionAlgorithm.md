@@ -33,7 +33,7 @@ Priority (меньше = раньше): PDF/DWG (1) → NWC (2) → IFC/RESAVE (
 
 `availableSlots = MaxConcurrentCommands - running`. Claim: `pending` с наступившим `NextRetryAt`, без partition в `processing`, `FOR UPDATE SKIP LOCKED` + partition advisory lock. Сортировка: Priority, CreatedAt, CommandId.
 
-Аварийная lease: `ProcessTimeoutMinutes + 5` (185 мин). Crash mid-export не снимает неистёкший lease. Штатный shutdown Worker после kill дерева возвращает claimed `processing` в `pending` (`NextRetryAt` ≈ now+15 с, `RetryCount` не растёт, тот же lease-fencing).
+Аварийная lease: `ProcessTimeoutMinutes + 5` (185 мин). Crash mid-export не снимает неистёкший lease. Штатный shutdown Worker после kill дерева возвращает claimed `processing` в `pending` (`NextRetryAt` ≈ now+15 с, `RetryCount` не растёт, тот же lease-fencing). Жёсткий рестарт (`/end`/crash) закрывается в каждом cleanup-тике (первый — сразу при старте): `processing`-команды с мёртвым `ProcessId` отпускаются через `ScheduleRetry` (`RetryCount` +1, `NextRetryAt` ≈ now; команды самого Worker — в `TrackedCommandIds`, от claim до закрытия — не проверяются; исчерпанные retry не поднимаются — их закрывает poison-guard lease-таймаута); живой процесс не трогается — его закроет lease-таймаут или ResultFile.
 
 ## 3. Подготовка и запуск
 
